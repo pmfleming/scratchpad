@@ -135,9 +135,15 @@ Settings are available in the app with `Ctrl + ,` and are stored as TOML:
 | Linux | `$XDG_CONFIG_HOME/scratchpad/settings.toml` or `~/.config/scratchpad/settings.toml` | `$XDG_STATE_HOME/scratchpad` or `~/.local/state/scratchpad` |
 
 Sessions use a local embedded Turso `session.db`; settings remain TOML and user
-files keep their existing save paths. Legacy JSON/temp recovery files are imported
-without deleting the originals. See [migration and recovery export](docs/turso-migration.md)
+files keep their existing save paths. Unsupported session schemas are preserved,
+not migrated or automatically reset. See [migration and recovery export](docs/turso-migration.md)
 before backing up, recovering, or downgrading a session database.
+
+Closing during startup restore leaves the previous session intact. If startup
+restore fails, session saving stays disabled for that run to protect the saved
+workspace; save new edits to files before closing. A protected/unavailable session
+store does not prevent exit. Retryable save errors still keep the window open,
+without retrying automatic last-tab shutdown every frame.
 
 Start with [the configuration guide](docs/configuration.md). It documents the
 TOML sections, shortcut syntax, platform overrides, runtime environment

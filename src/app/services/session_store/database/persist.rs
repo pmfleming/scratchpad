@@ -1,11 +1,13 @@
-use super::{Database, SessionPersistProfile, error, invalid, quarantine::damaged};
+use super::{
+    ContentInventory, Database, SessionPersistProfile, error, invalid, quarantine::damaged,
+};
 use crate::app::domain::PersistedHistoryEntry;
 use crate::app::services::session_store::{
     capture::{CapturedSessionBuffer, CapturedSessionTab, SessionPersistRequest},
     model::SessionManifest,
     validation,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::time::Instant;
 use turso::params;
@@ -23,6 +25,7 @@ struct Prepared {
     tabs: Vec<Vec<u8>>,
     snapshots: Vec<CapturedSessionBuffer>,
     buffers: HashMap<String, RecoveryBuffer>,
+    full_cleanup: bool,
 }
 impl Prepared {
     fn new(request: SessionPersistRequest) -> io::Result<Self> {
@@ -123,14 +126,39 @@ impl Database {
                 return Err(self.protect_failed_write(cause).await);
             }
             profile.manifest_write_ns += commit_start.elapsed().as_nanos();
+            let connection_changes = self.integer("SELECT total_changes()").await.ok();
+            self.accept_prepared(prepared, connection_changes);
         }
-        self.accept_prepared(prepared);
         self.latest_request = generation;
         profile.total_ns = start.elapsed().as_nanos();
         Ok(profile)
     }
 
     async fn prepare_changes(&mut self, prepared: &mut Prepared) -> io::Result<()> {
+        // The worker owns this connection. Detect writes outside the save path
+        // (including fault injection) before trusting its committed-ID inventory.
+        let connection_changes = self.integer("SELECT total_changes()").await?;
+        if self
+            .inventory
+            .as_ref()
+            .is_some_and(|inventory| inventory.connection_changes != Some(connection_changes))
+        {
+            self.inventory = None;
+        }
+        if self.inventory.is_none() {
+            self.inventory = Some(ContentInventory {
+                buffers: self.string_set("SELECT id FROM buffer_ids").await?,
+                snapshots: self.string_set("SELECT id FROM snapshots").await?,
+                full_cleanup_pending: true,
+                connection_changes: Some(connection_changes),
+            });
+        }
+        // One conservative sweep after open, rollback, or observed damage.
+        // Warm saves collect only digests whose references they removed.
+        prepared.full_cleanup = self
+            .inventory
+            .as_ref()
+            .is_some_and(|inventory| inventory.full_cleanup_pending);
         for (id, buffer) in &mut prepared.buffers {
             if self.quarantined.contains_key(id) {
                 buffer.history = None;
@@ -149,10 +177,19 @@ impl Database {
         Ok(())
     }
     fn has_changes(&self, prepared: &Prepared) -> bool {
-        !prepared.snapshots.is_empty()
+        prepared.full_cleanup
+            || !prepared.snapshots.is_empty()
             || self.state_cache != prepared.state
             || self.tab_cache != prepared.tabs
-            || self.revisions.keys().any(|id| !prepared.retains(id))
+            || self.inventory.as_ref().is_some_and(|inventory| {
+                inventory
+                    .snapshots
+                    .iter()
+                    .any(|id| !prepared.retains(id) && !self.quarantined.contains_key(id))
+                    || inventory.buffers.iter().any(|id| {
+                        !prepared.buffers.contains_key(id) && !self.quarantined.contains_key(id)
+                    })
+            })
             || prepared.buffers.iter().any(|(id, buffer)| {
                 buffer
                     .history
@@ -160,8 +197,31 @@ impl Database {
                     .is_some_and(|entries| self.history_cache.get(id) != Some(entries))
             })
     }
-    fn accept_prepared(&mut self, prepared: Prepared) {
+    fn accept_prepared(&mut self, prepared: Prepared, connection_changes: Option<i64>) {
         // Only after COMMIT. A failed attempt must be fully retryable.
+        let inventory = self
+            .inventory
+            .as_mut()
+            .expect("inventory loaded before saving");
+        inventory
+            .snapshots
+            .retain(|id| prepared.retains(id) || self.quarantined.contains_key(id));
+        inventory.snapshots.extend(
+            prepared
+                .snapshots
+                .iter()
+                .map(|buffer| buffer.temp_id.clone()),
+        );
+        inventory
+            .buffers
+            .retain(|id| prepared.buffers.contains_key(id) || self.quarantined.contains_key(id));
+        for id in prepared.buffers.keys() {
+            if !inventory.buffers.contains(id) {
+                inventory.buffers.insert(id.clone());
+            }
+        }
+        inventory.full_cleanup_pending = false;
+        inventory.connection_changes = connection_changes;
         self.revisions.retain(|id, _| prepared.retains(id));
         self.revisions.extend(
             prepared
@@ -187,18 +247,25 @@ impl Database {
         profile: &mut SessionPersistProfile,
     ) -> io::Result<()> {
         let start = Instant::now();
+        let inventory = self
+            .inventory
+            .as_ref()
+            .expect("inventory loaded before saving");
+        let mut removed_digests = HashSet::new();
         for (id, buffer) in &prepared.buffers {
-            self.execute_cached(
-                "INSERT INTO buffer_ids VALUES(?) ON CONFLICT(id) DO NOTHING",
-                [id.as_str()],
-            )
-            .await?;
+            if !inventory.buffers.contains(id) {
+                self.execute_cached(
+                    "INSERT INTO buffer_ids VALUES(?) ON CONFLICT(id) DO NOTHING",
+                    [id.as_str()],
+                )
+                .await?;
+            }
             if let Some(entries) = &buffer.history {
                 self.write_history(id, entries).await?;
             }
         }
         for buffer in &prepared.snapshots {
-            self.write_content(&buffer.temp_id, &buffer.snapshot)
+            self.write_content(&buffer.temp_id, &buffer.snapshot, &mut removed_digests)
                 .await?;
         }
         profile.snapshot_write_ns = start.elapsed().as_nanos();
@@ -220,39 +287,73 @@ impl Database {
         self.execute_cached("INSERT INTO session_state VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", [prepared.state.as_slice()]).await?;
         profile.manifest_write_ns = start.elapsed().as_nanos();
         let start = Instant::now();
-        self.delete_stale_content(prepared).await?;
+        self.delete_stale_content(prepared, removed_digests).await?;
         profile.stale_cleanup_ns = start.elapsed().as_nanos();
         Ok(())
     }
 
-    async fn delete_stale_content(&self, prepared: &Prepared) -> io::Result<()> {
-        let snapshots = self.string_set("SELECT id FROM snapshots").await?;
+    async fn delete_stale_content(
+        &self,
+        prepared: &Prepared,
+        mut removed_digests: HashSet<Vec<u8>>,
+    ) -> io::Result<()> {
+        let inventory = self
+            .inventory
+            .as_ref()
+            .expect("inventory loaded before saving");
+        let written: HashSet<_> = prepared
+            .snapshots
+            .iter()
+            .map(|buffer| &buffer.temp_id)
+            .collect();
         if let Some((id, _)) = prepared.buffers.iter().find(|(id, buffer)| {
-            buffer.required && !snapshots.contains(*id) && !self.quarantined.contains_key(*id)
+            buffer.required
+                && !inventory.snapshots.contains(*id)
+                && !written.contains(id)
+                && !self.quarantined.contains_key(*id)
         }) {
             return Err(damaged(id, "refusing to commit missing recovery content"));
         }
-        for id in snapshots
+        for id in inventory
+            .snapshots
             .iter()
             .filter(|id| !prepared.retains(id) && !self.quarantined.contains_key(*id))
         {
+            let mut rows = self
+                .conn
+                .query("SELECT digest FROM parts WHERE temp_id=?", [id.as_str()])
+                .await
+                .map_err(error)?;
+            while let Some(row) = rows.next().await.map_err(error)? {
+                removed_digests.insert(row.get(0).map_err(error)?);
+            }
+            drop(rows);
             self.execute_cached("DELETE FROM snapshots WHERE id=?", [id.as_str()])
                 .await?;
         }
-        for id in self
-            .string_set("SELECT id FROM buffer_ids")
-            .await?
+        for id in inventory
+            .buffers
             .iter()
             .filter(|id| !prepared.buffers.contains_key(*id) && !self.quarantined.contains_key(*id))
         {
             self.execute_cached("DELETE FROM buffer_ids WHERE id=?", [id.as_str()])
                 .await?;
         }
-        // Quarantined parts remain GC roots even after their live tabs close.
-        self.execute_cached(
-            "DELETE FROM blobs WHERE digest NOT IN (SELECT digest FROM parts)",
-            (),
-        )
-        .await
+        // Quarantined and shared parts remain GC roots even after live tabs close.
+        if prepared.full_cleanup {
+            self.execute_cached(
+                "DELETE FROM blobs WHERE digest NOT IN (SELECT digest FROM parts)",
+                (),
+            )
+            .await?;
+        } else {
+            for digest in removed_digests {
+                self.execute_cached(
+                    "DELETE FROM blobs WHERE digest=? AND NOT EXISTS(SELECT 1 FROM parts WHERE digest=?)",
+                    params![digest.as_slice(), digest.as_slice()],
+                ).await?;
+            }
+        }
+        Ok(())
     }
 }

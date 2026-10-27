@@ -94,6 +94,9 @@ impl Database {
         .await?;
         self.quarantined.insert(id.to_owned(), buffer.clone());
         self.revisions.remove(id);
+        // Damage may have removed snapshots/parts outside our normal write path.
+        // Rebuild inventory and collect orphaned blobs on the next successful save.
+        self.inventory = None;
         Ok(())
     }
 

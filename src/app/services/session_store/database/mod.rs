@@ -8,6 +8,8 @@ mod fault_tests;
 mod history;
 #[cfg(test)]
 mod incremental_tests;
+#[cfg(test)]
+mod inventory_tests;
 mod persist;
 mod quarantine;
 #[cfg(test)]
@@ -49,6 +51,14 @@ pub(super) struct StoredSession {
     pub contents: HashMap<String, String>,
     pub quarantined: HashSet<String>,
 }
+#[derive(Default)]
+struct ContentInventory {
+    buffers: HashSet<String>,
+    snapshots: HashSet<String>,
+    full_cleanup_pending: bool,
+    connection_changes: Option<i64>,
+}
+
 pub(super) struct Database {
     conn: Connection,
     database: TursoDatabase,
@@ -57,6 +67,9 @@ pub(super) struct Database {
     state_cache: Vec<u8>,
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
     history_cache: HashMap<String, Vec<crate::app::domain::PersistedHistoryEntry>>,
+    // Complete committed IDs, including cold/quarantined content; revisions alone
+    // only describe snapshots written by this process. None requires a fresh scan.
+    inventory: Option<ContentInventory>,
     latest_request: u64,
     pub(super) blocked: Option<String>,
     verified: bool,
@@ -91,6 +104,7 @@ impl Database {
             state_cache: Vec::new(),
             revisions: HashMap::new(),
             history_cache: HashMap::new(),
+            inventory: None,
             latest_request: 0,
             blocked: None,
             verified: false,
@@ -202,6 +216,7 @@ impl Database {
             self.tab_cache.clear();
             self.revisions.clear();
             self.history_cache.clear();
+            self.inventory = None;
             // SQLITE_FULL and rollback triggers can already end the transaction.
             if !self.conn.is_autocommit().unwrap_or(false) {
                 let rollback = self

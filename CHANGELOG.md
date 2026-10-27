@@ -6,6 +6,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Made warm session saves insert only new buffer IDs and collect only affected recovery blobs, with conservative rescans after restart, rollback, or detected damage. Positional tab-row rewrites and full capture/preparation costs remain.
 - Added Linux lint and runtime-test coverage, including the native file watcher.
 - Updated to upstream `eframe`/`egui` 0.37.0 and removed the local Wayland presentation fork, retaining WGPU by default and the Linux Glow fallback.
 - Enabled native system-font fallback for missing scripts and color emoji while preserving bundled editor and icon fonts.

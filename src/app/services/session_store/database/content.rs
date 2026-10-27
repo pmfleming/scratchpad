@@ -3,7 +3,7 @@ use super::{Database, error, invalid, quarantine::damaged};
 use crate::app::domain::DocumentSnapshot;
 use crate::app::services::session_store::model::SessionTab;
 use futures_lite::future::block_on;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use turso::params;
 
@@ -115,6 +115,7 @@ impl Database {
         &self,
         id: &str,
         snapshot: &DocumentSnapshot,
+        removed_digests: &mut HashSet<Vec<u8>>,
     ) -> io::Result<()> {
         // Establish the FK parent before inserting parts. Placeholder metadata is
         // never visible outside this transaction, including on a failed save.
@@ -123,7 +124,7 @@ impl Database {
             params![id, blake3::hash(b"").as_bytes().as_slice()],
         )
         .await?;
-        let (bytes, digest) = self.write_chunks(id, snapshot).await?;
+        let (bytes, digest) = self.write_chunks(id, snapshot, removed_digests).await?;
         self.execute_cached(
             "INSERT INTO snapshots VALUES(?, ?, ?) ON CONFLICT(id) DO UPDATE SET bytes=excluded.bytes, digest=excluded.digest",
             params![id, bytes, digest.as_bytes().as_slice()],
@@ -135,6 +136,7 @@ impl Database {
         &self,
         id: &str,
         snapshot: &DocumentSnapshot,
+        removed_digests: &mut HashSet<Vec<u8>>,
     ) -> io::Result<(i64, blake3::Hash)> {
         let mut rows = self
             .conn
@@ -163,11 +165,19 @@ impl Database {
                     params![hash.as_bytes().as_slice(), chunk.data, hash.as_bytes().as_slice()]).await?;
             }
             if old.get(&count).map(Vec::as_slice) != Some(hash.as_bytes().as_slice()) {
+                if let Some(digest) = old.get(&count) {
+                    removed_digests.insert(digest.clone());
+                }
                 self.execute_cached("INSERT INTO parts VALUES(?, ?, ?) ON CONFLICT(temp_id, part) DO UPDATE SET digest=excluded.digest",
                     params![id, count, hash.as_bytes().as_slice()]).await?;
             }
             count += 1;
         }
+        removed_digests.extend(
+            old.iter()
+                .filter(|(part, _)| **part >= count)
+                .map(|(_, digest)| digest.clone()),
+        );
         self.execute_cached(
             "DELETE FROM parts WHERE temp_id=? AND part>=?",
             params![id, count],
