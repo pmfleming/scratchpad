@@ -100,6 +100,7 @@ impl ScratchpadApp {
                     settings_store,
                     session_store,
                     persist_session_on_drop: true,
+                    session_restore_failed: false,
                     last_session_persist: Instant::now(),
                 },
                 user_manual_path: manual_files::resolve_user_manual_path(),

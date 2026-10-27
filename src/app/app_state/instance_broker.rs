@@ -39,7 +39,7 @@ impl ScratchpadApp {
         self.state.deferred_launch_requests.extend(received);
     }
 
-    fn startup_restore_pending(&self) -> bool {
+    pub(crate) fn startup_restore_pending(&self) -> bool {
         self.state
             .background_io
             .pending_background_actions

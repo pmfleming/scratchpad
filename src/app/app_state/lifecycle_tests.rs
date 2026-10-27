@@ -7,6 +7,8 @@ use crate::app::startup::StartupOptions;
 use eframe::{App, egui};
 use std::time::{Duration, Instant};
 
+mod restore;
+
 fn hidden_input() -> egui::RawInput {
     let mut input = egui::RawInput {
         focused: false,

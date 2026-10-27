@@ -8,7 +8,10 @@ use eframe::egui;
 use std::time::Instant;
 
 pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if !app.tab_manager.session_dirty {
+    if app.startup_restore_pending()
+        || app.state.persistence.session_restore_failed
+        || !app.tab_manager.session_dirty
+    {
         return;
     }
 
@@ -35,6 +38,11 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
 }
 
 pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()> {
+    // Covers explicit saves and Drop as well as exit. Never replace a committed
+    // session with the startup placeholder, streamed prefix, or failed fallback.
+    if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
+        return Ok(());
+    }
     let request = SessionPersistRequest::capture_with_cold_tabs(
         app.tab_manager.tabs.as_slice(),
         app.tab_manager.cold_session_tabs(),
@@ -57,7 +65,8 @@ pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettin
         Ok(Some(restored)) => Some(apply_restored_session(app, restored)),
         Ok(None) => None,
         Err(error) => {
-            app.state.status.report_session_restore_failed(error);
+            app.state.persistence.session_restore_failed = true;
+            app.state.status.report_startup_restore_failed(error);
             None
         }
     }

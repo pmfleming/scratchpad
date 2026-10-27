@@ -522,13 +522,14 @@ impl ScratchpadApp {
             }
             Ok(None) => None,
             Err(error) => {
+                self.state.persistence.session_restore_failed = true;
                 diagnostics::record_background_failure(
                     "session_restore_result",
                     "app_state::background_io",
                     &error,
                     std::iter::empty(),
                 );
-                self.state.status.report_session_restore_failed(error);
+                self.state.status.report_startup_restore_failed(error);
                 None
             }
         };

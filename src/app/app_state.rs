@@ -105,12 +105,15 @@ pub(crate) struct AppPersistenceState {
     pub(crate) settings_store: SettingsStore,
     pub(crate) session_store: SessionStore,
     pub(crate) persist_session_on_drop: bool,
+    // A failed restore leaves a fallback/partial workspace, never an authoritative session.
+    pub(crate) session_restore_failed: bool,
     pub(crate) last_session_persist: Instant,
 }
 
 #[derive(Default)]
 pub(crate) struct WindowRuntimeState {
     pub(crate) close_in_progress: bool,
+    pub(crate) empty_workspace_exit_attempted: bool,
     pub(crate) lifecycle: window_lifecycle::WindowLifecycle,
     // Include lifecycle work in frame timings after splitting logic from UI.
     frame_started_at: Option<Instant>,
@@ -279,6 +282,14 @@ impl StatusState {
         self.set_error_status_with_detail(
             StatusDomain::Session,
             "Could not save your session.",
+            error.to_string(),
+        );
+    }
+
+    pub(crate) fn report_startup_restore_failed(&mut self, error: impl Display) {
+        self.set_error_status_with_detail(
+            StatusDomain::Session,
+            "Could not restore your previous session. Session saving is disabled to protect it; save new edits to files before closing.",
             error.to_string(),
         );
     }

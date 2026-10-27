@@ -54,14 +54,28 @@ pub(super) fn update_logic(app: &mut ScratchpadApp, ctx: &egui::Context) {
         FramePhase::BackgroundPoll,
         background_poll_started_at.elapsed(),
     );
-    // Settings is a tab too. Use the normal exit path so an empty workspace is
-    // persisted and save failures still prevent shutdown.
-    if crate::app::app_state::workspace::display_tabs::total_tab_slots(app) == 0 {
-        request_exit(app, ctx);
+    if maybe_exit_empty_workspace(app, ctx) {
         return;
     }
     crate::app::services::session_manager::maybe_persist_session(app, ctx);
     sync_window_title(app, ctx);
+}
+
+pub(super) fn maybe_exit_empty_workspace(app: &mut ScratchpadApp, ctx: &egui::Context) -> bool {
+    // Settings counts too. An empty workspace during restore is not a close intent.
+    if app.startup_restore_pending()
+        || crate::app::app_state::workspace::display_tabs::total_tab_slots(app) != 0
+    {
+        app.state.window.empty_workspace_exit_attempted = false;
+        return false;
+    }
+    if !app.state.window.empty_workspace_exit_attempted {
+        app.state.window.empty_workspace_exit_attempted = true;
+        request_exit(app, ctx);
+    }
+    // A retryable save error keeps the window open, but must not retry every frame.
+    // Explicit window-close requests may retry; opening a tab rearms automatic exit.
+    true
 }
 
 pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
@@ -170,8 +184,10 @@ fn persist_with_error_status(app: &mut ScratchpadApp) -> bool {
     match crate::app::app_state::workspace::accessors::persist_session_now(app) {
         Ok(()) => true,
         Err(error) => {
+            let protected = app.state.persistence.session_store.writes_blocked();
             app.state.status.report_session_save_failed(error);
-            false
+            // The original data is protected; trapping the window cannot repair it.
+            protected
         }
     }
 }
@@ -233,6 +249,8 @@ pub(crate) fn request_exit(app: &mut ScratchpadApp, ctx: &egui::Context) {
 
     if persist_with_error_status(app) {
         app.state.window.close_in_progress = true;
+        // The exit save was completed or deliberately skipped. Drop must not retry it.
+        app.state.persistence.persist_session_on_drop = false;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 }

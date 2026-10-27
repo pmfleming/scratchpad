@@ -14,6 +14,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Protected saved sessions from placeholder/partial-workspace saves during startup restore and from fallback saves after restore failure, including shutdown and drop.
+- Allowed shutdown when session writes are permanently blocked, while keeping retryable save failures open without per-frame last-tab exit retries.
 - Kept piece-tree line indexes revision-local so snapshots cannot corrupt line lookup after history compaction.
 - Serialized session persistence and committed manifests before stale-snapshot cleanup to prevent overlapping or interrupted saves from producing inconsistent restore state.
 - Rejected overlapping saves for the same buffer instead of silently writing an untracked second Save As target.

@@ -61,6 +61,14 @@ impl SessionStore {
             .as_ref()
             .map_err(|message| io::Error::other(message.clone()))
     }
+    /// A protection latch or cached worker-open failure cannot be retried by this
+    /// store. Ordinary transaction errors remain retryable and must not discard edits.
+    pub(crate) fn writes_blocked(&self) -> bool {
+        match self.worker() {
+            Ok(worker) => worker.call(|db| Ok(db.blocked.is_some())).unwrap_or(true),
+            Err(_) => true,
+        }
+    }
     fn read_session(&self, scope: ReadScope) -> io::Result<Option<StoredSession>> {
         self.worker()?
             .call(move |db| block_on(db.load(scope)))
