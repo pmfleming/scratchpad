@@ -41,7 +41,12 @@ pub(crate) fn restore_recovery_text(
     app: &mut ScratchpadApp,
     buffer_id: BufferId,
     text: &str,
+    follow_focus: bool,
 ) -> bool {
+    let previous_view = app
+        .tab_manager
+        .active_tab()
+        .map(|tab| tab.layout.active_view_id());
     let Some((index, view_id)) =
         app.tab_manager
             .tabs
@@ -78,8 +83,24 @@ pub(crate) fn restore_recovery_text(
         return false;
     }
     finalize_active_buffer_text_mutation(app, index);
+    if !follow_focus && let Some(view_id) = previous_view {
+        restore_history_view(app, view_id);
+    }
     workspace_accessors::request_focus_for_active_view(app);
     true
+}
+
+fn restore_history_view(app: &mut ScratchpadApp, view_id: crate::app::domain::ViewId) {
+    if let Some(index) = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .position(|tab| tab.layout.views.iter().any(|view| view.id == view_id))
+    {
+        app.tab_manager.set_active_tab_index_clamped(index);
+        app.tab_manager.tabs.as_mut_slice()[index].activate_view(view_id);
+    }
 }
 
 pub(crate) fn clear_text_history(app: &mut ScratchpadApp) -> bool {

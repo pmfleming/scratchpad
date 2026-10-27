@@ -20,3 +20,17 @@ separately. No sibling repository changes are included.
   baseline, errors, mismatched paths, empty/extra results and duplicate requests.
 - Passed: focused save tests, full locked all-feature tests, formatting and strict
   all-target/all-feature Clippy. Logs: `target/quality-stage1-tests.log`.
+
+## 2. History preview actions
+
+- Separated rendering from explicit restore/new-tab/replay actions. Text truncation
+  is computed once per preview, not allocated every UI frame; recovery still uses
+  the complete Unicode text.
+- Replay checks both history revision and document identity, preventing a replaced
+  document with coincidentally matching history IDs from accepting a stale action.
+- Recovery mutation owns follow-focus behavior; rendering no longer restores views
+  itself. Failed actions keep the preview open.
+- UI journeys cover undo/redo, edits without new history, document replacement,
+  closed sources, both focus policies, full-length recovery and disk preservation.
+- Passed: focused history tests, full locked all-feature tests, formatting and
+  strict all-target/all-feature Clippy. Log: `target/quality-stage2-tests.log`.
