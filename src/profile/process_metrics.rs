@@ -3,15 +3,39 @@
 use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
+/// Best-effort process-wide counters sampled at one measurement boundary.
+///
+/// `None` means unavailable or unreadable, not a measured zero. Counters include
+/// other threads and sampling overhead; they do not isolate one operation.
+/// Compare boundaries with [`ProcessMeasurement::between`] rather than treating
+/// cumulative values as per-operation deltas.
+///
+/// ```
+/// use scratchpad::profile::process_metrics::{ProcessMeasurement, ProcessSnapshot};
+///
+/// let before = ProcessSnapshot { read_bytes: Some(10), ..Default::default() };
+/// let after = ProcessSnapshot { read_bytes: Some(13), ..Default::default() };
+/// let measured = ProcessMeasurement::between(before, after);
+/// assert_eq!(measured.read_bytes, Some(3));
+/// assert_eq!(measured.write_bytes, None);
+/// ```
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct ProcessSnapshot {
+    /// Platform-reported resident/working-set bytes, not private allocation bytes.
     pub working_set_bytes: Option<u64>,
+    /// Linux `VmHWM` process-lifetime resident high-water bytes; otherwise `None`.
     pub peak_working_set_bytes: Option<u64>,
+    /// Cumulative process CPU milliseconds, not elapsed wall-clock time.
     pub process_cpu_time_ms: Option<u64>,
+    /// OS-reported cumulative process disk-read bytes; platform accounting varies.
     pub read_bytes: Option<u64>,
+    /// OS-reported cumulative process disk-write bytes; platform accounting varies.
     pub write_bytes: Option<u64>,
+    /// Cumulative Linux minor page faults (without disk I/O); otherwise `None`.
     pub minor_page_faults: Option<u64>,
+    /// Cumulative Linux major page faults (requiring disk I/O); otherwise `None`.
     pub major_page_faults: Option<u64>,
+    /// Platform-reported open-file/handle count, when supported.
     pub handle_count: Option<u64>,
 }
 
