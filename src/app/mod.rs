@@ -47,21 +47,41 @@ pub use app_state::ScratchpadApp;
 
 use std::path::Path;
 
+/// Owned, best-effort comparison text for a path, not a persistent file identity.
+///
+/// Construction attempts filesystem canonicalization and otherwise retains the
+/// input spelling. Windows keys are lowercased; other platforms preserve case.
+/// Equality and hashing compare the resulting lossy text, not file metadata:
+/// distinct non-UTF-8 paths can collide, while aliases of missing paths can differ.
+/// Keys constructed at different times can differ as filesystem state changes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CanonicalPathKey(String);
 
 impl CanonicalPathKey {
+    /// Attempt to canonicalize `path`, falling back silently on any I/O error.
+    ///
+    /// The fallback does not make relative paths absolute or simplify `.`/`..`.
+    /// Both paths through construction convert non-UTF-8 text lossily and apply
+    /// Windows lowercasing; the key is not guaranteed to be a canonical pathname.
     #[must_use]
     pub fn from_path(path: &Path) -> Self {
         Self(normalize_path(path))
     }
 
+    /// Borrow the stored comparison text, not necessarily the original spelling.
+    ///
+    /// This is neither a display-label contract nor a stable file identifier.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
+/// Compare two independently constructed [`CanonicalPathKey`] values.
+///
+/// This can query the filesystem twice, without a shared filesystem snapshot.
+/// Equality is not proof that paths identify the same file: lossy text can
+/// collide, and different spellings of a missing path can compare unequal.
 #[must_use]
 pub fn paths_match(left: &Path, right: &Path) -> bool {
     CanonicalPathKey::from_path(left) == CanonicalPathKey::from_path(right)
@@ -88,6 +108,38 @@ fn normalize_path(path: &Path) -> String {
 mod tests {
     use super::CanonicalPathKey;
     use std::path::Path;
+
+    #[test]
+    fn canonical_path_keys_resolve_existing_dot_spellings() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("buffer.txt");
+        std::fs::write(&path, "path-key fixture").unwrap();
+        let dotted = directory.path().join(".").join("buffer.txt");
+        let canonical = std::fs::canonicalize(&path).unwrap();
+        let key = CanonicalPathKey::from_path(&dotted);
+
+        assert_eq!(key, CanonicalPathKey::from_path(&canonical));
+        assert!(super::paths_match(&path, &dotted));
+        #[cfg(target_os = "windows")]
+        assert_eq!(key.as_str(), canonical.to_string_lossy().to_lowercase());
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(key.as_str(), canonical.to_string_lossy().as_ref());
+    }
+
+    #[test]
+    fn canonical_path_keys_keep_missing_dot_spellings_distinct() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missing.txt");
+        let dotted = directory.path().join(".").join("missing.txt");
+        assert!(std::fs::canonicalize(&path).is_err());
+        assert!(std::fs::canonicalize(&dotted).is_err());
+
+        assert_ne!(
+            CanonicalPathKey::from_path(&path),
+            CanonicalPathKey::from_path(&dotted)
+        );
+        assert!(!super::paths_match(&path, &dotted));
+    }
 
     #[cfg(target_os = "windows")]
     #[test]

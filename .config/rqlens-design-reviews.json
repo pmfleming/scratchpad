@@ -1,0 +1,95 @@
+{
+  "records": [
+    {
+      "binding": {
+        "algorithm": "fnv1a64-design-source-v1",
+        "digest": "7e4479a140a458ed",
+        "files": [
+          {
+            "bytes": 5285,
+            "digest": "483d533a41bee237",
+            "path": "src/app/mod.rs"
+          }
+        ]
+      },
+      "decision": "pending-human",
+      "drafted_at": "2026-10-28T10:08:01.374785866+00:00",
+      "expires_at": null,
+      "observations": [
+        "Actual scope is src/app/mod.rs, not every application module it declares.",
+        "Prior Step-5 R2 8893d3bc3bdcdd5f1ea155a1230f1c6f5cf5a493071bd6c788b97f168d32ef74 observed public CanonicalPathKey and standard Debug, not correctness of Eq/Hash or filesystem identity. Historical host cfg(doc), Rust 1.95.0/JSON57 with explicit bootstrap; overall artifact partial.",
+        "AI documentation clarifications and Linux tests cannot choose the required design trade-offs for a human."
+      ],
+      "rationale": "PENDING HUMAN REVIEW. Is an owned lossy string the right comparison-key representation, or should OsString/PathBuf preserve non-UTF-8 distinctions? Are derived string equality and hashing appropriate when canonicalization may fail and filesystem state changes? Consider relative spelling, unresolved dot components, symlinks, hard links and Windows lowercasing. Would explicit canonicalization errors or distinct display/identity types make callers safer? This AI draft makes no decision about adequacy, applicability or ownership design.",
+      "requirement_digest": "acb6eeee80f61e26",
+      "requirement_id": "path-key-newtype-v1",
+      "reviewed_at": null,
+      "reviewer": {
+        "identity": "AI-authored Scratchpad consumer draft; NOT a human reviewer",
+        "kind": "ai"
+      },
+      "topic": "newtypes"
+    },
+    {
+      "binding": {
+        "algorithm": "fnv1a64-design-source-v1",
+        "digest": "7e4479a140a458ed",
+        "files": [
+          {
+            "bytes": 5285,
+            "digest": "483d533a41bee237",
+            "path": "src/app/mod.rs"
+          }
+        ]
+      },
+      "decision": "pending-human",
+      "drafted_at": "2026-10-28T10:08:01.374891254+00:00",
+      "expires_at": null,
+      "observations": [
+        "Historical Step-5 R2 expanded rustdoc reported no own docs for CanonicalPathKey, from_path, as_str and paths_match. This motivates clarification, not automated usefulness acceptance.",
+        "This exact file binding covers current bytes; compiler evidence cited here is historical context, not current whole-project proof or human review."
+      ],
+      "rationale": "PENDING HUMAN REVIEW. Are these API contracts useful and sufficiently accurate for callers? They should distinguish best-effort comparison text from original paths, display strings and persistent file identity; explain filesystem access and failure fallback, lossy non-UTF-8 conversion, relative/dot spelling, Windows lowercase behavior and instability as filesystem state changes. Please assess whether examples, alternatives or stronger type boundaries are needed. Mere doc presence, a successful test or this AI draft cannot establish documentation usefulness.",
+      "requirement_digest": "9e15d5db8d92d4fd",
+      "requirement_id": "path-key-documentation-v1",
+      "reviewed_at": null,
+      "reviewer": {
+        "identity": "AI-authored Scratchpad consumer draft; NOT a human reviewer",
+        "kind": "ai"
+      },
+      "topic": "documentation-usefulness"
+    },
+    {
+      "binding": {
+        "algorithm": "fnv1a64-design-source-v1",
+        "digest": "c5bd0e1fc0255f05",
+        "files": [
+          {
+            "bytes": 8378,
+            "digest": "0bd45a5e5246affa",
+            "path": "crates/windows_file_watch/src/lib.rs"
+          }
+        ]
+      },
+      "decision": "pending-human",
+      "drafted_at": "2026-10-28T10:08:01.374996361+00:00",
+      "expires_at": null,
+      "observations": [
+        "Scope is crates/windows_file_watch/src/lib.rs. Its four rationale-comment observations from earlier campaign steps are syntax/documentation evidence, not safety or necessity proof.",
+        "Step-5 selected Linux cfg(doc) library evidence does not validate this Windows runtime branch.",
+        "No Windows execution, alternate compiler matrix or human alternative analysis has been performed here."
+      ],
+      "rationale": "PENDING HUMAN REVIEW. Why are direct Windows FFI calls necessary instead of an established safe wrapper or another watcher implementation? Assess handle ownership, worker lifetime, wait/rearm/shutdown sequencing, errors ignored by FindNextChangeNotification and FindCloseChangeNotification, and recovery behavior. Are invariants and alternatives explained by the existing rationale comments? Specify native Windows tests needed before judging necessity or adequacy. No human approval, unsafe soundness or Windows runtime validation is supplied by this AI draft.",
+      "requirement_digest": "13ce3196d0d68bea",
+      "requirement_id": "windows-watch-unsafe-necessity-v1",
+      "reviewed_at": null,
+      "reviewer": {
+        "identity": "AI-authored Scratchpad consumer draft; NOT a human reviewer",
+        "kind": "ai"
+      },
+      "topic": "unsafe-necessity"
+    }
+  ],
+  "rubric_digest": "34dacde10fd0445a",
+  "schema_version": 1
+}

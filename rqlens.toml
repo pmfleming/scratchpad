@@ -44,3 +44,33 @@ exclude_paths = ["src/bin/**", "src/profile/**"]
 level = "error"
 max = 3
 exclude_paths = ["src/bin/**", "src/profile/**"]
+
+# AI-authored drafts are pending, not human acceptance. These obligations remain
+# blocking until a human records a bound, reasoned, time-limited decision.
+[design_review]
+manifest = ".config/rqlens-design-reviews.json"
+
+[[design_review.requirements]]
+id = "path-key-newtype-v1"
+topic = "newtypes"
+sources = ["src/app/mod.rs"]
+required = true
+max_age_days = 90
+
+[[design_review.requirements]]
+id = "path-key-documentation-v1"
+topic = "documentation-usefulness"
+sources = ["src/app/mod.rs"]
+required = true
+max_age_days = 90
+
+[[design_review.requirements]]
+id = "windows-watch-unsafe-necessity-v1"
+topic = "unsafe-necessity"
+sources = ["crates/windows_file_watch/src/lib.rs"]
+required = true
+max_age_days = 90
+
+[policy.rules."rust.design.required-review"]
+level = "error"
+max = 0
