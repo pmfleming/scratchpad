@@ -53,15 +53,10 @@ pub(super) fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadAp
         |ui| {
             let original_budget = app.state.app_settings.history.budget;
             let mut budget = original_budget;
-            ui.horizontal(|ui| {
-                let label = ui.label("Maximum detailed entries per file");
-                ui.add(egui::DragValue::new(&mut budget.per_file_entry_limit).range(100..=100_000))
-                    .labelled_by(label.id);
-            });
             byte_budget_row(
                 ui,
                 "Per-file",
-                "Per-file undo limit.",
+                None,
                 &mut budget.per_file_byte_budget,
                 1,
                 1024,
@@ -69,7 +64,7 @@ pub(super) fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadAp
             byte_budget_row(
                 ui,
                 "Total",
-                "Total undo limit.",
+                None,
                 &mut budget.aggregate_byte_budget,
                 4,
                 4096,
@@ -77,38 +72,33 @@ pub(super) fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadAp
             byte_budget_row(
                 ui,
                 "Persisted per file",
-                "Per-file saved undo payload limit (not a global disk cap).",
+                None,
                 &mut budget.persisted_payload_budget,
                 0,
                 1024,
             );
-            inner_select_row(
-                ui,
-                "Automatic defaults",
-                Some("Checks available memory."),
-                |ui| {
-                    available_width_control(ui, |ui| {
-                        let button_width = SettingsUi::control_width(ui);
-                        let response = widget_ids::surface_response(
-                            ui,
-                            "settings.history.budget.reset_auto",
-                            widget_ids::WidgetRole::ActionButton,
-                            |ui| {
-                                ui.add_sized(
-                                    egui::vec2(button_width, 0.0),
-                                    egui::Button::new("Reset to auto"),
-                                )
-                            },
+            inner_select_row(ui, "Automatic defaults", None, |ui| {
+                available_width_control(ui, |ui| {
+                    let button_width = SettingsUi::control_width(ui);
+                    let response = widget_ids::surface_response(
+                        ui,
+                        "settings.history.budget.reset_auto",
+                        widget_ids::WidgetRole::ActionButton,
+                        |ui| {
+                            ui.add_sized(
+                                egui::vec2(button_width, 0.0),
+                                egui::Button::new("Reset to auto"),
+                            )
+                        },
+                    );
+                    record_settings_control_box("button.Reset to auto", response.rect);
+                    if response.clicked() {
+                        crate::app::app_state::settings_controller::reset_history_budget_to_auto(
+                            app,
                         );
-                        record_settings_control_box("button.Reset to auto", response.rect);
-                        if response.clicked() {
-                            crate::app::app_state::settings_controller::reset_history_budget_to_auto(
-                                app,
-                            );
-                        }
-                    });
-                },
-            );
+                    }
+                });
+            });
             if budget != original_budget {
                 crate::app::app_state::settings_controller::set_history_budget(app, budget);
             }
@@ -119,7 +109,7 @@ pub(super) fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadAp
 pub(super) fn byte_budget_row(
     ui: &mut egui::Ui,
     label: &str,
-    description: &str,
+    description: Option<&str>,
     value: &mut u64,
     min_mb: u64,
     max_mb: u64,
@@ -127,7 +117,7 @@ pub(super) fn byte_budget_row(
     const BYTES_PER_DISPLAY_MB: u64 = 1024 * 1024;
 
     let mut mb = (*value / BYTES_PER_DISPLAY_MB).clamp(min_mb, max_mb);
-    inner_select_row(ui, label, Some(description), |ui| {
+    inner_select_row(ui, label, description, |ui| {
         slider_value_control(
             ui,
             format!("slider.{label}"),

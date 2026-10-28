@@ -40,7 +40,7 @@ fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     super::sections::byte_budget_row(
         ui,
         "Recovery points",
-        "Snapshot storage limit.",
+        Some("Snapshot storage limit."),
         &mut policy.snapshot_byte_budget,
         1,
         16384,
@@ -48,7 +48,7 @@ fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     super::sections::byte_budget_row(
         ui,
         "Closed archives",
-        "Closed-tab storage limit.",
+        Some("Closed-tab storage limit."),
         &mut policy.archive_byte_budget,
         1,
         65536,

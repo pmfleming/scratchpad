@@ -240,6 +240,26 @@ mod tests {
     }
 
     #[test]
+    fn settings_undo_controls_align_to_row_right_edge() {
+        render_settings_layout_for_test(1600.0, 1600.0);
+
+        let measurements = settings_control_measurements();
+        for (label, control_label) in [
+            ("Per-file", "slider.Per-file"),
+            ("Total", "slider.Total"),
+            ("Persisted per file", "slider.Persisted per file"),
+            ("Automatic defaults", "button.Reset to auto"),
+        ] {
+            let row = measurement_for(&measurements, &format!("inner_select_row.{label}"));
+            let control = measurement_for(&measurements, control_label);
+            assert!(
+                (control.right_x - row.right_x).abs() <= 0.5,
+                "{control_label} must align with its row's right edge"
+            );
+        }
+    }
+
+    #[test]
     fn settings_toggle_labels_align_with_switch_centers() {
         render_settings_layout_for_test(1600.0, 1600.0);
 
