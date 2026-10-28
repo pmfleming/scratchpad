@@ -67,6 +67,13 @@ impl SessionStore {
             .as_ref()
             .map_err(|message| io::Error::other(message.clone()))
     }
+    /// Drain startup notices without opening the database or waiting for its worker.
+    pub(crate) fn take_notices(&self) -> Vec<RestoreStatus> {
+        match self.worker.get() {
+            Some(Ok(worker)) => worker.take_notices(),
+            _ => Vec::new(),
+        }
+    }
     /// A protection latch or cached worker-open failure cannot be retried by this
     /// store. Ordinary transaction errors remain retryable and must not discard edits.
     pub(crate) fn writes_blocked(&self) -> bool {

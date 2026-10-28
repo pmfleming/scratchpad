@@ -117,13 +117,32 @@ fn capture_session(app: &ScratchpadApp) -> SessionPersistRequest {
 }
 
 pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettings> {
-    match app.state.persistence.session_store.load() {
+    let result = app.state.persistence.session_store.load();
+    report_database_notices(app);
+    match result {
         Ok(Some(restored)) => Some(apply_restored_session(app, restored)),
         Ok(None) => None,
         Err(error) => {
             app.state.persistence.session_restore_failed = true;
             app.state.status.report_startup_restore_failed(error);
             None
+        }
+    }
+}
+
+/// Database initialization can happen during restore, recovery queries or saving.
+/// Notices are shared by store clones and consumed once into the [] status log.
+pub(crate) fn report_database_notices(app: &mut ScratchpadApp) {
+    for notice in app.state.persistence.session_store.take_notices() {
+        match notice.level {
+            RestoreStatusLevel::Info => app
+                .state
+                .status
+                .set_info_status_in_domain(StatusDomain::Session, notice.message),
+            RestoreStatusLevel::Warning => app
+                .state
+                .status
+                .set_warning_status_in_domain(StatusDomain::Session, notice.message),
         }
     }
 }

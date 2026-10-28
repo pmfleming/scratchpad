@@ -53,9 +53,15 @@ The current database schema is **8**. Schemas 6 and 7 upgrade transactionally,
 backfilling stored byte counts for undo entries and text blobs and adding covering
 accounting indexes. Schema 6 also gains idempotent undo-boundary snapshot tokens.
 The upgrade scans payloads once; existing snapshots and archives remain. A failed
-backfill rolls back the schema change. Schemas older than 6 and future schemas are
-rejected intact, without automatic reset. Back up the whole database/WAL before
-upgrading; older binaries cannot read schema 8. Original text files are unrelated.
+backfill rolls back the schema change without resetting the database. Unsupported
+schemas (including older than 6, future versions and unexpected application IDs)
+are automatically replaced by a fresh database. The previous session, undo history,
+closed-tab archives and recovery points are discarded. The `[]` status log records
+successful upgrades as information and resets as warnings. Ordinary I/O, ownership
+and corruption failures do not trigger a reset. Recovery export also refuses an
+unsupported source rather than resetting it. Back up the whole database/WAL before
+switching builds if that disposable history matters. Saved text files and settings
+are unaffected.
 The logical open-session export does not include closed archives; retain the
 whole database/WAL using the documented safe backup procedure for full recovery.
 

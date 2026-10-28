@@ -27,6 +27,9 @@ mod retention_policy_tests;
 mod retention_regression_tests;
 #[cfg(test)]
 mod retention_tests;
+mod schema_reset;
+#[cfg(test)]
+mod schema_reset_tests;
 #[cfg(test)]
 mod size_tests;
 #[cfg(test)]
@@ -82,7 +85,8 @@ struct ContentInventory {
 pub(super) struct Database {
     conn: Connection,
     database: TursoDatabase,
-    _ownership: File,
+    ownership: File,
+    startup_notices: Vec<super::RestoreStatus>,
     tab_cache: Vec<Vec<u8>>,
     state_cache: Vec<u8>,
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
@@ -98,10 +102,48 @@ pub(super) struct Database {
     quarantined: HashMap<String, super::model::SessionBuffer>,
 }
 impl Database {
+    #[cfg(test)]
     async fn open(root: &Path) -> io::Result<Self> {
+        Self::open_with_reset(root, true).await
+    }
+    async fn open_with_reset(root: &Path, reset_unsupported: bool) -> io::Result<Self> {
         create_private_directory(root)?;
         let ownership = private_file(&root.join("session.db.lock"))?;
         ownership.try_lock().map_err(error)?;
+        let mut db = Self::connect(root, ownership).await?;
+        if let Err(cause) = db.initialize().await {
+            if !reset_unsupported {
+                return Err(cause);
+            }
+            let Some(schema) = cause
+                .get_ref()
+                .and_then(|cause| cause.downcast_ref::<schema_reset::UnsupportedSchema>())
+            else {
+                return Err(cause);
+            };
+            let detail = schema.to_string();
+            // Keep the ownership lock while closing all database handles and replacing
+            // the incompatible database, including its WAL/SHM sidecars.
+            let ownership = db.ownership;
+            drop(db.conn);
+            drop(db.database);
+            schema_reset::discard(root)?;
+            db = Self::connect(root, ownership).await?;
+            db.initialize().await?;
+            db.startup_notices.push(super::RestoreStatus {
+                level: super::RestoreStatusLevel::Warning,
+                message: format!("Created a new session database because {detail}. Previous session, undo history, closed-tab archives and recovery points were discarded. Files on disk are unchanged."),
+            });
+        }
+        db.load_quarantine().await?;
+        // Reserve sequences from cold tabs too, without reading their payloads.
+        let maximum = db
+            .integer("SELECT coalesce(max(global_seq),0) FROM history")
+            .await?;
+        crate::app::domain::buffer::register_text_history_global_seq(maximum as u64);
+        Ok(db)
+    }
+    async fn connect(root: &Path, ownership: File) -> io::Result<Self> {
         let path = root.join("session.db");
         drop(private_file(&path)?);
         let path = path
@@ -118,10 +160,11 @@ impl Database {
         )
         .await
         .map_err(error)?;
-        let mut db = Self {
+        Ok(Self {
             conn,
             database,
-            _ownership: ownership,
+            ownership,
+            startup_notices: Vec::new(),
             tab_cache: Vec::new(),
             state_cache: Vec::new(),
             revisions: HashMap::new(),
@@ -133,15 +176,7 @@ impl Database {
             blocked: None,
             verified: false,
             quarantined: HashMap::new(),
-        };
-        db.initialize().await?;
-        db.load_quarantine().await?;
-        // Reserve sequences from cold tabs too, without reading their payloads.
-        let maximum = db
-            .integer("SELECT coalesce(max(global_seq),0) FROM history")
-            .await?;
-        crate::app::domain::buffer::register_text_history_global_seq(maximum as u64);
-        Ok(db)
+        })
     }
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
@@ -158,9 +193,8 @@ impl Database {
             // One transactional payload scan during upgrade, never during usage
             // polling or retention. Covering indexes keep even overflow pages
             // out of the accounting read path on the pinned Turso engine.
-            return self
-                .create_schema(&format!(
-                    "{undo_tokens}
+            self.create_schema(&format!(
+                "{undo_tokens}
                 ALTER TABLE history ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0);
                 ALTER TABLE blobs ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0);
                 UPDATE history SET bytes=length(entry);
@@ -168,8 +202,13 @@ impl Database {
                 CREATE INDEX history_sizes ON history(temp_id, bytes);
                 CREATE INDEX blob_sizes ON blobs(bytes, digest);
                 PRAGMA user_version=8;"
-                ))
-                .await;
+            ))
+            .await?;
+            self.startup_notices.push(super::RestoreStatus {
+                level: super::RestoreStatusLevel::Info,
+                message: format!("Upgraded session database schema from {version} to 8. Session and history data were retained."),
+            });
+            return Ok(());
         }
         if version != 0
             || application != 0
@@ -178,8 +217,12 @@ impl Database {
                 .await?
                 != 0
         {
-            return Err(invalid(
-                "unsupported session database schema; preserve it for recovery",
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                schema_reset::UnsupportedSchema {
+                    version,
+                    application,
+                },
             ));
         }
         self.create_schema(&format!(

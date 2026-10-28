@@ -48,6 +48,7 @@ pub(super) fn update_logic(app: &mut ScratchpadApp, ctx: &egui::Context) {
     FileController::poll_open_file_dialog(app, ctx);
     let background_poll_started_at = Instant::now();
     app.poll_background_io(ctx);
+    crate::app::services::session_manager::report_database_notices(app);
     app.apply_pending_broker_launches(ctx);
     record_frame_phase(
         FramePhase::BackgroundPoll,

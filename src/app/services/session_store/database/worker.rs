@@ -2,7 +2,7 @@ use super::{Database, error};
 use futures_lite::future::block_on;
 use std::io;
 use std::path::PathBuf;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 
 type Job = Box<dyn FnOnce(&mut Database) + Send>;
@@ -12,41 +12,57 @@ pub(in crate::app::services::session_store) struct DatabaseWorker(Arc<Worker>);
 struct Worker {
     sender: Option<mpsc::SyncSender<Job>>,
     thread: Option<JoinHandle<()>>,
+    notices: Arc<Mutex<Vec<super::super::RestoreStatus>>>,
 }
 
 impl DatabaseWorker {
     pub fn open(root: PathBuf) -> io::Result<Self> {
+        Self::open_with_reset(root, true)
+    }
+
+    pub fn open_with_reset(root: PathBuf, reset_unsupported: bool) -> io::Result<Self> {
         let (sender, receiver) = mpsc::sync_channel::<Job>(2);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let notices = Arc::new(Mutex::new(Vec::new()));
+        let worker_notices = notices.clone();
         let thread = thread::Builder::new()
             .name("session-database".into())
-            .spawn(move || match block_on(Database::open(&root)) {
-                Ok(mut database) => {
-                    let _ = ready_tx.send(Ok(()));
-                    for job in receiver {
-                        job(&mut database);
+            .spawn(
+                move || match block_on(Database::open_with_reset(&root, reset_unsupported)) {
+                    Ok(mut database) => {
+                        *worker_notices.lock().unwrap() =
+                            std::mem::take(&mut database.startup_notices);
+                        let _ = ready_tx.send(Ok(()));
+                        for job in receiver {
+                            job(&mut database);
+                        }
+                        if database.ensure_healthy().is_ok()
+                            && let Err(cause) = block_on(database.checkpoint())
+                        {
+                            crate::app::diagnostics::record_io_error(
+                                "session_checkpoint",
+                                Some(&root),
+                                "session_store",
+                                &cause,
+                            );
+                        }
                     }
-                    if database.ensure_healthy().is_ok()
-                        && let Err(cause) = block_on(database.checkpoint())
-                    {
-                        crate::app::diagnostics::record_io_error(
-                            "session_checkpoint",
-                            Some(&root),
-                            "session_store",
-                            &cause,
-                        );
+                    Err(cause) => {
+                        let _ = ready_tx.send(Err(cause));
                     }
-                }
-                Err(cause) => {
-                    let _ = ready_tx.send(Err(cause));
-                }
-            })?;
+                },
+            )?;
         let worker = Self(Arc::new(Worker {
             sender: Some(sender),
             thread: Some(thread),
+            notices,
         }));
         ready_rx.recv().map_err(error)??;
         Ok(worker)
+    }
+
+    pub fn take_notices(&self) -> Vec<super::super::RestoreStatus> {
+        std::mem::take(&mut *self.0.notices.lock().unwrap())
     }
 
     pub fn call<T: Send + 'static>(

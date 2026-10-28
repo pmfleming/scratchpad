@@ -9,6 +9,12 @@ impl SessionStore {
     /// are never overwritten. The manifest is written last; an error can leave
     /// an incomplete directory, which must not be treated as a valid backup.
     pub fn export_recovery(&self, destination: &Path) -> io::Result<()> {
+        // Export is a recovery operation, not an interactive fresh start. Never
+        // discard an incompatible source database while trying to back it up.
+        self.worker.get_or_init(|| {
+            super::DatabaseWorker::open_with_reset(self.root.clone(), false)
+                .map_err(|error| error.to_string())
+        });
         let stored = self.read_session(ReadScope::All)?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "no committed session to export")
         })?;

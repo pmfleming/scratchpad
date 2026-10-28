@@ -183,15 +183,36 @@ fn invalid_captures_leave_the_committed_session_intact() {
 }
 
 #[test]
-fn second_owner_and_future_schema_are_rejected() {
+fn second_owner_is_rejected_but_unsupported_schemas_start_fresh() {
     block_on(async {
-        let (root, db) = database().await;
-        assert!(Database::open(root.path()).await.is_err());
-        db.conn
-            .execute("PRAGMA user_version=999", ())
-            .await
-            .unwrap();
-        drop(db);
-        assert!(Database::open(root.path()).await.is_err());
+        for pragma in [
+            "PRAGMA user_version=999",
+            "PRAGMA user_version=1",
+            "PRAGMA application_id=123",
+            "PRAGMA application_id=0; PRAGMA user_version=0",
+        ] {
+            let (root, mut db) = database().await;
+            db.persist(request(&[tab("discarded")]), 1).await.unwrap();
+            assert!(Database::open(root.path()).await.is_err());
+            db.conn.execute_batch(pragma).await.unwrap();
+            drop(db);
+            let mut db = Database::open(root.path()).await.unwrap();
+            assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 8);
+            assert!(db.load(ReadScope::All).await.unwrap().is_none());
+            assert_eq!(db.startup_notices.len(), 1);
+            assert!(matches!(
+                db.startup_notices[0].level,
+                super::super::RestoreStatusLevel::Warning
+            ));
+            assert!(Database::open(root.path()).await.is_err());
+            db.persist(request(&[tab("fresh session")]), 1)
+                .await
+                .unwrap();
+            drop(db);
+            let mut db = Database::open(root.path()).await.unwrap();
+            assert!(db.startup_notices.is_empty());
+            let restored = db.load(ReadScope::All).await.unwrap().unwrap();
+            assert_eq!(restored.contents.values().next().unwrap(), "fresh session");
+        }
     });
 }

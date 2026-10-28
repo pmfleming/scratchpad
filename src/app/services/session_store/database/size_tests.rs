@@ -81,6 +81,12 @@ fn schema_seven_backfills_byte_counts_and_preserves_text_history_and_versions() 
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
         assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 8);
+        assert_eq!(db.startup_notices.len(), 1);
+        assert!(matches!(
+            db.startup_notices[0].level,
+            super::super::RestoreStatusLevel::Info
+        ));
+        assert!(db.startup_notices[0].message.contains("from 7 to 8"));
         assert_sizes(&db).await;
         assert_eq!(db.read_history(&id).await.unwrap().len(), 1);
         let points = db.version_history(&id).await.unwrap();

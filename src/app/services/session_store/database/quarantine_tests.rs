@@ -341,7 +341,7 @@ fn full_parallel_read_attributes_damage_to_one_buffer() {
 }
 
 #[test]
-fn old_schema_is_rejected_and_schema_batch_rolls_back() {
+fn old_schema_is_reset_and_schema_batch_rolls_back() {
     block_on(async {
         let (directory, mut db) = database().await;
         db.persist(request(&[tab("before upgrade")]), 1)
@@ -352,8 +352,8 @@ fn old_schema_is_rejected_and_schema_batch_rolls_back() {
             .await
             .unwrap();
         drop(db);
-        assert!(Database::open(directory.path()).await.is_err());
-        let (_fresh, db) = database().await;
+        let mut db = Database::open(directory.path()).await.unwrap();
+        assert!(db.load(super::ReadScope::All).await.unwrap().is_none());
         assert!(
             db.create_schema("CREATE TABLE partial_schema(x); CREATE TABLE tabs(x);")
                 .await

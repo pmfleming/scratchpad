@@ -65,7 +65,7 @@ fn failed_blocking_restore_cannot_erase_healthy_tabs_after_quarantine() {
 }
 
 #[test]
-fn unsupported_schema_allows_exit_without_replacing_the_database() {
+fn unsupported_schema_resets_and_reports_once_without_blocking_saves() {
     let root = tempfile::tempdir().unwrap();
     let session_root = root.path().join("session");
     let store = SessionStore::new(session_root.clone());
@@ -84,17 +84,25 @@ fn unsupported_schema_allows_exit_without_replacing_the_database() {
         })
         .unwrap();
     drop(store);
-    let before = std::fs::read(session_root.join("session.db")).unwrap();
+    let source = root.path().join("user-note.txt");
+    std::fs::write(&source, "saved text").unwrap();
     let mut app = ScratchpadApp::with_stores_and_startup(
         SessionStore::new(session_root.clone()),
         SettingsStore::new(root.path().join("settings")),
-        // Skip restore so exit actually attempts (and reports) the refused save.
-        StartupOptions {
-            restore_session: false,
-            restore_session_explicit: true,
-            ..Default::default()
-        },
+        StartupOptions::default(),
     );
+    assert!(!app.state.persistence.session_restore_failed);
+    assert!(!app.state.persistence.session_store.writes_blocked());
+    let count = app.state.status.history.len();
+    assert!(app.state.status.history.iter().any(|status| {
+        status.severity == crate::app::app_state::StatusSeverity::Warning
+            && status.domain == crate::app::app_state::StatusDomain::Session
+            && status.text.contains("Created a new session database")
+    }));
+    session_manager::report_database_notices(&mut app);
+    assert_eq!(app.state.status.history.len(), count);
+    app.tab_manager.set_tabs(tabs(), 0);
+    session_manager::persist_session_now(&mut app).unwrap();
     let ctx = egui::Context::default();
     let output = logic(&mut app, &ctx, &close_input());
     assert!(
@@ -103,10 +111,10 @@ fn unsupported_schema_allows_exit_without_replacing_the_database() {
     assert!(app.state.window.close_in_progress);
     assert!(!app.state.persistence.persist_session_on_drop);
     drop(app);
-    assert_eq!(
-        std::fs::read(session_root.join("session.db")).unwrap(),
-        before
-    );
+    assert_eq!(std::fs::read_to_string(source).unwrap(), "saved text");
+    let restored = SessionStore::new(session_root).load().unwrap().unwrap();
+    assert_eq!(restored.tabs.len(), 2);
+    assert_eq!(restored.tabs[0].active_buffer().text(), "healthy");
 }
 
 #[test]
