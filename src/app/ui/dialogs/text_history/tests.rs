@@ -26,11 +26,11 @@ fn history_preferences_default_and_change_only_on_the_next_frame() {
 }
 
 #[test]
-fn now_line_is_only_between_redoable_and_applied_rows() {
+fn now_line_marks_the_boundary_including_both_history_extremes() {
     for (states, boundary) in [
         (&[][..], None),
-        (&[true, true][..], None),
-        (&[false, false][..], None),
+        (&[true, true][..], Some(2)),
+        (&[false, false][..], Some(0)),
         (&[true, true, false, false][..], Some(2)),
     ] {
         let rows = states

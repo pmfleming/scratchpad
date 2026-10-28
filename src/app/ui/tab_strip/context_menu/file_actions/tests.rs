@@ -1,4 +1,4 @@
-use super::render_recently_closed_files;
+use super::{render_file_actions, render_recently_closed_files};
 use crate::app::{
     app_state::{
         settings_controller,
@@ -11,6 +11,82 @@ use crate::app::{
 use eframe::egui;
 use egui_kittest::{Harness, kittest::Queryable};
 use std::time::{Duration, Instant};
+
+#[test]
+fn recently_closed_row_follows_open_file_and_matches_menu_styling() {
+    for recent_files in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_app(root.path());
+        settings_controller::set_recent_files_enabled(&mut app, recent_files);
+        let mut harness = Harness::builder()
+            .with_context_setup(|ctx| {
+                let mut fonts = egui::FontDefinitions::default();
+                egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+                ctx.set_fonts(fonts);
+            })
+            .with_size(egui::vec2(700.0, 600.0))
+            .build_ui_state(
+                |ui, app| {
+                    ui.set_max_width(super::TAB_CONTEXT_MENU_WIDTH);
+                    render_file_actions(ui, app, 0, Some(0), true, true, true);
+                },
+                app,
+            );
+        harness.run();
+        let text = |label: &str| {
+            harness
+                .output()
+                .shapes
+                .iter()
+                .find_map(|shape| {
+                    if let egui::Shape::Text(text) = &shape.shape
+                        && text.galley.text() == label
+                    {
+                        Some(text)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| panic!("missing painted text: {label}"))
+        };
+        let open = text(if recent_files {
+            "Open File"
+        } else {
+            "Open File Here"
+        });
+        let recent = text("Recently Closed");
+        let rename = text("Rename");
+        assert!(open.pos.y < recent.pos.y && recent.pos.y < rename.pos.y);
+        assert_eq!(recent.pos.x, open.pos.x);
+        assert_eq!(recent.pos.x, rename.pos.x);
+        assert_eq!(
+            recent.galley.job.sections[0].format.font_id,
+            open.galley.job.sections[0].format.font_id
+        );
+        let icon = text(egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE);
+        let folder = text(egui_phosphor::regular::FOLDER_OPEN);
+        assert_eq!(icon.pos.x, folder.pos.x);
+        assert_eq!(
+            icon.galley.job.sections[0].format.font_id,
+            folder.galley.job.sections[0].format.font_id
+        );
+        assert!(harness.output().shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text)
+                if text.galley.text() == egui_phosphor::regular::CARET_RIGHT
+                    && (text.pos.y - recent.pos.y).abs() < 5.0)
+        }));
+        harness
+            .get_by_role_and_label(egui::Role::Button, "Recently Closed")
+            .click();
+        harness.run_steps(2);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while harness.query_by_label("No recently closed files").is_none() {
+            assert!(Instant::now() < deadline, "submenu did not open");
+            std::thread::sleep(Duration::from_millis(1));
+            harness.run_steps(1);
+        }
+    }
+}
 
 #[test]
 fn recently_closed_menu_pins_recovers_and_opens_disk_only_entries() {

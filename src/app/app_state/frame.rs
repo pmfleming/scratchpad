@@ -88,6 +88,7 @@ pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
         app.state.window.overflow_popup_open = false;
     }
     handle_dropped_files(app, ctx);
+    dialogs::handle_text_history_navigation(ctx, app);
     settings_state::apply_theme_to_context(app, ctx);
     crate::app::ui::widget_ids::configure_debug_options(ctx);
     sync_editor_fonts(app, ctx);
@@ -204,6 +205,7 @@ pub(crate) fn chrome_transition_active(app: &ScratchpadApp) -> bool {
 }
 
 fn modal_callout_open(app: &ScratchpadApp) -> bool {
+    // History is a movable live navigator; allow the underlying editor to scroll.
     app.state.dialogs.any_modal_open()
         || crate::app::app_state::workspace::accessors::pending_action(app).is_some()
 }

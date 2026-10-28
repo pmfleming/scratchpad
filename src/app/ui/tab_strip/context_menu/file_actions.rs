@@ -3,6 +3,7 @@ use super::menu_ui::{
     OPEN_DISPOSITION_BUTTON_SIZE, OPEN_FILE_SUBMENU_WIDTH, SUBMENU_WIDTH,
     WIDTH as TAB_CONTEXT_MENU_WIDTH, menu_button, open_disposition_button,
     primary_menu_button_enabled, recent_file_button, submenu_button, submenu_button_sized,
+    submenu_row,
 };
 use crate::app::app_state::{ScratchpadApp, workspace::accessors as workspace_accessors};
 use crate::app::commands::{AppCommand, FileCommand, WorkspaceCommand};
@@ -12,7 +13,8 @@ use crate::app::services::settings_store::FileOpenDisposition;
 
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROW_SQUARE_IN, FILE_PLUS, FLOPPY_DISK, FOLDER_OPEN, PENCIL_SIMPLE_LINE, PLUS,
+    ARROW_SQUARE_IN, CLOCK_COUNTER_CLOCKWISE, FILE_PLUS, FLOPPY_DISK, FOLDER_OPEN,
+    PENCIL_SIMPLE_LINE, PLUS,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -42,12 +44,6 @@ pub(super) fn render_file_actions(
         crate::app::app_state::workspace::lifecycle::reopen_last_closed_tab(app);
         ui.close();
     }
-    egui::containers::menu::SubMenuButton::new("Recently Closed")
-        .config(
-            egui::containers::menu::MenuConfig::new()
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
-        )
-        .ui(ui, |ui| render_recently_closed_files(ui, app, slot_index));
     if app.state.app_settings.recent_files_enabled() {
         render_open_file_actions(ui, app, slot_index, open_here_enabled);
     } else if menu_button(
@@ -61,6 +57,13 @@ pub(super) fn render_file_actions(
         crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFileHere));
         ui.close();
     }
+    submenu_row(
+        ui,
+        "tab_context.recently_closed",
+        "Recently Closed",
+        CLOCK_COUNTER_CLOCKWISE,
+        |ui| render_recently_closed_files(ui, app, slot_index),
+    );
     if menu_button(
         ui,
         TAB_CONTEXT_MENU_WIDTH,

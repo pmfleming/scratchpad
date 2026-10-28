@@ -1,5 +1,6 @@
 mod list;
 mod model;
+mod navigation;
 mod persistence;
 mod preview;
 mod recovery;
@@ -9,7 +10,7 @@ use self::model::{
     timeline_rows_from_entries,
 };
 use self::persistence::{read_active_tab, read_follow_focus, write_active_tab, write_follow_focus};
-use super::common::{history_dialog_card, history_dialog_header, show_centered_callout};
+use super::common::{history_dialog_card, history_dialog_header};
 use crate::app::app_state::{ScratchpadApp, workspace::mutation as workspace_mutation};
 use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg};
 use crate::app::ui::{callout, settings, widget_ids};
@@ -46,6 +47,7 @@ struct TextHistoryWindowInputs<'a> {
     file_groups: &'a [TextHistoryFileGroup],
     active_tab: HistoryTab,
     follow_focus: bool,
+    step_targets: [Option<TextHistoryAction>; 2],
 }
 
 struct TextHistoryWindowState<'a> {
@@ -56,8 +58,29 @@ struct TextHistoryWindowState<'a> {
     clear_requested: &'a mut bool,
 }
 
+/// Consume navigation before the editor sees arrow keys. Browsing moves the real
+/// undo boundary, but never writes the resulting text to its source file.
+pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    if !app.state.dialogs.text_history.is_open()
+        || read_active_tab(ctx) == HistoryTab::Recovery
+        || app.state.dialogs.encoding.is_open()
+        || app.state.dialogs.status_history.is_open()
+        || crate::app::app_state::workspace::accessors::pending_action(app).is_some()
+    {
+        return;
+    }
+    for (key, undo) in [(egui::Key::ArrowUp, true), (egui::Key::ArrowDown, false)] {
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
+            && let Some(action) = navigation::step_target(ctx, app, undo)
+        {
+            navigation::apply(ctx, app, action);
+        }
+    }
+}
+
 pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if !app.state.dialogs.text_history.is_open() {
+        navigation::clear(ctx);
         return;
     }
 
@@ -73,11 +96,17 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
     let follow_focus = read_follow_focus(ctx);
     let mut next_follow_focus = follow_focus;
 
-    show_centered_callout(
+    let step_targets = navigation::targets(ctx, app, &entries);
+    let screen = ctx.content_rect();
+    callout::show_floating(
         ctx,
         "text_history_window",
         "Text history",
-        TEXT_HISTORY_SIZE,
+        egui::pos2(
+            (screen.right() - TEXT_HISTORY_SIZE.x - 24.0).max(screen.left()),
+            screen.top() + 72.0,
+        ),
+        TEXT_HISTORY_SIZE.x,
         |ui| {
             widget_ids::feature_scope(ui, "text_history_dialog", |ui| {
                 render_text_history_window(
@@ -87,6 +116,7 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
                         file_groups: &file_groups,
                         active_tab,
                         follow_focus,
+                        step_targets,
                     },
                     TextHistoryWindowState {
                         next_tab: &mut next_tab,
@@ -111,14 +141,17 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
     }
     if close_requested {
         crate::app::commands::close_text_history(&mut app.state.dialogs);
+        navigation::clear(ctx);
     }
     if clear_requested {
         let _ = workspace_mutation::clear_text_history(app);
     }
     if let Some(action) = action {
-        preview::preview_edit(ctx, app, action);
+        navigation::apply(ctx, app, action);
     }
-    preview::show(ctx, app);
+    if active_tab == HistoryTab::Recovery {
+        preview::show(ctx, app);
+    }
 }
 
 fn render_text_history_window(
@@ -146,6 +179,11 @@ fn render_text_history_window(
         );
     });
 
+    if inputs.active_tab != HistoryTab::Recovery
+        && let Some(action) = navigation::controls(ui, inputs.step_targets)
+    {
+        *state.action = Some(action);
+    }
     match inputs.active_tab {
         HistoryTab::Timeline => list::render_timeline(ui, inputs.timeline_rows, state.action),
         HistoryTab::ByFile => list::render_by_file(ui, inputs.file_groups, state.action),

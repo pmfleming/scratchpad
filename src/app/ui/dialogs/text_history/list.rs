@@ -92,6 +92,9 @@ fn render_timeline_rows(
         }
         render_row(ui, row, action);
     }
+    if now_line_index == Some(rows.len()) {
+        render_now_line(ui);
+    }
 }
 
 fn render_file_group(
@@ -206,16 +209,7 @@ fn render_file_history_rows(
     rows: &[TextHistoryRow],
     action: &mut Option<TextHistoryAction>,
 ) {
-    let now_line_index = now_line_insert_index(rows);
-    let mut now_rendered = false;
-
-    for (idx, row) in rows.iter().enumerate() {
-        if !now_rendered && now_line_index == Some(idx) {
-            render_now_line(ui);
-            now_rendered = true;
-        }
-        render_row(ui, row, action);
-    }
+    render_timeline_rows(ui, rows, action);
 }
 
 fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<TextHistoryAction>) {
@@ -226,11 +220,22 @@ fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<TextH
     )
     .inner
     .on_hover_text(if row.undone {
-        "Preview the text after redoing this change"
+        "Redo through this change in the editor"
     } else {
-        "Preview the text before this change"
+        "Undo through this change in the editor"
     });
 
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            true,
+            format!(
+                "{}: {}",
+                if row.undone { "Redo" } else { "Undo" },
+                row.title
+            ),
+        )
+    });
     if response.clicked() {
         *action = Some(TextHistoryAction {
             buffer_id: row.buffer_id,

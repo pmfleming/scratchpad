@@ -47,6 +47,7 @@ pub(super) fn menu_button(
                 )
             },
         );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
         paint_row_label(ui, response.rect, icon, label, enabled);
         let clicked = response.clicked();
         if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui, label) {
@@ -250,6 +251,7 @@ pub(super) fn primary_menu_button_enabled(
                 )
             },
         );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
         paint_row_label(ui, response.rect, Some(icon), label, enabled);
         let clicked = response.clicked();
         if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui, label) {
@@ -257,6 +259,39 @@ pub(super) fn primary_menu_button_enabled(
         }
         clicked
     })
+}
+
+/// A full-width submenu entry using the same label, icon and chevron layout as
+/// the split-action menu rows, with the entire row opening the submenu.
+pub(super) fn submenu_row(
+    ui: &mut egui::Ui,
+    id_source: impl Hash,
+    label: &str,
+    icon: &str,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    with_row_visuals(ui, |ui| {
+        let button = egui::Button::new("")
+            .min_size(egui::vec2(WIDTH, ROW_HEIGHT))
+            .stroke(egui::Stroke::NONE);
+        widget_ids::surface_widget(ui, id_source, "submenu", |ui| {
+            let (response, _) = egui::containers::menu::SubMenuButton::from_button(button)
+                .config(
+                    egui::containers::menu::MenuConfig::new()
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                )
+                .ui(ui, add_contents);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+            paint_row_label(ui, response.rect, Some(icon), label, true);
+            ui.painter().text(
+                response.rect.right_center() - egui::vec2(CARET_WIDTH * 0.5, 0.0),
+                egui::Align2::CENTER_CENTER,
+                CARET_RIGHT,
+                egui_phosphor::font_id(14.0),
+                text_primary(ui),
+            );
+        });
+    });
 }
 
 pub(super) fn submenu_button(

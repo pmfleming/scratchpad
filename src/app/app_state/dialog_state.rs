@@ -96,7 +96,7 @@ impl DialogState {
     }
 
     pub(crate) fn any_modal_open(&self) -> bool {
-        self.encoding.is_open() || self.text_history.is_open() || self.status_history.is_open()
+        self.encoding.is_open() || self.status_history.is_open()
     }
 
     pub(crate) fn begin_tab_rename(&mut self, state: TabRenameState) {

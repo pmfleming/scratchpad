@@ -28,6 +28,7 @@ struct ReplacementPreviewContext<'a> {
 }
 
 pub(super) struct EditorFrame<'a> {
+    pub(super) buffer: &'a crate::app::domain::BufferState,
     pub(super) galley: &'a Arc<egui::Galley>,
     pub(super) galley_pos: egui::Pos2,
     pub(super) rect: egui::Rect,
@@ -92,6 +93,7 @@ pub(super) struct CursorPaintOutcome {
 
 pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> CursorPaintOutcome {
     paint_tablines(ui, request.rect, request.options);
+    super::history_feedback::paint(ui, &request);
     paint_contiguous_selection_background(
         SelectionPaintContext {
             ui,

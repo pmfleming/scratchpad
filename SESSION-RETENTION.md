@@ -96,9 +96,18 @@ in both targeted and full garbage collection. Points expire with their buffer
 when it is no longer live, retained-closed, or quarantined.
 
 Use **History…** in a tab context menu. Detailed edits and **Recovery points** live
-in the same history window. Selecting an edit or snapshot previews text; **Restore
-into this tab** creates an undoable replacement, while **Open as new tab** leaves
-the source untouched. Snapshot rows show readable UTC dates and distinguish
+in the same movable history window. Selecting an applied edit undoes through it;
+selecting an undone edit redoes through it, directly in the editor. **↑ Undo** /
+**↓ Redo** (or Up/Down) move one step within the last selected file, initially the
+active file. The **Now** line marks the undo boundary, including either end of the
+retained history. A faint tint briefly marks the line at the selected change's
+start; it is paint-only and disappears on normal editing. Browsing neither adds
+replacement edits nor saves files; closing history keeps the chosen state.
+The editor can still be scrolled while history is open.
+
+Snapshot-only **Recovery points** retain a separate preview because they no longer
+have replayable edits. **Restore into this tab** creates an undoable replacement,
+while **Open as new tab** leaves the source untouched. Snapshot rows show readable UTC dates and distinguish
 automatic points from undo-compaction boundaries. Snapshots contain text, not
 separate copies of undo history. The store validates checksums on recovery.
 

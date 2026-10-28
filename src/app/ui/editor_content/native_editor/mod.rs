@@ -1,6 +1,7 @@
 mod cursor;
 mod editing;
 mod highlighting;
+pub(crate) mod history_feedback;
 mod interactions;
 mod layout;
 mod painting;
@@ -154,6 +155,7 @@ pub fn render_editor_text_edit(
         paint_editor(
             ui,
             EditorFrame {
+                buffer,
                 galley: &galley_context.galley,
                 galley_pos,
                 rect,

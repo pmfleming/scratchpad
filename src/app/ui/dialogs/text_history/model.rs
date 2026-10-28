@@ -117,8 +117,11 @@ fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
     }
 }
 
-/// Both history views place the boundary after the redoable prefix, never at the top.
+/// Show the current boundary even at the oldest/newest retained state.
 pub(super) fn now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
-    let insert_index = rows.iter().position(|row| !row.undone)?;
-    (insert_index > 0).then_some(insert_index)
+    (!rows.is_empty()).then(|| {
+        rows.iter()
+            .position(|row| !row.undone)
+            .unwrap_or(rows.len())
+    })
 }

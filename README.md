@@ -147,7 +147,9 @@ workspace; save new edits to files before closing. A protected/unavailable sessi
 store does not prevent exit. Retryable save errors still keep the window open,
 without retrying automatic last-tab shutdown every frame.
 
-**History…** combines detailed edits and snapshot-only recovery, with preview,
+**History…** navigates detailed edits directly in the editor: click a change or use
+Up/Down to undo/redo in the selected file. A brief, subtle tint marks the affected
+line; browsing does not save files. Snapshot-only recovery retains explicit preview,
 undoable restore and recovery into a new tab. **Recently Closed** combines archived
 tabs and disk-only file entries; normal reopening restores archives automatically
 and separates externally changed files from recovered unsaved text.
