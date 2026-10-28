@@ -1,11 +1,27 @@
 use super::{Database, content::Content, error, invalid};
 use std::{collections::HashSet, io};
 use turso::params;
+mod navigation;
+pub(crate) use navigation::{HistoryCheckpoint, RestoredVersion};
+
+pub(super) const NAVIGATION_UPGRADE: &str = "
+ALTER TABLE buffer_versions ADD COLUMN text_digest BLOB;
+ALTER TABLE buffer_versions ADD COLUMN anchor_seq INTEGER;
+ALTER TABLE buffer_versions ADD COLUMN anchor_before INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE buffer_versions ADD COLUMN branch_history BLOB;
+ALTER TABLE buffer_versions ADD COLUMN branch_bytes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE buffer_versions ADD COLUMN history_high_water INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX version_sequences ON buffer_versions(history_high_water);
+CREATE INDEX version_sizes ON buffer_versions(temp_id,bytes,branch_bytes,digest);";
 
 pub(super) const VERSION_INTERVAL_SECONDS: i64 = 300;
 pub(super) const SCHEMA: &str = "
 CREATE TABLE buffer_versions(id INTEGER PRIMARY KEY AUTOINCREMENT, temp_id TEXT NOT NULL REFERENCES buffer_ids(id) ON DELETE CASCADE,
-    created_at INTEGER NOT NULL, bytes INTEGER NOT NULL, digest BLOB NOT NULL, source_token TEXT) STRICT;
+    created_at INTEGER NOT NULL, bytes INTEGER NOT NULL, digest BLOB NOT NULL, source_token TEXT,
+    text_digest BLOB, anchor_seq INTEGER, anchor_before INTEGER NOT NULL DEFAULT 0, branch_history BLOB,
+    branch_bytes INTEGER NOT NULL DEFAULT 0, history_high_water INTEGER NOT NULL DEFAULT 0) STRICT;
+CREATE INDEX version_sequences ON buffer_versions(history_high_water);
+CREATE INDEX version_sizes ON buffer_versions(temp_id,bytes,branch_bytes,digest);
 CREATE UNIQUE INDEX version_source ON buffer_versions(temp_id, source_token);
 CREATE INDEX versions_buffer ON buffer_versions(temp_id, id);
 CREATE TABLE version_parts(version_id INTEGER NOT NULL REFERENCES buffer_versions(id) ON DELETE CASCADE,
@@ -18,6 +34,11 @@ pub struct BufferVersionInfo {
     pub created_at_unix_seconds: i64,
     pub bytes: usize,
     pub undo_boundary: bool,
+    pub text_digest: Vec<u8>,
+    /// (global edit sequence, before rather than after that edit).
+    pub anchor: Option<(u64, bool)>,
+    pub has_history: bool,
+    pub history_bytes: usize,
 }
 
 impl Database {
@@ -26,46 +47,19 @@ impl Database {
         point: &super::super::capture::CapturedRecoveryPoint,
         now: i64,
     ) -> io::Result<()> {
-        use super::chunking::{IncrementalChunks, hash_part, manifest_hasher};
-        let token = format!("undo-{}", point.sequence);
-        let existing = self
-            .query_collect(
-                "SELECT id FROM buffer_versions WHERE temp_id=? AND source_token=?",
-                params![point.temp_id.as_str(), token.as_str()],
-                |row| row.get::<i64>(0).map_err(error),
-            )
-            .await?;
-        if !existing.is_empty() {
-            return Ok(());
-        }
-        let mut digest = manifest_hasher();
-        let mut bytes = 0i64;
-        let mut parts = Vec::new();
-        for chunk in IncrementalChunks::new(&point.snapshot, None) {
-            let chunk = chunk?;
-            bytes += chunk.meta.len as i64;
-            hash_part(&mut digest, chunk.meta);
-            let hash = chunk.meta.digest.as_bytes().to_vec();
-            if let Some(data) = chunk.data {
-                self.execute_cached("INSERT INTO blobs(digest, body, bytes) SELECT ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM blobs WHERE digest=?)",
-                    params![hash.as_slice(), data.as_slice(), data.len() as i64, hash.as_slice()]).await?;
-            }
-            parts.push(hash);
-        }
-        let ids = self.query_collect(
-            "INSERT INTO buffer_versions(temp_id,created_at,bytes,digest,source_token) VALUES(?,?,?,?,?) RETURNING id",
-            params![point.temp_id.as_str(), now, bytes, digest.finalize().as_bytes().as_slice(), token],
-            |row| row.get::<i64>(0).map_err(error),
-        ).await?;
-        let id = ids[0];
-        for (part, hash) in parts.into_iter().enumerate() {
-            self.execute_cached(
-                "INSERT INTO version_parts VALUES(?,?,?)",
-                params![id, part as i64, hash],
-            )
-            .await?;
-        }
-        Ok(())
+        self.write_history_checkpoint(
+            &HistoryCheckpoint {
+                temp_id: point.temp_id.clone(),
+                snapshot: point.snapshot.clone(),
+                history: Vec::new(),
+            },
+            &format!("undo-{}", point.sequence),
+            now,
+            Some((point.sequence, true)),
+            false,
+        )
+        .await
+        .map(|_| ())
     }
 
     pub(super) async fn checkpoint_version(
@@ -93,6 +87,17 @@ impl Database {
             params![version, id],
         )
         .await?;
+        let history = self.read_history(id).await?;
+        self.record_version_identity(
+            version,
+            navigation::history_anchor(&history),
+            history
+                .iter()
+                .map(|entry| entry.global_seq)
+                .max()
+                .unwrap_or(0),
+        )
+        .await?;
         Ok(())
     }
 
@@ -109,19 +114,33 @@ impl Database {
         id: &str,
     ) -> io::Result<Vec<BufferVersionInfo>> {
         self.ensure_healthy()?;
-        self.query_collect(
-            "SELECT id, created_at, bytes, source_token FROM buffer_versions WHERE temp_id=? ORDER BY id DESC",
+        let mut versions = self.query_collect(
+            "SELECT id, created_at, bytes, source_token, text_digest, anchor_seq, anchor_before, branch_bytes FROM buffer_versions WHERE temp_id=? ORDER BY id DESC",
             [id],
             |row| {
+                let before = row.get::<i64>(6).map_err(error)? != 0;
+                let history_bytes = usize::try_from(row.get::<i64>(7).map_err(error)?).map_err(invalid)?;
                 Ok(BufferVersionInfo {
                     id: row.get(0).map_err(error)?,
                     created_at_unix_seconds: row.get(1).map_err(error)?,
                     bytes: usize::try_from(row.get::<i64>(2).map_err(error)?).map_err(invalid)?,
-                    undo_boundary: row.get::<Option<String>>(3).map_err(error)?.is_some(),
+                    undo_boundary: row.get::<Option<String>>(3).map_err(error)?.is_some_and(|token| token.starts_with("undo-")),
+                    text_digest: row.get::<Option<Vec<u8>>>(4).map_err(error)?.unwrap_or_default(),
+                    anchor: row.get::<Option<i64>>(5).map_err(error)?.map(|seq| (seq as u64, before)),
+                    has_history: history_bytes != 0,
+                    history_bytes,
                 })
             },
         )
-        .await
+        .await?;
+        // Older databases have no state identity. Backfill on demand, never during
+        // startup or a paint frame; the worker owns the checksummed reads.
+        for version in &mut versions {
+            if version.text_digest.is_empty() {
+                version.text_digest = self.version_text_digest(version.id).await?;
+            }
+        }
+        Ok(versions)
     }
 
     pub(in crate::app::services::session_store) async fn read_version(

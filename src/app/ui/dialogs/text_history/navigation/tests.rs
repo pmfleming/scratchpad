@@ -130,6 +130,25 @@ fn history_rows_buttons_and_arrow_keys_change_the_underlying_editor_without_a_pr
             app,
         );
     harness.run_steps(3);
+    let undo = harness.get_by_label("Up: Older state in this file").rect();
+    let redo = harness
+        .get_by_label("Down: Newer state in this file")
+        .rect();
+    let delete = harness
+        .get_by_label("CTRL+SHIFT+DELETE: Clear history")
+        .rect();
+    assert_eq!(undo.size(), delete.size());
+    assert_eq!(redo.size(), delete.size());
+    assert_eq!(undo.center().y, delete.center().y);
+    assert_eq!(redo.center().y, delete.center().y);
+    assert!(undo.right() <= redo.left() && redo.right() <= delete.left());
+    assert!((redo.left() - undo.right() - 8.0).abs() < 1.0);
+    assert!((delete.left() - redo.right() - 8.0).abs() < 1.0);
+    assert!(
+        harness
+            .query_by_label("Changes apply directly; files are not saved.")
+            .is_none()
+    );
     harness
         .get_all_by_role_and_label(egui::Role::Button, &undo_all)
         .last()
@@ -145,7 +164,7 @@ fn history_rows_buttons_and_arrow_keys_change_the_underlying_editor_without_a_pr
     harness.run_steps(3);
     assert_eq!(text(harness.state()), "current");
     harness
-        .get_by_role_and_label(egui::Role::Button, "↑ Undo")
+        .get_by_role_and_label(egui::Role::Button, "Up: Older state in this file")
         .click();
     harness.run_steps(3);
     assert_eq!(text(harness.state()), "middle");
@@ -156,7 +175,7 @@ fn history_rows_buttons_and_arrow_keys_change_the_underlying_editor_without_a_pr
     harness.run_steps(3);
     assert_eq!(text(harness.state()), "middle");
     harness
-        .get_by_role_and_label(egui::Role::Button, "↓ Redo")
+        .get_by_role_and_label(egui::Role::Button, "Down: Newer state in this file")
         .click();
     harness.run_steps(3);
     assert_eq!(text(harness.state()), "current");

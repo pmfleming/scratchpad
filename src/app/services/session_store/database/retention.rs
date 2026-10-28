@@ -137,8 +137,14 @@ impl Database {
                 if saved >= needed {
                     break;
                 }
+                if buffer
+                    .snapshot_navigation
+                    .is_some_and(|(selected, back)| point.id == selected || point.id == back)
+                {
+                    continue;
+                }
                 expired.push(point.id);
-                saved = saved.saturating_add(point.bytes as u64);
+                saved = saved.saturating_add(point.bytes as u64 + point.history_bytes as u64);
             }
         }
         Ok(saved)
@@ -150,7 +156,7 @@ impl Database {
             .len() as u64;
         for buffer in &archive.tab.session_tab.buffers {
             let rows = self.query_collect(
-                "SELECT coalesce((SELECT bytes FROM snapshots WHERE id=?1),0), coalesce((SELECT sum(bytes) FROM history INDEXED BY history_sizes WHERE temp_id=?1),0), coalesce((SELECT sum(bytes) FROM buffer_versions WHERE temp_id=?1),0)",
+                "SELECT coalesce((SELECT bytes FROM snapshots WHERE id=?1),0), coalesce((SELECT sum(bytes) FROM history INDEXED BY history_sizes WHERE temp_id=?1),0), coalesce((SELECT sum(bytes+branch_bytes) FROM buffer_versions WHERE temp_id=?1),0)",
                 [buffer.temp_id.as_str()], |row| Ok((row.get::<i64>(0).map_err(error)? as u64, row.get::<i64>(1).map_err(error)? as u64, row.get::<i64>(2).map_err(error)? as u64)),
             ).await?;
             let (current, history, versions) = rows[0];
@@ -208,8 +214,13 @@ impl Database {
         &self,
         policy: &RecoverySettings,
         archives: &[ClosedRow],
+        navigation_roots: &HashSet<i64>,
         removed: &mut HashSet<Vec<u8>>,
     ) -> io::Result<()> {
+        let mut navigation_roots = navigation_roots.clone();
+        for &(selected, back) in self.navigation_roots.values() {
+            navigation_roots.extend([selected, back]);
+        }
         let mut protected: HashSet<String> = self.quarantined.keys().cloned().collect();
         for archive in archives
             .iter()
@@ -226,19 +237,19 @@ impl Database {
         // Interior periodic points go first; retain boundary/endpoint coverage
         // longer. Only when necessary do oldest endpoints expire as well.
         let points = self.query_collect(
-            "SELECT id,temp_id,bytes FROM buffer_versions v ORDER BY (id=(SELECT min(id) FROM buffer_versions WHERE temp_id=v.temp_id) OR id=(SELECT max(id) FROM buffer_versions WHERE temp_id=v.temp_id)), source_token IS NOT NULL, created_at, id",
+            "SELECT id,temp_id,bytes+branch_bytes FROM buffer_versions v ORDER BY (id=(SELECT min(id) FROM buffer_versions WHERE temp_id=v.temp_id) OR id=(SELECT max(id) FROM buffer_versions WHERE temp_id=v.temp_id)), source_token IS NOT NULL, created_at, id",
             (), |row| Ok((row.get::<i64>(0).map_err(error)?, row.get::<String>(1).map_err(error)?, row.get::<i64>(2).map_err(error)? as u64)),
         ).await?;
         let mut total: u64 = points
             .iter()
-            .filter(|(_, buffer, _)| !protected.contains(buffer))
+            .filter(|(id, buffer, _)| !protected.contains(buffer) && !navigation_roots.contains(id))
             .map(|(_, _, bytes)| bytes + 96)
             .sum();
         for (id, buffer, bytes) in points {
             if total <= policy.snapshot_byte_budget {
                 break;
             }
-            if protected.contains(&buffer) {
+            if protected.contains(&buffer) || navigation_roots.contains(&id) {
                 continue;
             }
             self.collect_digests(

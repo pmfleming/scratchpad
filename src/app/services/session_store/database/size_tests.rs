@@ -72,7 +72,11 @@ fn schema_seven_backfills_byte_counts_and_preserves_text_history_and_versions() 
         db.persist(save, 1).await.unwrap();
         db.conn
             .execute_batch(
-                "DROP INDEX history_sizes; DROP INDEX blob_sizes;
+                "DROP INDEX version_sequences; ALTER TABLE buffer_versions DROP COLUMN history_high_water;
+                DROP INDEX version_sizes; ALTER TABLE buffer_versions DROP COLUMN branch_bytes;
+                ALTER TABLE buffer_versions DROP COLUMN text_digest; ALTER TABLE buffer_versions DROP COLUMN anchor_seq;
+                ALTER TABLE buffer_versions DROP COLUMN anchor_before; ALTER TABLE buffer_versions DROP COLUMN branch_history;
+                DROP INDEX history_sizes; DROP INDEX blob_sizes;
             ALTER TABLE history DROP COLUMN bytes; ALTER TABLE blobs DROP COLUMN bytes;
             PRAGMA user_version=7;",
             )
@@ -80,13 +84,13 @@ fn schema_seven_backfills_byte_counts_and_preserves_text_history_and_versions() 
             .unwrap();
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
-        assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 8);
+        assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 9);
         assert_eq!(db.startup_notices.len(), 1);
         assert!(matches!(
             db.startup_notices[0].level,
             super::super::RestoreStatusLevel::Info
         ));
-        assert!(db.startup_notices[0].message.contains("from 7 to 8"));
+        assert!(db.startup_notices[0].message.contains("from 7 to 9"));
         assert_sizes(&db).await;
         assert_eq!(db.read_history(&id).await.unwrap().len(), 1);
         let points = db.version_history(&id).await.unwrap();
@@ -105,7 +109,11 @@ fn failed_size_backfill_rolls_back_the_whole_schema_upgrade() {
     block_on(async {
         let (root, mut db) = database().await;
         db.persist(request(&[tab("retained")]), 1).await.unwrap();
-        db.conn.execute_batch("DROP INDEX history_sizes; DROP INDEX blob_sizes;
+        db.conn.execute_batch("DROP INDEX version_sequences; ALTER TABLE buffer_versions DROP COLUMN history_high_water;
+            DROP INDEX version_sizes; ALTER TABLE buffer_versions DROP COLUMN branch_bytes;
+            ALTER TABLE buffer_versions DROP COLUMN text_digest; ALTER TABLE buffer_versions DROP COLUMN anchor_seq;
+            ALTER TABLE buffer_versions DROP COLUMN anchor_before; ALTER TABLE buffer_versions DROP COLUMN branch_history;
+            DROP INDEX history_sizes; DROP INDEX blob_sizes;
             ALTER TABLE history DROP COLUMN bytes; ALTER TABLE blobs DROP COLUMN bytes;
             PRAGMA user_version=7;
             CREATE TRIGGER fail_backfill BEFORE UPDATE ON blobs BEGIN SELECT RAISE(ABORT, 'injected'); END;").await.unwrap();

@@ -2,11 +2,10 @@ mod list;
 mod model;
 mod navigation;
 mod persistence;
-mod preview;
-mod recovery;
+mod snapshots;
 
 use self::model::{
-    TextHistoryAction, TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries,
+    HistoryAction, TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries,
     timeline_rows_from_entries,
 };
 use self::persistence::{read_active_tab, read_follow_focus, write_active_tab, write_follow_focus};
@@ -39,7 +38,6 @@ const HISTORY_CLEAR_SHORTCUT: &str = "CTRL+SHIFT+DELETE: Clear history";
 enum HistoryTab {
     Timeline,
     ByFile,
-    Recovery,
 }
 
 struct TextHistoryWindowInputs<'a> {
@@ -47,13 +45,15 @@ struct TextHistoryWindowInputs<'a> {
     file_groups: &'a [TextHistoryFileGroup],
     active_tab: HistoryTab,
     follow_focus: bool,
-    step_targets: [Option<TextHistoryAction>; 2],
+    step_targets: [Option<HistoryAction>; 2],
+    snapshots: &'a snapshots::Catalog,
+    active_buffer: Option<u64>,
 }
 
 struct TextHistoryWindowState<'a> {
     next_tab: &'a mut HistoryTab,
     next_follow_focus: &'a mut bool,
-    action: &'a mut Option<TextHistoryAction>,
+    action: &'a mut Option<HistoryAction>,
     close_requested: &'a mut bool,
     clear_requested: &'a mut bool,
 }
@@ -62,7 +62,6 @@ struct TextHistoryWindowState<'a> {
 /// undo boundary, but never writes the resulting text to its source file.
 pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if !app.state.dialogs.text_history.is_open()
-        || read_active_tab(ctx) == HistoryTab::Recovery
         || app.state.dialogs.encoding.is_open()
         || app.state.dialogs.status_history.is_open()
         || crate::app::app_state::workspace::accessors::pending_action(app).is_some()
@@ -71,24 +70,23 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
     }
     for (key, undo) in [(egui::Key::ArrowUp, true), (egui::Key::ArrowDown, false)] {
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
-            && let Some(action) = navigation::step_target(ctx, app, undo)
+            && let Some(action) = snapshots::step(ctx, app, undo)
         {
-            navigation::apply(ctx, app, action);
+            snapshots::execute(ctx, app, action);
         }
     }
 }
 
 pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    snapshots::cleanup(ctx, app);
     if !app.state.dialogs.text_history.is_open() {
+        snapshots::cancel_pending(ctx);
+        snapshots::cancel_coverage(ctx, app);
         navigation::clear(ctx);
         return;
     }
 
-    let entries = workspace_mutation::cached_text_history_entries(app);
-    let timeline_rows = timeline_rows_from_entries(entries.iter());
-    let file_groups = file_groups_from_entries(entries.iter());
-
-    let mut action: Option<TextHistoryAction> = None;
+    let mut action: Option<HistoryAction> = None;
     let mut close_requested = false;
     let mut clear_requested = false;
     let active_tab = read_active_tab(ctx);
@@ -96,7 +94,6 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
     let follow_focus = read_follow_focus(ctx);
     let mut next_follow_focus = follow_focus;
 
-    let step_targets = navigation::targets(ctx, app, &entries);
     let screen = ctx.content_rect();
     callout::show_floating(
         ctx,
@@ -109,6 +106,21 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
         TEXT_HISTORY_SIZE.x,
         |ui| {
             widget_ids::feature_scope(ui, "text_history_dialog", |ui| {
+                snapshots::poll(ui, app);
+                snapshots::hydrate(ui, app);
+                let entries = snapshots::entries(ctx, app);
+                let timeline_rows = timeline_rows_from_entries(entries.iter());
+                let mut file_groups = file_groups_from_entries(entries.iter());
+                snapshots::add_empty_groups(app, &mut file_groups);
+                let catalog = snapshots::collect(ui, app);
+                let step_targets = [
+                    snapshots::step(ctx, app, true),
+                    snapshots::step(ctx, app, false),
+                ];
+                let active_buffer = app
+                    .tab_manager
+                    .active_tab()
+                    .map(|tab| tab.active_buffer().id);
                 render_text_history_window(
                     ui,
                     TextHistoryWindowInputs {
@@ -117,6 +129,8 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
                         active_tab,
                         follow_focus,
                         step_targets,
+                        snapshots: &catalog,
+                        active_buffer,
                     },
                     TextHistoryWindowState {
                         next_tab: &mut next_tab,
@@ -126,9 +140,6 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
                         clear_requested: &mut clear_requested,
                     },
                 );
-                if active_tab == HistoryTab::Recovery {
-                    recovery::render(ui, app);
-                }
             });
         },
     );
@@ -141,16 +152,23 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
     }
     if close_requested {
         crate::app::commands::close_text_history(&mut app.state.dialogs);
+        snapshots::cancel_pending(ctx);
+        snapshots::cancel_coverage(ctx, app);
         navigation::clear(ctx);
     }
     if clear_requested {
-        let _ = workspace_mutation::clear_text_history(app);
+        let saved = snapshots::clear_history(ctx, app);
+        let live = workspace_mutation::clear_text_history(app);
+        if saved && !live {
+            app.tab_manager.mark_session_dirty();
+            app.state.status.set_info_status_in_domain(
+                crate::app::app_state::StatusDomain::History,
+                "Cleared text history.",
+            );
+        }
     }
     if let Some(action) = action {
-        navigation::apply(ctx, app, action);
-    }
-    if active_tab == HistoryTab::Recovery {
-        preview::show(ctx, app);
+        snapshots::execute(ctx, app, action);
     }
 }
 
@@ -168,26 +186,19 @@ fn render_text_history_window(
     }
     ui.add_space(4.0);
     history_dialog_card(ui, HISTORY_CARD_CORNER_RADIUS, |ui| {
-        render_controls(
-            ui,
-            inputs.active_tab,
-            state.next_tab,
-            inputs.follow_focus,
-            state.next_follow_focus,
-            !inputs.timeline_rows.is_empty(),
-            state.clear_requested,
-        );
+        render_controls(ui, &inputs, &mut state);
     });
-
-    if inputs.active_tab != HistoryTab::Recovery
-        && let Some(action) = navigation::controls(ui, inputs.step_targets)
-    {
-        *state.action = Some(action);
-    }
     match inputs.active_tab {
-        HistoryTab::Timeline => list::render_timeline(ui, inputs.timeline_rows, state.action),
-        HistoryTab::ByFile => list::render_by_file(ui, inputs.file_groups, state.action),
-        HistoryTab::Recovery => {}
+        HistoryTab::Timeline => {
+            list::render_timeline(ui, inputs.timeline_rows, inputs.snapshots, state.action);
+        }
+        HistoryTab::ByFile => list::render_by_file(
+            ui,
+            inputs.file_groups,
+            inputs.snapshots,
+            inputs.active_buffer,
+            state.action,
+        ),
     }
 }
 
@@ -203,13 +214,11 @@ fn render_header(ui: &mut egui::Ui) -> bool {
 
 fn render_controls(
     ui: &mut egui::Ui,
-    active: HistoryTab,
-    next: &mut HistoryTab,
-    follow_focus: bool,
-    next_follow_focus: &mut bool,
-    has_history: bool,
-    clear_requested: &mut bool,
+    inputs: &TextHistoryWindowInputs<'_>,
+    state: &mut TextHistoryWindowState<'_>,
 ) {
+    let active = inputs.active_tab;
+    let follow_focus = inputs.follow_focus;
     let tabs = [
         (
             "timeline",
@@ -228,14 +237,8 @@ fn render_controls(
     ui.horizontal(|ui| {
         for (id_source, icon, tooltip, tab) in tabs {
             if control_icon_button(ui, id_source, icon, tooltip, active == tab, true).clicked() {
-                *next = tab;
+                *state.next_tab = tab;
             }
-        }
-        if ui
-            .selectable_label(active == HistoryTab::Recovery, "Recovery points")
-            .clicked()
-        {
-            *next = HistoryTab::Recovery;
         }
         if control_icon_button(
             ui,
@@ -251,7 +254,7 @@ fn render_controls(
         )
         .clicked()
         {
-            *next_follow_focus = !follow_focus;
+            *state.next_follow_focus = !follow_focus;
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if control_icon_button(
@@ -260,11 +263,14 @@ fn render_controls(
                 TRASH,
                 HISTORY_CLEAR_SHORTCUT,
                 false,
-                has_history,
+                !inputs.timeline_rows.is_empty(),
             )
             .clicked()
             {
-                *clear_requested = true;
+                *state.clear_requested = true;
+            }
+            if let Some(action) = navigation::controls(ui, inputs.step_targets) {
+                *state.action = Some(action);
             }
         });
     });
@@ -337,6 +343,7 @@ fn control_icon_button(
         ui.add_enabled(enabled, button)
     })
     .inner
+    .accessible_name(tooltip)
     .on_hover_text(tooltip)
 }
 

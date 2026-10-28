@@ -25,6 +25,7 @@ use std::time::Instant;
 
 pub(crate) use capture::{CapturedClosedTab, SessionPersistRequest, cold_tab_from_workspace_tab};
 pub use database::versions::BufferVersionInfo;
+pub(crate) use database::versions::{HistoryCheckpoint, RestoredVersion};
 pub use retained::ClosedTabInfo;
 mod reopen;
 mod retained;

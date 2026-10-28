@@ -1,3 +1,6 @@
+mod snapshot;
+pub(crate) use snapshot::install_history_document;
+
 use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::app_state::settings_controller;
 use crate::app::app_state::workspace::accessors as workspace_accessors;
@@ -35,72 +38,6 @@ fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, u64)> {
                 .map(|buffer| (buffer.id, buffer.document().history_revision_counter()))
         })
         .collect()
-}
-
-pub(crate) fn restore_recovery_text(
-    app: &mut ScratchpadApp,
-    buffer_id: BufferId,
-    text: &str,
-    follow_focus: bool,
-) -> bool {
-    let previous_view = app
-        .tab_manager
-        .active_tab()
-        .map(|tab| tab.layout.active_view_id());
-    let Some((index, view_id)) =
-        app.tab_manager
-            .tabs
-            .as_slice()
-            .iter()
-            .enumerate()
-            .find_map(|(index, tab)| {
-                tab.layout
-                    .views
-                    .iter()
-                    .find(|view| view.buffer_id == buffer_id)
-                    .map(|view| (index, view.id))
-            })
-    else {
-        app.state.status.set_error_status_in_domain(
-            StatusDomain::History,
-            "The source buffer is no longer open.",
-        );
-        return false;
-    };
-    app.tab_manager.set_active_tab_index_clamped(index);
-    let tab = &mut app.tab_manager.tabs.as_mut_slice()[index];
-    tab.activate_view(view_id);
-    let document = tab.active_buffer_mut().document_mut();
-    let length = document.snapshot().len_chars();
-    if document
-        .replace_char_ranges_with_undo(
-            &[(0..length, text.to_owned())],
-            crate::app::domain::CursorRange::default(),
-            crate::app::domain::CursorRange::default(),
-        )
-        .is_err()
-    {
-        return false;
-    }
-    finalize_active_buffer_text_mutation(app, index);
-    if !follow_focus && let Some(view_id) = previous_view {
-        restore_history_view(app, view_id);
-    }
-    workspace_accessors::request_focus_for_active_view(app);
-    true
-}
-
-fn restore_history_view(app: &mut ScratchpadApp, view_id: crate::app::domain::ViewId) {
-    if let Some(index) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .position(|tab| tab.layout.views.iter().any(|view| view.id == view_id))
-    {
-        app.tab_manager.set_active_tab_index_clamped(index);
-        app.tab_manager.tabs.as_mut_slice()[index].activate_view(view_id);
-    }
 }
 
 pub(crate) fn clear_text_history(app: &mut ScratchpadApp) -> bool {

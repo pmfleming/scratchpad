@@ -1,5 +1,5 @@
 use super::model::{
-    TextHistoryAction, TextHistoryFileGroup, TextHistoryRow, now_line_insert_index,
+    HistoryAction, TextHistoryAction, TextHistoryFileGroup, TextHistoryRow, now_line_insert_index,
 };
 use super::{
     HISTORY_PILL_CORNER_RADIUS, HISTORY_PILL_INNER_MARGIN, HISTORY_PILL_SPACING,
@@ -10,28 +10,53 @@ use crate::app::ui::{callout, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{CARET_DOWN, CARET_RIGHT};
 
+use super::snapshots::{self, Catalog};
+
 const HISTORY_PILL_ICON_SIZE: f32 = 16.0;
 const NOW_LINE_HEIGHT: f32 = 22.0;
-pub(super) const FILE_GROUP_DEFAULT_EXPANDED: bool = false;
+pub(super) fn file_expanded(ctx: &egui::Context, id: u64, active: Option<u64>) -> bool {
+    ctx.data_mut(|data| data.get_persisted::<bool>(expansion_key(id)))
+        .unwrap_or(Some(id) == active)
+}
+
+fn expansion_key(id: u64) -> egui::Id {
+    egui::Id::unique(("text_history.file.expanded", id))
+}
 
 pub(super) fn render_timeline(
     ui: &mut egui::Ui,
     rows: &[TextHistoryRow],
-    action: &mut Option<TextHistoryAction>,
+    catalog: &Catalog,
+    action: &mut Option<HistoryAction>,
 ) {
     render_history_section(
         ui,
         "text_history.section.timeline",
-        rows.is_empty(),
+        rows.is_empty() && catalog.is_empty(),
         "No entries",
-        |ui| render_timeline_rows(ui, rows, action),
+        |ui| {
+            render_timeline_rows(ui, rows, catalog, action);
+            let mut files: Vec<_> = catalog
+                .iter()
+                .filter(|(_, file)| file.has_snapshot_section())
+                .collect();
+            files.sort_by_key(|(id, _)| **id);
+            for (&id, file) in files {
+                ui.add_space(HISTORY_PILL_SPACING);
+                ui.strong(&file.label);
+                snapshots::covered_markers(ui, id, None, false, catalog);
+                snapshots::older_rows(ui, id, catalog, action);
+            }
+        },
     );
 }
 
 pub(super) fn render_by_file(
     ui: &mut egui::Ui,
     groups: &[TextHistoryFileGroup],
-    action: &mut Option<TextHistoryAction>,
+    catalog: &Catalog,
+    active: Option<u64>,
+    action: &mut Option<HistoryAction>,
 ) {
     render_history_section(
         ui,
@@ -40,7 +65,7 @@ pub(super) fn render_by_file(
         "No file history",
         |ui| {
             for (index, group) in groups.iter().enumerate() {
-                render_file_group(ui, group, action);
+                render_file_group(ui, group, catalog, active, action);
                 if index + 1 < groups.len() {
                     ui.add_space(12.0);
                 }
@@ -80,9 +105,14 @@ fn render_history_section(
 fn render_timeline_rows(
     ui: &mut egui::Ui,
     rows: &[TextHistoryRow],
-    action: &mut Option<TextHistoryAction>,
+    catalog: &Catalog,
+    action: &mut Option<HistoryAction>,
 ) {
-    let now_line_index = now_line_insert_index(rows);
+    let now_line_index = if catalog.values().any(|file| file.selected.is_some()) {
+        None
+    } else {
+        now_line_insert_index(rows)
+    };
     let mut now_rendered = false;
 
     for (idx, row) in rows.iter().enumerate() {
@@ -90,7 +120,9 @@ fn render_timeline_rows(
             render_now_line(ui);
             now_rendered = true;
         }
+        snapshots::covered_markers(ui, row.buffer_id, Some(row.entry_id), false, catalog);
         render_row(ui, row, action);
+        snapshots::covered_markers(ui, row.buffer_id, Some(row.entry_id), true, catalog);
     }
     if now_line_index == Some(rows.len()) {
         render_now_line(ui);
@@ -100,14 +132,13 @@ fn render_timeline_rows(
 fn render_file_group(
     ui: &mut egui::Ui,
     group: &TextHistoryFileGroup,
-    action: &mut Option<TextHistoryAction>,
+    catalog: &Catalog,
+    active: Option<u64>,
+    action: &mut Option<HistoryAction>,
 ) {
     widget_ids::scope(ui, ("text_history.file_group", group.buffer_id), |ui| {
-        let expansion_id =
-            widget_ids::local(ui, ("text_history.file_group.expanded", group.buffer_id));
-        let expanded = ui
-            .data_mut(|data| data.get_persisted::<bool>(expansion_id))
-            .unwrap_or(FILE_GROUP_DEFAULT_EXPANDED);
+        let expansion_id = expansion_key(group.buffer_id);
+        let expanded = file_expanded(ui.ctx(), group.buffer_id, active);
         let (group_response, toggle_requested) = render_file_header_pill(ui, group, expanded);
         if group_response.clicked() || toggle_requested {
             ui.data_mut(|data| data.insert_persisted(expansion_id, !expanded));
@@ -118,7 +149,15 @@ fn render_file_group(
         ui.add_space(HISTORY_PILL_SPACING);
         ui.indent(
             widget_ids::local(ui, ("text_history.file_group.indent", group.buffer_id)),
-            |ui| render_file_history_rows(ui, &group.rows, action),
+            |ui| {
+                let local: Catalog = catalog
+                    .get(&group.buffer_id)
+                    .map(|file| [(group.buffer_id, file.clone())].into_iter().collect())
+                    .unwrap_or_default();
+                render_timeline_rows(ui, &group.rows, &local, action);
+                snapshots::covered_markers(ui, group.buffer_id, None, false, &local);
+                snapshots::older_rows(ui, group.buffer_id, &local, action);
+            },
         );
     });
 }
@@ -204,15 +243,7 @@ fn change_count_label(count: usize) -> String {
     }
 }
 
-fn render_file_history_rows(
-    ui: &mut egui::Ui,
-    rows: &[TextHistoryRow],
-    action: &mut Option<TextHistoryAction>,
-) {
-    render_timeline_rows(ui, rows, action);
-}
-
-fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<TextHistoryAction>) {
+fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<HistoryAction>) {
     let response = widget_ids::scope(
         ui,
         ("text_history.row", row.buffer_id, row.entry_id),
@@ -237,10 +268,10 @@ fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<TextH
         )
     });
     if response.clicked() {
-        *action = Some(TextHistoryAction {
+        *action = Some(HistoryAction::Edit(TextHistoryAction {
             buffer_id: row.buffer_id,
             entry_id: row.entry_id,
-        });
+        }));
     }
     ui.add_space(HISTORY_PILL_SPACING);
 }

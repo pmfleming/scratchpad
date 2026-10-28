@@ -13,6 +13,8 @@ mod history_fingerprint_tests;
 mod incremental_tests;
 #[cfg(test)]
 mod inventory_tests;
+#[cfg(test)]
+mod navigation_tests;
 mod persist;
 mod quarantine;
 #[cfg(test)]
@@ -87,6 +89,7 @@ pub(super) struct Database {
     database: TursoDatabase,
     ownership: File,
     startup_notices: Vec<super::RestoreStatus>,
+    navigation_roots: HashMap<String, (i64, i64)>,
     tab_cache: Vec<Vec<u8>>,
     state_cache: Vec<u8>,
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
@@ -136,9 +139,9 @@ impl Database {
             });
         }
         db.load_quarantine().await?;
-        // Reserve sequences from cold tabs too, without reading their payloads.
+        // Reserve sequences from cold tabs and parked branches without reading payloads.
         let maximum = db
-            .integer("SELECT coalesce(max(global_seq),0) FROM history")
+            .integer("SELECT max(value) FROM (SELECT coalesce(max(global_seq),0) AS value FROM history UNION ALL SELECT coalesce(max(history_high_water),0) FROM buffer_versions)")
             .await?;
         crate::app::domain::buffer::register_text_history_global_seq(maximum as u64);
         Ok(db)
@@ -165,6 +168,7 @@ impl Database {
             database,
             ownership,
             startup_notices: Vec::new(),
+            navigation_roots: HashMap::new(),
             tab_cache: Vec::new(),
             state_cache: Vec::new(),
             revisions: HashMap::new(),
@@ -181,10 +185,10 @@ impl Database {
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID && version == 8 {
+        if application == APPLICATION_ID && version == 9 {
             return Ok(());
         }
-        if application == APPLICATION_ID && matches!(version, 6 | 7) {
+        if application == APPLICATION_ID && matches!(version, 6..=8) {
             let undo_tokens = if version == 6 {
                 "ALTER TABLE buffer_versions ADD COLUMN source_token TEXT; CREATE UNIQUE INDEX version_source ON buffer_versions(temp_id, source_token);"
             } else {
@@ -193,20 +197,24 @@ impl Database {
             // One transactional payload scan during upgrade, never during usage
             // polling or retention. Covering indexes keep even overflow pages
             // out of the accounting read path on the pinned Turso engine.
-            self.create_schema(&format!(
-                "{undo_tokens}
-                ALTER TABLE history ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0);
+            let sizes = if version < 8 {
+                "ALTER TABLE history ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0);
                 ALTER TABLE blobs ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0);
                 UPDATE history SET bytes=length(entry);
                 UPDATE blobs SET bytes=length(body);
                 CREATE INDEX history_sizes ON history(temp_id, bytes);
-                CREATE INDEX blob_sizes ON blobs(bytes, digest);
-                PRAGMA user_version=8;"
+                CREATE INDEX blob_sizes ON blobs(bytes, digest);"
+            } else {
+                ""
+            };
+            self.create_schema(&format!(
+                "{undo_tokens} {sizes} {} PRAGMA user_version=9;",
+                versions::NAVIGATION_UPGRADE
             ))
             .await?;
             self.startup_notices.push(super::RestoreStatus {
                 level: super::RestoreStatusLevel::Info,
-                message: format!("Upgraded session database schema from {version} to 8. Session and history data were retained."),
+                message: format!("Upgraded session database schema from {version} to 9. Session and history data were retained."),
             });
             return Ok(());
         }
@@ -226,7 +234,7 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=8;",
+            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=9;",
             quarantine::SCHEMA,
             closed::SCHEMA,
             versions::SCHEMA

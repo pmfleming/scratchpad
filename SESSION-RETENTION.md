@@ -49,11 +49,13 @@ Cold file shells with no stored snapshot still depend on their source file; load
 previews cannot archive unavailable bytes. Closing individual split views is not
 workspace-tab retention.
 
-The current database schema is **8**. Schemas 6 and 7 upgrade transactionally,
-backfilling stored byte counts for undo entries and text blobs and adding covering
-accounting indexes. Schema 6 also gains idempotent undo-boundary snapshot tokens.
-The upgrade scans payloads once; existing snapshots and archives remain. A failed
-backfill rolls back the schema change without resetting the database. Unsupported
+The current database schema is **9**. Schemas 6–8 upgrade transactionally.
+Schema 9 adds snapshot content fingerprints, edit-sequence anchors, and optional
+saved-branch history with indexed byte counts. Existing snapshots gain fingerprints
+on demand in the database worker. Schemas 6 and 7 also backfill stored byte counts
+for undo entries and text blobs; schema 6 gains idempotent undo-boundary tokens.
+Existing snapshots and archives remain. A failed upgrade rolls back without
+resetting the database. Unsupported
 schemas (including older than 6, future versions and unexpected application IDs)
 are automatically replaced by a fresh database. The previous session, undo history,
 closed-tab archives and recovery points are discarded. The `[]` status log records
@@ -95,26 +97,54 @@ references, not text bodies. Unchanged chunks are shared. Version roots particip
 in both targeted and full garbage collection. Points expire with their buffer
 when it is no longer live, retained-closed, or quarantined.
 
-Use **History…** in a tab context menu. Detailed edits and **Recovery points** live
-in the same movable history window. Selecting an applied edit undoes through it;
-selecting an undone edit redoes through it, directly in the editor. **↑ Undo** /
-**↓ Redo** (or Up/Down) move one step within the last selected file, initially the
-active file. The **Now** line marks the undo boundary, including either end of the
-retained history. A faint tint briefly marks the line at the selected change's
-start; it is paint-only and disappears on normal editing. Browsing neither adds
-replacement edits nor saves files; closing history keeps the chosen state.
-The editor can still be scrolled while history is open.
+### One file-history navigator
 
-Snapshot-only **Recovery points** retain a separate preview because they no longer
-have replayable edits. **Restore into this tab** creates an undoable replacement,
-while **Open as new tab** leaves the source untouched. Snapshot rows show readable UTC dates and distinguish
-automatic points from undo-compaction boundaries. Snapshots contain text, not
-separate copies of undo history. The store validates checksums on recovery.
+Use **History…** in a tab context menu. There is no separate recovery-points tab or
+preview window. The active file's group opens by default, including files whose
+detailed undo history is empty. Selecting an applied edit undoes through it;
+selecting an undone edit redoes through it in the normal editor. The up/down arrow
+icons beside Delete (or Up/Down keys) move through the selected file's states.
+The **Now** marker identifies the current state. Closing history keeps that state;
+browsing does not save original files or create replacement undo records.
+
+Snapshots that can be reconstructed by retained undo/redo appear as dotted,
+non-selectable markers beside their matching edit boundary. Only snapshots outside
+that reachable history become selectable under **Snapshots beyond undo**. Identical
+text states are displayed once. When undo expires, previously covered snapshots
+become selectable automatically. A stored sequence anchor is only a hint: coverage
+requires successful replay and an exact decoded-text fingerprint, never timestamp
+overlap. Coverage work runs off the UI thread and is reused while the document,
+history and snapshot list are unchanged. Legacy snapshots without anchors are
+verified against reachable states as well.
+
+Moving into a snapshot checkpoints the current text and its native undo/redo branch
+transactionally before changing the editor. These return checkpoints share text
+chunks with existing snapshots and are deduplicated by content and history identity.
+Ordinary periodic snapshots contain text references, not another undo log. Only a
+saved return branch carries native history, bounded by the persisted-history budget;
+its bytes count toward retention and undo usage. Navigating multiple older snapshots
+does not generate a chain of replacement edits. Down rejoins the oldest reachable
+undo state, then continues through native redo; clicking an edit returns directly to
+that state. Editing an older snapshot starts a new branch without deleting the saved
+return branch. Session persistence retains the selected snapshot and return identity,
+so navigation can resume after restart. Original file contents remain untouched until
+an explicit save.
+
+The most recent navigation pair per buffer is protected during the run. Persisted
+navigation pairs are also retention roots after restart; other saved branches follow
+the normal snapshot/archive budgets. Failed loads or checkpoint writes leave the
+editor unchanged. Results arriving after an edit, reload or file close cannot replace
+the newer document. Content checksums and file identities are validated on restore.
+All split views are refreshed when switching snapshot roots.
 
 ### Disk usage
 
 Settings > History & Recovery > Disk usage refreshes asynchronously every five
-seconds. It reports the actual database, WAL/shared-memory, other state files,
+seconds. Summary cards show total data-file size, closed archives and recovery
+points. File sizes use readable units; hover a size for the exact byte count.
+Expand **Stored recovery data** for the payload breakdown. The data-directory
+footer can copy the complete path. The overview reports the actual database,
+WAL/shared-memory, other state files,
 separate settings files and combined file lengths; on Unix it also reports actual
 allocated file blocks. Portable/nested roots are deduplicated; original documents,
 application binaries and symlink targets outside these roots are excluded.

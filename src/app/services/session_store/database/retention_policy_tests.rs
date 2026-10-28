@@ -156,7 +156,11 @@ fn schema_six_migrates_without_discarding_existing_versions() {
         db.persist(capture, 1).await.unwrap();
         db.conn
             .execute_batch(
-                "DROP INDEX version_source; ALTER TABLE buffer_versions DROP COLUMN source_token;
+                "DROP INDEX version_sequences; ALTER TABLE buffer_versions DROP COLUMN history_high_water;
+                DROP INDEX version_sizes; ALTER TABLE buffer_versions DROP COLUMN branch_bytes;
+                ALTER TABLE buffer_versions DROP COLUMN text_digest; ALTER TABLE buffer_versions DROP COLUMN anchor_seq;
+                ALTER TABLE buffer_versions DROP COLUMN anchor_before; ALTER TABLE buffer_versions DROP COLUMN branch_history;
+                DROP INDEX version_source; ALTER TABLE buffer_versions DROP COLUMN source_token;
             DROP INDEX history_sizes; DROP INDEX blob_sizes;
             ALTER TABLE history DROP COLUMN bytes; ALTER TABLE blobs DROP COLUMN bytes;
             PRAGMA user_version=6;",
@@ -165,7 +169,7 @@ fn schema_six_migrates_without_discarding_existing_versions() {
             .unwrap();
         drop(db);
         let db = Database::open(root.path()).await.unwrap();
-        assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 8);
+        assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 9);
         let point = db
             .version_history(&tabs[0].active_buffer().temp_id)
             .await

@@ -21,6 +21,18 @@ pub(super) struct TextHistoryAction {
     pub(super) entry_id: u64,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum HistoryAction {
+    Edit(TextHistoryAction),
+    Snapshot {
+        buffer_id: BufferId,
+        version_id: i64,
+    },
+    Return {
+        buffer_id: BufferId,
+    },
+}
+
 #[derive(Clone)]
 pub(super) struct TextHistoryFileGroup {
     pub(super) buffer_id: BufferId,

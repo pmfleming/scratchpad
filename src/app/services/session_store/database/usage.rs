@@ -25,9 +25,10 @@ impl Database {
         let mut usage = StoredUsage {
             session_metadata: self.integer("SELECT coalesce(sum(length(payload)),0) FROM tabs").await? as u64
                 + self.integer("SELECT coalesce(sum(length(payload)),0) FROM session_state").await? as u64,
-            undo: self.integer("SELECT coalesce(sum(bytes),0) FROM history INDEXED BY history_sizes").await? as u64,
+            undo: self.integer("SELECT coalesce(sum(bytes),0) FROM history INDEXED BY history_sizes").await? as u64
+                + self.integer("SELECT coalesce(sum(branch_bytes),0) FROM buffer_versions INDEXED BY version_sizes").await? as u64,
             archive_metadata: self.integer("SELECT coalesce(sum(length(payload)),0) FROM closed_tabs").await? as u64,
-            snapshot_metadata: self.integer("SELECT coalesce(sum(length(temp_id)+length(digest)+24),0) FROM buffer_versions").await? as u64,
+            snapshot_metadata: self.integer("SELECT coalesce(sum(length(temp_id)+length(digest)+24),0) FROM buffer_versions INDEXED BY version_sizes").await? as u64,
             reusable_pages: self.integer("PRAGMA freelist_count").await? as u64
                 * self.integer("PRAGMA page_size").await? as u64,
             ..StoredUsage::default()
@@ -40,7 +41,7 @@ impl Database {
             usage.archive_referenced_bytes += archive.payload.len() as u64;
             for buffer in tab.buffers {
                 let bytes = self.query_collect(
-                    "SELECT coalesce((SELECT bytes FROM snapshots WHERE id=?1),0) + coalesce((SELECT sum(bytes) FROM history INDEXED BY history_sizes WHERE temp_id=?1),0) + coalesce((SELECT sum(bytes) FROM buffer_versions WHERE temp_id=?1),0)",
+                    "SELECT coalesce((SELECT bytes FROM snapshots WHERE id=?1),0) + coalesce((SELECT sum(bytes) FROM history INDEXED BY history_sizes WHERE temp_id=?1),0) + coalesce((SELECT sum(bytes+branch_bytes) FROM buffer_versions WHERE temp_id=?1),0)",
                     [buffer.temp_id.as_str()], |row| row.get::<i64>(0).map_err(error),
                 ).await?;
                 usage.archive_referenced_bytes += bytes[0] as u64;

@@ -23,6 +23,24 @@ impl SessionStore {
             .call(move |db| block_on(db.read_version(version_id)))
     }
 
+    pub(crate) fn read_history_version(
+        &self,
+        temp_id: String,
+        target: i64,
+    ) -> io::Result<super::RestoredVersion> {
+        self.worker()?
+            .call(move |db| block_on(db.read_history_version(&temp_id, target)))
+    }
+
+    pub(crate) fn navigate_version(
+        &self,
+        checkpoint: super::HistoryCheckpoint,
+        target: i64,
+    ) -> io::Result<super::RestoredVersion> {
+        self.worker()?
+            .call(move |db| block_on(db.navigate_version(checkpoint, target)))
+    }
+
     pub fn closed_tabs(&self) -> io::Result<Vec<ClosedTabInfo>> {
         self.worker()?.call(|db| {
             block_on(async {

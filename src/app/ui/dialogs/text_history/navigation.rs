@@ -1,5 +1,5 @@
-//! Live undo/redo navigation. Never clones or replaces a document to browse it.
-use super::model::TextHistoryAction;
+//! Native undo/redo navigation, with snapshot transitions delegated to snapshots.
+use super::model::{HistoryAction, TextHistoryAction};
 use crate::app::{
     app_state::{ScratchpadApp, workspace::mutation},
     text_history::TextHistoryEntryView,
@@ -15,7 +15,11 @@ pub(super) fn clear(ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<u64>(buffer_key()));
 }
 
-fn target_buffer(ctx: &egui::Context, app: &ScratchpadApp) -> Option<u64> {
+pub(super) fn select_buffer(ctx: &egui::Context, id: u64) {
+    ctx.data_mut(|data| data.insert_temp(buffer_key(), id));
+}
+
+pub(super) fn target_buffer(ctx: &egui::Context, app: &ScratchpadApp) -> Option<u64> {
     let selected = ctx.data(|data| data.get_temp::<u64>(buffer_key()));
     selected
         .filter(|id| {
@@ -41,20 +45,6 @@ pub(super) fn step_target(
     choose_target(&mutation::cached_text_history_entries(app), buffer_id, undo)
 }
 
-pub(super) fn targets(
-    ctx: &egui::Context,
-    app: &ScratchpadApp,
-    entries: &[TextHistoryEntryView],
-) -> [Option<TextHistoryAction>; 2] {
-    let Some(buffer_id) = target_buffer(ctx, app) else {
-        return [None; 2];
-    };
-    [
-        choose_target(entries, buffer_id, true),
-        choose_target(entries, buffer_id, false),
-    ]
-}
-
 fn choose_target(
     entries: &[TextHistoryEntryView],
     buffer_id: u64,
@@ -76,24 +66,28 @@ fn choose_target(
 
 pub(super) fn controls(
     ui: &mut egui::Ui,
-    [older, newer]: [Option<TextHistoryAction>; 2],
-) -> Option<TextHistoryAction> {
+    [older, newer]: [Option<HistoryAction>; 2],
+) -> Option<HistoryAction> {
     let mut selected = None;
-    ui.horizontal(|ui| {
-        for (target, label, tooltip) in [
-            (older, "↑ Undo", "Up: move one change earlier in this file"),
-            (newer, "↓ Redo", "Down: move one change later in this file"),
-        ] {
-            if ui
-                .add_enabled(target.is_some(), egui::Button::new(label))
-                .on_hover_text(tooltip)
-                .clicked()
-            {
-                selected = target;
-            }
+    // The control bar lays out right-to-left: Undo, Redo, then Delete visually.
+    for (target, id, icon, tooltip) in [
+        (
+            newer,
+            "redo",
+            egui_phosphor::regular::ARROW_DOWN,
+            "Down: Newer state in this file",
+        ),
+        (
+            older,
+            "undo",
+            egui_phosphor::regular::ARROW_UP,
+            "Up: Older state in this file",
+        ),
+    ] {
+        if super::control_icon_button(ui, id, icon, tooltip, false, target.is_some()).clicked() {
+            selected = target;
         }
-        ui.weak("Changes apply directly; files are not saved.");
-    });
+    }
     selected
 }
 
@@ -102,6 +96,9 @@ pub(super) fn apply(
     app: &mut ScratchpadApp,
     action: TextHistoryAction,
 ) -> bool {
+    if let Some(result) = super::snapshots::return_for_edit(ctx, app, action) {
+        return result;
+    }
     // Mark the start of the selected change, not the selection or an expensive
     // whole-document diff. For deletions this still identifies the affected line.
     let offset = app

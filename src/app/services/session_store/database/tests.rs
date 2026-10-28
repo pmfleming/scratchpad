@@ -197,7 +197,7 @@ fn second_owner_is_rejected_but_unsupported_schemas_start_fresh() {
             db.conn.execute_batch(pragma).await.unwrap();
             drop(db);
             let mut db = Database::open(root.path()).await.unwrap();
-            assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 8);
+            assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 9);
             assert!(db.load(ReadScope::All).await.unwrap().is_none());
             assert_eq!(db.startup_notices.len(), 1);
             assert!(matches!(

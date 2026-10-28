@@ -33,6 +33,7 @@ struct Prepared {
     version_history: bool,
     recovery_policy: crate::app::services::settings_store::RecoverySettings,
     expired_versions: Vec<i64>,
+    navigation_roots: HashSet<i64>,
     chunk_checkpoints: HashMap<String, super::chunking::ChunkCheckpoint>,
 }
 impl Prepared {
@@ -76,6 +77,9 @@ impl Prepared {
     fn push_tab(&mut self, mut tab: CapturedSessionTab) -> io::Result<(Vec<u8>, SessionTab)> {
         validation::validate_tab(&tab.session_tab)?;
         for buffer in &mut tab.session_tab.buffers {
+            if let Some((selected, back)) = buffer.snapshot_navigation {
+                self.navigation_roots.extend([selected, back]);
+            }
             let entries = std::mem::take(&mut buffer.text_history);
             let history = (!tab.preserve_existing || tab.discard_history).then_some(entries);
             if let Some(entries) = &history {
@@ -313,6 +317,8 @@ impl Database {
                 .into_iter()
                 .map(|buffer| (buffer.temp_id, buffer.snapshot.revision_key())),
         );
+        self.navigation_roots
+            .retain(|id, _| prepared.buffers.contains_key(id) || self.quarantined.contains_key(id));
         self.history_cache
             .retain(|id, _| prepared.buffers.contains_key(id));
         self.history_cache.extend(
@@ -437,8 +443,13 @@ impl Database {
             self.execute_cached("DELETE FROM buffer_versions WHERE id=?", [id])
                 .await?;
         }
-        self.prune_recovery_points(&prepared.recovery_policy, &prepared.closed, removed_digests)
-            .await
+        self.prune_recovery_points(
+            &prepared.recovery_policy,
+            &prepared.closed,
+            &prepared.navigation_roots,
+            removed_digests,
+        )
+        .await
     }
 
     async fn delete_stale_content(
