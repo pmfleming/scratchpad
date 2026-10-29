@@ -67,7 +67,10 @@ fn missing_archives_remain_recoverable_but_missing_file_only_entries_do_not() {
     assert_eq!(entries[0].disk_icon(), Some(FILE_X));
     assert!(!entries[1].can_reopen());
     assert_eq!(entries[1].disk_icon(), Some(FILE_X));
-    assert!(entries[1].tooltip().contains("no retained tab copy"));
+    assert_eq!(
+        entries[1].tooltip(),
+        format!("Closed time unknown\n{}", other_missing.display())
+    );
 }
 
 #[test]
@@ -87,18 +90,22 @@ fn split_tab_status_reports_each_file_and_untitled_entries_use_only_unsaved_dot(
     assert!(split.can_reopen());
     assert!(split.unsaved);
     assert_eq!(split.disk_icon(), Some(FILE_X));
-    let tooltip = split.tooltip();
-    for detail in [
-        "Some files missing",
-        "Unsaved content retained",
-        "exists.txt — On disk",
-        "missing.txt — Missing",
-    ] {
-        assert!(tooltip.contains(detail), "missing {detail}: {tooltip}");
-    }
+    assert_eq!(
+        split.tooltip(),
+        format!(
+            "Closed {}\n{}\n{}",
+            recovery::timestamp(2),
+            exists.display(),
+            missing.display()
+        )
+    );
     assert!(entries[1].can_reopen());
     assert!(entries[1].unsaved);
     assert_eq!(entries[1].disk_icon(), None);
+    assert_eq!(
+        entries[1].tooltip(),
+        format!("Closed {}\nNo file location", recovery::timestamp(1))
+    );
 }
 
 #[test]
@@ -115,5 +122,8 @@ fn access_errors_are_not_misreported_as_missing_files() {
     let entries = merged_entries(vec![], vec![file(root.path(), None)]);
     assert_eq!(entries[0].disk_icon(), Some(WARNING_CIRCLE));
     assert!(!entries[0].can_reopen());
-    assert!(entries[0].tooltip().contains("Unavailable"));
+    assert_eq!(
+        entries[0].tooltip(),
+        format!("Closed time unknown\n{}", root.path().display())
+    );
 }

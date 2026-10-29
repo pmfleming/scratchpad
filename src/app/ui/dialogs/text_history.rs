@@ -111,8 +111,8 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
                 let entries = snapshots::entries(ctx, app);
                 let timeline_rows = timeline_rows_from_entries(entries.iter());
                 let mut file_groups = file_groups_from_entries(entries.iter());
-                snapshots::add_empty_groups(app, &mut file_groups);
                 let catalog = snapshots::collect(ui, app);
+                snapshots::add_changed_snapshot_groups(&catalog, &mut file_groups);
                 let step_targets = [
                     snapshots::step(ctx, app, true),
                     snapshots::step(ctx, app, false),

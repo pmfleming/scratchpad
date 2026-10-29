@@ -33,8 +33,8 @@ archived versions remain separate, identified by closing time.
 
 Click a row to reopen it. A file icon indicates an existing disk file, a crossed
 file indicates a missing file, and a warning icon indicates inaccessible paths.
-An independent dot marks unsaved content. Hover for full paths, closing time and
-recovery details. Split tabs list the status of each file in their tooltip.
+An independent dot marks unsaved content. Tooltips show only closing time and
+full file paths. Split tabs list each path; unknown times or locations are marked.
 Missing files without a retained copy cannot be reopened; retained tabs remain
 recoverable even if their files are gone. Disk checks run outside the UI thread.
 Ordinary file opens (including Open Here) also consult archives when enabled;

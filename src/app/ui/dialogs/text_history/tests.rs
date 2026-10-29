@@ -26,6 +26,66 @@ fn history_preferences_default_and_change_only_on_the_next_frame() {
 }
 
 #[test]
+fn by_file_only_lists_buffers_with_undo_or_redo_changes() {
+    use crate::app::{
+        app_state::test_support::test_app,
+        domain::{BufferState, CursorRange, WorkspaceTab},
+        fonts::{EditorFontPreset, EditorFontSelection, apply_editor_fonts},
+    };
+    use eframe::egui;
+    use egui_kittest::{Harness, kittest::Queryable};
+
+    for undone in [None, Some(false), Some(true)] {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_app(root.path());
+        let mut changed = BufferState::new("changed.txt".into(), "before".into(), None);
+        if let Some(undone) = undone {
+            changed
+                .replace_char_ranges_with_undo(
+                    &[(0..6, "after".into())],
+                    CursorRange::default(),
+                    CursorRange::default(),
+                )
+                .unwrap();
+            if undone {
+                changed.document_mut().undo_last_operation().unwrap();
+            }
+        }
+        let unchanged = BufferState::new("unchanged.txt".into(), "untouched".into(), None);
+        app.tab_manager.set_tabs(
+            vec![WorkspaceTab::new(changed), WorkspaceTab::new(unchanged)],
+            1,
+        );
+        app.state.dialogs.text_history.open();
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(1200.0, 850.0))
+            .with_context_setup(|ctx| {
+                apply_editor_fonts(
+                    ctx,
+                    &EditorFontSelection::scratchpad(EditorFontPreset::Standard),
+                    4.0,
+                )
+                .unwrap();
+            })
+            .build_ui_state(
+                |ui, app| super::show_text_history_window(ui.ctx(), app),
+                app,
+            );
+        harness.run_steps(3);
+        assert!(harness.query_by_label("unchanged.txt").is_none());
+        assert!(harness.query_by_label("0 changes").is_none());
+        if undone.is_some() {
+            harness.get_by_label("changed.txt");
+            harness.get_by_label("1 change");
+            assert!(harness.query_by_label("No file history").is_none());
+        } else {
+            assert!(harness.query_by_label("changed.txt").is_none());
+            harness.get_by_label("No file history");
+        }
+    }
+}
+
+#[test]
 fn now_line_marks_the_boundary_including_both_history_extremes() {
     for (states, boundary) in [
         (&[][..], None),

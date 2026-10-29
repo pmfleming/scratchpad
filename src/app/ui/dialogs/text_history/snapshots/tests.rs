@@ -33,6 +33,50 @@ fn point(id: i64, text: &str) -> BufferVersionInfo {
 }
 
 #[test]
+fn file_groups_require_real_changes_not_loading_errors_or_current_state_snapshots() {
+    use super::{Catalog, FileSnapshots, add_changed_snapshot_groups};
+    let current = TextDocument::new("current".into());
+    let catalog: Catalog = [
+        (
+            1,
+            FileSnapshots {
+                loading: true,
+                ..Default::default()
+            },
+        ),
+        (
+            2,
+            FileSnapshots {
+                error: Some("unavailable".into()),
+                ..Default::default()
+            },
+        ),
+        (
+            3,
+            FileSnapshots {
+                rows: classify(&current, vec![point(1, "current")]),
+                ..Default::default()
+            },
+        ),
+        (
+            4,
+            FileSnapshots {
+                label: "older.txt".into(),
+                rows: classify(&current, vec![point(2, "older")]),
+                ..Default::default()
+            },
+        ),
+    ]
+    .into();
+    let mut groups = Vec::new();
+    add_changed_snapshot_groups(&catalog, &mut groups);
+    add_changed_snapshot_groups(&catalog, &mut groups);
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].buffer_id, 4);
+    assert_eq!(catalog[&4].older_change_count(), 1);
+}
+
+#[test]
 fn snapshots_extend_history_only_when_the_state_is_not_reachable() {
     let mut document = document();
     let points = vec![

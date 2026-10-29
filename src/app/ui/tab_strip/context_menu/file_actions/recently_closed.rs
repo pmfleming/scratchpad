@@ -36,14 +36,6 @@ impl DiskStatus {
             _ => Self::Unavailable,
         }
     }
-
-    fn description(self) -> &'static str {
-        match self {
-            Self::OnDisk => "On disk",
-            Self::Missing => "Missing from disk",
-            Self::Unavailable => "Unavailable (cannot access a regular file)",
-        }
-    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -90,29 +82,19 @@ impl ReopenEntry {
     }
 
     fn tooltip(&self) -> String {
-        let mut lines = vec![self.name.clone()];
-        if let Some(closed_at) = self.closed_at {
-            lines.push(format!("Closed {}", recovery::timestamp(closed_at)));
+        let mut lines = vec![self.closed_at.map_or_else(
+            || "Closed time unknown".into(),
+            |closed_at| format!("Closed {}", recovery::timestamp(closed_at)),
+        )];
+        if self.paths.is_empty() {
+            lines.push("No file location".into());
+        } else {
+            lines.extend(
+                self.paths
+                    .iter()
+                    .map(|(path, _)| path.display().to_string()),
+            );
         }
-        if self.unsaved {
-            lines.push("Unsaved content retained".into());
-        }
-        if self.paths.len() > 1
-            && self
-                .paths
-                .iter()
-                .any(|(_, status)| *status == DiskStatus::Missing)
-        {
-            lines.push("Some files missing from disk".into());
-        }
-        for (path, status) in &self.paths {
-            lines.push(format!("{} — {}", path.display(), status.description()));
-        }
-        lines.push(match &self.target {
-            ReopenTarget::Archive(_) => "Reopen saved tab, including split layout and retained undo history. Missing files and conflicting unsaved content are recovered as untitled buffers.",
-            ReopenTarget::File(_) if self.can_reopen() => "Reopen file from disk; no retained tab copy.",
-            ReopenTarget::File(_) => "Cannot reopen: file is unavailable and no retained tab copy exists.",
-        }.into());
         lines.join("\n")
     }
 }
@@ -296,14 +278,7 @@ fn render_entry(ui: &mut egui::Ui, entry: &ReopenEntry, label: &str, enabled: bo
             color,
         );
         let clicked = response.clicked();
-        let tooltip = if !enabled && entry.can_reopen() {
-            format!(
-                "{}\nSession recovery is not currently available.",
-                entry.tooltip()
-            )
-        } else {
-            entry.tooltip()
-        };
+        let tooltip = entry.tooltip();
         response
             .on_hover_text(&tooltip)
             .on_disabled_hover_text(tooltip);

@@ -345,7 +345,7 @@ fn shortcut_tooltip_for_menu_label(ui: &egui::Ui, label: &str) -> Option<String>
         "Save" => ShortcutAction::SaveFile,
         "Encoding" => ShortcutAction::OpenEncodingDialog,
         "Copy Path" => ShortcutAction::CopyActivePath,
-        "Reveal In Explorer" | "Open Containing Folder" => ShortcutAction::RevealActivePath,
+        "Reveal In Explorer" | "Open Folder" => ShortcutAction::RevealActivePath,
         "Hide Tab List" => ShortcutAction::ToggleTabList,
         "Pin Tab List" => ShortcutAction::ToggleTabListAutoHide,
         "Close" => ShortcutAction::CloseTab,

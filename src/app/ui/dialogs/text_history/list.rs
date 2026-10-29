@@ -139,7 +139,12 @@ fn render_file_group(
     widget_ids::scope(ui, ("text_history.file_group", group.buffer_id), |ui| {
         let expansion_id = expansion_key(group.buffer_id);
         let expanded = file_expanded(ui.ctx(), group.buffer_id, active);
-        let (group_response, toggle_requested) = render_file_header_pill(ui, group, expanded);
+        let change_count = group.rows.len()
+            + catalog
+                .get(&group.buffer_id)
+                .map_or(0, |file| file.older_change_count());
+        let (group_response, toggle_requested) =
+            render_file_header_pill(ui, group, expanded, change_count);
         if group_response.clicked() || toggle_requested {
             ui.data_mut(|data| data.insert_persisted(expansion_id, !expanded));
         }
@@ -166,6 +171,7 @@ fn render_file_header_pill(
     ui: &mut egui::Ui,
     group: &TextHistoryFileGroup,
     expanded: bool,
+    change_count: usize,
 ) -> (egui::Response, bool) {
     egui::Frame::NONE
         .fill(action_bg(ui))
@@ -177,7 +183,7 @@ fn render_file_header_pill(
             ui.set_width(content_width);
             ui.set_min_width(content_width);
             ui.set_max_width(content_width);
-            render_file_header_contents(ui, group, expanded)
+            render_file_header_contents(ui, group, expanded, change_count)
         })
         .inner
 }
@@ -186,6 +192,7 @@ fn render_file_header_contents(
     ui: &mut egui::Ui,
     group: &TextHistoryFileGroup,
     expanded: bool,
+    change_count: usize,
 ) -> (egui::Response, bool) {
     let mut toggle_requested = false;
     let group_response = ui
@@ -205,7 +212,7 @@ fn render_file_header_contents(
             .on_hover_text(&group.label);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
-                    egui::RichText::new(change_count_label(group.rows.len()))
+                    egui::RichText::new(change_count_label(change_count))
                         .size(12.0)
                         .color(callout::muted_text(ui)),
                 );

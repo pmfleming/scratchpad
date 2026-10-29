@@ -44,6 +44,10 @@ pub(super) struct FileSnapshots {
     version_ids: Vec<i64>,
 }
 impl FileSnapshots {
+    pub(super) fn older_change_count(&self) -> usize {
+        self.rows.iter().filter(|row| row.covered.is_none()).count()
+    }
+
     pub(super) fn has_snapshot_section(&self) -> bool {
         self.loading
             || self.error.is_some()
@@ -184,22 +188,30 @@ pub(super) fn entries(ctx: &egui::Context, app: &mut ScratchpadApp) -> Vec<TextH
     entries
 }
 
-pub(super) fn add_empty_groups(app: &ScratchpadApp, groups: &mut Vec<TextHistoryFileGroup>) {
-    for buffer in app
-        .tab_manager
-        .tabs
-        .as_slice()
+/// Do not add every open buffer: only older changes outside the undo range
+/// justify a group without edit rows. Loading/error/current-state markers do not.
+pub(super) fn add_changed_snapshot_groups(
+    catalog: &Catalog,
+    groups: &mut Vec<TextHistoryFileGroup>,
+) {
+    let mut older: Vec<_> = catalog
         .iter()
-        .flat_map(|tab| tab.buffers())
-    {
-        if !groups.iter().any(|group| group.buffer_id == buffer.id) {
-            groups.push(TextHistoryFileGroup {
-                buffer_id: buffer.id,
-                label: buffer.name.clone(),
+        .filter(|(id, file)| {
+            file.older_change_count() > 0 && !groups.iter().any(|group| group.buffer_id == **id)
+        })
+        .collect();
+    older.sort_by(|(left_id, left), (right_id, right)| {
+        left.label.cmp(&right.label).then(left_id.cmp(right_id))
+    });
+    groups.extend(
+        older
+            .into_iter()
+            .map(|(&buffer_id, file)| TextHistoryFileGroup {
+                buffer_id,
+                label: file.label.clone(),
                 rows: Vec::new(),
-            });
-        }
-    }
+            }),
+    );
 }
 
 pub(super) fn collect(ui: &egui::Ui, app: &ScratchpadApp) -> Catalog {
