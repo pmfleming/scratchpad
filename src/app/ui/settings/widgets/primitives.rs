@@ -1,7 +1,6 @@
-use super::{SettingsUi, border, egui, text_muted};
+use super::{SettingsUi, egui};
 use crate::app::ui::widget_ids;
 use std::hash::Hash;
-use std::path::Path;
 
 pub(super) fn toggle_switch(
     ui: &mut egui::Ui,
@@ -57,65 +56,4 @@ pub(super) fn toggle_switch(
     );
 
     response
-}
-
-pub(super) fn value_pill(
-    ui: &mut egui::Ui,
-    text: &str,
-    hover_text: Option<&str>,
-    width: f32,
-) -> egui::Response {
-    let margin = SettingsUi::MARGINS.value_pill_inner;
-    let outer_width = width.max(0.0);
-    let outer_height =
-        ui.spacing().interact_size.y + f32::from(margin.top) + f32::from(margin.bottom);
-    let response = widget_ids::allocate_exact_rect_interact(
-        ui,
-        egui::vec2(outer_width, outer_height),
-        ("settings.value_pill", text, widget_ids::WidgetRole::Label),
-        egui::Sense::hover(),
-        "settings_value_pill",
-    );
-
-    ui.painter().rect(
-        response.rect,
-        egui::CornerRadius::same(8),
-        SettingsUi::control_bg(ui),
-        egui::Stroke::new(1.0, border(ui).gamma_multiply(0.75)),
-        egui::StrokeKind::Inside,
-    );
-
-    let text_rect = response.rect.shrink2(egui::vec2(
-        f32::from(margin.left + margin.right) * 0.5,
-        f32::from(margin.top + margin.bottom) * 0.5,
-    ));
-    ui.painter().with_clip_rect(text_rect).text(
-        text_rect.right_center(),
-        egui::Align2::RIGHT_CENTER,
-        text,
-        egui::FontId::proportional(SettingsUi::TYPOGRAPHY.description),
-        text_muted(ui),
-    );
-    if let Some(hover_text) = hover_text {
-        return response.on_hover_text(hover_text);
-    }
-    response
-}
-
-pub(super) fn path_tail_text(path: &Path, component_count: usize) -> String {
-    let components: Vec<String> = path
-        .components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
-            _ => None,
-        })
-        .collect();
-
-    if components.len() <= component_count {
-        return path.display().to_string();
-    }
-
-    let separator = std::path::MAIN_SEPARATOR.to_string();
-    let tail = components[components.len() - component_count..].join(&separator);
-    format!("...{separator}{tail}")
 }

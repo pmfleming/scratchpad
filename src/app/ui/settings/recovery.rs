@@ -1,8 +1,8 @@
 use super::{
-    ScratchpadApp, category_heading, egui, expandable_card, inner_select_row, toggle_select_row,
-    u32_slider_value_control,
+    ScratchpadApp, egui,
+    widgets::{dropdown, group_heading, inner_select_row, toggle_select_row},
 };
-use crate::app::services::session_store::StorageUsage;
+use crate::app::{services::session_store::StorageUsage, ui::widget_ids};
 use std::time::Duration;
 
 mod storage;
@@ -10,102 +10,15 @@ mod storage;
 mod tests;
 
 pub(super) fn render_recovery_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    category_heading(ui, "History & Recovery");
-    super::sections::text_history_budget_card(ui, app);
-    ui.add_space(super::SettingsUi::LAYOUT.card_gap);
-    expandable_card(
-        ui,
-        "recovery.policy",
-        egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
-        "Recovery & storage",
-        "Retained history, limits and reopening.",
-        false,
-        |ui| render_recovery(ui, app),
-    );
-}
-
-fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp, usage: Option<&StorageUsage>) {
-    let mut policy = app.state.app_settings.history.recovery.clone();
-    let stored = usage
-        .filter(|usage| usage.stored_error.is_none())
-        .map(|usage| &usage.stored);
-    let archive_hint = limit_hint(stored.map(|stored| stored.archives as u64), "archive");
-    let snapshot_hint = limit_hint(stored.map(|stored| stored.recovery_points), "snapshot");
-    super::sections::byte_budget_row(
-        ui,
-        "Closed tabs",
-        Some(&archive_hint),
-        &mut policy.archive_byte_budget,
-        1,
-        65536,
-    );
-    super::sections::byte_budget_row(
-        ui,
-        "Recovery points",
-        Some(&snapshot_hint),
-        &mut policy.snapshot_byte_budget,
-        1,
-        16384,
-    );
-    inner_select_row(
-        ui,
-        "Archive retention",
-        Some("Zero means no age limit."),
-        |ui| {
-            let days = policy.archive_retention_days;
-            let value = if days == 0 {
-                "No expiry".to_owned()
-            } else if days == 1 {
-                "1 day".to_owned()
-            } else {
-                format!("{days} days")
-            };
-            u32_slider_value_control(
-                ui,
-                "settings.recovery.retention",
-                "slider.Archive retention",
-                &mut policy.archive_retention_days,
-                0..=36500,
-                82.0,
-                value,
-            );
-        },
-    );
-    toggle_select_row(
-        ui,
-        "Restore archived tabs",
-        Some("When reopening files."),
-        "settings.recovery.reopen_archives",
-        policy.reopen_archives,
-        |enabled| policy.reopen_archives = enabled,
-    );
-    toggle_select_row(
-        ui,
-        "Open changed files",
-        Some("Alongside recovered text."),
-        "settings.recovery.open_changed_files",
-        policy.open_changed_disk_files,
-        |enabled| policy.open_changed_disk_files = enabled,
-    );
-    if policy != app.state.app_settings.history.recovery {
-        crate::app::app_state::settings_controller::set_recovery_settings(app, policy);
-    }
-}
-
-fn limit_hint(count: Option<u64>, kind: &str) -> String {
-    let count = count.map_or_else(|| "—".into(), |count| count.to_string());
-    format!("{count} retained · Logical {kind} limit.")
-}
-
-fn render_recovery(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let store = app.state.persistence.session_store.clone();
     let settings_root = crate::app::app_state::settings_state::settings_path(app)
         .parent()
         .unwrap_or(store.root())
         .to_owned();
+    let key = ("storage", store.root().to_owned(), settings_root.clone());
     let result = crate::app::ui::recovery::query_with_interval(
         ui,
-        ("storage", store.root().to_owned(), settings_root.clone()),
+        key.clone(),
         Duration::from_secs(5),
         move || store.storage_usage_with_settings(&settings_root),
     );
@@ -119,6 +32,103 @@ fn render_recovery(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 .map_err(String::as_str)
         }),
     );
+    if result.as_ref().is_some_and(|result| {
+        result
+            .as_ref()
+            .map_or(true, |usage| usage.stored_error.is_some())
+    }) && ui.button("Retry disk usage").clicked()
+    {
+        crate::app::ui::recovery::refresh_query::<StorageUsage>(ui, key);
+    }
+}
+
+fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    let mut policy = app.state.app_settings.history.recovery.clone();
+    toggle_select_row(
+        ui,
+        "Restore history when reopening files",
+        None,
+        "settings.recovery.reopen_archives",
+        policy.reopen_archives,
+        |value| policy.reopen_archives = value,
+    );
+    toggle_select_row(
+        ui,
+        "Also open changed disk files",
+        Some("Keep the disk version alongside recovered text."),
+        "settings.recovery.open_changed_files",
+        policy.open_changed_disk_files,
+        |value| policy.open_changed_disk_files = value,
+    );
+    group_heading(ui, "Retention");
+    retention_row(ui, &mut policy.archive_retention_days);
+    super::sections::byte_budget_row(
+        ui,
+        "Closed-tab budget",
+        &mut policy.archive_byte_budget,
+        1,
+        65536,
+    );
+    super::sections::byte_budget_row(
+        ui,
+        "Recovery-point budget",
+        &mut policy.snapshot_byte_budget,
+        1,
+        16384,
+    );
+    ui.label(egui::RichText::new("Age and size limits both apply. No expiry removes only the age limit.").size(12.5).color(super::text_muted(ui)))
+        .on_hover_text("Lower limits can expire older recovery data. Budgets limit retained data, not the size of the database file.");
+    if policy != app.state.app_settings.history.recovery {
+        crate::app::app_state::settings_controller::set_recovery_settings(app, policy);
+    }
+}
+
+fn retention_row(ui: &mut egui::Ui, days: &mut u32) {
+    let id = widget_ids::local(ui, "settings.retention.custom");
+    let custom = ui
+        .data_mut(|data| data.get_temp::<bool>(id))
+        .unwrap_or(false);
+    let mut selection = if custom || ![0, 7, 30, 90].contains(days) {
+        None
+    } else {
+        Some(*days)
+    };
+    inner_select_row(ui, "Keep closed tabs for", None, |ui| {
+        if dropdown(
+            ui,
+            "Retention",
+            &mut selection,
+            &[Some(7), Some(30), Some(90), Some(0), None],
+            |value| match value {
+                Some(0) => "No expiry".into(),
+                Some(days) => format!("{days} days"),
+                None => "Custom…".into(),
+            },
+            180.0,
+            "",
+        ) {
+            ui.data_mut(|data| data.insert_temp(id, selection.is_none()));
+            if let Some(value) = selection {
+                *days = value;
+            } else if *days == 0 {
+                *days = 30;
+            }
+        }
+    });
+    if selection.is_none() {
+        inner_select_row(ui, "Retention period", None, |ui| {
+            let response = ui.add(
+                egui::DragValue::new(days)
+                    .range(1..=36500)
+                    .clamp_existing_to_range(false)
+                    .update_while_editing(false)
+                    .suffix(" days"),
+            );
+            response.accessible_name("Retention period").on_hover_text(
+                "Enter a custom number of days. Choose No expiry to remove the age limit.",
+            );
+        });
+    }
 }
 
 fn render_content(
@@ -126,12 +136,15 @@ fn render_content(
     app: &mut ScratchpadApp,
     result: Option<Result<&StorageUsage, &str>>,
 ) {
-    storage_lane(ui, |ui| match result {
+    render_policy(ui, app);
+    super::sections::text_history_budget(ui, app);
+    group_heading(ui, "Storage");
+    match result {
         None => storage::notice(
             ui,
             egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
             "Measuring disk usage…",
-            "Collecting file sizes and recovery details in the background.",
+            "",
         ),
         Some(Err(error)) => storage::notice(
             ui,
@@ -139,26 +152,9 @@ fn render_content(
             "Disk usage unavailable",
             error,
         ),
-        Some(Ok(usage)) => storage::summary(ui, usage),
-    });
-    super::inner_divider(ui);
-    let usage = result.and_then(Result::ok);
-    render_policy(ui, app, usage);
-    storage_lane(ui, |ui| {
-        if let Some(usage) = usage {
+        Some(Ok(usage)) => {
+            storage::summary(ui, usage);
             storage::details(ui, usage);
         }
-        storage::location(ui, app.state.persistence.session_store.root());
-    });
-}
-
-/// Match the leading label inset of the standard settings control rows.
-fn storage_lane(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui)) {
-    ui.horizontal(|ui| {
-        ui.add_space(40.0);
-        ui.vertical(|ui| {
-            ui.set_width(ui.available_width());
-            contents(ui);
-        });
-    });
+    }
 }

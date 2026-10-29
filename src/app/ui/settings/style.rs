@@ -1,228 +1,78 @@
 use eframe::egui;
 
 pub(super) struct SettingsTypography {
-    pub body: f32,
-    pub title: f32,
-    pub category: f32,
     pub description: f32,
 }
-
 pub(super) struct SettingsLayout {
-    pub page_min_viewport_width: f32,
-    pub page_min_viewport_height: f32,
-    pub page_resize_gutter: f32,
     pub card_max_width: f32,
-    pub preview_max_width: f32,
-    pub card_radius: u8,
-    pub card_min_height: f32,
-    pub inner_row_height: f32,
-    pub body_top_space: f32,
-    pub body_bottom_space: f32,
     pub section_gap: f32,
-    pub card_gap: f32,
-    pub preview_top_margin: f32,
 }
-
 pub(super) struct ControlMetrics {
     pub column_width: f32,
     pub gap: f32,
-    pub icon_button_size: f32,
 }
-
-pub(super) struct SettingsMargins {
-    pub card_inner: egui::Margin,
-    pub preview_inner: egui::Margin,
-    pub value_pill_inner: egui::Margin,
-    pub info_chip_inner: egui::Margin,
-}
-
 pub(super) struct SettingsUi;
 
 impl SettingsUi {
-    pub(super) const TYPOGRAPHY: SettingsTypography = SettingsTypography {
-        body: 15.0,
-        title: 28.0,
-        category: 20.0,
-        description: 12.5,
-    };
+    pub(super) const TYPOGRAPHY: SettingsTypography = SettingsTypography { description: 12.5 };
     pub(super) const LAYOUT: SettingsLayout = SettingsLayout {
-        page_min_viewport_width: 1180.0,
-        page_min_viewport_height: 720.0,
-        page_resize_gutter: 10.0,
-        card_max_width: 720.0,
-        preview_max_width: 420.0,
-        card_radius: 10,
-        card_min_height: 72.0,
-        inner_row_height: 56.0,
-        body_top_space: 24.0,
-        body_bottom_space: 28.0,
-        section_gap: 24.0,
-        card_gap: 8.0,
-        preview_top_margin: 14.0,
+        card_max_width: 920.0,
+        section_gap: 18.0,
     };
     pub(super) const CONTROLS: ControlMetrics = ControlMetrics {
-        column_width: 360.0,
-        gap: 16.0,
-        icon_button_size: 34.0,
+        column_width: 300.0,
+        gap: 24.0,
     };
-    pub(super) const MARGINS: SettingsMargins = SettingsMargins {
-        card_inner: egui::Margin {
-            left: 18,
-            right: 18,
-            top: 14,
-            bottom: 14,
-        },
-        preview_inner: egui::Margin::same(20),
-        value_pill_inner: egui::Margin {
-            left: 12,
-            right: 12,
-            top: 8,
-            bottom: 8,
-        },
-        info_chip_inner: egui::Margin {
-            left: 10,
-            right: 10,
-            top: 5,
-            bottom: 5,
-        },
-    };
-    const CARD_BG_DARK: egui::Color32 = egui::Color32::from_rgb(42, 47, 57);
-    const CARD_BORDER_DARK: egui::Color32 = egui::Color32::from_rgb(61, 67, 77);
-    const CONTROL_BG_DARK: egui::Color32 = egui::Color32::from_rgb(58, 63, 71);
-    const ACCENT: egui::Color32 = egui::Color32::from_rgb(42, 168, 242);
-    const ICON_DARK: egui::Color32 = egui::Color32::from_rgba_premultiplied(242, 244, 247, 170);
-    const CARD_BG_LIGHT: egui::Color32 = egui::Color32::from_rgb(255, 255, 255);
-    const CARD_BORDER_LIGHT: egui::Color32 = egui::Color32::from_rgb(204, 213, 226);
-    const CONTROL_BG_LIGHT: egui::Color32 = egui::Color32::from_rgb(238, 243, 249);
-    const ICON_LIGHT: egui::Color32 = egui::Color32::from_rgba_premultiplied(28, 35, 45, 170);
-    pub(super) const CARD_STROKE_WIDTH: f32 = 1.0;
 
     pub(super) fn apply_typography(ui: &mut egui::Ui) {
         let style = ui.style_mut();
-        let font_id = egui::FontId::proportional(Self::TYPOGRAPHY.body);
-        style.override_font_id = Some(font_id.clone());
-        for text_style in [
+        let font = egui::FontId::proportional(15.0);
+        style.override_font_id = Some(font.clone());
+        for text in [
             egui::TextStyle::Body,
             egui::TextStyle::Button,
             egui::TextStyle::Small,
         ] {
-            style.text_styles.insert(text_style, font_id.clone());
+            style.text_styles.insert(text, font.clone());
         }
     }
-
-    pub(super) fn page_viewport_size(ui: &egui::Ui) -> egui::Vec2 {
-        ui.available_size()
-    }
-
-    pub(super) fn page_surface_size(ui: &egui::Ui) -> egui::Vec2 {
-        Self::page_surface_size_for_viewport(Self::page_viewport_size(ui))
-    }
-
-    pub(super) fn card_width(ui: &egui::Ui) -> f32 {
-        ui.available_width().min(Self::LAYOUT.card_max_width)
-    }
-
-    pub(super) fn card_leading_inset(ui: &egui::Ui) -> f32 {
-        ((ui.available_width() - Self::card_width(ui)) * 0.5).max(0.0)
-    }
-
-    pub(super) fn control_width(ui: &egui::Ui) -> f32 {
-        ui.available_width().clamp(0.0, Self::CONTROLS.column_width)
-    }
-
-    pub(super) fn dropdown_width(ui: &egui::Ui) -> f32 {
-        ui.available_width()
-            .clamp(0.0, Self::LAYOUT.card_max_width / 3.0)
-    }
-
-    pub(super) fn preview_width(ui: &egui::Ui) -> f32 {
-        ui.available_width().min(Self::LAYOUT.preview_max_width)
-    }
-
-    pub(super) fn header_text_width_for_trailing(ui: &egui::Ui, trailing_width: f32) -> f32 {
-        let available_width = ui.available_width().max(0.0);
-        (available_width - trailing_width - Self::CONTROLS.gap).max(0.0)
-    }
-
-    pub(super) fn header_trailing_width(ui: &egui::Ui) -> f32 {
-        Self::control_width(ui)
-    }
-
-    pub(super) fn row_label_width(row_width: f32) -> f32 {
-        (row_width - Self::row_control_width(row_width) - Self::CONTROLS.gap).max(0.0)
-    }
-
-    pub(super) fn row_control_width(row_width: f32) -> f32 {
-        row_width.clamp(0.0, Self::CONTROLS.column_width)
-    }
-
-    pub(super) fn divider_width(ui: &egui::Ui) -> f32 {
-        (ui.available_width() - 40.0).max(0.0)
-    }
-
     pub(super) fn card_bg(ui: &egui::Ui) -> egui::Color32 {
-        Self::theme_color(ui, Self::CARD_BG_DARK, Self::CARD_BG_LIGHT)
+        if ui.visuals().dark_mode {
+            egui::Color32::from_rgb(25, 29, 32)
+        } else {
+            egui::Color32::from_rgb(250, 251, 252)
+        }
     }
-
     pub(super) fn card_border(ui: &egui::Ui) -> egui::Color32 {
-        Self::theme_color(ui, Self::CARD_BORDER_DARK, Self::CARD_BORDER_LIGHT)
+        if ui.visuals().dark_mode {
+            egui::Color32::from_rgb(50, 58, 64)
+        } else {
+            egui::Color32::from_rgb(204, 213, 226)
+        }
     }
-
     pub(super) fn control_bg(ui: &egui::Ui) -> egui::Color32 {
-        Self::theme_color(ui, Self::CONTROL_BG_DARK, Self::CONTROL_BG_LIGHT)
+        if ui.visuals().dark_mode {
+            egui::Color32::from_rgb(41, 48, 54)
+        } else {
+            egui::Color32::from_rgb(230, 236, 240)
+        }
     }
-
     pub(super) fn icon_color(ui: &egui::Ui) -> egui::Color32 {
-        Self::theme_color(ui, Self::ICON_DARK, Self::ICON_LIGHT)
+        crate::app::theme::text_muted(ui)
     }
-
     pub(super) fn accent() -> egui::Color32 {
-        Self::ACCENT
+        egui::Color32::from_rgb(111, 177, 149)
     }
-
     pub(super) fn card_frame(ui: &egui::Ui) -> egui::Frame {
-        Self::framed(
-            Self::card_bg(ui),
-            Self::card_border(ui),
-            Self::MARGINS.card_inner,
-        )
-    }
-
-    pub(super) fn preview_frame(ui: &egui::Ui, fill: egui::Color32) -> egui::Frame {
-        Self::framed(fill, Self::card_border(ui), Self::MARGINS.preview_inner)
-    }
-
-    fn framed(
-        fill: egui::Color32,
-        border: egui::Color32,
-        inner_margin: egui::Margin,
-    ) -> egui::Frame {
         egui::Frame::new()
-            .fill(fill)
-            .stroke(egui::Stroke::new(Self::CARD_STROKE_WIDTH, border))
-            .corner_radius(egui::CornerRadius::same(Self::LAYOUT.card_radius))
-            .inner_margin(inner_margin)
-    }
-
-    fn theme_color(ui: &egui::Ui, dark: egui::Color32, light: egui::Color32) -> egui::Color32 {
-        if ui.visuals().dark_mode { dark } else { light }
-    }
-
-    fn page_surface_size_for_viewport(viewport_size: egui::Vec2) -> egui::Vec2 {
-        egui::vec2(
-            viewport_size.x.max(Self::LAYOUT.page_min_viewport_width),
-            viewport_size.y.max(Self::LAYOUT.page_min_viewport_height),
-        )
-    }
-
-    pub(super) fn page_content_width() -> f32 {
-        Self::LAYOUT.card_max_width
-    }
-
-    pub(super) fn page_horizontal_margin_for_viewport(
-        viewport_width: f32,
-        content_width: f32,
-    ) -> f32 {
-        ((viewport_width - content_width) * 0.5).max(Self::LAYOUT.page_resize_gutter)
+            .fill(Self::card_bg(ui))
+            .stroke(egui::Stroke::new(1.0, Self::card_border(ui)))
+            .corner_radius(10)
+            .inner_margin(egui::Margin {
+                left: 18,
+                right: 18,
+                top: 10,
+                bottom: 12,
+            })
     }
 }

@@ -22,6 +22,33 @@ fn frame<T: Send + Sync + 'static>(
 }
 
 #[test]
+fn retry_expires_the_cache_without_discarding_an_inflight_worker() {
+    let ctx = egui::Context::default();
+    let key = egui::Id::unique(("recovery.query", "retry"));
+    let cache = Arc::new(Mutex::new(super::QueryCache::<u64> {
+        result: Some(Err("offline".into())),
+        checked: Some(Instant::now()),
+        pending: true,
+    }));
+    ctx.data_mut(|data| data.insert_temp(key, cache.clone()));
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        super::refresh_query::<u64>(ui, "retry")
+    });
+    output.textures_delta.clear();
+    let state = cache.lock().unwrap();
+    assert!(state.pending);
+    assert!(state.checked.is_none());
+    assert_eq!(
+        state.result.as_ref().unwrap().as_ref().unwrap_err(),
+        "offline"
+    );
+    let stored = ctx
+        .data_mut(|data| data.get_temp::<Arc<Mutex<super::QueryCache<u64>>>>(key))
+        .unwrap();
+    assert!(Arc::ptr_eq(&cache, &stored));
+}
+
+#[test]
 fn query_shares_nonclone_results_suppresses_duplicate_loads_and_refreshes_errors() {
     struct Payload(Vec<u8>); // Intentionally not Clone: UI frames must not copy payloads.
     let ctx = egui::Context::default();

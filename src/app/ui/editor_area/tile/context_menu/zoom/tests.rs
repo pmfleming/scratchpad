@@ -57,8 +57,10 @@ fn zoom_menu_targets_clicked_pane_and_stays_open_for_repeated_adjustments() {
     harness.run();
     harness.get_by_label("Second pane").click_secondary();
     harness.run();
-    harness.get_by_label("Zoom · 100%");
-    for expected in ["Zoom · 110%", "Zoom · 120%"] {
+    harness.get_by_label(egui_phosphor::regular::MAGNIFYING_GLASS);
+    harness.get_by_label("100%");
+    assert!(harness.query_by_label("Zoom · 100%").is_none());
+    for expected in ["110%", "120%"] {
         harness
             .get_by_role_and_label(egui::Role::Button, "Zoom in")
             .click();
@@ -81,12 +83,12 @@ fn zoom_menu_targets_clicked_pane_and_stays_open_for_repeated_adjustments() {
         .get_by_role_and_label(egui::Role::Button, "Zoom out")
         .click();
     harness.run();
-    harness.get_by_label("Zoom · 110%");
+    harness.get_by_label("110%");
     harness
         .get_by_role_and_label(egui::Role::Button, "Reset zoom")
         .click();
     harness.run();
-    harness.get_by_label("Zoom · 100%");
+    harness.get_by_label("100%");
     assert!(
         harness
             .get_by_role_and_label(egui::Role::Button, "Reset zoom")

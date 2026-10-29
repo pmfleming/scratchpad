@@ -68,6 +68,25 @@ pub(crate) fn query_with_interval<T: Send + Sync + 'static>(
     state.result.clone()
 }
 
+/// Retry a completed query without discarding an in-flight worker or spawning
+/// duplicate requests. The next paint starts the refresh.
+pub(crate) fn refresh_query<T: Send + Sync + 'static>(
+    ui: &egui::Ui,
+    key: impl std::hash::Hash + std::fmt::Debug,
+) {
+    let id = egui::Id::unique(("recovery.query", key));
+    if let Some(cache) = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<Arc<Mutex<QueryCache<T>>>>(id))
+    {
+        cache
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .checked = None;
+    }
+    ui.ctx().request_repaint();
+}
+
 pub(crate) fn timestamp(seconds: i64) -> String {
     chrono::DateTime::from_timestamp(seconds, 0).map_or_else(
         || "Unknown date".into(),

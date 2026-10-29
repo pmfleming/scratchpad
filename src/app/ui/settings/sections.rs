@@ -1,137 +1,181 @@
-use super::appearance::render_tab_position_category;
-use super::opening::render_opening_category;
-use super::text_formatting::{render_editing_category, render_text_formatting_category};
 use super::{
-    ScratchpadApp, SettingsUi, action_card, available_width_control, category_heading, egui,
-    expandable_card, inner_select_row, record_settings_control_box, settings_file_card,
-    slider_value_control, widget_ids,
+    ScratchpadApp, SettingsUi, egui,
+    widgets::{action_row, category, group_heading, numeric_slider},
 };
 
+struct Category {
+    key: &'static str,
+    title: &'static str,
+    subtitle: &'static str,
+    search: &'static str,
+    render: fn(&mut egui::Ui, &mut ScratchpadApp),
+}
+
+const CATEGORIES: [Category; 5] = [
+    Category {
+        key: "appearance",
+        title: "Appearance",
+        subtitle: "Text and colors",
+        search: "system OS font size theme text background highlight palette",
+        render: super::text_formatting::render_appearance,
+    },
+    Category {
+        key: "editors",
+        title: "Editors",
+        subtitle: "Writing and indentation",
+        search: "word wrap padding gutter indent width spaces tabs characters guides preview",
+        render: super::text_formatting::render_editing,
+    },
+    Category {
+        key: "workspace",
+        title: "Workspace",
+        subtitle: "Tabs and files",
+        search: "position top bottom left right auto hide delay status bar opening new current tab placement recent files",
+        render: super::appearance::render_workspace,
+    },
+    Category {
+        key: "history",
+        title: "History",
+        subtitle: "Recovery and storage",
+        search: "recovery reopening archives closed tabs changed files retention days expiry budgets limits undo memory RAM persisted saved per-file total recommended automatic disk usage payloads database journal settings reusable references",
+        render: super::recovery::render_recovery_category,
+    },
+    Category {
+        key: "application",
+        title: "Application",
+        subtitle: "Startup and configuration",
+        search: "startup launch session continue fresh TOML settings file configuration reset defaults",
+        render: super::opening::render_application,
+    },
+];
+
 pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    for render_category in [
-        render_text_formatting_category as fn(&mut egui::Ui, &mut ScratchpadApp),
-        render_editing_category,
-        render_opening_category,
-        render_tab_position_category,
-        super::recovery::render_recovery_category,
-        render_advanced_category,
-    ] {
+    let search_id = egui::Id::unique("settings.search");
+    let mut query = ui
+        .data_mut(|data| data.get_temp::<String>(search_id))
+        .unwrap_or_default();
+    let response = ui.add_sized(
+        egui::vec2(ui.available_width(), 34.0),
+        egui::TextEdit::singleline(&mut query).hint_text("Find a setting…"),
+    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Search settings"));
+    ui.data_mut(|data| data.insert_temp(search_id, query.clone()));
+    let query = query.trim().to_lowercase();
+    let mut visible = 0;
+    ui.horizontal(|ui| {
+        for (label, open) in [("Expand all", true), ("Collapse all", false)] {
+            if ui
+                .add_enabled(query.is_empty(), egui::Button::new(label).frame(false))
+                .clicked()
+            {
+                // Resolve IDs in the parent scope, after this horizontal row.
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(egui::Id::unique("settings.expand_all"), open)
+                });
+            }
+        }
+    });
+    if let Some(open) =
+        ui.data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("settings.expand_all")))
+    {
+        for item in &CATEGORIES {
+            let id = super::widget_ids::local(ui, item.key);
+            ui.data_mut(|data| data.insert_persisted(id, open));
+        }
+    }
+    for item in &CATEGORIES {
+        if !matches_category(item, &query) {
+            continue;
+        }
+        visible += 1;
         ui.add_space(SettingsUi::LAYOUT.section_gap);
-        render_category(ui, app);
+        category(
+            ui,
+            item.key,
+            item.title,
+            item.subtitle,
+            !query.is_empty(),
+            |ui| (item.render)(ui, app),
+        );
+    }
+    if visible == 0 {
+        ui.label("No matching settings. Try tabs, font or history.");
     }
 }
 
-fn render_advanced_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    category_heading(ui, "Advanced");
-    settings_file_card(
-        ui,
-        egui_phosphor::regular::FLOPPY_DISK,
-        "Settings file",
-        "TOML on startup.",
-        app,
-    );
-    ui.add_space(SettingsUi::LAYOUT.card_gap);
-    action_card(
-        ui,
-        egui_phosphor::regular::ARROW_SQUARE_UP,
-        "Reset to defaults",
-        "Restore app defaults.",
-        "Reset to defaults",
-        crate::app::app_state::settings_controller::reset_settings_to_defaults,
-        app,
-    );
+fn matches_category(category: &Category, query: &str) -> bool {
+    let haystack = format!(
+        "{} {} {}",
+        category.title, category.subtitle, category.search
+    )
+    .to_lowercase();
+    query
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|term| !term.is_empty())
+        .all(|term| haystack.contains(term))
 }
 
-pub(super) fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    expandable_card(
-        ui,
-        "advanced.text_history_budget",
-        egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
-        "Undo memory",
-        "Undo history limits.",
-        false,
-        |ui| {
-            let original_budget = app.state.app_settings.history.budget;
-            let mut budget = original_budget;
-            byte_budget_row(
-                ui,
-                "Per-file",
-                None,
-                &mut budget.per_file_byte_budget,
-                1,
-                1024,
-            );
-            byte_budget_row(
-                ui,
-                "Total",
-                None,
-                &mut budget.aggregate_byte_budget,
-                4,
-                4096,
-            );
-            byte_budget_row(
-                ui,
-                "Persisted per file",
-                None,
-                &mut budget.persisted_payload_budget,
-                0,
-                1024,
-            );
-            inner_select_row(ui, "Automatic defaults", None, |ui| {
-                available_width_control(ui, |ui| {
-                    let button_width = SettingsUi::control_width(ui);
-                    let response = widget_ids::surface_response(
-                        ui,
-                        "settings.history.budget.reset_auto",
-                        widget_ids::WidgetRole::ActionButton,
-                        |ui| {
-                            ui.add_sized(
-                                egui::vec2(button_width, 0.0),
-                                egui::Button::new("Reset to auto"),
-                            )
-                        },
-                    );
-                    record_settings_control_box("button.Reset to auto", response.rect);
-                    if response.clicked() {
-                        crate::app::app_state::settings_controller::reset_history_budget_to_auto(
-                            app,
-                        );
-                    }
-                });
-            });
-            if budget != original_budget {
-                crate::app::app_state::settings_controller::set_history_budget(app, budget);
-            }
-        },
-    );
+#[cfg(test)]
+mod tests {
+    use super::{CATEGORIES, matches_category};
+
+    #[test]
+    fn search_supports_labels_and_legacy_aliases() {
+        for (query, key) in [
+            ("auto-hide", "workspace"),
+            ("gutter", "editors"),
+            ("persisted per-file", "history"),
+            ("font size", "appearance"),
+            ("toml", "application"),
+        ] {
+            let matches: Vec<_> = CATEGORIES
+                .iter()
+                .filter(|item| matches_category(item, query))
+                .map(|item| item.key)
+                .collect();
+            assert_eq!(matches, vec![key], "{query}");
+        }
+    }
 }
 
-pub(super) fn byte_budget_row(
-    ui: &mut egui::Ui,
-    label: &str,
-    description: Option<&str>,
-    value: &mut u64,
-    min_mb: u64,
-    max_mb: u64,
-) {
-    const BYTES_PER_DISPLAY_MB: u64 = 1024 * 1024;
+pub(super) fn text_history_budget(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    group_heading(ui, "Undo limits");
+    let original = app.state.app_settings.history.budget;
+    let mut budget = original;
+    byte_budget_row(
+        ui,
+        "Memory per file",
+        &mut budget.per_file_byte_budget,
+        1,
+        1024,
+    );
+    byte_budget_row(
+        ui,
+        "Memory across all files",
+        &mut budget.aggregate_byte_budget,
+        4,
+        4096,
+    );
+    byte_budget_row(
+        ui,
+        "Saved undo per file",
+        &mut budget.persisted_payload_budget,
+        0,
+        1024,
+    );
+    if budget != original {
+        crate::app::app_state::settings_controller::set_history_budget(app, budget);
+    }
+    if action_row(ui, "Recommended limits", "Use recommended", None) {
+        crate::app::app_state::settings_controller::reset_history_budget_to_auto(app);
+    }
+}
 
-    let mut mb = (*value / BYTES_PER_DISPLAY_MB).clamp(min_mb, max_mb);
-    inner_select_row(ui, label, description, |ui| {
-        slider_value_control(
-            ui,
-            format!("slider.{label}"),
-            82.0,
-            format!("{mb} MiB"),
-            |ui, slider_width| {
-                ui.add_sized(
-                    egui::vec2(slider_width, 0.0),
-                    egui::Slider::new(&mut mb, min_mb..=max_mb)
-                        .step_by(1.0)
-                        .show_value(false),
-                )
-            },
-        );
-    });
-    *value = mb * BYTES_PER_DISPLAY_MB;
+pub(super) fn byte_budget_row(ui: &mut egui::Ui, label: &str, bytes: &mut u64, min: u64, max: u64) {
+    const MIB: u64 = 1024 * 1024;
+    let mut value = *bytes / MIB;
+    if numeric_slider(ui, label, &mut value, min..=max, "MiB") {
+        *bytes = value * MIB;
+    }
 }

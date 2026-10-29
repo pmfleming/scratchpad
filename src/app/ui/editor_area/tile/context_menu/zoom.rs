@@ -13,7 +13,7 @@ use crate::app::{
     ui::widget_ids,
 };
 use eframe::egui;
-use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, MINUS, PLUS};
+use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, MAGNIFYING_GLASS, MINUS, PLUS};
 
 pub(super) fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp, view_id: ViewId) {
     let Some(view) = app
@@ -26,13 +26,21 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp, view_id: ViewId
         return;
     };
     let factor = view.zoom_factor();
-    let label = format!("Zoom · {}", view.zoom_label());
+    let label = view.zoom_label();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         let button_width = 28.0;
         ui.add_sized(
+            egui::vec2(40.0, EDITOR_CONTEXT_ROW_HEIGHT),
+            egui::Label::new(
+                egui::RichText::new(MAGNIFYING_GLASS).font(egui_phosphor::font_id(16.0)),
+            ),
+        )
+        .accessible_name("Zoom")
+        .on_hover_text("Zoom");
+        ui.add_sized(
             egui::vec2(
-                EDITOR_CONTEXT_MENU_WIDTH - 3.0 * (button_width + 4.0),
+                EDITOR_CONTEXT_MENU_WIDTH - 3.0 * (button_width + 4.0) - 44.0,
                 EDITOR_CONTEXT_ROW_HEIGHT,
             ),
             egui::Label::new(label).halign(egui::Align::LEFT),

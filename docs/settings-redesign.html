@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scratchpad · Settings redesign</title>
+<style>
+:root{color-scheme:dark;--bg:#141719;--side:#191d20;--panel:#1f2428;--field:#171b1e;--hover:#293036;--line:#323a40;--text:#e9edef;--muted:#a0adb5;--accent:#a8d6c2;--accent-bg:#293f36;--warning:#edb77c;--danger:#f0a4a4;--radius:12px}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select{font:inherit}button,a,input,select,summary{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:disabled{cursor:default;opacity:.45}button,input,select{color:inherit}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px}button{border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:7px 12px}button:hover{background:var(--hover)}a{color:var(--accent)}input,select{background:var(--field);border:1px solid var(--line);border-radius:7px;padding:8px 10px;min-height:36px}input[type=number]{width:78px;font-variant-numeric:tabular-nums}select{max-width:100%;min-width:146px}input[type=range]{accent-color:var(--accent);padding:0;border:0;min-height:24px;width:126px}input[type=color]{width:42px;height:34px;padding:4px;min-height:0;cursor:pointer}h1,h2,h3,p{margin:0}h1{font-size:28px;line-height:1.2;letter-spacing:-.8px;font-weight:650}h2{font-size:15px;font-weight:650}h3{font-size:13px;font-weight:650}small,.muted{color:var(--muted)}.icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}.sprite{position:absolute;width:0;height:0;overflow:hidden}.shell{max-width:1200px;min-height:100vh;margin:auto;display:block}.sidebar{background:var(--side);border-right:1px solid var(--line);padding:30px 18px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column}.brand{display:flex;align-items:center;gap:10px;padding:0 12px;font-size:17px;font-weight:650;letter-spacing:-.4px}.brand-mark{display:grid;place-items:center;background:var(--accent);color:#21372d;width:30px;height:30px;border-radius:8px}.side-label{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);padding:38px 12px 12px}.nav{display:grid;gap:5px}.nav button{display:flex;align-items:center;gap:12px;text-align:left;border:0;background:transparent;color:var(--muted);padding:12px;border-radius:8px}.nav button:hover{background:var(--hover);color:var(--text)}.nav button[aria-current=page]{background:var(--accent-bg);color:var(--accent)}.nav .arrow{margin-left:auto;font-size:18px;opacity:0}.nav button[aria-current=page] .arrow{opacity:1}.side-bottom{margin-top:auto;padding-top:40px}.side-bottom p{font-size:12px;color:var(--muted);padding:18px 12px 0;line-height:1.7}.side-bottom button{width:100%;text-align:left;display:flex;align-items:center;gap:12px}.workbench{min-width:0}.toolbar{height:76px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 40px;gap:20px}.breadcrumbs{font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}.pill{font-size:10px;font-weight:650;letter-spacing:.7px;text-transform:uppercase;border:1px solid var(--line);border-radius:5px;padding:3px 7px;color:var(--accent)}.search{display:flex;align-items:center;gap:8px;background:var(--field);border:1px solid var(--line);border-radius:8px;padding:0 10px;width:280px;max-width:55%}.search input{width:100%;min-width:0;border:0;background:transparent;padding-left:0;outline-offset:0}.search .icon{width:15px;color:var(--muted)}main{max-width:1000px;margin:auto;padding:38px 40px 64px}.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:28px}.page-head p{margin-top:9px;color:var(--muted);font-size:13px}.subtle{background:transparent;border-color:transparent;color:var(--muted)}.subtle:hover{border-color:var(--line)}.section-label{display:flex;gap:8px;align-items:center;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin:26px 0 10px}.section-label:first-child{margin-top:0}.card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);overflow:hidden;margin-bottom:16px}.card-head{padding:17px 22px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line)}.card-head small{font-size:12px}.row{min-height:62px;padding:13px 22px;display:grid;grid-template-columns:minmax(160px,1fr) auto;align-items:center;gap:16px}.row+.row{border-top:1px solid color-mix(in srgb,var(--line) 60%,transparent)}.row .label{font-size:13px;font-weight:500}.row .label small{display:block;max-width:350px;font-weight:400;font-size:12px;line-height:1.5;margin-top:4px}.control{display:flex;align-items:center;justify-content:flex-end;gap:10px}.unit{font-size:12px;color:var(--muted);min-width:22px}.seg{display:flex;gap:2px;padding:3px;background:var(--field);border:1px solid var(--line);border-radius:8px;max-width:100%;flex-wrap:wrap}.seg label{position:relative;cursor:pointer}.seg input{position:absolute;opacity:0;width:1px;height:1px;min-height:0;margin:0;padding:0}.seg span{display:block;border-radius:5px;padding:6px 11px;color:var(--muted);font-size:12px;white-space:nowrap}.seg input:checked+span{background:#36423e;color:#e7f5ed;box-shadow:0 1px 3px #0003}.seg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}.switch{position:relative;display:inline-block;width:36px;height:21px;flex:none}.switch input{opacity:0;position:absolute;inset:0;width:100%;height:100%;margin:0;min-height:0;cursor:pointer}.switch span{position:absolute;inset:0;border-radius:20px;background:#414a50;pointer-events:none;transition:background .15s}.switch span:after{content:"";position:absolute;width:15px;height:15px;left:3px;top:3px;background:#e7edef;border-radius:50%;transition:transform .15s}.switch input:checked+span{background:var(--accent)}.switch input:checked+span:after{transform:translateX(15px);background:#21372d}.switch input:focus-visible+span{outline:2px solid var(--accent);outline-offset:4px}.hint{padding:12px 22px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);background:#00000012;line-height:1.7}.hint strong{color:var(--text);font-weight:500}.preview{padding:20px;background:#151a1c;border-top:1px solid var(--line)}.preview-top{display:flex;align-items:center;justify-content:space-between;font-size:10px;text-transform:uppercase;letter-spacing:1.3px;color:var(--muted);margin-bottom:12px}.editor-preview{padding:18px 16px;background:#171d21;color:#e1e8ec;border:1px solid var(--line);border-radius:8px;font-size:16px;line-height:1.8;min-height:140px;overflow:auto}.editor-preview mark{background:#35584c;color:inherit;border-radius:2px}.line-number{display:inline-block;width:30px;color:#73828c;user-select:none}.preview-code{font:13px/1.9 ui-monospace,monospace;white-space:pre;overflow:auto;padding:20px 22px;background:var(--field);color:#c5d2d8;border-top:1px solid var(--line)}.token{color:var(--accent)}.fine-print{font-size:12px;color:var(--muted);margin-top:18px;line-height:1.7}.layout-choices .seg span{display:grid;justify-items:center;gap:6px;padding:9px 16px}.mini-layout{width:33px;height:25px;border:1px solid #84938e;border-radius:3px;position:relative;display:block!important;padding:0!important}.mini-layout:after{content:"";position:absolute;background:#9eb6ac;border-radius:1px}.mini-layout.top:after{top:3px;left:3px;right:3px;height:4px}.mini-layout.bottom:after{bottom:3px;left:3px;right:3px;height:4px}.mini-layout.left:after{top:3px;left:3px;bottom:3px;width:6px}.mini-layout.right:after{top:3px;right:3px;bottom:3px;width:6px}.inset{margin:0 22px 18px;border:1px solid var(--line);border-radius:8px;background:var(--field);padding:13px 16px;font-size:12px;color:var(--muted)}details>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:10px;padding:16px 22px;font-size:13px;font-weight:500}details>summary::-webkit-details-marker{display:none}details>summary:before{content:"›";font-size:18px;line-height:1;color:var(--muted)}details[open]>summary:before{transform:rotate(90deg)}details>summary small{margin-left:auto;font-size:12px;font-weight:400}details>summary+.row,details>summary+.chart-wrap{border-top:1px solid var(--line)}.stat{font-size:30px;line-height:1.2;letter-spacing:-1px;font-variant-numeric:tabular-nums}.stat small{font-size:14px;letter-spacing:0;margin-left:5px}.storage-overview{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:22px}.storage-overview p{font-size:12px;color:var(--muted);margin-top:7px}.storage-tag{background:var(--field);border:1px solid var(--line);padding:6px 10px;border-radius:6px;color:var(--muted);font-size:11px}.chart-wrap{padding:24px 22px;display:grid;grid-template-columns:160px minmax(0,1fr);align-items:center;gap:26px}.pie{width:156px;height:156px;border-radius:50%;box-shadow:0 0 0 5px var(--panel),0 0 0 6px var(--line)}.legend{display:grid;gap:10px;font-size:12px}.legend-item{display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:9px;align-items:center}.dot{width:8px;height:8px;border-radius:50%}.legend-item .value{font-variant-numeric:tabular-nums;color:var(--muted)}.chart-caption{grid-column:1/-1;font-size:11px;color:var(--muted)}.danger{color:var(--danger);border-color:#624345}.danger:hover{background:#39282b}.primary{background:var(--accent);color:#1e342a;border-color:var(--accent)}.primary:hover{background:#c0e4d3}.path{font:11px/1.7 ui-monospace,monospace;overflow-wrap:anywhere;color:var(--muted)}.notes-intro{font-size:16px;line-height:1.75;color:var(--muted);max-width:660px;margin:0 0 28px}.notes-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:26px}.note{padding:22px;background:var(--panel);border:1px solid var(--line);border-radius:12px}.note .number{color:var(--accent);font:11px ui-monospace,monospace;display:block;margin-bottom:18px}.note h2{margin-bottom:8px}.note p,.note li{color:var(--muted);font-size:13px;line-height:1.75}.note ul{padding-left:18px;margin:10px 0 0}.notes-table{width:100%;border-collapse:collapse;font-size:12px}.notes-table th,.notes-table td{text-align:left;padding:13px 18px;vertical-align:top;border-bottom:1px solid var(--line)}.notes-table th{color:var(--muted);font-size:11px;font-weight:500;background:var(--field)}.notes-table tr:last-child td{border:0}.notes-table td:last-child{color:var(--muted)}.tag{display:inline-block;color:var(--accent);background:var(--accent-bg);font-size:10px;border-radius:4px;padding:2px 6px;vertical-align:middle}.recommendation{border-left:2px solid var(--accent);padding:2px 0 2px 16px;margin:24px 0;color:var(--muted);font-size:13px;line-height:1.75}.notes-list{padding:20px 22px;font-size:13px;color:var(--muted)}.notes-list li+li{margin-top:10px}.no-results{border:1px dashed var(--line);border-radius:12px;padding:40px;text-align:center;color:var(--muted)}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 20px;max-width:90vw;background:#33483e;color:#e7f5ed;border:1px solid #5b786a;border-radius:9px;box-shadow:0 8px 40px #0005;z-index:5;font-size:13px}.toast:empty{display:none}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}[hidden]{display:none!important}dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:26px;max-width:420px;width:calc(100% - 40px)}dialog::backdrop{background:#0009}dialog p{color:var(--muted);margin:12px 0 24px;font-size:13px}dialog .actions{display:flex;gap:10px;justify-content:flex-end}
+@media(min-width:1300px){main{padding-top:46px}.toolbar{padding-inline:50px}}
+@media(max-width:960px){.shell{grid-template-columns:200px 1fr}.toolbar{padding:0 24px}.breadcrumbs>span:first-child{display:none}main{padding:28px 24px}.row{grid-template-columns:1fr}.control{justify-content:flex-start}.row:has(.switch){grid-template-columns:1fr auto}.chart-wrap{grid-template-columns:1fr}.pie{margin:0 auto}.layout-choices .seg span{padding:8px 12px}.notes-grid{grid-template-columns:1fr}.search{max-width:70%}.card-head{align-items:flex-start}}
+@media(max-width:650px){.shell{display:block}.sidebar{position:static;height:auto;padding:18px 16px 12px;border-right:0;border-bottom:1px solid var(--line)}.brand{padding:0 4px}.side-label,.side-bottom p{display:none}.nav{display:flex;overflow-x:auto;margin-top:16px;gap:4px}.nav button{flex-shrink:0;font-size:12px;padding:9px}.nav button .icon,.nav .arrow{display:none}.side-bottom{padding:0;margin:10px 0 0}.side-bottom button{width:auto;padding:5px 9px;font-size:11px;border:0;background:transparent;color:var(--muted)}.side-bottom button .icon{width:14px;height:14px}.toolbar{height:60px;padding:0 20px}.search{width:220px}.breadcrumbs{gap:0}.breadcrumbs>span:not(.pill){display:none}main{padding:26px 16px}.row,.card-head{padding:14px 18px}.page-head{margin-bottom:22px}h1{font-size:25px}.storage-overview{align-items:flex-start}.storage-tag{max-width:100px}.notes-table th,.notes-table td{padding:12px 10px}.notes-table{font-size:11px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+@media print{body{background:white;color:#111}.sidebar,.toolbar,.page-head button,.toast{display:none!important}.shell{display:block}.page[hidden],.card[hidden]{display:block!important}.page{break-before:page}main{padding:0}.card,.note{background:white;color:#111;border-color:#ccc;break-inside:avoid}.muted,small,.fine-print,.note p,.notes-intro,.notes-list,.notes-table td:last-child{color:#555}.page-head{margin-top:24px}.row{border-color:#ddd}.notes-grid{display:block}.note{margin-bottom:12px}.pie{print-color-adjust:exact}.control{color:#111}input,select,button{color:#111;background:#eee}.seg span{color:#555}.seg input:checked+span{background:#ddd;color:#111}}
+/* A single scrollable list; each category can be expanded independently. */
+.category{border:1px solid var(--line);border-radius:var(--radius);padding:0 20px 20px;margin-bottom:20px;background:var(--side);scroll-margin-top:24px}
+.category:not([open]){padding-bottom:0}
+.category>summary{margin:0 -20px;padding:21px 22px;gap:14px}
+.category>summary h2{font-size:19px;letter-spacing:-.3px}
+.category>summary small{font-size:12px}
+.category[open]>summary{border-bottom:1px solid var(--line);margin-bottom:16px}
+.category>summary:before{color:var(--accent)}
+.category .card:last-child{margin-bottom:0}
+.list-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px;color:var(--muted);font-size:12px}
+.list-tools>div{display:flex;gap:3px}
+.page-head>a{font-size:12px;white-space:nowrap;margin-top:6px;text-decoration:none}
+.control:has(input[type=range]){display:grid;grid-template-columns:minmax(60px,126px) 78px 32px;width:min(100%,256px)}
+.control:has(input[type=range]) .unit{width:32px;min-width:0}
+.control input[type=range]{width:100%;min-width:0}
+#custom-style>.row:has(#font)>.control,#custom-style>.row:has(#font-size)>.control{width:256px;max-width:100%;justify-content:flex-start}
+.design-notes>summary{color:var(--muted)}
+@media(max-width:650px){.category{padding-inline:12px}.category>summary{margin-inline:-12px;padding:18px 16px}.category>summary small{display:none}.list-tools{align-items:flex-start;flex-direction:column}.page-head{flex-wrap:wrap}.category>summary h2{font-size:18px}}
+/* One visual container per category; inner groups are only rows and dividers. */
+.page.category{padding:0 0 12px}
+.page.category>summary{margin:0;padding:21px 22px}
+.page.category:not([open]){padding-bottom:0}
+.page .card{border:0;border-radius:0;background:transparent;margin:0;box-shadow:none}
+.page .card+.card{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}
+.page .card-head{border:0;padding:16px 22px 6px}
+.page .card-head h2{font-size:12px;color:var(--muted);font-weight:600}
+.page .row,.page .storage-overview{padding-inline:22px}
+.page .preview{background:transparent;border:0;padding:18px 22px}
+.page .hint{border:0;background:transparent;padding:6px 22px 14px}
+.page>.fine-print{padding:0 22px;margin:8px 0 4px}
+.page .inset{border:0;background:transparent;padding:0;margin:0 22px 12px}
+@media print{.list-tools,#notes-link{display:none!important}.category{break-before:auto;background:white;padding-top:12px}}
+</style>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="i-note" viewBox="0 0 24 24"><path d="M5 3h14v18H5zM9 8h6M9 12h6M9 16h3"/></symbol>
+<symbol id="i-appearance" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M12 4a8 8 0 0 1 0 16" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-editor" viewBox="0 0 24 24"><path d="m5 18 6-13 6 13M8 12h6M18 5h3M19.5 5v13M18 18h3"/></symbol>
+<symbol id="i-workspace" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></symbol>
+<symbol id="i-history" viewBox="0 0 24 24"><path d="M4 9a8 8 0 1 1 0 6M4 4v5h5M12 7v5l3 2"/></symbol>
+<symbol id="i-app" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></symbol>
+<symbol id="i-ideas" viewBox="0 0 24 24"><path d="M9 17h6M9 20h6M8 13a6 6 0 1 1 8 0l-1 4H9z"/></symbol>
+</defs></svg>
+<div class="shell">
+<div class="workbench">
+<header class="toolbar"><div class="breadcrumbs"><span>Scratchpad</span><span>/</span><span class="pill">Settings concept</span></div><label class="search"><svg class="icon"><use href="#i-search"/></svg><span class="sr-only">Search settings</span><input id="search" type="search" placeholder="Find a setting…" autocomplete="off"></label></header>
+<main>
+<div class="page-head"><div><h1>Settings</h1><p>One place to make Scratchpad yours.</p></div><a href="#notes" id="notes-link">Design rationale ↗</a></div>
+<div class="list-tools"><span>Interactive study · Example values only</span><div><button class="subtle" id="expand-all">Expand all</button><button class="subtle" id="collapse-all">Collapse all</button></div></div>
+<div id="search-status" class="fine-print" role="status" hidden></div>
+<details class="page category" id="appearance" open>
+  <summary><h2 id="appearance-title">Appearance</h2><small>Text and colors</small></summary>
+  <div class="card" data-search="appearance system OS font theme colors">
+    <div class="row"><div class="label" id="source-label">Use appearance from</div><div class="control"><div class="seg" role="group" aria-labelledby="source-label"><label><input type="radio" name="source" value="app" checked><span>Scratchpad</span></label><label><input type="radio" name="source" value="system"><span>System</span></label></div></div></div>
+    <div id="system-summary" class="inset" hidden>Font, size and colors follow your operating system.<br><strong>Example:</strong> System sans · 14 pt · Dark</div>
+    <div id="custom-style">
+      <div class="row"><label class="label" for="font">Font</label><div class="control"><select id="font"><option>Standard</option><option>Flex</option><option selected>Mono</option><option>Serif</option></select></div></div>
+      <div class="row"><label class="label" for="font-size">Size</label><div class="control"><select id="font-size" style="min-width:90px"><option>11</option><option>12</option><option>14</option><option selected>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>32</option></select><span class="unit">pt</span></div></div>
+      <div class="row"><div class="label" id="theme-label">Colors</div><div class="control"><div class="seg" role="group" aria-labelledby="theme-label"><label><input type="radio" name="theme" value="system"><span>System</span></label><label><input type="radio" name="theme" value="light"><span>Light</span></label><label><input type="radio" name="theme" value="dark" checked><span>Dark</span></label><label><input type="radio" name="theme" value="custom"><span>Custom</span></label></div></div></div>
+      <div id="palette">
+        <div class="row"><label class="label" for="text-color">Text</label><div class="control"><input type="color" id="text-color" value="#e1e8ec"></div></div>
+        <div class="row"><label class="label" for="background-color">Background</label><div class="control"><input type="color" id="background-color" value="#171d21"></div></div>
+        <div class="row"><label class="label" for="highlight-color">Search highlight</label><div class="control"><input type="color" id="highlight-color" value="#35584c"></div></div>
+      </div>
+    </div>
+    <div class="preview"><div class="preview-top"><span>Text preview</span><span id="preview-mode">Mono · 16 pt</span></div><div class="editor-preview" id="appearance-preview">A small place for <mark>unfinished ideas</mark>.<br>A thought, a list, a fresh start.</div></div>
+  </div>
+  <p class="fine-print">All appearance controls stay visible. Editing font or colors switches to Scratchpad; editing a color selects Custom.</p>
+</details>
+<details class="page category" id="editor" open>
+  <summary><h2 id="editor-title">Editors</h2><small>Writing and indentation</small></summary>
+  <div class="card" data-search="editor word wrap gutter padding">
+    <div class="row"><label class="label" for="wrap">Word wrap</label><div class="control"><label class="switch"><input id="wrap" type="checkbox" role="switch" checked><span></span></label></div></div>
+    <div class="row"><label class="label" for="padding">Editor padding</label><div class="control"><input id="padding-range" aria-label="Editor padding slider" type="range" min="0" max="32" value="16"><input id="padding" type="number" min="0" max="32" value="16"><span class="unit">px</span></div></div>
+  </div>
+  <div class="card" data-search="editor indentation tab spaces width guides characters">
+    <div class="card-head"><h2>Indentation</h2></div>
+    <div class="row"><div class="label" id="indent-label">Indent with</div><div class="control"><div class="seg" role="group" aria-labelledby="indent-label"><label><input type="radio" name="indent" value="spaces" checked><span>Spaces</span></label><label><input type="radio" name="indent" value="tabs"><span>Tabs</span></label></div></div></div>
+    <div class="row"><label class="label" for="indent-width">Indent width</label><div class="control"><input id="indent-width-range" aria-label="Indent width slider" type="range" min="1" max="16" step="1" value="4"><input id="indent-width" type="number" min="1" max="16" value="4"><span class="unit" title="Columns" aria-label="columns">col</span></div></div>
+    <div class="row"><div class="label" id="tab-marks-label">Show tabs</div><div class="control"><div class="seg" role="group" aria-labelledby="tab-marks-label"><label><input type="radio" name="tab-marks" value="hidden" checked><span>None</span></label><label><input type="radio" name="tab-marks" value="characters"><span>Characters</span></label><label><input type="radio" name="tab-marks" value="guides"><span>Guides</span></label></div></div></div>
+    <div class="preview"><div class="preview-top"><span>Tab preview</span><span id="indent-preview-mode">Mono · 16 pt</span></div><div class="editor-preview" id="indent-preview" aria-label="Indentation preview"></div></div>
+    <div class="hint">Tab markers show actual tab characters, not runs of spaces.</div>
+  </div>
+</details>
+<details class="page category" id="workspace" open>
+  <summary><h2 id="workspace-title">Workspace</h2><small>Tabs and files</small></summary>
+  <div class="card" data-search="workspace tab list position top bottom left right auto-hide delay status bar">
+    <div class="row"><div class="label" id="position-label">Tabs</div><div class="control layout-choices"><div class="seg" role="group" aria-labelledby="position-label"><label><input type="radio" name="position" value="top" checked><span><i class="mini-layout top" aria-hidden="true"></i>Top</span></label><label><input type="radio" name="position" value="bottom"><span><i class="mini-layout bottom" aria-hidden="true"></i>Bottom</span></label><label><input type="radio" name="position" value="left"><span><i class="mini-layout left" aria-hidden="true"></i>Left</span></label><label><input type="radio" name="position" value="right"><span><i class="mini-layout right" aria-hidden="true"></i>Right</span></label></div></div></div>
+    <div class="row"><label class="label" for="auto-hide">Auto-hide tabs</label><div class="control"><label class="switch"><input id="auto-hide" type="checkbox" role="switch"><span></span></label></div></div>
+    <div class="row" id="delay-row" hidden><label class="label" for="delay">Hide after</label><div class="control"><select id="delay" style="min-width:90px"><option>0.1</option><option>0.3</option><option>0.5</option><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select><span class="unit">s</span></div></div>
+    <div class="row"><label class="label" for="status-bar">Status bar</label><div class="control"><label class="switch"><input id="status-bar" type="checkbox" role="switch" checked><span></span></label></div></div>
+  </div>
+  <div class="card" data-search="workspace opening files current new tab placement recent">
+    <div class="card-head"><h2>Opening files</h2></div>
+    <div class="row"><div class="label" id="open-label">Open files in</div><div class="control"><div class="seg" role="group" aria-labelledby="open-label"><label><input type="radio" name="open-in" value="new" checked><span>New tab</span></label><label><input type="radio" name="open-in" value="current"><span>Current tab</span></label></div></div></div>
+    <div class="row"><label class="label" for="new-tabs">Place new tabs</label><div class="control"><select id="new-tabs"><option>At the start</option><option>At the end</option><option>Before active tab</option><option selected>After active tab</option></select></div></div>
+    <div class="row"><label class="label" for="recent-files">Show recent files</label><div class="control"><label class="switch"><input id="recent-files" type="checkbox" role="switch" checked><span></span></label></div></div>
+  </div>
+</details>
+<details class="page category" id="history" open>
+  <summary><h2 id="history-title">History</h2><small>Recovery and storage</small></summary>
+  <div class="card" data-search="history recovery reopen archived tabs changed files restore">
+    <div class="card-head"><h2>Recovery</h2></div>
+    <div class="row"><label class="label" for="restore-archive">Restore history when reopening files</label><div class="control"><label class="switch"><input id="restore-archive" type="checkbox" role="switch" checked><span></span></label></div></div>
+    <div class="row"><label class="label" for="changed-files">Also open changed disk files<small>Keep the disk version alongside recovered text.</small></label><div class="control"><label class="switch"><input id="changed-files" type="checkbox" role="switch" checked><span></span></label></div></div>
+  </div>
+  <div class="card" data-search="history retention archives closed tabs recovery points snapshots expiry days limits budgets">
+    <div class="card-head"><h2>Retention</h2><small>Example: 6 closed tabs · 10 recovery points</small></div>
+    <div class="row"><label class="label" for="retention">Keep closed tabs for</label><div class="control"><select id="retention"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="0">No expiry</option><option value="custom">Custom…</option></select></div></div>
+    <div class="row" id="custom-retention" hidden><label class="label" for="retention-days">Retention period</label><div class="control"><input id="retention-days" type="number" min="1" max="36500" value="60"><span class="unit">days</span></div></div>
+    <div class="row"><label class="label" for="archive-limit">Closed-tab budget</label><div class="control"><input id="archive-limit-range" aria-label="Closed-tab budget slider in MiB" type="range" min="1" max="65536" step="1" value="256"><input id="archive-limit" type="number" min="1" max="65536" value="256"><span class="unit">MiB</span></div></div>
+    <div class="row"><label class="label" for="snapshot-limit">Recovery-point budget</label><div class="control"><input id="snapshot-limit-range" aria-label="Recovery-point budget slider in MiB" type="range" min="1" max="16384" step="1" value="128"><input id="snapshot-limit" type="number" min="1" max="16384" value="128"><span class="unit">MiB</span></div></div>
+    <div class="hint">Age and size limits both apply. <strong>No expiry</strong> removes the age limit only. Budgets limit retained data, not the database file size.</div>
+  </div>
+  <div class="card" data-search="history undo memory RAM persisted per-file total automatic limits">
+    <div class="card-head"><h2>Undo limits</h2></div>
+      <div class="row"><label class="label" for="undo-file">Memory per file</label><div class="control"><input id="undo-file-range" aria-label="Memory per file slider in MiB" type="range" min="1" max="1024" step="1" value="64"><input id="undo-file" type="number" min="1" max="1024" value="64"><span class="unit">MiB</span></div></div>
+      <div class="row"><label class="label" for="undo-total">Memory across all files</label><div class="control"><input id="undo-total-range" aria-label="Memory across all files slider in MiB" type="range" min="4" max="4096" step="1" value="512"><input id="undo-total" type="number" min="4" max="4096" value="512"><span class="unit">MiB</span></div></div>
+      <div class="row"><label class="label" for="undo-saved">Saved undo per file</label><div class="control"><input id="undo-saved-range" aria-label="Saved undo per file slider in MiB" type="range" min="0" max="1024" step="1" value="16"><input id="undo-saved" type="number" min="0" max="1024" value="16"><span class="unit">MiB</span></div></div>
+      <div class="row"><span class="label">Recommended limits</span><div class="control"><button id="auto-limits" title="Recalculate limits once from available memory. This prototype uses example values.">Use recommended</button></div></div>
+  </div>
+  <div class="card" data-search="storage disk usage breakdown database journal settings files payload archive references reusable space allocated">
+    <div class="storage-overview"><div><h2>Files on disk</h2><div class="stat" id="disk-total">—</div><p>Actual file sizes, not a retention budget.</p></div><span class="storage-tag">Illustrative data</span></div>
+    <div class="card-head"><h2>Disk breakdown</h2></div><div class="chart-wrap" id="disk-chart"></div><div class="row"><span class="label">Allocated on disk</span><span class="muted">10.04 MiB</span></div>
+    <section aria-labelledby="payload-heading"><div class="card-head"><h2 id="payload-heading">Recovery payloads</h2><small id="payload-total"></small></div><div class="chart-wrap" id="payload-chart"></div><div class="row"><span class="label">Reusable database space</span><span class="muted">8.00 KiB</span></div><div class="row"><span class="label">Archive references</span><span class="muted">158.06 KiB</span></div></section>
+  </div>
+</details>
+<details class="page category" id="app" open>
+  <summary><h2 id="app-title">Application</h2><small>Startup and configuration</small></summary>
+  <div class="card" data-search="application startup session continue previous fresh opening">
+    <div class="row"><div class="label" id="startup-label">On launch</div><div class="control"><div class="seg" role="group" aria-labelledby="startup-label"><label><input type="radio" name="startup" value="continue" checked><span>Continue session</span></label><label><input type="radio" name="startup" value="fresh"><span>Start fresh</span></label></div></div></div>
+  </div>
+  <div class="card" data-search="application advanced configuration TOML settings file path open reset defaults">
+    <div class="row"><div class="label">Settings file<small>TOML · Loaded on startup</small></div><div class="control"><button id="open-settings">Open file <span aria-hidden="true">↗</span></button></div></div>
+    <div class="inset path">Example: ~/.config/scratchpad/settings.toml</div>
+    <div class="row"><div class="label">Reset all settings<small>Restore preferences without deleting documents.</small></div><div class="control"><button class="danger" id="reset-all">Reset settings…</button></div></div>
+  </div>
+</details>
+<details class="design-notes category" id="notes">
+  <summary><h2 id="notes-title">Design rationale</h2><small>Proposal notes</small></summary>
+  <p class="notes-intro">Organize around what people are trying to change, not the implementation. Show the setting once, make its control predictable, and keep explanations only where they prevent a mistake.</p>
+  <div class="notes-grid">
+    <article class="note"><span class="number">01 / STRUCTURE</span><h2>One list, five expandable groups</h2><p>Appearance, Editors, Workspace, History and Application stay in one scrollable page. Expand several groups at once, or collapse any you do not need. No sidebar or separate settings screens.</p></article>
+    <article class="note"><span class="number">02 / CONSISTENCY</span><h2>One row, one decision</h2><p>A stable label column and a right-aligned control column. Shared row height, spacing and control sizes. Font and size dropdowns share a left edge in the control column. Text and tab previews share the same font, colors, padding and preview frame. Only the five expandable categories have containers; inner groups use quiet headings and dividers, never another rounded card. No section-reset controls.</p></article>
+    <article class="note"><span class="number">03 / LANGUAGE</span><h2>Labels that do the explaining</h2><p>“Editor padding”, not “Gutter”. “Memory across all files”, not “Total”. “Saved undo per file”, not “Persisted per file”. Remove sentences that merely repeat the label.</p></article>
+    <article class="note"><span class="number">04 / DISCLOSURE</span><h2>Hide complexity, not everyday settings</h2><p>Text, background and highlight controls remain visible in every appearance mode. Recovery payloads have no inner disclosure. All three undo limits stay visible with sliders and exact MiB inputs. Only dependent timing remains tucked away. Search opens matching groups, then restores their previous expansion state.</p></article>
+  </div>
+  <div class="section-label">Reorganizing existing settings</div>
+  <div class="card"><table class="notes-table"><thead><tr><th>Destination</th><th>Contents</th><th>Why it belongs here</th></tr></thead><tbody>
+    <tr><td>Appearance</td><td>Appearance source, font, size, theme, text/background/highlight colors, preview</td><td>One place to answer “How should my text look?” Preserve the distinction between OS appearance and OS color mode.</td></tr>
+    <tr><td>Editors</td><td>Word wrap, padding, indentation type/width, tab visualization</td><td>Writing behavior together; wrap no longer floats in its own appearance card.</td></tr>
+    <tr><td>Workspace</td><td>Tab position, auto-hide/delay, status bar, file-opening target, new-tab placement, recent files</td><td>“Tab Position” was too narrow a heading for a status bar. Opening target and new-tab placement are related decisions.</td></tr>
+    <tr><td>History</td><td>Reopening recovery, archive retention, archive/snapshot budgets, undo budgets, disk and payload charts</td><td>Behavior first, resource tuning second, diagnostics last. Do not confuse measured usage with configured limits.</td></tr>
+    <tr><td>Application</td><td>Startup session, settings file, reset preferences</td><td>Application-level actions, separated from file-opening behavior and recovery policy.</td></tr>
+  </tbody></table></div>
+  <div class="section-label">Choose the control to fit the value</div>
+  <div class="card"><table class="notes-table"><thead><tr><th>Setting</th><th>Recommended control</th><th>Reason</th></tr></thead><tbody>
+    <tr><td>Wrap, auto-hide, status bar, recent files, recovery flags</td><td>Switch</td><td>Immediate, independent on/off behavior. No redundant “Enabled” text.</td></tr>
+    <tr><td>Appearance source, indentation, file target, startup</td><td>Two-option segmented radio group</td><td>Both alternatives visible. Use stacked radios when translations or a narrow window need more room.</td></tr>
+    <tr><td>Tab position</td><td>Four miniature layouts</td><td>Spatial choice, spatial control. Keep text labels for clarity and accessibility.</td></tr>
+    <tr><td>Font / size / hide delay</td><td>Compact select</td><td>These are existing finite option sets. Preserve supported values rather than implying arbitrary precision.</td></tr>
+    <tr><td>Indent width</td><td>Slider + integer stepper, 1–16</td><td>Scrub to see the shared preview change, or enter an exact column count. Both controls stay synchronized.</td></tr>
+    <tr><td>Editor padding</td><td>Slider + editable px value</td><td>A genuinely visual adjustment; scrubbing is useful here. Keep both values synchronized.</td></tr>
+    <tr><td>Retention period</td><td>7 / 30 / 90 days, No expiry, Custom</td><td>A 0–36,500-day slider is not useful. Make “No expiry” explicit, not a hidden meaning of zero. Preserve arbitrary existing values via Custom.</td></tr>
+    <tr><td>Closed-tab / recovery-point budgets</td><td>Slider + number field + MiB unit</td><td>Drag for quick adjustment; type for precision across the full supported range. Both controls represent the same value.</td></tr>
+    <tr><td>Undo budgets</td><td>Slider + number field + MiB unit</td><td>Always visible within History. All slider rows use the same track, number-field and fixed-width unit columns. “Columns” is shortened to “col”; supported ranges are preserved.</td></tr>
+    <tr><td>Recommended undo limits</td><td>One action button</td><td>The existing reset calculates defaults once. Do not invent a persistent Auto/Custom mode without backend support.</td></tr>
+    <tr><td>Storage breakdowns</td><td>Pie chart + legend + exact values</td><td>Composition, not progress toward a limit. Distinct colors, zero-value legend entries, and separate physical and logical totals. Payloads are inside the database/journal; reusable space and overlapping references stay outside the pie. Keep these accounting details in the design notes, not a paragraph below the chart.</td></tr>
+  </tbody></table></div>
+  <div class="recommendation"><strong>Keep the entry-count limit out of the UI.</strong> As requested, no “maximum detailed entries” row. The underlying limit remains intact; memory controls must not imply they change it.</div>
+  <div class="section-label">Interaction contract</div>
+  <div class="card"><ul class="notes-list">
+    <li><strong>Search all groups.</strong> Match labels and older terms such as “gutter”, “persisted” and “archive”. Reveal matching collapsed content and show its category. No horizontal scrolling at narrow window sizes.</li>
+    <li><strong>Apply valid changes immediately.</strong> No Save button for ordinary preferences. Commit numeric edits on Enter or blur; reject invalid values inline and keep the last valid value. Display a save failure rather than falsely claiming success. Startup choices apply on the next launch; no explanatory footer is needed.</li>
+    <li><strong>Respect dependencies.</strong> System appearance keeps all controls visible. Editing an appearance control explicitly switches to Scratchpad, and editing a color selects Custom. Auto-hide remembers the delay while off. New-tab placement remains available even when files open in the current tab: users can still create tabs.</li>
+    <li><strong>Reset safely.</strong> No reset buttons or reset labels within category headers. Keep only the explicit global reset in Application, with confirmation. Retention changes that can prune data need a clear consequence before applying; a lower budget is not an immediate disk-space guarantee.</li>
+    <li><strong>Do not equate zero with unavailable.</strong> Load disk usage asynchronously. On failure, show Retry and an unavailable state while keeping policy controls editable. Show a neutral “No data” pie only for a successful zero result.</li>
+    <li><strong>Accessible by default.</strong> Native-style keyboard behavior, named controls, visible focus, readable contrast, non-color labels, 36px controls and generous row targets. No vital help available only on hover.</li>
+  </ul></div>
+  <div class="section-label">Scope & implementation</div>
+  <div class="card"><div class="notes-list"><p><span class="tag">Existing behavior</span> All preference concepts above come from the current Rust settings UI. The sample values are illustrative, not a claim about shipped defaults. No additional “sync”, account or telemetry settings are invented.</p><p style="margin-top:14px"><span class="tag">New UI work</span> Flat expandable groups, search aliases, aligned synchronized sliders, shared previews, retention presets, validation and dependency handling need implementation. Reuse existing settings-controller actions and their persistence semantics; do not write a parallel settings layer.</p><p style="margin-top:14px"><span class="tag">Prototype only</span> Expandable groups, search, synchronized sliders, dependencies, shared text/tab preview styling and global reset work locally. Charts use example data. Open-file and recommended-limit actions are demonstrations. No files are opened, no OS settings or available memory are read, and no preferences survive a reload.</p></div></div>
+  <p class="fine-print">Suggested order: 1. Regroup and shorten copy → 2. Shared row/control components → 3. Precise numeric inputs and dependencies → 4. Search and validation → 5. Visual and accessibility regression tests.</p>
+</details>
+<div id="no-results" class="no-results" hidden>No matching settings. Try “tabs”, “font” or “history”.</div>
+</main>
+</div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog id="reset-dialog" aria-labelledby="reset-title"><h2 id="reset-title">Reset this prototype?</h2><p>All controls return to their example values. Your Scratchpad preferences and documents are unaffected.</p><div class="actions"><button id="cancel-reset" autofocus>Cancel</button><button id="confirm-reset" class="danger">Reset prototype</button></div></dialog>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const all = (selector, root = document) => [...root.querySelectorAll(selector)];
+const radio = name => document.querySelector(`input[name="${name}"]:checked`).value;
+const pages = all('.page');
+const sliderFields = ['padding','indent-width','archive-limit','snapshot-limit','undo-file','undo-total','undo-saved'];
+let toastTimer;
+const controls = all('.page input, .page select');
+const snapshot = elements => elements.map(el => ({el, value:el.value, checked:el.checked}));
+const initial = snapshot(controls);
+function restore(state){state.forEach(({el,value,checked})=>{el.value=value;if('checked' in el)el.checked=checked;if(el.type==='number')el.dataset.lastValid=value;});sync();}
+function notify(message){
+  clearTimeout(toastTimer);$('toast').replaceChildren(document.createTextNode(message));
+  toastTimer=setTimeout(()=>{$('toast').replaceChildren();},4500);
+}
+$('notes-link').addEventListener('click',()=>{$('search').value='';filter();$('notes').open=true;});
+for(const [id,open] of [['expand-all',true],['collapse-all',false]]){
+  $(id).addEventListener('click',()=>{pages.filter(page=>!page.hidden).forEach(page=>page.open=open);});
+}
+const detailsState = new Map();
+function filter(){
+  const query=$('search').value.trim().toLowerCase();
+  const terms=query.split(/\s+/).filter(Boolean);
+  let count=0;
+  if(query&&!detailsState.size){all('details').forEach(detail=>detailsState.set(detail,detail.open));}
+  pages.forEach(page=>{
+    let found=false;
+    all('[data-search]',page).forEach(card=>{
+      const haystack=(page.querySelector('summary').textContent+' '+card.dataset.search+' '+card.textContent).toLowerCase();
+      const matches=terms.every(term=>haystack.includes(term));
+      card.hidden=!!query&&!matches;
+      if(matches){found=true;if(query)count++;}
+      all('details',card).forEach(detail=>{
+        if(query&&matches)detail.open=true;
+      });
+    });
+    page.hidden=!!query&&!found;
+    if(query&&found)page.open=true;
+    all('.section-label,.fine-print',page).forEach(el=>el.hidden=!!query);
+  });
+  if(!query){detailsState.forEach((open,detail)=>detail.open=open);detailsState.clear();}
+  $('notes').hidden=!!query;
+  $('search-status').hidden=!query;
+  $('search-status').textContent=`${count} matching ${count===1?'group':'groups'} across all settings`;
+  $('search-status').style.margin='0 0 22px';
+  $('no-results').hidden=!query||count>0;
+}
+$('search').addEventListener('input',filter);
+function sync(){
+  const system=radio('source')==='system';
+  $('system-summary').hidden=!system;
+  sliderFields.forEach(id=>{const field=$(id);if(field.checkValidity())$(id+'-range').value=field.value;});
+  $('delay-row').hidden=!$('auto-hide').checked;
+  $('custom-retention').hidden=$('retention').value!=='custom';
+  const mode=system?'system':radio('theme');
+  const light=mode==='light'||(mode==='system'&&matchMedia('(prefers-color-scheme: light)').matches);
+  const font=system?'Standard':$('font').value;
+  const style={
+    color:mode==='custom'?$('text-color').value:light?'#253039':'#e1e8ec',
+    background:mode==='custom'?$('background-color').value:light?'#f1f3f2':'#171d21',
+    fontFamily:{Standard:'system-ui, sans-serif',Flex:'system-ui, sans-serif',Mono:'ui-monospace, monospace',Serif:'Georgia, serif'}[font],
+    fontSize:(system?14:$('font-size').value)+'pt',
+    padding:($('padding').checkValidity()?$('padding').value:$('padding').dataset.lastValid)+'px',
+    whiteSpace:$('wrap').checked?'pre-wrap':'pre'
+  };
+  for(const preview of [$('appearance-preview'),$('indent-preview')])Object.assign(preview.style,style);
+  const highlight=mode==='custom'?$('highlight-color').value:light?'#c9e6d8':'#35584c';
+  $('appearance-preview').querySelector('mark').style.background=highlight;
+  for(const id of ['preview-mode','indent-preview-mode'])$(id).textContent=system?'System · Example':`${font} · ${$('font-size').value} pt`;
+  const width=$('indent-width');
+  const columns=Number(width.checkValidity()?width.value:width.dataset.lastValid)||4;
+  const indent=radio('indent')==='tabs'?'\t':' '.repeat(columns);
+  const mark=radio('tab-marks');
+  const visibleIndent=radio('indent')==='tabs'&&mark!=='hidden'?(mark==='characters'?'→':'│')+' '.repeat(Math.max(0,columns-1)):indent;
+  $('indent-preview').style.tabSize=columns;
+  $('indent-preview').replaceChildren(document.createTextNode(`Project notes\n${visibleIndent}`));
+  const match=document.createElement('mark');match.textContent='A small idea';match.style.background=highlight;
+  $('indent-preview').append(match,document.createTextNode(`\n${visibleIndent}Something to come back to`));
+}
+controls.forEach(el=>{
+  el.addEventListener('change',()=>{
+    if(el.type==='number'&&!el.checkValidity()){el.reportValidity();return;}
+    if(el.closest('#custom-style')){
+      document.querySelector('input[name="source"][value="app"]').checked=true;
+      if(el.name==='theme'&&el.value!=='custom'){
+        const light=el.value==='light'||(el.value==='system'&&matchMedia('(prefers-color-scheme: light)').matches);
+        $('text-color').value=light?'#253039':'#e1e8ec';
+        $('background-color').value=light?'#f1f3f2':'#171d21';
+        $('highlight-color').value=light?'#c9e6d8':'#35584c';
+      }
+    }
+    sync();
+  });
+  if(el.type==='color')el.addEventListener('input',()=>{
+    document.querySelector('input[name="source"][value="app"]').checked=true;
+    document.querySelector('input[name="theme"][value="custom"]').checked=true;
+    sync();
+  });
+  if(el.type==='number'){
+    el.required=true;
+    el.dataset.lastValid=el.value;
+    el.addEventListener('change',()=>{if(el.checkValidity())el.dataset.lastValid=el.value;});
+    el.addEventListener('blur',()=>{if(!el.checkValidity()){el.value=el.dataset.lastValid;notify('Enter a number within the supported range. Last valid value restored.');sync();}});
+  }
+});
+sliderFields.forEach(id=>{
+  const field=$(id),slider=$(id+'-range');
+  slider.addEventListener('input',()=>{field.value=slider.value;field.dataset.lastValid=field.value;sync();});
+  field.addEventListener('input',()=>{if(field.checkValidity())sync();});
+});
+$('auto-limits').addEventListener('click',()=>{
+  restore(initial.filter(({el})=>['undo-file','undo-total','undo-saved'].includes(el.id)));
+  notify('Example limits restored. The app would calculate these from available memory.');
+});
+$('open-settings').addEventListener('click',()=>notify('In Scratchpad, this opens settings.toml in an editor tab.'));
+$('reset-all').addEventListener('click',()=>$('reset-dialog').showModal());
+$('cancel-reset').addEventListener('click',()=>$('reset-dialog').close());
+$('confirm-reset').addEventListener('click',()=>{restore(initial);$('reset-dialog').close();notify('Prototype reset. No Scratchpad files were changed.');});
+const colors=['#90a7c5','#63b9ee','#b7a2e1','#e1ba77','#e68f9f','#91bf80','#d894c8','#6cc5b7'];
+const disk=[['Other data files',6457453],['Session database',4096],['Journal & shared memory',3786312],['Settings files',1963]];
+const payload=[['Current & archived text',0],['Historical snapshot text',29768],['Shared text',100854],['Undo history',125184],['Session metadata',104530],['Archive metadata',4096],['Recovery-point metadata',2038],['Awaiting cleanup',0]];
+function bytes(value){if(value<1024)return value+' B';if(value<1048576)return(value/1024).toFixed(2)+' KiB';return(value/1048576).toFixed(2)+' MiB';}
+function chart(id,parts,caption){
+  const total=parts.reduce((sum,[,value])=>sum+value,0);
+  const pie=document.createElement('div');pie.className='pie';pie.setAttribute('role','img');
+  pie.setAttribute('aria-label','Pie chart. '+parts.map(([label,value])=>`${label}: ${bytes(value)}, ${(value/total*100).toFixed(2)}%`).join('; '));
+  let angle=0;const slices=parts.map(([,value],index)=>{const start=angle;angle+=value/total*360;return `${colors[index]} ${start}deg ${angle}deg`;});
+  pie.style.background=`conic-gradient(${slices.join(',')})`;
+  const legend=document.createElement('div');legend.className='legend';
+  parts.forEach(([label,value],index)=>{
+    const item=document.createElement('div');item.className='legend-item';item.title=`${value.toLocaleString()} bytes · ${(value/total*100).toFixed(2)}%`;
+    const dot=document.createElement('span');dot.className='dot';dot.style.background=colors[index];
+    const name=document.createElement('span');name.textContent=label;
+    const size=document.createElement('span');size.className='value';size.textContent=bytes(value);
+    item.append(dot,name,size);legend.append(item);
+  });
+  const text=document.createElement('p');text.className='chart-caption';text.textContent=caption;
+  $(id).append(pie,legend,text);return total;
+}
+$('disk-total').textContent=bytes(chart('disk-chart',disk,'Share of total file size. Colors identify categories, not warnings.'));
+$('payload-total').textContent=bytes(chart('payload-chart',payload,'Share of recovery payloads. Tiny and empty categories remain in the legend.'));
+sync();
+</script>
+</body>
+</html>
