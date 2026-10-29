@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scratchpad · Storage & recovery design proposals</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --page: #1b1e23; --card: #2a2f39; --control: #3a3f47; --border: #3d434d;
+    --text: #f2f4f7; --muted: #b5becb; --faint: #8c97a7; --accent: #2aa8f2;
+    --inset: #242932; --line: #363d48; --track: #20252d;
+    --other: #8698b4; --db: #48b6f7; --journal: #b6a1df; --config: #e1b975;
+    --shared: #6fc1ad; --undo: #a79bdb; --meta: #839dbf;
+    --mono: "Noto Sans Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  }
+  body.light {
+    color-scheme: light;
+    --page: #edf1f6; --card: #fff; --control: #eef3f9; --border: #ccd5e2;
+    --text: #1c232d; --muted: #536173; --faint: #657487; --inset: #f5f7fa;
+    --line: #e2e7ee; --track: #e7ecf2; --accent: #087abf;
+    --other: #798da9; --db: #1888c9; --journal: #9582c6; --config: #b68a39;
+    --shared: #29856f; --undo: #8471bd; --meta: #5d80aa;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font: 14px/1.5 var(--mono); }
+  button, input { font: inherit; }
+  button, summary { -webkit-tap-highlight-color: transparent; }
+  button { cursor: pointer; color: inherit; }
+  button:focus-visible, summary:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+  button:hover { border-color: var(--accent); }
+  h1, h2, h3, p { margin: 0; }
+  h1 { font-size: 24px; font-weight: 500; letter-spacing: -.7px; }
+  h2 { font-size: 20px; font-weight: 500; }
+  h3 { font-size: 15px; font-weight: 500; }
+  small, .small { font-size: 12px; }
+  .muted { color: var(--muted); }
+  .icon { width: 19px; height: 19px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
+  .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+  .studio { max-width: 1110px; padding: 36px 24px 24px; margin: auto; }
+  .studio-top { display: flex; justify-content: space-between; gap: 20px; align-items: center; }
+  .eyebrow { color: var(--muted); font-size: 11px; letter-spacing: 1.8px; text-transform: uppercase; margin-bottom: 8px; }
+  .studio p { margin-top: 9px; max-width: 820px; color: var(--muted); font-size: 13px; }
+  .utility { border: 1px solid var(--border); border-radius: 7px; padding: 8px 12px; background: var(--card); white-space: nowrap; }
+  .proposal-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 24px; }
+  .proposal-choice { background: none; border: 1px solid var(--border); text-align: left; border-radius: 9px; padding: 14px 16px; }
+  .proposal-choice[aria-pressed="true"] { background: var(--card); border-color: var(--accent); box-shadow: inset 0 2px var(--accent); }
+  .proposal-choice .letter { color: var(--accent); margin-right: 9px; }
+  .proposal-choice small { display: block; color: var(--muted); margin: 5px 0 0 22px; font-size: 11px; }
+  .stage { max-width: 1110px; margin: 0 auto; padding: 26px 24px 60px; border-top: 1px solid var(--border); display: grid; grid-template-columns: minmax(0, 720px) minmax(200px, 1fr); gap: 42px; align-items: start; }
+  .settings { min-width: 0; container-type: inline-size; }
+  .settings-title { display: flex; align-items: center; gap: 10px; font-size: 28px; margin-bottom: 24px; }
+  .category-title { margin-bottom: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
+  .card > summary, .card-header { min-height: 72px; display: flex; align-items: center; gap: 16px; padding: 14px 18px; }
+  summary { cursor: pointer; list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  .card > summary .icon, .card-header > .icon { color: var(--muted); }
+  .card-heading { min-width: 0; flex: 1; }
+  .card-heading > span { display: block; font-size: 15px; }
+  .card-heading small { color: var(--muted); display: block; margin-top: 3px; font-size: 12.5px; }
+  .chevron { width: 14px; height: 14px; color: var(--muted); transition: transform .15s; }
+  details[open] > summary > .chevron { transform: rotate(180deg); }
+  .summary-value { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .card-body { padding: 0 18px 14px; }
+  .card-body::before { content: ""; display: block; border-top: 1px solid var(--line); margin: 0 0 4px 35px; }
+  .indented { margin-left: 35px; }
+  .section-row { display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 10px 0; }
+  .section-row + .section-row { border-top: 1px solid var(--line); }
+  .section-row > .label { flex: 1; min-width: 0; }
+  .label small { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .value { white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+  .value small { display: block; color: var(--muted); margin-top: 2px; font-size: 11px; }
+  .pill { display: inline-flex; align-items: center; padding: 6px 10px; background: var(--control); border-radius: 6px; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .big-value { font-size: 23px; font-weight: 500; letter-spacing: -.8px; }
+  .big-value span { font-size: 13px; color: var(--muted); letter-spacing: 0; }
+  .stack { height: 12px; display: flex; overflow: hidden; border-radius: 4px; background: var(--track); }
+  .stack span { width: var(--part); background: var(--color); }
+  .stack span + span { border-left: 1px solid var(--card); }
+  .disk-stack { --other-part: 88.4%; }
+  .graph-note { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin: 14px 0 18px; }
+  .legend-item { display: grid; grid-template-columns: 7px 1fr auto; align-items: center; gap: 9px; font-size: 12px; min-width: 0; }
+  .swatch { width: 7px; height: 7px; border-radius: 2px; background: var(--color); display: inline-block; }
+  .legend-item .value { color: var(--muted); font-size: 11px; }
+  .recovery-line { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 22px; margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+  .recovery-line span { display: inline-flex; align-items: center; gap: 7px; }
+  .recovery-line b { color: var(--text); font-weight: 500; }
+  .recovery-line .icon { width: 15px; height: 15px; }
+  .separator { border-top: 1px solid var(--line); margin-top: 6px; }
+  .micro-rows { display: grid; gap: 12px; padding: 2px 0 16px; }
+  .micro-row { display: grid; grid-template-columns: 150px 1fr 92px; align-items: center; gap: 15px; font-size: 12px; }
+  .micro-track { background: var(--track); border-radius: 3px; height: 5px; }
+  .micro-track > span { display: block; height: 100%; width: var(--part); background: var(--color); border-radius: inherit; }
+  .micro-row .value { color: var(--muted); }
+  .info { display: flex; align-items: flex-start; gap: 9px; color: var(--muted); font-size: 11px; margin: 0 0 14px; }
+  .info .icon { width: 15px; height: 15px; margin-top: 1px; }
+  .technical { border-top: 1px solid var(--line); }
+  .technical > summary { font-size: 12px; display: flex; gap: 8px; align-items: center; padding: 12px 0; color: var(--muted); }
+  .technical > summary .chevron { width: 12px; margin-left: auto; }
+  .technical-inner { padding: 0 0 14px; }
+  .technical-inner .explainer { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
+  .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .data-table td { padding: 7px 0; vertical-align: top; }
+  .data-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .data-table td:first-child { padding-right: 16px; color: var(--muted); }
+  .data-table tr.rule td { border-top: 1px solid var(--line); padding-top: 12px; }
+  .data-table small { display: block; font-size: 10px; color: var(--faint); margin-top: 2px; }
+  .location { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); font-size: 11px; }
+  .location .icon { width: 16px; height: 16px; }
+  .location code { font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .icon-button { background: var(--control); border: 1px solid transparent; border-radius: 5px; padding: 6px; display: inline-flex; }
+  .refresh-note { color: var(--faint); font-size: 10px; padding: 10px 0 0 35px; }
+  .footnote { color: var(--muted); font-size: 11px; margin-top: 16px; line-height: 1.7; }
+  .notes { padding-top: 76px; font-size: 12px; }
+  .tag { display: inline-block; font-size: 10px; color: var(--accent); border: 1px solid var(--border); border-radius: 5px; padding: 4px 7px; margin-bottom: 12px; }
+  .notes h2 { font-size: 17px; margin-bottom: 10px; }
+  .notes p { color: var(--muted); line-height: 1.8; }
+  .note { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 15px; }
+  .note h3 { font-size: 12px; margin-bottom: 7px; }
+  .note h3 span { color: var(--accent); margin-right: 7px; }
+  .notes .tradeoff { margin-top: 25px; font-size: 11px; }
+  .notes .tradeoff b { color: var(--text); font-weight: 500; }
+  [hidden] { display: none !important; }
+  .lens-grid { display: grid; grid-template-columns: 180px 1fr; align-items: center; gap: 25px; padding: 22px 0; }
+  .donut { width: 164px; height: 164px; border-radius: 50%; margin: auto; background: conic-gradient(var(--other) 0 88.4%, var(--db) 88.4% 94.85%, var(--journal) 94.85% 99.97%, var(--config) 99.97% 100%); display: grid; place-items: center; }
+  .donut::before { content: ""; width: 138px; height: 138px; border-radius: 50%; background: var(--card); grid-area: 1/1; }
+  .donut-label { grid-area: 1/1; text-align: center; z-index: 1; }
+  .donut-label small { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .lens-grid .legend { grid-template-columns: 1fr; margin: 0 0 14px; gap: 13px; }
+  .lens-grid .allocated { color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); padding-top: 11px; }
+  .lens-title { padding-top: 15px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .eyelabel { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .payload-panel { background: var(--inset); border: 1px solid var(--line); border-radius: 7px; padding: 16px; margin-bottom: 16px; }
+  .payload-panel .section-row { padding-top: 0; min-height: 40px; }
+  .payload-panel .recovery-line { margin-top: 13px; margin-bottom: 0; }
+  .payload-panel .legend { margin-bottom: 10px; }
+  .control-row { display: grid; grid-template-columns: 1fr minmax(190px, 48%); gap: 16px; align-items: center; padding: 14px 0; min-height: 70px; }
+  .control-row + .control-row { border-top: 1px solid var(--line); }
+  .control-label small { display: block; color: var(--muted); margin-top: 4px; font-size: 11px; }
+  .slider-line { display: flex; align-items: center; gap: 12px; }
+  input[type=range] { width: 100%; min-width: 0; accent-color: var(--accent); cursor: pointer; height: 18px; }
+  output { display: inline-block; min-width: 80px; padding: 6px 8px; border-radius: 6px; background: var(--control); text-align: center; font-size: 12px; white-space: nowrap; }
+  .switch { background: var(--track); border: 1px solid var(--border); border-radius: 20px; width: 36px; height: 21px; position: relative; padding: 0; }
+  .switch::after { content: ""; width: 13px; height: 13px; background: var(--text); border-radius: 50%; position: absolute; top: 3px; left: 3px; }
+  .switch[aria-checked=true] { background: var(--accent); border-color: var(--accent); }
+  .switch[aria-checked=true]::after { left: 18px; background: white; }
+  .toggle-group { display: flex; gap: 9px; align-items: center; justify-content: flex-end; font-size: 12px; }
+  .integration-summary { padding: 15px 0; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+  .integration-summary .stack { height: 7px; margin: 12px 0 8px; }
+  .integration-summary .section-row { min-height: 0; padding: 0; }
+  .inline-note { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .overview-count { font-size: 12px; color: var(--muted); }
+  .overview-count b { color: var(--text); font-weight: 500; }
+  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); padding: 10px 18px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); z-index: 10; font-size: 12px; box-shadow: 0 6px 30px #0004; }
+  @container (max-width: 590px) {
+    .legend { grid-template-columns: 1fr; }
+    .micro-row { grid-template-columns: 135px 1fr 87px; gap: 8px; }
+    .lens-grid { grid-template-columns: 145px 1fr; gap: 16px; }
+    .donut { width: 136px; height: 136px; } .donut::before { width: 112px; height: 112px; }
+    .summary-value { display: none; }
+  }
+  @media (max-width: 960px) {
+    .stage { grid-template-columns: minmax(0, 720px); justify-content: center; gap: 8px; }
+    .notes { padding-top: 24px; } .notes .note { display: inline-block; vertical-align: top; width: 31%; margin-right: 2%; }
+  }
+  @media (max-width: 600px) {
+    .studio { padding: 22px 16px; } .studio-top { align-items: flex-start; } h1 { font-size: 19px; }
+    .utility { font-size: 11px; } .proposal-picker { gap: 6px; } .proposal-choice { padding: 10px; font-size: 12px; }
+    .proposal-choice small { display: none; } .proposal-choice .letter { display: block; }
+    .stage { padding: 22px 12px 40px; } .settings-title { font-size: 25px; }
+    .card > summary { padding: 14px; gap: 10px; } .card-body { padding: 0 14px 14px; }
+    .indented { margin-left: 0; } .card-body::before { margin-left: 0; } .refresh-note { padding-left: 0; }
+    .micro-row { grid-template-columns: 125px 1fr 83px; font-size: 11px; }
+    .lens-grid { grid-template-columns: 1fr; } .lens-grid .legend { max-width: none; }
+    .control-row { grid-template-columns: 1fr; gap: 9px; } .control-row.toggle-row { grid-template-columns: 1fr auto; }
+    .notes .note { display: block; width: 100%; } .section-row { gap: 8px; }
+    .card-heading small { font-size: 11px; } .big-value { font-size: 21px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+  <symbol id="i-disk" viewBox="0 0 24 24"><path d="M5 3h12l3 3v15H4V3h1zM8 3v6h8V3M8 21v-8h8v8"/><path d="M13 5v2"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 9a8 8 0 1 1 0 7M4 4v5h5M12 7v5l3 2"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><path d="M3 4h18v4H3zM5 8v12h14V8M9 12h6"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V4h6l3 3h9v3M3 7v13h16l3-10H7L3 20"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><path d="M8 8h12v13H8zM16 8V3H3v13h5"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h7m5 0h4M4 17h3m5 0h8M11 4v6M7 14v6"/></symbol>
+</defs></svg>
+<header class="studio">
+  <div class="studio-top"><div><div class="eyebrow">Scratchpad / design study 01</div><h1>Less accounting. More understanding.</h1></div><button class="utility" id="theme-toggle" aria-pressed="false">Light preview</button></div>
+  <p>Three ways to bring disk usage into the settings page’s visual language. Same sample data, different levels of consolidation.</p>
+  <nav class="proposal-picker" aria-label="Choose a design proposal">
+    <button class="proposal-choice" data-proposal="a" aria-pressed="true" aria-controls="proposal-a"><span class="letter">A</span>Compact overview<small>Recommended · least disruption</small></button>
+    <button class="proposal-choice" data-proposal="b" aria-pressed="false" aria-controls="proposal-b"><span class="letter">B</span>Two clear lenses<small>More visual · two distinct measures</small></button>
+    <button class="proposal-choice" data-proposal="c" aria-pressed="false" aria-controls="proposal-c"><span class="letter">C</span>Usage meets policy<small>More consolidation · one place</small></button>
+  </nav>
+</header>
+<main>
+<section class="stage" id="proposal-a" aria-label="Proposal A: Compact overview">
+  <div class="settings">
+    <h2 class="settings-title">Settings</h2><h2 class="category-title">History &amp; Recovery</h2>
+    <div data-context="standard"></div>
+    <details class="card" open>
+      <summary><svg class="icon"><use href="#i-disk"/></svg><div class="card-heading"><span>Storage &amp; recovery</span><small>Disk footprint and retained history.</small></div><span class="summary-value">6.97 MiB</span><svg class="icon chevron"><use href="#i-chevron"/></svg></summary>
+      <div class="card-body"><div class="indented">
+        <div class="section-row"><div class="label">Files on disk<small>Data and settings directories</small></div><div class="value"><div class="big-value">6.97 <span>MiB</span></div><small>7.22 MiB allocated</small></div></div>
+        <div data-disk-chart></div>
+        <div class="section-row separator"><div class="label">Retained recovery data<small>Payloads within the files above</small></div><div class="value">279.50 KiB</div></div>
+        <div class="recovery-line"><span><svg class="icon"><use href="#i-archive"/></svg><b>5</b> closed tabs</span><span><svg class="icon"><use href="#i-history"/></svg><b>16</b> recovery points</span></div>
+        <div class="micro-rows" aria-label="Recovery payload composition">
+          <div class="micro-row"><span>Text &amp; snapshots</span><div class="micro-track"><span style="--part:43%;--color:var(--shared)"></span></div><span class="value">120.20 KiB</span></div>
+          <div class="micro-row"><span>Undo history</span><div class="micro-track"><span style="--part:19.9%;--color:var(--undo)"></span></div><span class="value">55.66 KiB</span></div>
+          <div class="micro-row"><span>Metadata</span><div class="micro-track"><span style="--part:37.1%;--color:var(--meta)"></span></div><span class="value">103.64 KiB</span></div>
+        </div>
+        <div class="info"><svg class="icon"><use href="#i-info"/></svg><span>Included in disk usage, not added to it. Shared text is counted once.</span></div>
+        <div data-technical></div><div data-location></div>
+      </div><p class="refresh-note">Refreshes every 5 s · Excludes original documents and the app</p></div>
+    </details>
+    <p class="footnote">Interactive mockup · Figures copied from your screenshot, rounded for display. No live measurements or application changes.</p>
+  </div>
+  <aside class="notes"><span class="tag">A / RECOMMENDED</span><h2>A settings card,<br>not a dashboard.</h2><p>The same hierarchy, margins and quiet rows as the surrounding controls.</p>
+    <div class="note"><h3><span>01</span>One headline</h3><p>6.97 MiB answers “how much disk?” Allocated space is secondary, rather than another competing total.</p></div>
+    <div class="note"><h3><span>02</span>Combine related facts</h3><p>Counts sit with recovery data. Eight payload rows become three understandable groups and a small composition graph.</p></div>
+    <div class="note"><h3><span>03</span>Detail on demand</h3><p>Exact accounting, shared references and reusable space remain available in one disclosure.</p></div>
+    <p class="tradeoff"><b>Trade-off</b><br>Less visual drama, but the closest fit to the existing settings page.</p>
+  </aside>
+</section>
+<section class="stage" id="proposal-b" aria-label="Proposal B: Two clear lenses" hidden>
+  <div class="settings">
+    <h2 class="settings-title">Settings</h2><h2 class="category-title">History &amp; Recovery</h2><div data-context="standard"></div>
+    <details class="card" open>
+      <summary><svg class="icon"><use href="#i-disk"/></svg><div class="card-heading"><span>Storage &amp; recovery</span><small>Physical files and the history they contain.</small></div><svg class="icon chevron"><use href="#i-chevron"/></svg></summary>
+      <div class="card-body"><div class="indented">
+        <div class="lens-title"><span class="eyelabel">01 / Physical files</span><span class="small muted">Data + settings</span></div>
+        <div class="lens-grid">
+          <div class="donut" role="img" aria-label="6.97 MiB of files: 88.4 percent other data, 6.45 percent session database, 5.13 percent journal and shared memory, approximately 0.03 percent settings"><div class="donut-label"><div class="big-value">6.97 <span>MiB</span></div><small>file sizes</small></div></div>
+          <div><div data-disk-legend></div><div class="allocated">7.22 MiB allocated on disk<br><span class="small">Same files, measured in blocks.</span></div></div>
+        </div>
+        <div class="payload-panel">
+          <div class="section-row"><div class="label"><span class="eyelabel">02 / Recovery payloads</span></div><span class="value">279.50 KiB</span></div>
+          <p class="small muted" style="margin-bottom:14px">A view inside those files, not extra disk usage.</p>
+          <div class="stack" role="img" aria-label="Recovery payloads: text and snapshots 120.20 KiB, undo history 55.66 KiB, metadata 103.64 KiB"><span style="--part:43%;--color:var(--shared)"></span><span style="--part:19.9%;--color:var(--undo)"></span><span style="--part:37.1%;--color:var(--meta)"></span></div>
+          <div class="legend" style="grid-template-columns:1fr"><div class="legend-item"><i class="swatch" style="--color:var(--shared)"></i><span>Text &amp; snapshots</span><span class="value">120.20 KiB</span></div><div class="legend-item"><i class="swatch" style="--color:var(--undo)"></i><span>Undo history</span><span class="value">55.66 KiB</span></div><div class="legend-item"><i class="swatch" style="--color:var(--meta)"></i><span>Metadata</span><span class="value">103.64 KiB</span></div></div>
+          <div class="recovery-line"><span><svg class="icon"><use href="#i-archive"/></svg><b>5</b> closed tabs</span><span><svg class="icon"><use href="#i-history"/></svg><b>16</b> recovery points</span></div>
+        </div>
+        <div data-technical></div><div data-location></div>
+      </div><p class="refresh-note">Refreshes every 5 s · Excludes original documents and the app</p></div>
+    </details><p class="footnote">Interactive mockup · Same sample figures as proposal A. The two charts have different denominators; they must never be added together.</p>
+  </div>
+  <aside class="notes"><span class="tag">B / VISUAL EXPLANATION</span><h2>Two questions.<br>Two clear answers.</h2><p>Use separate visual treatments to explain why file size and recovery payload size differ.</p>
+    <div class="note"><h3><span>01</span>Where disk space goes</h3><p>The ring makes the dominant category obvious: other data files, not the session database.</p></div>
+    <div class="note"><h3><span>02</span>What is retained</h3><p>A quieter inset panel brings together history counts, payload composition and the non-additive explanation.</p></div>
+    <div class="note"><h3><span>03</span>No misleading “free” slice</h3><p>This is composition, not capacity. It does not imply a disk quota or combine overlapping archive references.</p></div>
+    <p class="tradeoff"><b>Trade-off</b><br>Stronger visual explanation, but taller and less consistent with ordinary settings rows.</p>
+  </aside>
+</section>
+<section class="stage" id="proposal-c" aria-label="Proposal C: Usage meets policy" hidden>
+  <div class="settings">
+    <h2 class="settings-title">Settings</h2><h2 class="category-title">History &amp; Recovery</h2><div data-context="undo"></div>
+    <details class="card" open>
+      <summary><svg class="icon"><use href="#i-history"/></svg><div class="card-heading"><span>Recovery &amp; storage</span><small>Retained history, limits and reopening.</small></div><span class="summary-value">6.97 MiB</span><svg class="icon chevron"><use href="#i-chevron"/></svg></summary>
+      <div class="card-body"><div class="indented">
+        <div class="integration-summary">
+          <div class="section-row"><span>Files on disk</span><div class="value" style="margin-left:auto"><span class="big-value">6.97 <span>MiB</span></span></div></div>
+          <div data-disk-stack></div>
+          <div class="overview-count">5 closed tabs · 16 recovery points · <b>279.50 KiB</b> payloads</div>
+          <p class="inline-note">Payloads are included in the file total, not additional usage.</p>
+        </div>
+        <div class="control-row"><label class="control-label" for="archive-limit">Closed tabs<small>5 retained · Logical archive limit</small></label><div class="slider-line"><input id="archive-limit" type="range" min="1" max="2048" value="512" data-unit="MiB"><output for="archive-limit">512 MiB</output></div></div>
+        <div class="control-row"><label class="control-label" for="snapshot-limit">Recovery points<small>16 retained · Logical snapshot limit</small></label><div class="slider-line"><input id="snapshot-limit" type="range" min="1" max="1024" value="256" data-unit="MiB"><output for="snapshot-limit">256 MiB</output></div></div>
+        <div class="control-row"><label class="control-label" for="age-limit">Archive retention<small>Zero means no age limit</small></label><div class="slider-line"><input id="age-limit" type="range" min="0" max="365" value="90" data-unit="days"><output for="age-limit">90 days</output></div></div>
+        <div class="control-row toggle-row"><div class="control-label" id="restore-label">Restore archived tabs<small>When reopening files</small></div><div class="toggle-group"><span class="toggle-value">On</span><button class="switch" role="switch" aria-checked="true" aria-labelledby="restore-label"></button></div></div>
+        <div class="control-row toggle-row"><div class="control-label" id="changed-label">Open changed files<small>Alongside recovered text</small></div><div class="toggle-group"><span class="toggle-value">On</span><button class="switch" role="switch" aria-checked="true" aria-labelledby="changed-label"></button></div></div>
+        <details class="technical"><summary>Disk breakdown<span class="summary-value" style="margin-left:auto">7.22 MiB allocated</span><svg class="icon chevron"><use href="#i-chevron"/></svg></summary><div class="technical-inner"><div data-disk-chart></div><p class="explainer">7.22 MiB allocated measures the same files in filesystem blocks. It is not another category.</p></div></details>
+        <div data-technical></div><div data-location></div>
+      </div><p class="refresh-note">Refreshes every 5 s · Excludes original documents and the app</p></div>
+    </details><p class="footnote">Interactive mockup · Sliders and switches are illustrative, local-only controls. Demo ranges are shortened; no settings are saved.</p>
+  </div>
+  <aside class="notes"><span class="tag">C / STRUCTURAL CHANGE</span><h2>Put evidence beside<br>the decision.</h2><p>Merge Automatic recovery and Disk usage. Keep Undo memory separate: RAM limits are not disk limits.</p>
+    <div class="note"><h3><span>01</span>Counts beside controls</h3><p>“5 retained” belongs next to the archive limit, not in a disconnected statistics tile.</p></div>
+    <div class="note"><h3><span>02</span>Preserve familiar controls</h3><p>Existing label/value alignment, sliders and switches. A compact storage summary replaces the three headline boxes.</p></div>
+    <div class="note"><h3><span>03</span>Do not invent utilisation</h3><p>The screenshot does not provide exact policy-accounted usage. No “157 KiB / 512 MiB” progress bar based on overlapping references.</p></div>
+    <p class="tradeoff"><b>Trade-off</b><br>Best consolidation, but changes information architecture and makes the policy card longer.</p>
+  </aside>
+</section>
+</main>
+<template id="context-undo"><details class="card"><summary><svg class="icon"><use href="#i-history"/></svg><div class="card-heading"><span>Undo memory</span><small>Undo history limits.</small></div><span class="summary-value">Automatic</span><svg class="icon chevron"><use href="#i-chevron"/></svg></summary><div class="card-body"><div class="indented"><div class="section-row"><span class="label">Per-file</span><span class="pill">64 MiB</span></div><div class="section-row"><span class="label">Total</span><span class="pill">512 MiB</span></div><div class="section-row"><span class="label">Persisted per file</span><span class="pill">16 MiB</span></div><p class="small muted" style="padding-bottom:8px">Illustrative existing controls, unchanged by these proposals.</p></div></div></details></template>
+<template id="context-policy"><details class="card"><summary><svg class="icon"><use href="#i-history"/></svg><div class="card-heading"><span>Automatic recovery</span><small>Retention and reopening policy.</small></div><span class="summary-value">90 days</span><svg class="icon chevron"><use href="#i-chevron"/></svg></summary><div class="card-body"><div class="indented"><div class="section-row"><span class="label">Recovery points</span><span class="pill">256 MiB</span></div><div class="section-row"><span class="label">Closed archives</span><span class="pill">512 MiB</span></div><div class="section-row"><span class="label">Archive retention</span><span class="pill">90 days</span></div><p class="small muted" style="padding-bottom:8px">Existing policy controls remain separate in this proposal.</p></div></div></details></template>
+<template id="disk-stack"><div class="stack disk-stack" role="img" aria-label="Files on disk: other data 6.16 MiB, database 460 KiB, journal and shared memory 366.16 KiB, settings 1.92 KiB"><span style="--part:88.4%;--color:var(--other)" title="Other data files · 6.16 MiB"></span><span style="--part:6.45%;--color:var(--db)" title="Session database · 460.00 KiB"></span><span style="--part:5.123%;--color:var(--journal)" title="Write-ahead log & shared memory · 366.16 KiB"></span><span style="--part:.027%;--color:var(--config)" title="Settings files · 1.92 KiB"></span></div></template>
+<template id="disk-legend"><div class="legend"><div class="legend-item"><i class="swatch" style="--color:var(--other)"></i><span>Other data files</span><span class="value">6.16 MiB</span></div><div class="legend-item"><i class="swatch" style="--color:var(--db)"></i><span>Session database</span><span class="value">460.00 KiB</span></div><div class="legend-item"><i class="swatch" style="--color:var(--journal)"></i><span>Journal &amp; memory</span><span class="value">366.16 KiB</span></div><div class="legend-item"><i class="swatch" style="--color:var(--config)"></i><span>Settings files</span><span class="value">1.92 KiB</span></div></div></template>
+<template id="technical"><details class="technical"><summary>Recovery details<svg class="icon chevron"><use href="#i-chevron"/></svg></summary><div class="technical-inner"><p class="explainer">Payload sizes only. Database indexes, page overhead and journal files are included in disk usage, not in this breakdown.</p><table class="data-table" aria-label="Detailed recovery payloads"><tbody>
+<tr><td>Current &amp; archived text</td><td>0 B</td></tr><tr><td>Historical snapshot text</td><td>22.88 KiB</td></tr><tr><td>Shared text<small>Referenced by both buffers and snapshots; counted once.</small></td><td>97.32 KiB</td></tr><tr><td>Undo history</td><td>55.66 KiB</td></tr><tr><td>Session metadata</td><td>98.40 KiB</td></tr><tr><td>Archive metadata</td><td>3.91 KiB</td></tr><tr><td>Recovery point metadata</td><td>1.33 KiB</td></tr><tr><td>Awaiting cleanup</td><td>0 B</td></tr>
+<tr class="rule"><td>Recovery payload total<small>Sum of the categories above, using rounded example values.</small></td><td>279.50 KiB</td></tr>
+<tr class="rule"><td>Reusable database space<small>Empty pages already inside the database. Not extra usage.</small></td><td>0 B</td></tr><tr><td>Archive references<small>Overlaps the payloads above; not added to the total.</small></td><td>157.98 KiB</td></tr>
+</tbody></table></div></details></template>
+<template id="location"><div class="location"><svg class="icon"><use href="#i-folder"/></svg><code title="Data directory: /home/laufan/.local/state/scratchpad">/home/laufan/.local/state/scratchpad</code><button class="icon-button copy-location" aria-label="Copy data directory" title="Copy data directory"><svg class="icon"><use href="#i-copy"/></svg></button></div></template>
+<div id="toast" class="toast" role="status" hidden></div>
+<script>
+  'use strict';
+  const clone = id => document.getElementById(id).content.cloneNode(true);
+  document.querySelectorAll('[data-context]').forEach(host => {
+    host.append(clone('context-undo'));
+    if (host.dataset.context === 'standard') host.append(clone('context-policy'));
+  });
+  document.querySelectorAll('[data-disk-chart]').forEach(host => host.append(clone('disk-stack'), clone('disk-legend')));
+  for (const name of ['disk-stack', 'disk-legend', 'technical', 'location']) {
+    document.querySelectorAll(`[data-${name}]`).forEach(host => host.append(clone(name)));
+  }
+  function selectProposal(id) {
+    if (!['a', 'b', 'c'].includes(id)) id = 'a';
+    document.querySelectorAll('.stage').forEach(panel => panel.hidden = panel.id !== `proposal-${id}`);
+    document.querySelectorAll('[data-proposal]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.proposal === id)));
+    document.title = `Scratchpad · Proposal ${id.toUpperCase()} · Storage & recovery`;
+  }
+  document.querySelectorAll('[data-proposal]').forEach(button => button.addEventListener('click', () => {
+    location.hash = button.dataset.proposal;
+    selectProposal(button.dataset.proposal);
+  }));
+  window.addEventListener('hashchange', () => selectProposal(location.hash.slice(1)));
+  selectProposal(location.hash.slice(1));
+  document.getElementById('theme-toggle').addEventListener('click', event => {
+    const light = document.body.classList.toggle('light');
+    event.currentTarget.textContent = light ? 'Dark preview' : 'Light preview';
+    event.currentTarget.setAttribute('aria-pressed', String(light));
+  });
+  document.querySelectorAll('input[type=range]').forEach(input => input.addEventListener('input', () => {
+    document.querySelector(`output[for="${input.id}"]`).textContent = input.dataset.unit === 'days' && input.value === '0' ? 'No expiry' : `${input.value} ${input.dataset.unit}`;
+  }));
+  document.querySelectorAll('.switch').forEach(button => button.addEventListener('click', () => {
+    const checked = button.getAttribute('aria-checked') !== 'true';
+    button.setAttribute('aria-checked', String(checked));
+    button.parentElement.querySelector('.toggle-value').textContent = checked ? 'On' : 'Off';
+  }));
+  let toastTimer;
+  function announce(message) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message; toast.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.hidden = true, 3500);
+  }
+  document.querySelectorAll('.copy-location').forEach(button => button.addEventListener('click', async () => {
+    const path = '/home/laufan/.local/state/scratchpad';
+    try { await navigator.clipboard.writeText(path); announce('Data directory copied'); }
+    catch {
+      const selection = window.getSelection();
+      const range = document.createRange(); range.selectNodeContents(button.previousElementSibling);
+      selection.removeAllRanges(); selection.addRange(range);
+      announce('Path selected — press Ctrl+C or ⌘C to copy');
+    }
+  }));
+</script>
+</body>
+</html>

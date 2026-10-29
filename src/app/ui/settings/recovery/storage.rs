@@ -1,164 +1,250 @@
 use super::super::{SettingsUi, text_muted, text_primary};
-use crate::app::services::session_store::StorageUsage;
+use crate::app::{services::session_store::StorageUsage, ui::widget_ids};
 use eframe::egui;
-use egui_phosphor::regular::{
-    ARCHIVE, CARET_DOWN, CARET_RIGHT, CLOCK_COUNTER_CLOCKWISE, COPY_SIMPLE, DATABASE, FOLDER_OPEN,
-    INFO, WARNING,
-};
+use egui_phosphor::regular::{CARET_DOWN, CARET_UP, COPY_SIMPLE, FOLDER_OPEN, WARNING};
 use std::path::Path;
 
+mod chart;
 #[cfg(test)]
 mod tests;
 
-pub(super) fn render(ui: &mut egui::Ui, usage: &StorageUsage) {
-    ui.spacing_mut().item_spacing.y = 8.0;
-    let available = usage.stored_error.is_none();
-    ui.columns(3, |columns| {
-        metric(
-            &mut columns[0],
-            DATABASE,
-            "Data files",
-            &format_bytes(usage.total_file_bytes),
-            &format!(
-                "{} bytes across the data and settings directories",
-                usage.total_file_bytes
-            ),
-        );
-        metric(
-            &mut columns[1],
-            ARCHIVE,
-            "Closed archives",
-            &count(available, usage.stored.archives as u64),
-            "Saved tabs available in Recently Closed",
-        );
-        metric(
-            &mut columns[2],
-            CLOCK_COUNTER_CLOCKWISE,
-            "Recovery points",
-            &count(available, usage.stored.recovery_points),
-            "Stored text snapshots; not additional copies of all undo history",
-        );
-    });
-    ui.add_space(8.0);
-    heading(ui, "Files on disk");
-    for (label, bytes, help) in [
-        (
-            "Session database",
-            usage.database,
-            "The main database file. Recent committed data can also be in the write-ahead log.",
-        ),
-        (
-            "Write-ahead log & shared memory",
-            usage.journal,
-            "Database journal and shared-memory files; included in the data-files total.",
-        ),
-        (
-            "Other data files",
-            usage.other,
-            "Other files in Scratchpad's state directory, including diagnostics.",
-        ),
-        (
-            "Settings files",
-            usage.settings,
-            "Files in the separate settings directory. Overlapping directories are counted only once.",
-        ),
-    ] {
-        usage_row(ui, label, bytes, help);
-    }
-    if let Some(bytes) = usage.allocated_bytes {
-        ui.separator();
-        usage_row(
-            ui,
-            "Allocated on disk",
-            bytes,
-            "Actual filesystem blocks occupied by all measured files, rather than their file lengths. Not an additional category.",
-        );
-    }
-    ui.add_space(4.0);
-    if let Some(error) = &usage.stored_error {
-        notice(ui, WARNING, "Recovery details unavailable", error);
-    } else {
-        details(ui, usage);
-    }
-    ui.add_space(4.0);
-    ui.horizontal_top(|ui| {
-        icon(ui, INFO, SettingsUi::icon_color(ui));
-        description(ui, "Refreshes every 5 seconds. Your original documents and the application itself are not included.");
-    });
-}
-
-fn count(available: bool, value: u64) -> String {
-    if available {
-        value.to_string()
-    } else {
-        "—".into()
-    }
-}
-
-fn metric(ui: &mut egui::Ui, glyph: &str, label: &str, value: &str, help: &str) {
-    let width = (ui.available_width() - 22.0).max(0.0);
-    egui::Frame::new()
-        .fill(SettingsUi::control_bg(ui))
-        .stroke(egui::Stroke::new(1.0, SettingsUi::card_border(ui)))
-        .corner_radius(egui::CornerRadius::same(SettingsUi::LAYOUT.card_radius))
-        .inner_margin(egui::Margin::same(10))
-        .show(ui, |ui| {
-            ui.set_width(width);
-            ui.horizontal(|ui| {
-                icon(ui, glyph, SettingsUi::icon_color(ui));
-                ui.label(
-                    egui::RichText::new(label)
-                        .size(SettingsUi::TYPOGRAPHY.description)
-                        .color(text_muted(ui)),
-                );
-            });
+pub(super) fn summary(ui: &mut egui::Ui, usage: &StorageUsage) {
+    ui.horizontal(|ui| {
+        ui.set_min_height(44.0);
+        heading(ui, "Files on disk");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
-                egui::RichText::new(value)
-                    .size(24.0)
-                    .strong()
+                egui::RichText::new(format_bytes(usage.total_file_bytes))
+                    .size(23.0)
                     .color(text_primary(ui)),
             )
-            .on_hover_text(help);
+            .on_hover_text(format!(
+                "{} bytes across the data and settings directories",
+                usage.total_file_bytes
+            ));
         });
+    });
+    chart::render(ui, usage);
+    ui.add_space(4.0);
+    if usage.stored_error.is_none() {
+        let stored = &usage.stored;
+        description(
+            ui,
+            &format!(
+                "{} · {} · {} payloads",
+                counted(stored.archives as u64, "closed tab", "closed tabs"),
+                counted(stored.recovery_points, "recovery point", "recovery points"),
+                format_bytes(payload_total(usage))
+            ),
+        );
+        description(
+            ui,
+            "Payloads are included in the file total, not additional usage.",
+        );
+    } else {
+        description(ui, "Recovery counts and payload sizes unavailable.");
+    }
+    ui.add_space(6.0);
 }
 
-fn details(ui: &mut egui::Ui, usage: &StorageUsage) {
-    egui::CollapsingHeader::new(egui::RichText::new("Stored recovery data")
-        .size(SettingsUi::TYPOGRAPHY.body).color(text_primary(ui)))
-        .id_salt("recovery.storage.details")
-        .icon(|ui, openness, response| {
-            ui.painter().text(response.rect.center(), egui::Align2::CENTER_CENTER,
-                if openness > 0.5 { CARET_DOWN } else { CARET_RIGHT },
-                egui_phosphor::font_id(14.0), SettingsUi::icon_color(ui));
-        })
-        .show(ui, |ui| {
-            description(ui, "Payload sizes, not additional disk usage. Shared text is counted once; indexes, page overhead and the journal are only in the file totals above.");
-            ui.add_space(4.0);
-            for (label, bytes, help) in [
-                ("Session metadata", usage.stored.session_metadata, "Open tabs, views and session state."),
-                ("Undo history", usage.stored.undo, "Detailed undo data for open tabs, archives and saved return branches."),
-                ("Archive metadata", usage.stored.archive_metadata, "Metadata for retained closed tabs."),
-                ("Recovery point metadata", usage.stored.snapshot_metadata, "Estimated metadata size for stored recovery points."),
-                ("Current & archived text", usage.stored.live_text, "Text referenced only by current or archived buffers, not historical snapshots."),
-                ("Historical snapshot text", usage.stored.recovery_text, "Text referenced only by historical snapshots."),
-                ("Shared text", usage.stored.shared_text, "Text shared between live or archived buffers and historical snapshots; counted once."),
-                ("Awaiting cleanup", usage.stored.unreferenced_text, "Text with no remaining live or historical references."),
-            ] {
-                usage_row(ui, label, bytes, help);
+fn counted(count: u64, singular: &str, plural: &str) -> String {
+    format!("{count} {}", if count == 1 { singular } else { plural })
+}
+
+pub(super) fn details(ui: &mut egui::Ui, usage: &StorageUsage) {
+    let allocated = usage
+        .allocated_bytes
+        .map(|bytes| format!("{} allocated", format_bytes(bytes)));
+    disclosure(
+        ui,
+        "recovery.storage.disk",
+        "Disk breakdown",
+        allocated.as_deref(),
+        |ui| {
+            for part in chart::parts(ui, usage) {
+                ui.horizontal(|ui| {
+                    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(8.0, 8.0));
+                    ui.painter().rect_filled(rect, 2.0, part.color);
+                    ui.vertical(|ui| {
+                        ui.set_width(ui.available_width());
+                        usage_row(ui, part.label, part.bytes, part.help);
+                    });
+                });
             }
-            ui.separator();
-            usage_row(ui, "Reusable database space", usage.stored.reusable_pages,
-                "Free pages already inside the database file, available for reuse. Not additional disk usage.");
-            usage_row(ui, "Archive references", usage.stored.archive_referenced_bytes,
-                "Payloads referenced by closed archives. Overlaps the breakdown above and can count shared references more than once; do not add to the totals.");
+            if let Some(bytes) = usage.allocated_bytes {
+                ui.separator();
+                usage_row(
+                    ui,
+                    "Allocated on disk",
+                    bytes,
+                    "Actual filesystem blocks occupied by the same files. Not an additional category.",
+                );
+            }
+            description(ui, "File sizes, not a capacity or retention budget.");
+            ui.add_space(6.0);
+        },
+    );
+    if let Some(error) = &usage.stored_error {
+        ui.separator();
+        notice(ui, WARNING, "Recovery details unavailable", error);
+    } else {
+        disclosure(
+            ui,
+            "recovery.storage.details",
+            "Recovery details",
+            None,
+            |ui| {
+                description(
+                    ui,
+                    "Payload sizes only; shared text is counted once. Indexes, page overhead and the journal are only in the file total.",
+                );
+                ui.add_space(4.0);
+                for (label, bytes, help) in payload_rows(usage) {
+                    usage_row(ui, label, bytes, help);
+                }
+                ui.separator();
+                usage_row(
+                    ui,
+                    "Recovery payload total",
+                    payload_total(usage),
+                    "Sum of the payload categories above. Not extra disk usage or a measure of retention-budget utilisation.",
+                );
+                ui.separator();
+                usage_row(
+                    ui,
+                    "Reusable database space",
+                    usage.stored.reusable_pages,
+                    "Free pages already inside the database file, available for reuse. Not additional disk usage.",
+                );
+                usage_row(
+                    ui,
+                    "Archive references",
+                    usage.stored.archive_referenced_bytes,
+                    "Overlaps the payloads above and may count shared references more than once. Not added to the total.",
+                );
+                ui.add_space(6.0);
+            },
+        );
+    }
+}
+
+fn payload_rows(usage: &StorageUsage) -> [(&'static str, u64, &'static str); 8] {
+    let stored = &usage.stored;
+    [
+        (
+            "Current & archived text",
+            stored.live_text,
+            "Text referenced only by current or archived buffers, not historical snapshots.",
+        ),
+        (
+            "Historical snapshot text",
+            stored.recovery_text,
+            "Text referenced only by historical snapshots.",
+        ),
+        (
+            "Shared text",
+            stored.shared_text,
+            "Text shared between live or archived buffers and historical snapshots; counted once.",
+        ),
+        (
+            "Undo history",
+            stored.undo,
+            "Detailed undo data for open tabs, archives and saved return branches.",
+        ),
+        (
+            "Session metadata",
+            stored.session_metadata,
+            "Open tabs, views and session state.",
+        ),
+        (
+            "Archive metadata",
+            stored.archive_metadata,
+            "Metadata for retained closed tabs.",
+        ),
+        (
+            "Recovery point metadata",
+            stored.snapshot_metadata,
+            "Estimated metadata size for stored recovery points.",
+        ),
+        (
+            "Awaiting cleanup",
+            stored.unreferenced_text,
+            "Text with no remaining live or historical references.",
+        ),
+    ]
+}
+
+fn payload_total(usage: &StorageUsage) -> u64 {
+    payload_rows(usage)
+        .iter()
+        .fold(0u64, |total, (_, bytes, _)| total.saturating_add(*bytes))
+}
+
+/// Full-width disclosures keep the same left edge as policy labels and do not
+/// introduce another nested card or shift the expanded accounting rows inward.
+fn disclosure(
+    ui: &mut egui::Ui,
+    key: &str,
+    label: &str,
+    value: Option<&str>,
+    body: impl FnOnce(&mut egui::Ui),
+) {
+    ui.separator();
+    let id = widget_ids::local(ui, key);
+    let mut state =
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false);
+    let response =
+        widget_ids::surface_response(ui, key, widget_ids::WidgetRole::SettingsCardHeader, |ui| {
+            ui.add(
+                egui::Button::new("")
+                    .frame(false)
+                    .min_size(egui::vec2(ui.available_width(), 34.0)),
+            )
         });
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::DisclosureTriangle, ui.is_enabled(), label)
+    });
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_expanded(state.is_open()));
+    let font = egui::FontId::proportional(SettingsUi::TYPOGRAPHY.description);
+    ui.painter().text(
+        response.rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        label,
+        font.clone(),
+        text_muted(ui),
+    );
+    if let Some(value) = value {
+        ui.painter().text(
+            response.rect.right_center() - egui::vec2(28.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            value,
+            font,
+            text_muted(ui),
+        );
+        response.clone().on_hover_text(value);
+    }
+    ui.painter().text(
+        response.rect.right_center() - egui::vec2(8.0, 0.0),
+        egui::Align2::CENTER_CENTER,
+        if state.is_open() {
+            CARET_UP
+        } else {
+            CARET_DOWN
+        },
+        egui_phosphor::font_id(14.0),
+        SettingsUi::icon_color(ui),
+    );
+    if response.clicked() {
+        state.toggle(ui);
+    }
+    state.show_body_unindented(ui, body);
 }
 
 fn heading(ui: &mut egui::Ui, label: &str) {
     ui.label(
         egui::RichText::new(label)
             .size(SettingsUi::TYPOGRAPHY.body)
-            .strong()
             .color(text_primary(ui)),
     );
 }
@@ -197,7 +283,8 @@ pub(super) fn location(ui: &mut egui::Ui, path: &Path) {
                     .size(SettingsUi::TYPOGRAPHY.description)
                     .color(text_muted(ui)),
             )
-            .truncate(),
+            .truncate()
+            .halign(egui::Align::LEFT),
         )
         .on_hover_text(format!("Data directory\n{path}"));
         if ui
@@ -217,6 +304,14 @@ pub(super) fn location(ui: &mut egui::Ui, path: &Path) {
             ui.ctx().copy_text(path);
         }
     });
+}
+
+pub(super) fn refresh_note(ui: &mut egui::Ui) {
+    ui.add_space(6.0);
+    description(
+        ui,
+        "Refreshes every 5 seconds · Excludes original documents and the app.",
+    );
 }
 
 pub(super) fn notice(ui: &mut egui::Ui, glyph: &str, title: &str, detail: &str) {

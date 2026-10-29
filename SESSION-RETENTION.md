@@ -147,17 +147,27 @@ editor unchanged. Results arriving after an edit, reload or file close cannot re
 the newer document. Content checksums and file identities are validated on restore.
 All split views are refreshed when switching snapshot roots.
 
-### Disk usage
+### Recovery & storage
 
-Settings > History & Recovery > Disk usage refreshes asynchronously every five
-seconds. Summary cards show total data-file size, closed archives and recovery
-points. File sizes use readable units; hover a size for the exact byte count.
-Expand **Stored recovery data** for the payload breakdown. The data-directory
-footer can copy the complete path. The overview reports the actual database,
-WAL/shared-memory, other state files,
-separate settings files and combined file lengths; on Unix it also reports actual
-allocated file blocks. Portable/nested roots are deduplicated; original documents,
-application binaries and symlink targets outside these roots are excluded.
+Settings > History & Recovery > **Recovery & storage** combines usage and retention
+controls in one card; **Undo memory** remains separate. Usage refreshes asynchronously
+every five seconds. A compact summary shows combined file size, a disk-composition
+bar, retained tab/snapshot counts and recovery payload size. Counts also appear
+beside their corresponding limits. Policy controls remain usable while usage is
+loading or unavailable; unknown counts are shown as a dash, never a false zero.
+
+Expand **Disk breakdown** for database, WAL/shared-memory, other state files and
+settings files. On Unix it also reports allocated filesystem blocks. Expand
+**Recovery details** for payload accounting, reusable space and archive references.
+Both sections are collapsed initially. File sizes use readable units; hover a size
+for the exact byte count. The data-directory footer can copy the complete path.
+Portable/nested roots are deduplicated; original documents, application binaries
+and symlink targets outside these roots are excluded.
+
+The chart shows physical file composition, not capacity or retention-budget
+utilisation. The recovery payload total counts each exclusive category once;
+reusable pages and overlapping archive references are excluded. Payloads are
+already included in the physical files, not additional disk usage.
 
 Usage and archive-cost queries read covering byte-count indexes, not the undo or
 text blobs themselves. Closed metadata is decoded once per preparation pass and
