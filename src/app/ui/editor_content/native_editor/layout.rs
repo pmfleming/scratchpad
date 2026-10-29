@@ -104,7 +104,11 @@ pub(super) fn build_editor_galley(
     let cache_was_warm = !view.layout_cache.is_empty();
     let galley = if let Some(galley) = view.layout_cache.get(&cache_key) {
         crate::app::capacity_metrics::record_layout_cache_hit();
-        galley
+        // Our cache outlives egui's font atlas. Reuse the layout job, never its
+        // mesh directly: atlas rollover and display-scale changes invalidate
+        // glyph UVs/metrics even when this pane's text and options are unchanged.
+        // egui memoizes this call and rebuilds only when its own cache requires it.
+        ui.fonts_mut(|fonts| fonts.layout_job((*galley.job).clone()))
     } else {
         crate::app::capacity_metrics::record_layout_cache_miss();
         let galley = highlighting::build_galley(
@@ -555,5 +559,7 @@ fn editor_column_width(row_height: f32) -> f32 {
     (row_height * 0.5).max(1.0)
 }
 
+#[cfg(test)]
+mod cache_tests;
 #[cfg(test)]
 mod tests;
