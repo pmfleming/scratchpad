@@ -3,7 +3,9 @@ use crate::app::domain::{BufferId, SplitAxis, TabManager};
 use crate::app::fonts::EditorFontSelection;
 use crate::app::services::instance_broker::{BrokerInbox, LaunchRequest};
 use crate::app::services::session_store::SessionStore;
-use crate::app::services::settings_store::{AppSettings, AppThemeMode, SettingsStore};
+use crate::app::services::settings_store::{
+    AppSettings, AppThemeMode, RecentlyClosedFile, SettingsStore,
+};
 use crate::app::shortcut_keymap::InvalidShortcutOverride;
 use crate::app::startup::StartupOptions;
 use crate::app::text_history::TextHistoryCache;
@@ -143,7 +145,7 @@ pub struct ScratchpadAppState {
     pub(crate) workspace_selection: WorkspaceSelectionState,
     pub(crate) pending_open_file_paths: HashSet<CanonicalPathKey>,
     pub(crate) pending_open_file_dialog: Option<OpenFileDialogState>,
-    pub(crate) recently_closed_files: VecDeque<PathBuf>,
+    pub(crate) recently_closed_files: VecDeque<RecentlyClosedFile>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,
     pub(crate) background_io: BackgroundIoState,

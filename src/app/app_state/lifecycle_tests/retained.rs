@@ -137,8 +137,10 @@ fn retained_workspace_reopens_with_undo_and_recovers_versions_without_overwritin
     let mut app = test_app(root.path());
     let store = app.state.persistence.session_store.clone();
     assert!(store.load().unwrap().is_none());
-    assert_eq!(store.closed_tabs().unwrap().len(), 1);
-    workspace_controller::reopen_last_closed_tab(&mut app);
+    let closed = store.closed_tabs().unwrap();
+    assert_eq!(closed.len(), 1);
+    let token = &closed[0].token;
+    workspace_controller::reopen_archived_tab(&mut app, token);
     let index = app.tab_manager.active_tab_index;
     let reopened = app.tab_manager.active_tab().unwrap().active_buffer();
     assert_eq!(reopened.temp_id, id);
@@ -146,7 +148,7 @@ fn retained_workspace_reopens_with_undo_and_recovers_versions_without_overwritin
     assert!(reopened.is_dirty);
     assert!(store.closed_tabs().unwrap().is_empty());
     let count = app.tab_manager.tabs.len();
-    workspace_controller::reopen_last_closed_tab(&mut app);
+    workspace_controller::reopen_archived_tab(&mut app, token);
     assert_eq!(
         app.tab_manager.tabs.len(),
         count,

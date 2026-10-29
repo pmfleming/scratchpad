@@ -1,5 +1,6 @@
 //! Compaction and GC commit together with the live session. Damage discovered
-//! during preparation is quarantined durably first. Pins and quarantine are roots.
+//! during preparation is quarantined durably first. Quarantine and temporary
+//! legacy-pin migration grace are protected roots.
 use super::{Database, closed::ClosedRow, error};
 use crate::app::{
     domain::TextDocument,
@@ -20,7 +21,7 @@ fn now_seconds() -> i64 {
 
 impl Database {
     fn archive_protected(&self, archive: &CapturedClosedTab, policy: &RecoverySettings) -> bool {
-        policy.pinned_archives.contains(&archive.token)
+        policy.archive_has_migration_grace(&archive.token)
             || archive
                 .tab
                 .session_tab
@@ -224,7 +225,7 @@ impl Database {
         let mut protected: HashSet<String> = self.quarantined.keys().cloned().collect();
         for archive in archives
             .iter()
-            .filter(|archive| policy.pinned_archives.contains(&archive.token))
+            .filter(|archive| policy.archive_has_migration_grace(&archive.token))
         {
             protected.extend(
                 archive

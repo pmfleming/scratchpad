@@ -11,7 +11,6 @@ use egui_phosphor::regular::{
     ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT, ARROW_UP, CARET_RIGHT, SORT_ASCENDING, SORT_DESCENDING,
 };
 use std::hash::Hash;
-use std::path::Path;
 
 pub(super) const WIDTH: f32 = 220.0;
 pub(super) const SUBMENU_WIDTH: f32 = 176.0;
@@ -151,36 +150,6 @@ pub(super) fn open_disposition_button(
         );
         let clicked = response.clicked() || response.clicked_by(egui::PointerButton::Secondary);
         response.on_hover_text(tooltip);
-        clicked
-    })
-}
-
-pub(super) fn recent_file_button(
-    ui: &mut egui::Ui,
-    id_source: impl Hash,
-    width: f32,
-    path: &Path,
-) -> bool {
-    let exists = path.is_file();
-    let label = recent_file_label(path);
-    with_row_visuals(ui, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            id_source,
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add_enabled(
-                    exists,
-                    egui::Button::new("")
-                        .min_size(egui::vec2(width, ROW_HEIGHT))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, exists, &label));
-        paint_recent_file_label(ui, response.rect, &label, exists);
-        let clicked = response.clicked() && exists;
-        response.on_hover_text(path.display().to_string());
         clicked
     })
 }
@@ -425,52 +394,6 @@ fn paint_row_label(
     );
 }
 
-fn paint_recent_file_label(ui: &egui::Ui, rect: egui::Rect, label: &str, exists: bool) {
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let color = if exists {
-        text_primary(ui)
-    } else {
-        missing_file_color(ui)
-    };
-    let text_rect = egui::Rect::from_min_max(
-        rect.left_top() + egui::vec2(8.0, 0.0),
-        rect.right_bottom() - egui::vec2(8.0, 0.0),
-    );
-    ui.painter().with_clip_rect(text_rect).text(
-        text_rect.right_center(),
-        egui::Align2::RIGHT_CENTER,
-        label,
-        font,
-        color,
-    );
-
-    if !exists {
-        let y = text_rect.center().y + 1.0;
-        ui.painter().line_segment(
-            [
-                egui::pos2(text_rect.left(), y),
-                egui::pos2(text_rect.right(), y),
-            ],
-            egui::Stroke::new(1.0, color),
-        );
-    }
-}
-
-fn recent_file_label(path: &Path) -> String {
-    path.file_name().map_or_else(
-        || path.display().to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    )
-}
-
-fn missing_file_color(ui: &egui::Ui) -> egui::Color32 {
-    if ui.visuals().dark_mode {
-        egui::Color32::from_rgb(238, 96, 96)
-    } else {
-        egui::Color32::from_rgb(184, 36, 36)
-    }
-}
-
 fn label_x(icon: Option<&str>) -> f32 {
     if icon.is_some() {
         LABEL_X
@@ -505,6 +428,9 @@ fn apply_row_hover_style(ui: &mut egui::Ui) {
     visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
 }
 
-fn with_row_visuals<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub(super) fn with_row_visuals<R>(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     with_visual_overrides(ui, apply_row_hover_style, add_contents)
 }

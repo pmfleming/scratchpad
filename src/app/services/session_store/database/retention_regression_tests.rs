@@ -162,7 +162,11 @@ fn protected_archives_do_not_evict_new_archives_or_live_undo_boundaries() {
             save.recovery_policy = RecoverySettings {
                 archive_byte_budget: 4000,
                 snapshot_byte_budget: 4000,
-                pinned_archives: if quarantine { vec![] } else { vec![token] },
+                archive_migration_grace_until: if quarantine {
+                    Default::default()
+                } else {
+                    [(token, i64::MAX)].into()
+                },
                 ..Default::default()
             };
             save.closed_tabs.push(ordinary);

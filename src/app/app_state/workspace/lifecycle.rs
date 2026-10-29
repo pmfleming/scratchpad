@@ -144,35 +144,6 @@ pub(crate) fn perform_close_tab_no_persist(app: &mut ScratchpadApp, index: usize
     close_tab_internal(app, index);
 }
 
-pub(crate) fn reopen_last_closed_tab(app: &mut ScratchpadApp) {
-    if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
-        return;
-    }
-    let result = (|| -> std::io::Result<Option<String>> {
-        crate::app::services::session_manager::persist_session_now(app)?;
-        let store = &app.state.persistence.session_store;
-        let Some(closed) = store.closed_tabs()?.into_iter().find(|closed| {
-            closed.has_unsaved_changes
-                || closed.paths.is_empty()
-                || !closed
-                    .paths
-                    .iter()
-                    .all(|path| app.tab_manager.find_tab_by_path(path).is_some())
-        }) else {
-            return Ok(None);
-        };
-        Ok(Some(closed.token))
-    })();
-    match result {
-        Ok(Some(token)) => reopen_archived_tab(app, &token),
-        Ok(None) => app
-            .state
-            .status
-            .set_info_status_in_domain(StatusDomain::Session, "No retained closed tabs."),
-        Err(error) => app.state.status.report_session_restore_failed(error),
-    }
-}
-
 pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
     if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
         return;
@@ -192,7 +163,7 @@ pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
             .recovery
             .open_changed_disk_files;
     if let Some(tab) = reopened.tab
-        && !install_archive(app, tab, false)
+        && !install_archive(app, tab)
     {
         return;
     }
@@ -201,24 +172,7 @@ pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
     }
 }
 
-pub(crate) fn recover_archived_copy(app: &mut ScratchpadApp, token: &str) {
-    if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
-        return;
-    }
-    match app
-        .state
-        .persistence
-        .session_store
-        .restore_closed_tab(token)
-    {
-        Ok(tab) => {
-            install_archive(app, tab, true);
-        }
-        Err(error) => app.state.status.report_session_restore_failed(error),
-    }
-}
-
-fn install_archive(app: &mut ScratchpadApp, mut tab: WorkspaceTab, archived_text: bool) -> bool {
+fn install_archive(app: &mut ScratchpadApp, mut tab: WorkspaceTab) -> bool {
     let already_live = app
         .tab_manager
         .tabs
@@ -231,17 +185,12 @@ fn install_archive(app: &mut ScratchpadApp, mut tab: WorkspaceTab, archived_text
     }
     for buffer in tab.buffers_mut() {
         // A restored split must not steal a path from an already-open tab.
-        if archived_text
-            || buffer
-                .path
-                .as_ref()
-                .is_some_and(|path| app.tab_manager.find_tab_by_path(path).is_some())
+        if buffer
+            .path
+            .as_ref()
+            .is_some_and(|path| app.tab_manager.find_tab_by_path(path).is_some())
         {
-            buffer.recover_as_untitled(if archived_text {
-                "archived"
-            } else {
-                "recovered"
-            });
+            buffer.recover_as_untitled("recovered");
         }
     }
     create_workspace_tab(app, tab);
@@ -368,11 +317,21 @@ pub(crate) fn record_recently_closed_file_paths(app: &mut ScratchpadApp, paths: 
         return;
     }
 
+    let closed_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .min(i64::MAX as u64) as i64;
     for path in paths {
         app.state
             .recently_closed_files
-            .retain(|existing| !crate::app::paths_match(existing, &path));
-        app.state.recently_closed_files.push_front(path);
+            .retain(|existing| !crate::app::paths_match(&existing.path, &path));
+        app.state.recently_closed_files.push_front(
+            crate::app::services::settings_store::RecentlyClosedFile {
+                path,
+                closed_at_unix_seconds: Some(closed_at),
+            },
+        );
     }
 
     while app.state.recently_closed_files.len() > RECENTLY_CLOSED_FILE_LIMIT {

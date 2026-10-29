@@ -1,3 +1,4 @@
+use super::RecentlyClosedFile;
 use crate::app::color_contrast::parse_hex_color;
 use crate::app::domain::TextHistoryBudget;
 use crate::app::fonts::{EditorFontPreset, EditorFontSource};
@@ -5,7 +6,6 @@ use crate::app::platform::PlatformProfile;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 pub const DEFAULT_FONT_SIZE: f32 = 14.0;
 pub const DEFAULT_WORD_WRAP: bool = true;
@@ -317,7 +317,7 @@ pub struct WorkspaceSettings {
     #[serde(default = "default_recent_files_enabled")]
     pub recent_files_enabled: bool,
     #[serde(default)]
-    pub recently_closed_files: Vec<PathBuf>,
+    pub recently_closed_files: Vec<RecentlyClosedFile>,
 }
 
 impl Default for WorkspaceSettings {

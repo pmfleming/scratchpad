@@ -13,22 +13,32 @@ as the live session. Settings > History & Recovery controls their logical storag
 budget (default 512 MiB) and age limit (default 90 days; zero disables age expiry).
 There is no fixed count limit. Under budget pressure, older detailed history is
 compacted into snapshot-only recovery, then interior snapshots are thinned, then
-oldest eligible archives expire. Pinned archives and quarantined data are exempt
-and may exceed the budgets. Their bytes are excluded from the totals used to
-prune unprotected archives and recovery points, so a large pin cannot evict every
-new archive or a live buffer's undo-boundary points. Reopening transfers history
-into the live tab and ends that archive's pin. Oversized unpinned items may expire immediately.
+oldest eligible archives expire. Quarantined data is exempt and may exceed the
+budgets. Closed-tab pinning is no longer offered. Archives pinned by older versions
+receive a one-time 30-day migration grace period, persisted in settings; afterward
+normal age and storage limits apply. Protected bytes are excluded from ordinary
+budgets so they cannot evict other archives or live undo-boundary points.
+Oversized unprotected items may expire immediately.
 
 The close transaction commits the archive and remaining workspace before removing
 the tab from the UI. A retryable failure keeps the live tab open. A permanently
 protected/unavailable database still does not trap application exit; the visible
 failure status means recovery protection is unavailable.
 
-Use **Recently Closed** or **Reopen Last Closed Tab**, including after restarting.
-The list merges archives and disk-only recent-file entries; distinct archives are
-not collapsed just because their paths match. **Archived text** explicitly recovers
-an older branch into untitled buffers. Ordinary file opens (including Open Here)
-also consult archives when enabled; archived workspace layout takes precedence.
+Use **Recently Closed**, including after restarting.
+One scrollable list merges archives and disk-only recent-file entries, newest
+first. Old path-only settings lack closing times and appear last in their original
+order. File-only duplicates are hidden when an archive covers the path; distinct
+archived versions remain separate, identified by closing time.
+
+Click a row to reopen it. A file icon indicates an existing disk file, a crossed
+file indicates a missing file, and a warning icon indicates inaccessible paths.
+An independent dot marks unsaved content. Hover for full paths, closing time and
+recovery details. Split tabs list the status of each file in their tooltip.
+Missing files without a retained copy cannot be reopened; retained tabs remain
+recoverable even if their files are gone. Disk checks run outside the UI thread.
+Ordinary file opens (including Open Here) also consult archives when enabled;
+archived workspace layout takes precedence.
 
 Reopening compares a saved decoded-text fingerprint with current disk text. An
 unchanged file restores archived text/layout/undo, including unsaved edits. A changed

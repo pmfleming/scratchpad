@@ -6,22 +6,22 @@ use crate::app::services::{session_store::CapturedClosedTab, settings_store::Rec
 use futures_lite::future::block_on;
 
 #[test]
-fn age_and_budget_cleanup_preserve_pins_and_roll_back_on_failure() {
+fn age_and_budget_cleanup_preserve_migration_grace_and_roll_back_on_failure() {
     block_on(async {
         let (_root, mut db) = database().await;
         let mut old = CapturedClosedTab::capture(&tab("old"), None);
         old.closed_at = 0;
-        let mut pinned = CapturedClosedTab::capture(&tab("protected"), None);
-        pinned.closed_at = 0;
-        let token = pinned.token.clone();
+        let mut protected = CapturedClosedTab::capture(&tab("protected"), None);
+        protected.closed_at = 0;
+        let token = protected.token.clone();
         let mut initial = request(&[]);
         initial.recovery_policy.archive_retention_days = 0;
-        initial.closed_tabs = vec![old, pinned];
+        initial.closed_tabs = vec![old, protected];
         db.persist(initial, 1).await.unwrap();
         let policy = RecoverySettings {
             archive_retention_days: 1,
             archive_byte_budget: 1,
-            pinned_archives: vec![token.clone()],
+            archive_migration_grace_until: [(token.clone(), i64::MAX)].into(),
             ..Default::default()
         };
         db.conn.execute_batch("CREATE TRIGGER fail_cleanup BEFORE DELETE ON closed_tabs BEGIN SELECT RAISE(ABORT, 'injected'); END;").await.unwrap();
@@ -39,6 +39,18 @@ fn age_and_budget_cleanup_preserve_pins_and_roll_back_on_failure() {
         let archives = db.closed_rows().await.unwrap();
         assert_eq!(archives.len(), 1);
         assert_eq!(archives[0].token, token);
+
+        let mut cleanup = request(&[]);
+        cleanup.recovery_policy.archive_retention_days = 1;
+        cleanup
+            .recovery_policy
+            .archive_migration_grace_until
+            .insert(token, 0);
+        db.persist(cleanup, 4).await.unwrap();
+        assert!(
+            db.closed_rows().await.unwrap().is_empty(),
+            "expired migration grace is not a permanent pin"
+        );
     });
 }
 

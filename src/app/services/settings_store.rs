@@ -5,7 +5,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 mod model;
+mod recently_closed;
 mod recovery;
+pub use recently_closed::RecentlyClosedFile;
 pub use recovery::RecoverySettings;
 
 pub use model::{
@@ -70,6 +72,21 @@ impl SettingsStore {
     fn load_toml(&self) -> io::Result<Option<AppSettings>> {
         let raw = fs::read_to_string(&self.settings_path)?;
         let settings = parse_toml_settings(&raw)?;
+        // Persist the one-time grace deadline before any retention pass. Reloads
+        // must not restart the grace period for formerly pinned archives.
+        let table = raw.parse::<toml::Table>().map_err(invalid_data)?;
+        if table
+            .get("history")
+            .and_then(|v| v.get("recovery"))
+            .and_then(|v| v.get("pinned_archives"))
+            .is_some()
+        {
+            // A read-only settings file must not replace valid loaded policy
+            // with defaults and expose formerly pinned archives to deletion.
+            if let Err(error) = self.save(&settings) {
+                log::warn!("Could not persist archive migration grace: {error}");
+            }
+        }
         Ok(Some(settings))
     }
 

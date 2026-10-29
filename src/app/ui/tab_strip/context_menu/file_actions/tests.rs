@@ -6,7 +6,10 @@ use crate::app::{
         workspace::lifecycle,
     },
     domain::{BufferState, WorkspaceTab},
-    services::{file_service::FileService, settings_store::FileOpenDisposition},
+    services::{
+        file_service::FileService,
+        settings_store::{FileOpenDisposition, RecentlyClosedFile},
+    },
 };
 use eframe::egui;
 use egui_kittest::{Harness, kittest::Queryable};
@@ -89,14 +92,10 @@ fn recently_closed_row_follows_open_file_and_matches_menu_styling() {
 }
 
 #[test]
-fn recently_closed_menu_pins_recovers_and_opens_disk_only_entries() {
-    for (action, disposition, suffix) in [
-        (
-            "note.txt · Recoverable tab · unsaved",
-            FileOpenDisposition::NewTab,
-            "recovered",
-        ),
-        ("Archived text", FileOpenDisposition::CurrentTab, "archived"),
+fn recently_closed_menu_has_single_action_rows_and_reopens_retained_and_disk_entries() {
+    for (disposition, missing) in [
+        (FileOpenDisposition::NewTab, false),
+        (FileOpenDisposition::CurrentTab, true),
     ] {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("note.txt");
@@ -113,39 +112,74 @@ fn recently_closed_menu_pins_recovers_and_opens_disk_only_entries() {
         let id = buffer.temp_id.clone();
         app.tab_manager.set_tabs(vec![WorkspaceTab::new(buffer)], 0);
         lifecycle::perform_close_tab(&mut app, 0);
-        let token = app.state.persistence.session_store.closed_tabs().unwrap()[0]
-            .token
-            .clone();
         let disk = FileService::build_buffer_from_file_content(
             &path,
             FileService::read_file(&path).unwrap(),
             Some(FileService::read_disk_state(&path).unwrap()),
         );
         app.tab_manager.set_tabs(vec![WorkspaceTab::new(disk)], 0);
-        app.state.recently_closed_files.push_back(other.clone());
+        app.state
+            .recently_closed_files
+            .push_back(RecentlyClosedFile {
+                path: other.clone(),
+                closed_at_unix_seconds: None,
+            });
+        if missing {
+            std::fs::remove_file(&path).unwrap();
+        }
         let mut harness = Harness::builder()
+            .with_context_setup(|ctx| {
+                let mut fonts = egui::FontDefinitions::default();
+                egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+                ctx.set_fonts(fonts);
+            })
             .with_size(egui::vec2(1000.0, 700.0))
             .build_ui_state(|ui, app| render_recently_closed_files(ui, app, 0), app);
         let deadline = Instant::now() + Duration::from_secs(5);
-        while harness.query_by_label("Pin").is_none() {
+        while harness
+            .query_by_role_and_label(egui::Role::Button, "note.txt")
+            .is_none()
+        {
             assert!(Instant::now() < deadline, "archive query did not finish");
             std::thread::sleep(Duration::from_millis(1));
             harness.run_steps(1);
         }
-        assert!(
+        assert_eq!(
             harness
-                .query_by_role_and_label(egui::Role::Button, "note.txt")
-                .is_none(),
+                .get_all_by_role_and_label(egui::Role::Button, "note.txt")
+                .count(),
+            1,
             "archive path must not be duplicated as disk-only entry"
         );
-        for expected in [true, false] {
-            harness.get_by_label("Pin").click_accesskit();
-            harness.run_steps(2);
-            let policy = &harness.state().state.app_settings.history.recovery;
-            assert_eq!(policy.pinned_archives.contains(&token), expected);
+        assert_eq!(harness.get_all_by_role(egui::Role::Button).count(), 2);
+        for removed in ["Pin", "Archived text", "Files on disk"] {
+            assert!(harness.query_by_label(removed).is_none());
         }
+        let painted = |label: &str| {
+            harness
+                .output()
+                .shapes
+                .iter()
+                .find_map(|shape| {
+                    if let egui::Shape::Text(text) = &shape.shape
+                        && text.galley.text() == label
+                    {
+                        Some(text.pos)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| panic!("missing painted label: {label}"))
+        };
+        assert_eq!(painted("note.txt").x, painted("other.txt").x);
+        painted(egui_phosphor::regular::DOT);
+        painted(if missing {
+            egui_phosphor::regular::FILE_X
+        } else {
+            egui_phosphor::regular::FILE
+        });
         harness
-            .get_by_role_and_label(egui::Role::Button, action)
+            .get_by_role_and_label(egui::Role::Button, "note.txt")
             .click_accesskit();
         harness.run_steps(2);
         wait_for_background_io(harness.state_mut());
@@ -159,7 +193,7 @@ fn recently_closed_menu_pins_recovers_and_opens_disk_only_entries() {
             .find(|buffer| buffer.temp_id == id)
             .unwrap();
         assert_eq!(recovered.text(), "unsaved");
-        assert_eq!(recovered.name, format!("note.txt ({suffix})"));
+        assert_eq!(recovered.name, "note.txt (recovered)");
         assert!(recovered.path.is_none());
         assert!(recovered.path_key.is_none());
         assert!(!recovered.is_settings_file);
@@ -185,6 +219,10 @@ fn recently_closed_menu_pins_recovers_and_opens_disk_only_entries() {
                 .find_tab_by_path(&other)
                 .is_some()
         );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "disk");
+        if missing {
+            assert!(!path.exists());
+        } else {
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "disk");
+        }
     }
 }
