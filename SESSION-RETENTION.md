@@ -156,9 +156,12 @@ bar, retained tab/snapshot counts and recovery payload size. Counts also appear
 beside their corresponding limits. Policy controls remain usable while usage is
 loading or unavailable; unknown counts are shown as a dash, never a false zero.
 
-Expand **Disk breakdown** for database, WAL/shared-memory, other state files and
-settings files. On Unix it also reports allocated filesystem blocks. Expand
-**Recovery details** for payload accounting, reusable space and archive references.
+Expand **Disk breakdown** for a horizontal bar chart of database, WAL/shared-memory,
+other state files and settings files. Each bar shows its share of total file size.
+On Unix it also reports allocated filesystem blocks. **Recovery details** shows a
+second bar chart, scaled to total recovery payloads. Both charts keep category
+labels and exact sizes visible, including zero-byte entries. Reusable space and
+overlapping archive references are reported separately, outside the charts.
 Both sections are collapsed initially. File sizes use readable units; hover a size
 for the exact byte count. The data-directory footer can copy the complete path.
 Portable/nested roots are deduplicated; original documents, application binaries

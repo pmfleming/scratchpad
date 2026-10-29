@@ -63,6 +63,8 @@ fn storage_summary_is_compact_and_disclosures_expand_without_shifting_values() {
         usage.stored.archives = 6;
         usage.stored.recovery_points = 10;
         usage.stored.live_text = 58;
+        usage.stored.reusable_pages = 4096;
+        usage.stored.archive_referenced_bytes = 4096;
         let mut harness = Harness::builder()
             .with_size(egui::vec2(740.0, 1200.0))
             .with_context_setup(move |ctx| {
@@ -112,6 +114,11 @@ fn storage_summary_is_compact_and_disclosures_expand_without_shifting_values() {
         ] {
             harness.get_by_label(label);
         }
+        assert_eq!(
+            harness.get_all_by_role(egui::Role::Image).count(),
+            5,
+            "overview plus one bar per physical file category"
+        );
         let database = harness.get_by_label("4.00 KiB").rect();
         let settings = harness.get_by_label("1.92 KiB").rect();
         assert!((database.right() - settings.right()).abs() < 1.0);
@@ -134,6 +141,19 @@ fn storage_summary_is_compact_and_disclosures_expand_without_shifting_values() {
             harness.get_by_label(label);
         }
         assert_eq!(harness.get_all_by_label("58 B").count(), 2);
+        assert_eq!(
+            harness.get_all_by_role(egui::Role::Image).count(),
+            13,
+            "four disk bars and eight payload bars; overlapping figures stay outside the graphs"
+        );
+        harness.get_by_role_and_label(
+            egui::Role::Image,
+            "Current & archived text: 58 B (100.00% of breakdown total)",
+        );
+        harness.get_by_role_and_label(
+            egui::Role::Image,
+            "Shared text: 0 B (0.00% of breakdown total)",
+        );
         harness
             .get_by_label("Copy data directory")
             .click_accesskit();

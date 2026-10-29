@@ -61,16 +61,8 @@ pub(super) fn details(ui: &mut egui::Ui, usage: &StorageUsage) {
         "Disk breakdown",
         allocated.as_deref(),
         |ui| {
-            for part in chart::parts(ui, usage) {
-                ui.horizontal(|ui| {
-                    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(8.0, 8.0));
-                    ui.painter().rect_filled(rect, 2.0, part.color);
-                    ui.vertical(|ui| {
-                        ui.set_width(ui.available_width());
-                        usage_row(ui, part.label, part.bytes, part.help);
-                    });
-                });
-            }
+            description(ui, "Share of total file size.");
+            chart::breakdown(ui, "recovery.disk.bars", &chart::parts(ui, usage));
             if let Some(bytes) = usage.allocated_bytes {
                 ui.separator();
                 usage_row(
@@ -99,9 +91,19 @@ pub(super) fn details(ui: &mut egui::Ui, usage: &StorageUsage) {
                     "Payload sizes only; shared text is counted once. Indexes, page overhead and the journal are only in the file total.",
                 );
                 ui.add_space(4.0);
-                for (label, bytes, help) in payload_rows(usage) {
-                    usage_row(ui, label, bytes, help);
-                }
+                description(ui, "Share of total recovery payloads.");
+                let color = if ui.visuals().dark_mode {
+                    egui::Color32::from_rgb(111, 193, 173)
+                } else {
+                    egui::Color32::from_rgb(41, 133, 111)
+                };
+                let parts = payload_rows(usage).map(|(label, bytes, help)| chart::Part {
+                    label,
+                    bytes,
+                    help,
+                    color,
+                });
+                chart::breakdown(ui, "recovery.payload.bars", &parts);
                 ui.separator();
                 usage_row(
                     ui,
