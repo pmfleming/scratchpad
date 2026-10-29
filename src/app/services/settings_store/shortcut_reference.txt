@@ -1,0 +1,36 @@
+
+# Fixed shortcuts — reference only; not configurable [shortcuts] entries.
+# Editor (when the text editor has focus):
+#   Ctrl+A                         Select all
+#   Ctrl+C / Ctrl+Insert           Copy selection
+#   Ctrl+X                         Cut selection
+#   Ctrl+V / Shift+Insert          Paste
+#   Ctrl+Z / Alt+Backspace         Undo
+#   Ctrl+Y                         Redo
+#   Arrow keys                     Move caret
+#   Ctrl+Left/Right, Alt+Left/Right Move by word (unless assigned to an app action)
+#   Home / End                     Start / end of line
+#   Ctrl+Home / Ctrl+End           Start / end of document
+#   Page Up / Page Down            Move by one viewport
+#   Shift + movement keys          Extend selection
+#   Backspace / Delete             Delete backward / forward
+#   Ctrl+Backspace                 Delete previous word
+#   Ctrl+Delete / Alt+Delete       Delete next word
+#   Enter                          Insert newline
+#   Tab / Shift+Tab                Indent / outdent
+#   Ctrl+wheel / Shift+wheel       Zoom the pane under the pointer
+# Search (while the search strip is open):
+#   F3 / Shift+F3                  Next / previous match
+#   Enter / Shift+Enter in Find    Next / previous match
+#   Enter in Replace               Replace current match
+#   Ctrl+Enter / Alt+Enter         Replace current / all matches
+#   Alt+1 / Alt+2                  Search selection / active file
+#   Alt+3 / Alt+4                  Search workspace / all open tabs
+#   Alt+R / Alt+C / Alt+W          Toggle regex / match case / whole word
+#   Ctrl+Z / Ctrl+Y                Undo / redo (text field when focused)
+#   Escape                         Close search
+# History (while the history window is open):
+#   Ctrl+1 / Ctrl+2                Timeline / by-file view
+#   Up / Down                      Older / newer state in the selected file
+#   Ctrl+Shift+F                   Toggle following the restored buffer
+#   Ctrl+Shift+Delete              Clear history

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 mod model;
 mod recently_closed;
 mod recovery;
+mod shortcut_reference;
 pub use recently_closed::RecentlyClosedFile;
 pub use recovery::RecoverySettings;
 
@@ -106,7 +107,8 @@ impl SettingsStore {
 
     pub fn save(&self, settings: &AppSettings) -> io::Result<()> {
         fs::create_dir_all(&self.root)?;
-        let toml = toml::to_string_pretty(settings).map_err(invalid_data)?;
+        let mut toml = toml::to_string_pretty(settings).map_err(invalid_data)?;
+        shortcut_reference::append(&mut toml, settings);
         write_atomic(&self.settings_path, toml.as_bytes())
     }
 

@@ -176,6 +176,9 @@ Start with [the configuration guide](docs/configuration.md). It documents the
 TOML sections, shortcut syntax, platform overrides, runtime environment
 variables, and Home Manager integration. A complete example is available at
 [`examples/settings.toml`](examples/settings.toml).
+Saved `settings.toml` files list every configurable shortcut under `[shortcuts]`:
+existing overrides remain active, and platform defaults are commented out for easy
+customization. Fixed editor, search, and history shortcuts follow as a reference.
 
 For compositor setup, see the
 [NixOS/Hyprland notes](docs/hyprland-nixos-configuration.md).
