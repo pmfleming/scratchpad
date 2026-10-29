@@ -1,6 +1,7 @@
 mod model;
 mod unicode_menu;
 mod widgets;
+mod zoom;
 
 use super::TileRenderRequest;
 use crate::app::app_state::{
@@ -44,20 +45,23 @@ pub(super) fn attach_editor_context_menu(
         &app.tab_manager.tabs.as_slice()[request.tab_index],
         request.view_id,
     );
-    tile_response.context_menu(|ui| {
-        set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
-        render_standard_edit_menu(ui, app);
-        ui.separator();
-        render_history_menu(ui, app);
-        ui.separator();
-        render_display_unicode_menu(ui, app);
-        ui.separator();
-        render_file_menu(ui, app);
-        ui.separator();
-        render_tile_menu(ui, actions, request, can_promote);
-        ui.separator();
-        render_edit_button_rail(ui, app);
-    });
+    egui::Popup::context_menu(tile_response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
+            render_standard_edit_menu(ui, app);
+            ui.separator();
+            render_history_menu(ui, app);
+            ui.separator();
+            render_display_unicode_menu(ui, app);
+            zoom::render(ui, app, request.view_id);
+            ui.separator();
+            render_file_menu(ui, app);
+            ui.separator();
+            render_tile_menu(ui, actions, request, can_promote);
+            ui.separator();
+            render_edit_button_rail(ui, app);
+        });
 }
 
 pub(super) fn activate_inactive_tile_on_secondary_click(

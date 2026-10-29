@@ -161,6 +161,8 @@ pub(crate) struct SessionView {
     pub id: u64,
     pub buffer_id: u64,
     pub show_line_numbers: bool,
+    #[serde(default = "crate::app::domain::view::default_zoom_factor")]
+    pub zoom_factor: f32,
     #[serde(default, skip_serializing)]
     pub show_control_chars: bool,
 }
@@ -171,6 +173,7 @@ impl From<&crate::app::domain::EditorViewState> for SessionView {
             id: view.id,
             buffer_id: view.buffer_id,
             show_line_numbers: view.show_line_numbers,
+            zoom_factor: view.zoom_factor(),
             show_control_chars: false,
         }
     }

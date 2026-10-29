@@ -30,10 +30,16 @@ impl TabManager {
         &self.cold_session_tabs
     }
 
-    pub(crate) fn replace_restored_tab(&mut self, index: usize, tab: WorkspaceTab) -> bool {
+    pub(crate) fn replace_restored_tab(&mut self, index: usize, mut tab: WorkspaceTab) -> bool {
         let Some(slot) = self.tabs.get_mut(index) else {
             return false;
         };
+        // A background load may have started before the user adjusted zoom.
+        for view in tab.layout.views_mut() {
+            if let Some(current) = slot.layout.view(view.id) {
+                view.set_zoom_factor(current.zoom_factor());
+            }
+        }
         let removed = std::mem::replace(slot, tab);
         self.remove_tab_buffers(&removed);
         self.dedupe_duplicate_path_owners();

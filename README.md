@@ -50,6 +50,19 @@ for methodology, budgets, and additional results.
 
 See the [user manual](docs/user-manual.md) for workflows and shortcuts.
 
+### Pane zoom
+
+Each editor pane has independent zoom, from 25% to 400%. **Ctrl + + / −** adjusts
+it in 10-percentage-point steps; **Ctrl + 0** resets to 100% of the configured
+editor font size. **Ctrl + 9** toggles line numbers. Mouse-wheel zoom affects the
+pane under the pointer; keyboard zoom affects the active pane.
+
+The status bar shows the active pane's percentage without any click action. The
+editor context menu has one **Zoom · 100% [−] [+] [↺]** row and stays open while
+adjusting. New splits inherit their source pane's zoom and then zoom independently;
+new tabs start at 100%. Pane zoom is preserved in sessions and closed-tab recovery.
+Changing the font size in Settings changes the baseline, not the pane percentages.
+
 ## Platforms
 
 Scratchpad supports:

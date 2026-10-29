@@ -4,6 +4,50 @@ use crate::app::services::file_service::FileService;
 use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 
 #[test]
+fn per_view_zoom_survives_session_and_closed_tab_restore() {
+    let root = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(root.path().to_owned());
+    let mut tab = WorkspaceTab::new(BufferState::new("note".into(), "text".into(), None));
+    let first = tab.layout.active_view_id();
+    let second = tab.split_active_view(SplitAxis::Vertical).unwrap();
+    tab.layout.view_mut(first).unwrap().set_zoom_factor(1.25);
+    tab.layout.view_mut(second).unwrap().set_zoom_factor(0.75);
+    store
+        .persist(std::slice::from_ref(&tab), 0, 18.0, false)
+        .unwrap();
+    let check = |restored: &WorkspaceTab| {
+        assert_eq!(restored.layout.view(first).unwrap().zoom_factor(), 1.25);
+        assert_eq!(restored.layout.view(second).unwrap().zoom_factor(), 0.75);
+        assert_eq!(
+            restored
+                .layout
+                .view(first)
+                .unwrap()
+                .effective_font_size(18.0),
+            22.5
+        );
+        assert_eq!(restored.layout.active_view_id(), second);
+    };
+    check(&store.load().unwrap().unwrap().tabs[0]);
+    let closed = super::CapturedClosedTab::capture(&tab, None);
+    let token = closed.token.clone();
+    let mut request = SessionPersistRequest::capture(&[], 0, 18.0, false);
+    request.closed_tabs.push(closed);
+    store.persist_request(request).unwrap();
+    check(&store.restore_closed_tab(&token).unwrap());
+}
+
+#[test]
+fn legacy_session_views_default_to_normal_zoom() {
+    let view: super::model::SessionView =
+        serde_json::from_str(r#"{"id":1,"buffer_id":2,"show_line_numbers":false}"#).unwrap();
+    assert_eq!(view.zoom_factor, 1.0);
+    let restored: super::model::SessionView =
+        serde_json::from_str(&serde_json::to_string(&view).unwrap()).unwrap();
+    assert_eq!(restored.zoom_factor, 1.0);
+}
+
+#[test]
 fn combined_tabs_preserve_format_flags_views_and_active_surface() {
     let directory = tempfile::tempdir().unwrap();
     let store = SessionStore::new(directory.path().to_owned());

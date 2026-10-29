@@ -22,11 +22,10 @@ pub(super) fn workspace_tab_from_restored_buffers(
         if view.id == active_view_id {
             active_buffer_id = Some(view.buffer_id);
         }
-        views.push(EditorViewState::restored(
-            view.id,
-            view.buffer_id,
-            view.show_line_numbers,
-        ));
+        let mut restored =
+            EditorViewState::restored(view.id, view.buffer_id, view.show_line_numbers);
+        restored.set_zoom_factor(view.zoom_factor);
+        views.push(restored);
     }
 
     for buffer in buffers.iter_mut() {

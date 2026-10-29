@@ -30,6 +30,7 @@ pub enum ShortcutAction {
     SaveFile,
     IncreaseFontSize,
     DecreaseFontSize,
+    ResetZoom,
     ToggleLineNumbers,
     CloseTab,
     PromoteTileToTab,
@@ -51,7 +52,7 @@ pub enum ShortcutAction {
 }
 
 impl ShortcutAction {
-    pub(crate) const ALL: [Self; 43] = [
+    pub(crate) const ALL: [Self; 44] = [
         Self::OpenUserManual,
         Self::OpenSearch,
         Self::OpenReplace,
@@ -77,6 +78,7 @@ impl ShortcutAction {
         Self::SaveFile,
         Self::IncreaseFontSize,
         Self::DecreaseFontSize,
+        Self::ResetZoom,
         Self::ToggleLineNumbers,
         Self::CloseTab,
         Self::PromoteTileToTab,
@@ -130,6 +132,7 @@ impl ShortcutAction {
             Self::SaveFile => SAVE_FILE,
             Self::IncreaseFontSize => INCREASE_FONT_SIZE,
             Self::DecreaseFontSize => DECREASE_FONT_SIZE,
+            Self::ResetZoom => RESET_ZOOM,
             Self::ToggleLineNumbers => TOGGLE_LINE_NUMBERS,
             Self::CloseTab => CLOSE_TAB,
             Self::PromoteTileToTab => PROMOTE_TILE_TO_TAB,
@@ -289,9 +292,11 @@ const DECREASE_FONT_SIZE: ShortcutDefinition = ShortcutDefinition::new(
     "decrease_font_size",
     &[KeyBinding::new(Modifiers::CTRL, Key::Minus)],
 );
+const RESET_ZOOM: ShortcutDefinition =
+    ShortcutDefinition::new("reset_zoom", &[KeyBinding::new(Modifiers::CTRL, Key::Num0)]);
 const TOGGLE_LINE_NUMBERS: ShortcutDefinition = ShortcutDefinition::new(
     "toggle_line_numbers",
-    &[KeyBinding::new(Modifiers::CTRL, Key::Num0)],
+    &[KeyBinding::new(Modifiers::CTRL, Key::Num9)],
 );
 const CLOSE_TAB: ShortcutDefinition =
     ShortcutDefinition::new("close_tab", &[KeyBinding::new(Modifiers::CTRL, Key::W)]);

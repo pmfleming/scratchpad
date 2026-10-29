@@ -5,6 +5,8 @@ mod decisions;
 mod scroll_frame;
 mod scroll_input;
 mod style;
+#[cfg(test)]
+mod zoom_tests;
 
 use self::autoscroll::apply_selection_edge_autoscroll_intent;
 use self::chrome::{apply_tile_body_focus, handle_tile_click, paint_tile_border, paint_tile_frame};
@@ -82,6 +84,7 @@ fn render_tile_contents(
     request: TileRenderRequest,
     state: &mut TileRenderState<'_>,
 ) {
+    super::handle_editor_zoom(ui, request.rect, app, request.view_id);
     let tile_response = handle_tile_click(ui, app, &request, state.actions);
     paint_tile_frame(
         ui,
@@ -167,7 +170,12 @@ fn render_tile_body_contents(
     request: &TileRenderRequest,
 ) -> TileBodyOutcome {
     let request_focus = workspace_accessors::should_focus_view(app, request.view_id);
-    let editor_font_id = editor_font_id(app.state.app_settings.font_size());
+    let base_size = app.state.app_settings.font_size();
+    let font_size = app.tab_manager.tabs.as_slice()[request.tab_index]
+        .layout
+        .view(request.view_id)
+        .map_or(base_size, |view| view.effective_font_size(base_size));
+    let editor_font_id = editor_font_id(font_size);
     let mut content_style =
         editor_content_style(app, request.is_active, request_focus, &editor_font_id);
     content_style.text_edit.right_to_left_reading_order = app

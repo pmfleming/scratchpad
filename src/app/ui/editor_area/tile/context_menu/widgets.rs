@@ -51,6 +51,7 @@ pub(super) fn menu_action_button(
                 )
             },
         );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
         paint_context_menu_row_label(ui, response.rect, icon, label, enabled);
         let clicked = response.clicked();
         if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui.ctx(), label) {
@@ -77,6 +78,7 @@ pub(super) fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> b
                 )
             },
         );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
         paint_context_menu_row_label(ui, response.rect, Some(icon), label, true);
         let clicked = response.clicked();
         if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui.ctx(), label) {

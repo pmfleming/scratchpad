@@ -7,6 +7,123 @@ use crate::app::startup::StartupOptions;
 use eframe::egui;
 
 #[test]
+fn zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers() {
+    use crate::app::{app_state::test_support::test_app, domain::SplitAxis};
+    let root = tempfile::tempdir().unwrap();
+    let mut app = test_app(root.path());
+    let mut tab = WorkspaceTab::new(BufferState::new("note".into(), "text".into(), None));
+    let first = tab.layout.active_view_id();
+    let second = tab.split_active_view(SplitAxis::Vertical).unwrap();
+    tab.activate_view(first);
+    app.tab_manager.set_tabs(vec![tab], 0);
+    let baseline = app.state.app_settings.font_size();
+    let ctx = egui::Context::default();
+    ctx.options_mut(|options| options.zoom_with_keyboard = false);
+    let press = |app: &mut ScratchpadApp, key, modifiers| {
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                ..Default::default()
+            },
+            |ui| handle_shortcuts(app, ui.ctx()),
+        )
+        .textures_delta
+        .clear();
+    };
+    press(&mut app, egui::Key::Equals, egui::Modifiers::CTRL);
+    assert_eq!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .layout
+            .view(first)
+            .unwrap()
+            .zoom_label(),
+        "110%"
+    );
+    app.tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .activate_view(second);
+    press(&mut app, egui::Key::Minus, egui::Modifiers::CTRL);
+    assert_eq!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .layout
+            .view(second)
+            .unwrap()
+            .zoom_label(),
+        "90%"
+    );
+    press(&mut app, egui::Key::Num0, egui::Modifiers::CTRL);
+    let tab = app.tab_manager.active_tab().unwrap();
+    assert_eq!(tab.layout.view(second).unwrap().zoom_factor(), 1.0);
+    assert_eq!(tab.layout.view(first).unwrap().zoom_label(), "110%");
+    assert!(!tab.layout.line_numbers_visible());
+    press(&mut app, egui::Key::Num9, egui::Modifiers::CTRL);
+    assert!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .layout
+            .line_numbers_visible()
+    );
+    app.state
+        .app_settings
+        .shortcuts
+        .bindings
+        .insert("reset_zoom".into(), "alt+r".into());
+    press(&mut app, egui::Key::Equals, egui::Modifiers::CTRL);
+    press(&mut app, egui::Key::Num0, egui::Modifiers::CTRL);
+    assert_eq!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .layout
+            .view(second)
+            .unwrap()
+            .zoom_label(),
+        "110%"
+    );
+    press(&mut app, egui::Key::R, egui::Modifiers::ALT);
+    assert_eq!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .layout
+            .view(second)
+            .unwrap()
+            .zoom_factor(),
+        1.0
+    );
+    crate::app::commands::handle_command(
+        &mut app,
+        crate::app::commands::AppCommand::Settings(
+            crate::app::commands::SettingsCommand::OpenSettings,
+        ),
+    );
+    press(&mut app, egui::Key::Equals, egui::Modifiers::CTRL);
+    assert_eq!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .layout
+            .view(second)
+            .unwrap()
+            .zoom_factor(),
+        1.0
+    );
+    assert_eq!(app.state.app_settings.font_size(), baseline);
+}
+
+#[test]
 fn configured_utility_keys_reach_their_application_actions() {
     type Check = fn(&ScratchpadApp) -> bool;
     let cases: &[(ShortcutAction, Check)] = &[

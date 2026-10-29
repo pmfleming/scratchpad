@@ -13,6 +13,7 @@ use eframe::egui;
 pub(super) struct ActiveStatusDetails {
     pub(super) path_label: String,
     pub(super) count_label: String,
+    pub(super) zoom_label: String,
     pub(super) cursor_label: Option<String>,
     pub(super) selection_label: Option<String>,
     pub(super) encoding: EncodingStatus,
@@ -52,6 +53,7 @@ pub(super) enum StatusBarItemKind {
     DiskState,
     Encoding,
     LineEndings,
+    Zoom,
     ControlChars,
     TextHistory,
     Settings,
@@ -89,6 +91,10 @@ pub(super) fn collect_active_status_details(
             |path| path.to_string_lossy().into_owned(),
         ),
         count_label: line_count_label(file_length.lines),
+        zoom_label: tab
+            .layout
+            .active_view()
+            .map_or_else(|| "100%".into(), |view| view.zoom_label()),
         cursor_label: cursor_label(&view_status),
         selection_label: selection_label(&view_status),
         encoding: EncodingStatus {
@@ -154,6 +160,10 @@ pub(super) fn active_status_items(
         StatusBarItem {
             kind: StatusBarItemKind::LineEndings,
             width: estimated_text_item_width(ui, &format!("EOL: {}", details.line_endings.label)),
+        },
+        StatusBarItem {
+            kind: StatusBarItemKind::Zoom,
+            width: estimated_text_item_width(ui, &details.zoom_label),
         },
         StatusBarItem {
             kind: StatusBarItemKind::ControlChars,

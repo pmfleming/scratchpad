@@ -7,6 +7,72 @@ use crate::app::domain::EditorViewState;
 use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 
 #[test]
+fn zoom_status_is_read_only_tracks_the_active_pane_and_is_hidden_in_settings() {
+    use crate::app::{
+        app_state::test_support::test_app,
+        domain::{BufferState, SplitAxis, WorkspaceTab},
+    };
+    use eframe::egui;
+    use egui_kittest::{Harness, kittest::Queryable};
+    let root = tempfile::tempdir().unwrap();
+    let mut app = test_app(root.path());
+    let mut tab = WorkspaceTab::new(BufferState::new("note".into(), "text".into(), None));
+    let first = tab.layout.active_view_id();
+    let second = tab.split_active_view(SplitAxis::Vertical).unwrap();
+    tab.layout.view_mut(first).unwrap().set_zoom_factor(1.25);
+    tab.activate_view(first);
+    app.tab_manager.set_tabs(vec![tab], 0);
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1600.0, 300.0))
+        .with_context_setup(|ctx| {
+            let mut fonts = egui::FontDefinitions::default();
+            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+            ctx.set_fonts(fonts);
+        })
+        .build_ui_state(|ui, app| super::show_status_bar(ui, app), app);
+    harness.run();
+    assert!(
+        harness
+            .query_by_role_and_label(egui::Role::Button, "125%")
+            .is_none()
+    );
+    harness
+        .get_by_role_and_label(egui::Role::Label, "125%")
+        .click();
+    harness.run();
+    assert!(!harness.state().state.chrome.showing_settings());
+    assert_eq!(
+        harness
+            .state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .layout
+            .view(first)
+            .unwrap()
+            .zoom_factor(),
+        1.25
+    );
+    harness
+        .state_mut()
+        .tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .activate_view(second);
+    harness.run();
+    harness.get_by_role_and_label(egui::Role::Label, "100%");
+    assert!(harness.query_by_label("125%").is_none());
+    crate::app::commands::handle_command(
+        harness.state_mut(),
+        crate::app::commands::AppCommand::Settings(
+            crate::app::commands::SettingsCommand::OpenSettings,
+        ),
+    );
+    harness.run();
+    assert!(harness.query_by_label("100%").is_none());
+}
+
+#[test]
 fn status_prefers_live_cursor_over_pending_cursor() {
     let mut view = EditorViewState::new(1);
     view.cursor_range = Some(CursorRange::two(0, 8));

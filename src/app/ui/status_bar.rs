@@ -452,6 +452,16 @@ fn render_status_item(
             &details.line_endings.label,
             details.line_endings.is_non_default,
         ),
+        StatusBarItemKind::Zoom => {
+            ui.separator();
+            widget_ids::surface_response(ui, "status_zoom", widget_ids::WidgetRole::Label, |ui| {
+                ui.add(egui::Label::new(&details.zoom_label).sense(egui::Sense::hover()))
+            })
+            .on_hover_text(format!(
+                "Zoom for this pane\n{}",
+                shortcut_tooltips::action(ui.ctx(), ShortcutAction::ResetZoom, "Reset zoom",)
+            ));
+        }
         StatusBarItemKind::ControlChars => show_control_char_toggle(ui, details, actions),
         StatusBarItemKind::TextHistory => show_text_history_button(ui, actions),
         StatusBarItemKind::Settings => show_settings_button(ui, actions),

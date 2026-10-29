@@ -2,6 +2,8 @@ mod anchors;
 mod caret_animation;
 mod layout_cache;
 mod search;
+mod zoom;
+pub use zoom::{MAX_ZOOM_FACTOR, MIN_ZOOM_FACTOR, default_zoom_factor};
 
 use self::anchors::{
     AnchoredCursorRange, AnchoredSearchRange, release_anchors, resolve_cursor_anchor_range,
@@ -78,6 +80,7 @@ pub enum CursorRevealMode {
 pub struct EditorViewState {
     pub id: ViewId,
     pub buffer_id: BufferId,
+    zoom_factor: f32,
     pub show_line_numbers: bool,
     pub right_to_left_reading_order: bool,
     pub editor_has_focus: bool,
@@ -129,6 +132,7 @@ impl EditorViewState {
         Self {
             id,
             buffer_id,
+            zoom_factor: default_zoom_factor(),
             show_line_numbers,
             right_to_left_reading_order: false,
             editor_has_focus: false,

@@ -41,7 +41,6 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 );
 
                 app.state.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
-                handle_editor_zoom(ui, workspace_rect, app);
                 let editor_state = prepare_editor_state(app);
                 let render_outcome =
                     render_editor_workspace(ui, app, &editor_state, workspace_rect);
@@ -241,23 +240,23 @@ fn request_search_repaint(ctx: &egui::Context, searching: bool) {
     }
 }
 
-fn handle_editor_zoom(ui: &egui::Ui, workspace_rect: egui::Rect, app: &mut ScratchpadApp) {
-    let pointer_over_editor = ui.rect_contains_pointer(workspace_rect);
+fn handle_editor_zoom(
+    ui: &egui::Ui,
+    view_rect: egui::Rect,
+    app: &mut ScratchpadApp,
+    view_id: ViewId,
+) {
+    use crate::app::app_state::workspace::zoom::{self, ZoomChange};
+    let pointer_over_editor = ui.rect_contains_pointer(view_rect);
     let zoom_factor = ui.ctx().input(|input| input.zoom_delta());
     if pointer_over_editor && zoom_factor != 1.0 {
-        crate::app::app_state::settings_controller::set_font_size(
-            app,
-            app.state.app_settings.font_size() * zoom_factor,
-        );
+        zoom::apply(app, view_id, ZoomChange::Scale(zoom_factor));
     }
     let shift_scroll_delta = ui.ctx().input(|input| {
         font_size_delta_from_shift_scroll(input.modifiers, input.smooth_scroll_delta)
     });
     if pointer_over_editor && shift_scroll_delta != 0.0 {
-        crate::app::app_state::settings_controller::set_font_size(
-            app,
-            app.state.app_settings.font_size() + shift_scroll_delta,
-        );
+        zoom::apply(app, view_id, ZoomChange::FontPoints(shift_scroll_delta));
     }
 }
 

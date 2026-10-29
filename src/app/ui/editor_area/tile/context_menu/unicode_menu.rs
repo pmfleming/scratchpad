@@ -191,6 +191,7 @@ fn unicode_submenu_row(
             })
             .inner;
 
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
         let rect = response.rect;
         paint_context_menu_row_label(ui, rect, Some(icon), label, true);
         ui.painter().text(

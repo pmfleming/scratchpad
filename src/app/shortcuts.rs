@@ -97,17 +97,15 @@ fn handle_file_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn handle_view_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if consume_app_shortcut(app, ctx, ShortcutAction::IncreaseFontSize) {
-        crate::app::app_state::settings_controller::set_font_size(
-            app,
-            app.state.app_settings.font_size() + 1.0,
-        );
-    }
-    if consume_app_shortcut(app, ctx, ShortcutAction::DecreaseFontSize) {
-        crate::app::app_state::settings_controller::set_font_size(
-            app,
-            app.state.app_settings.font_size() - 1.0,
-        );
+    use crate::app::app_state::workspace::zoom::{self, ZoomChange};
+    for (shortcut, change) in [
+        (ShortcutAction::IncreaseFontSize, ZoomChange::In),
+        (ShortcutAction::DecreaseFontSize, ZoomChange::Out),
+        (ShortcutAction::ResetZoom, ZoomChange::Reset),
+    ] {
+        if consume_app_shortcut(app, ctx, shortcut) && zoom::active_view(app, change) {
+            ctx.request_repaint();
+        }
     }
     if consume_app_shortcut(app, ctx, ShortcutAction::ToggleLineNumbers)
         && let Some(tab) = app.tab_manager.active_tab_mut()
