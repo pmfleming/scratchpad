@@ -149,7 +149,6 @@ fn render_content(
             storage::details(ui, usage);
         }
         storage::location(ui, app.state.persistence.session_store.root());
-        storage::refresh_note(ui);
     });
 }
 

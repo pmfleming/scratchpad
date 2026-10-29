@@ -77,7 +77,6 @@ fn storage_summary_is_compact_and_disclosures_expand_without_shifting_values() {
                 summary(ui, usage);
                 details(ui, usage);
                 location(ui, Path::new("/home/example/a/very/long/data/directory/that/should/not/widen/the/settings/card/scratchpad"));
-                refresh_note(ui);
             }, usage);
         harness.run();
         for label in [

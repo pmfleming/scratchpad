@@ -37,10 +37,6 @@ pub(super) fn summary(ui: &mut egui::Ui, usage: &StorageUsage) {
                 format_bytes(payload_total(usage))
             ),
         );
-        description(
-            ui,
-            "Payloads are included in the file total, not additional usage.",
-        );
     } else {
         description(ui, "Recovery counts and payload sizes unavailable.");
     }
@@ -86,11 +82,6 @@ pub(super) fn details(ui: &mut egui::Ui, usage: &StorageUsage) {
             "Recovery details",
             None,
             |ui| {
-                description(
-                    ui,
-                    "Payload sizes only; shared text is counted once. Indexes, page overhead and the journal are only in the file total.",
-                );
-                ui.add_space(4.0);
                 description(ui, "Share of total recovery payloads.");
                 let color = if ui.visuals().dark_mode {
                     egui::Color32::from_rgb(111, 193, 173)
@@ -306,14 +297,6 @@ pub(super) fn location(ui: &mut egui::Ui, path: &Path) {
             ui.ctx().copy_text(path);
         }
     });
-}
-
-pub(super) fn refresh_note(ui: &mut egui::Ui) {
-    ui.add_space(6.0);
-    description(
-        ui,
-        "Refreshes every 5 seconds · Excludes original documents and the app.",
-    );
 }
 
 pub(super) fn notice(ui: &mut egui::Ui, glyph: &str, title: &str, detail: &str) {
