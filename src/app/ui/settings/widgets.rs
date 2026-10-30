@@ -237,26 +237,17 @@ pub(super) fn toggle_select_row(
     }
 }
 
-pub(super) enum DropdownPlacement {
-    Leading(f32),
-    Trailing(f32),
-}
-
-/// Font/Size explicitly share a leading edge; other selects align with actions.
+/// Right-align every select together with its optional unit.
 pub(super) fn dropdown<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
     key: &str,
     value: &mut T,
     options: &[T],
     label: impl Fn(T) -> String,
-    placement: DropdownPlacement,
+    width: f32,
     unit: &str,
 ) -> bool {
     let original = *value;
-    let (width, leading) = match placement {
-        DropdownPlacement::Leading(width) => (width, true),
-        DropdownPlacement::Trailing(width) => (width, false),
-    };
     available_width_control(ui, |ui| {
         let lane = ui.max_rect();
         let unit_width = if unit.is_empty() {
@@ -273,11 +264,7 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
             .x + ui.spacing().item_spacing.x
         };
         let width = width.min((lane.width() - unit_width).max(0.0));
-        let left = if leading {
-            lane.left()
-        } else {
-            lane.right() - width - unit_width
-        };
+        let left = lane.right() - width - unit_width;
         let rect = egui::Rect::from_min_max(egui::pos2(left, lane.top()), lane.max);
         widget_ids::rect_scope_with_layout(
             ui,
@@ -298,9 +285,13 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
                     })
                     .response;
                 record_settings_control_box(format!("combo.{key}"), response.rect);
+                let mut control_rect = response.rect;
                 if !unit.is_empty() {
-                    ui.label(egui::RichText::new(unit).size(12.5).color(text_muted(ui)));
+                    let unit = ui.label(egui::RichText::new(unit).size(12.5).color(text_muted(ui)));
+                    record_settings_control_box(format!("unit.{key}"), unit.rect);
+                    control_rect = control_rect.union(unit.rect);
                 }
+                record_settings_control_box(format!("dropdown.{key}"), control_rect);
             },
         );
     });

@@ -1,6 +1,6 @@
 use super::{
     ScratchpadApp, TabListPosition, egui,
-    widgets::{DropdownPlacement, dropdown, group_heading, inner_select_row, toggle_select_row},
+    widgets::{dropdown, group_heading, inner_select_row, toggle_select_row},
 };
 use crate::app::{
     app_state::settings_controller as settings, services::settings_store::NewTabPlacement,
@@ -29,7 +29,7 @@ pub(super) fn render_workspace(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 &mut delay,
                 &DELAYS,
                 |delay| format!("{delay}"),
-                DropdownPlacement::Trailing(96.0),
+                96.0,
                 "s",
             ) {
                 settings::set_tab_list_auto_hide_delay_seconds(app, delay);
@@ -68,7 +68,7 @@ pub(super) fn render_workspace(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 }
                 .into()
             },
-            DropdownPlacement::Trailing(210.0),
+            210.0,
             "",
         ) {
             settings::set_new_tab_placement(app, placement);

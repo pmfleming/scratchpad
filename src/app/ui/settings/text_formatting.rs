@@ -2,8 +2,8 @@ use super::{
     AppThemeMode, EditorAppearanceSource, EditorFontPreset, FONT_SIZE_OPTIONS, IndentationStyle,
     ScratchpadApp, TabDisplayMode, egui,
     widgets::{
-        DropdownPlacement, dropdown, group_heading, inner_select_row, numeric_slider,
-        record_settings_control_box, render_preview_panel, segmented_row, toggle_select_row,
+        dropdown, group_heading, inner_select_row, numeric_slider, record_settings_control_box,
+        render_preview_panel, segmented_row, toggle_select_row,
     },
 };
 use crate::app::app_state::settings_controller as settings;
@@ -29,7 +29,7 @@ pub(super) fn render_appearance(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             &mut font,
             &EditorFontPreset::ALL,
             |font| font.label().into(),
-            DropdownPlacement::Leading(180.0),
+            180.0,
             "",
         ) {
             use_app_appearance(app);
@@ -45,7 +45,7 @@ pub(super) fn render_appearance(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             &mut size,
             &options,
             |size| format!("{size:.0}"),
-            DropdownPlacement::Leading(96.0),
+            96.0,
             "pt",
         ) {
             use_app_appearance(app);

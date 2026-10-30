@@ -121,7 +121,7 @@ fn search_reveals_matching_groups_without_losing_collapse_state() {
 }
 
 #[test]
-fn font_dropdowns_share_left_edge_and_all_sliders_share_columns() {
+fn appearance_controls_share_right_edge_and_all_sliders_share_columns() {
     for width in [1200.0, 900.0, 500.0, 360.0] {
         reset_settings_layout_measurements();
         let ctx = egui::Context::default();
@@ -141,7 +141,14 @@ fn font_dropdowns_share_left_edge_and_all_sliders_share_columns() {
                 .unwrap_or_else(|| panic!("missing {name}"))
         };
         let left = |m: &widgets::SettingsControlMeasurement| m.center_x - m.width / 2.0;
-        assert!((left(find("combo.Font")) - left(find("combo.Size"))).abs() < 1.0);
+        for label in ["dropdown.Font", "dropdown.Size", "segments.Colors"] {
+            assert!(
+                (find(label).right_x - find("segments.Use appearance from").right_x).abs() < 1.0,
+                "{label} at {width}"
+            );
+        }
+        assert!(find("unit.Size").rect.left() > find("combo.Size").right_x);
+        assert!((find("unit.Size").center_y - find("combo.Size").center_y).abs() < 1.0);
         let reference = find("slider.Editor padding");
         if width >= 900.0 {
             assert!((find("label.Editor padding").center_y - reference.center_y).abs() < 1.0);
@@ -216,6 +223,8 @@ fn styled_controls_fit_and_align_with_production_fonts_in_both_themes() {
                 for (control, row) in [
                     ("segments.Use appearance from", "Use appearance from"),
                     ("segments.Colors", "Colors"),
+                    ("dropdown.Font", "Font"),
+                    ("dropdown.Size", "Size"),
                     ("combo.Place new tabs", "Place new tabs"),
                     ("combo.Retention", "Keep closed tabs for"),
                     ("button.Open file", "Settings file"),
@@ -229,9 +238,7 @@ fn styled_controls_fit_and_align_with_production_fonts_in_both_themes() {
                         preset
                     );
                 }
-                assert!(
-                    (find("combo.Font").rect.left() - find("combo.Size").rect.left()).abs() < 1.0
-                );
+                assert!(find("unit.Size").rect.left() > find("combo.Size").right_x);
                 for control in &measurements {
                     if ["combo.", "button.", "segment.", "number."]
                         .iter()
