@@ -25,7 +25,7 @@ fn recovery_budgets_and_retention_presets_persist_without_render_side_effects() 
         harness.state().state.app_settings.history.recovery,
         original
     );
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 2);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 3);
     for (name, value) in [
         ("Closed-tab budget", 1024.0),
         ("Recovery-point budget", 512.0),
@@ -82,7 +82,7 @@ fn recovery_budgets_and_retention_presets_persist_without_render_side_effects() 
 
 #[test]
 fn custom_retention_values_are_preserved_and_no_expiry_is_explicit() {
-    for days in [0, 7, 30, 90, 61, 36500] {
+    for days in [0, 7, 30, 90, 61, 36500, u32::MAX] {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_app(root.path());
         app.state
@@ -191,6 +191,162 @@ fn retention_presets_and_custom_days_are_editable_and_persisted() {
 }
 
 #[test]
+fn retention_slider_supports_custom_days_and_unlimited_right_endpoint() {
+    for width in [360.0, 900.0] {
+        for dark in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            let mut app = test_app(root.path());
+            app.state
+                .app_settings
+                .history
+                .recovery
+                .archive_retention_days = 90;
+            let mut harness = Harness::builder()
+                .with_size(egui::vec2(width + 20.0, 1400.0))
+                .with_context_setup(move |ctx| {
+                    ctx.set_visuals(if dark {
+                        egui::Visuals::dark()
+                    } else {
+                        egui::Visuals::light()
+                    });
+                    crate::app::fonts::apply_editor_fonts(
+                        ctx,
+                        &crate::app::fonts::EditorFontSelection::scratchpad(
+                            crate::app::fonts::EditorFontPreset::Mono,
+                        ),
+                        4.0,
+                    )
+                    .unwrap();
+                })
+                .build_ui_state(
+                    move |ui, app| {
+                        super::super::widgets::reset_settings_layout_measurements();
+                        SettingsUi::apply_typography(ui);
+                        SettingsUi::apply_controls(ui);
+                        ui.set_width(width);
+                        render_policy(ui, app);
+                    },
+                    app,
+                );
+            harness.run();
+            harness
+                .get_by_role_and_label(egui::Role::Slider, "Keep closed tabs for")
+                .set_value_accesskit(61.0);
+            harness.run_steps(2);
+            assert_eq!(
+                harness
+                    .state()
+                    .state
+                    .app_settings
+                    .history
+                    .recovery
+                    .archive_retention_days,
+                61
+            );
+            harness.get_by_role_and_label(egui::Role::SpinButton, "Retention period");
+            for (right, expected) in [(true, 0), (false, 1), (true, 0)] {
+                click_retention_endpoint(&mut harness, right);
+                assert_eq!(
+                    harness
+                        .state()
+                        .state
+                        .app_settings
+                        .history
+                        .recovery
+                        .archive_retention_days,
+                    expected
+                );
+                if expected == 0 {
+                    assert_eq!(
+                        harness
+                            .get_by_role_and_label(egui::Role::ComboBox, "Keep closed tabs for")
+                            .accesskit_node()
+                            .value(),
+                        Some("No expiry".into())
+                    );
+                }
+                let saved = harness
+                    .state()
+                    .state
+                    .persistence
+                    .settings_store
+                    .load()
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(saved.history.recovery.archive_retention_days, expected);
+            }
+            assert_keyboard_can_leave_no_expiry(&mut harness);
+        }
+    }
+}
+
+fn assert_keyboard_can_leave_no_expiry(harness: &mut Harness<ScratchpadApp>) {
+    harness
+        .get_by_role_and_label(egui::Role::Slider, "Keep closed tabs for")
+        .focus();
+    harness.run_steps(2);
+    harness.key_press(egui::Key::ArrowLeft);
+    harness.run_steps(2);
+    let days = harness
+        .state()
+        .state
+        .app_settings
+        .history
+        .recovery
+        .archive_retention_days;
+    assert!((1..=36500).contains(&days));
+    for _ in 0..2 {
+        harness.key_press(egui::Key::ArrowRight);
+        harness.run_steps(2);
+    }
+    assert_eq!(
+        harness
+            .state()
+            .state
+            .app_settings
+            .history
+            .recovery
+            .archive_retention_days,
+        0
+    );
+}
+
+fn click_retention_endpoint(harness: &mut Harness<ScratchpadApp>, right: bool) {
+    let measures = super::super::widgets::settings_control_measurements();
+    let slider = measures
+        .iter()
+        .find(|m| m.label == "slider.Retention")
+        .unwrap()
+        .rect;
+    let combo = measures
+        .iter()
+        .find(|m| m.label == "combo.Retention")
+        .unwrap()
+        .rect;
+    assert!(slider.right() + 9.0 <= combo.left());
+    assert!((slider.center().y - combo.center().y).abs() < 1.0);
+    assert!(slider.height() >= 36.0);
+    let pos = egui::pos2(
+        if right {
+            slider.right() - 1.0
+        } else {
+            slider.left() + 1.0
+        },
+        slider.center().y,
+    );
+    harness.event(egui::Event::PointerMoved(pos));
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(2);
+    }
+}
+
+#[test]
 fn usage_errors_leave_policy_and_undo_limits_editable() {
     for state in ["loading", "disk-error", "database-error"] {
         let root = tempfile::tempdir().unwrap();
@@ -227,7 +383,7 @@ fn usage_errors_leave_policy_and_undo_limits_editable() {
             "disk-error" => "Disk usage unavailable",
             _ => "Recovery details unavailable",
         });
-        assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 5);
+        assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 6);
         assert!(
             harness
                 .query_by_role(egui::Role::DisclosureTriangle)

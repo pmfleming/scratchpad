@@ -45,7 +45,7 @@ fn settings_have_five_independent_categories_without_nested_disclosures() {
     ] {
         harness.get_by_role_and_label(egui::Role::DisclosureTriangle, label);
     }
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 7);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 8);
     for label in [
         "Memory per file",
         "Memory across all files",
@@ -117,7 +117,7 @@ fn search_reveals_matching_groups_without_losing_collapse_state() {
     assert!(harness.query_by_role(egui::Role::Slider).is_none());
     harness.get_by_label("Expand all").click_accesskit();
     harness.run_steps(2);
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 7);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 8);
 }
 
 #[test]
