@@ -119,6 +119,7 @@ pub(super) fn render(ui: &mut egui::Ui, usage: &StorageUsage) {
 /// Pie slices use true byte proportions. The legend retains zero and tiny
 /// categories even when their slices are not visible.
 pub(super) fn breakdown(ui: &mut egui::Ui, key: &str, parts: &[Part]) {
+    ui.add_space(12.0);
     if ui.available_width() >= 600.0 {
         ui.horizontal_top(|ui| {
             pie(ui, key, parts, 156.0);
@@ -131,9 +132,10 @@ pub(super) fn breakdown(ui: &mut egui::Ui, key: &str, parts: &[Part]) {
             ui.add_space((ui.available_width() - diameter) / 2.0);
             pie(ui, key, parts, diameter);
         });
-        ui.add_space(8.0);
+        ui.add_space(12.0);
         legend(ui, parts);
     }
+    ui.add_space(12.0);
 }
 
 fn part_label(part: &Part, total: f64) -> String {

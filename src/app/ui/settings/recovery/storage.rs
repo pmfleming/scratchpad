@@ -8,13 +8,24 @@ use row::usage_row;
 #[cfg(test)]
 mod tests;
 
-pub(super) fn summary(ui: &mut egui::Ui, usage: &StorageUsage) {
+fn storage_heading(ui: &mut egui::Ui, title: &str) {
     ui.label(
-        egui::RichText::new("Files on disk")
+        egui::RichText::new(title)
             .size(15.0)
             .strong()
             .color(text_primary(ui)),
     );
+}
+
+fn breakdown_heading(ui: &mut egui::Ui, title: &str) {
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(8.0);
+    storage_heading(ui, title);
+}
+
+pub(super) fn summary(ui: &mut egui::Ui, usage: &StorageUsage) {
+    storage_heading(ui, "Files on disk");
     let total = ui.label(
         egui::RichText::new(format_bytes(usage.total_file_bytes))
             .size(30.0)
@@ -49,7 +60,7 @@ fn counted(count: u64, singular: &str, plural: &str) -> String {
 /// Measurements are always visible inside History. Physical files and logical
 /// payloads have separate totals; overlapping references never become slices.
 pub(super) fn details(ui: &mut egui::Ui, usage: &StorageUsage) {
-    super::group_heading(ui, "Disk breakdown");
+    breakdown_heading(ui, "Disk breakdown");
     chart::breakdown(ui, "recovery.disk.pie", &chart::parts(ui, usage));
     if let Some(bytes) = usage.allocated_bytes {
         usage_row(
@@ -68,7 +79,7 @@ pub(super) fn details(ui: &mut egui::Ui, usage: &StorageUsage) {
         );
         return;
     }
-    super::group_heading(ui, "Recovery payloads");
+    breakdown_heading(ui, "Recovery payloads");
     let colors = chart::payload_colors(ui.visuals().dark_mode);
     let rows = payload_rows(usage);
     let parts: [_; 8] = std::array::from_fn(|index| {

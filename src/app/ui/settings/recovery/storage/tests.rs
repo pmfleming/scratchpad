@@ -105,6 +105,37 @@ fn both_pies_and_exact_values_are_visible_without_nested_disclosures() {
         ] {
             harness.get_by_label(label);
         }
+        let heading_format = |label: &str| {
+            harness
+                .output()
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == label => {
+                        Some(text.galley.job.sections[0].format.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let reference = heading_format("Files on disk");
+        assert_eq!(reference.font_id.size, 15.0);
+        for (index, (heading, following)) in [
+            ("Disk breakdown", "Allocated on disk"),
+            ("Recovery payloads", "Recovery payload total"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(heading_format(heading), reference);
+            let pie = harness
+                .get_all_by_role(egui::Role::Image)
+                .nth(index + 1)
+                .unwrap()
+                .rect();
+            assert!(pie.top() - harness.get_by_label(heading).rect().bottom() >= 12.0);
+            assert!(harness.get_by_label(following).rect().top() - pie.bottom() >= 12.0);
+        }
         assert_eq!(harness.get_all_by_label("58 B").count(), 2);
         let database = harness.get_by_label("4.00 KiB").rect();
         let settings = harness.get_by_label("1.92 KiB").rect();
