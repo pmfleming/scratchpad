@@ -5,6 +5,12 @@ use egui_kittest::{
     kittest::{NodeT, Queryable},
 };
 
+fn setup(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+    ctx.set_fonts(fonts);
+}
+
 #[test]
 fn recovery_budgets_and_retention_presets_persist_without_render_side_effects() {
     let root = tempfile::tempdir().unwrap();
@@ -12,6 +18,7 @@ fn recovery_budgets_and_retention_presets_persist_without_render_side_effects() 
     let original = app.state.app_settings.history.recovery.clone();
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1000.0, 1400.0))
+        .with_context_setup(setup)
         .build_ui_state(
             |ui, app| {
                 SettingsUi::apply_typography(ui);
@@ -25,7 +32,7 @@ fn recovery_budgets_and_retention_presets_persist_without_render_side_effects() 
         harness.state().state.app_settings.history.recovery,
         original
     );
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 3);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 6);
     for (name, value) in [
         ("Closed-tab budget", 1024.0),
         ("Recovery-point budget", 512.0),
@@ -92,6 +99,7 @@ fn custom_retention_values_are_preserved_and_no_expiry_is_explicit() {
             .archive_retention_days = days;
         let mut harness = Harness::builder()
             .with_size(egui::vec2(1000.0, 1400.0))
+            .with_context_setup(setup)
             .build_ui_state(
                 |ui, app| {
                     ui.set_width(880.0);
@@ -139,6 +147,7 @@ fn retention_presets_and_custom_days_are_editable_and_persisted() {
         .archive_retention_days = 30;
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1000.0, 1400.0))
+        .with_context_setup(setup)
         .build_ui_state(
             |ui, app| {
                 ui.set_width(880.0);
@@ -309,6 +318,99 @@ fn assert_keyboard_can_leave_no_expiry(harness: &mut Harness<ScratchpadApp>) {
             .archive_retention_days,
         0
     );
+}
+
+#[test]
+fn recommended_icon_resets_retention_and_all_limits_but_preserves_other_preferences() {
+    use crate::app::services::settings_store::RecoverySettings;
+    let root = tempfile::tempdir().unwrap();
+    let mut app = test_app(root.path());
+    let policy = &mut app.state.app_settings.history.recovery;
+    policy.archive_retention_days = 61;
+    policy.archive_byte_budget = 2000 * 1024 * 1024;
+    policy.snapshot_byte_budget = 100 * 1024 * 1024;
+    policy.reopen_archives = false;
+    policy.open_changed_disk_files = false;
+    policy
+        .archive_migration_grace_until
+        .insert("preserved".into(), 4_102_444_800);
+    let grace = policy.archive_migration_grace_until.clone();
+    app.state
+        .app_settings
+        .history
+        .budget
+        .persisted_payload_budget = 0;
+    app.state.app_settings.history.budget.derived_from_memory = false;
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1000.0, 1600.0))
+        .with_context_setup(setup)
+        .build_ui_state(
+            |ui, app| {
+                SettingsUi::apply_typography(ui);
+                SettingsUi::apply_controls(ui);
+                ui.set_width(880.0);
+                render_policy(ui, app);
+            },
+            app,
+        );
+    harness.run();
+    harness.get_by_label("Retention & limits");
+    for removed in ["Retention", "Undo limits", "Recommended limits"] {
+        assert!(harness.query_by_label(removed).is_none());
+    }
+    // Explicit Custom mode must also be cleared by the reset.
+    harness
+        .get_by_role_and_label(egui::Role::ComboBox, "Keep closed tabs for")
+        .click_accesskit();
+    harness.run_steps(2);
+    harness.get_by_label("Custom…").click_accesskit();
+    harness.run_steps(2);
+    assert!(!harness.output().shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Use recommended")));
+    harness
+        .get_by_role_and_label(egui::Role::Button, "Use recommended")
+        .click_accesskit();
+    harness.run_steps(2);
+    let history = &harness.state().state.app_settings.history;
+    let defaults = RecoverySettings::default();
+    assert_eq!(
+        history.recovery.archive_retention_days,
+        defaults.archive_retention_days
+    );
+    assert_eq!(
+        history.recovery.archive_byte_budget,
+        defaults.archive_byte_budget
+    );
+    assert_eq!(
+        history.recovery.snapshot_byte_budget,
+        defaults.snapshot_byte_budget
+    );
+    assert!(!history.recovery.reopen_archives);
+    assert!(!history.recovery.open_changed_disk_files);
+    assert_eq!(history.recovery.archive_migration_grace_until, grace);
+    assert!(history.budget.derived_from_memory);
+    assert!(history.budget.persisted_payload_budget > 0);
+    assert_eq!(
+        harness
+            .get_by_role_and_label(egui::Role::ComboBox, "Keep closed tabs for")
+            .accesskit_node()
+            .value(),
+        Some("90 days".into())
+    );
+    assert!(
+        harness
+            .query_by_role_and_label(egui::Role::SpinButton, "Retention period")
+            .is_none()
+    );
+    let saved = harness
+        .state()
+        .state
+        .persistence
+        .settings_store
+        .load()
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.history.recovery, history.recovery);
+    assert_eq!(saved.history.budget, history.budget);
 }
 
 fn click_retention_endpoint(harness: &mut Harness<ScratchpadApp>, right: bool) {

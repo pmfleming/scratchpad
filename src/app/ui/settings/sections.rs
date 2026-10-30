@@ -1,6 +1,6 @@
 use super::{
     ScratchpadApp, SettingsUi, egui,
-    widgets::{action_row, category, group_heading, numeric_slider},
+    widgets::{category, numeric_slider},
 };
 
 struct Category {
@@ -140,7 +140,6 @@ mod tests {
 }
 
 pub(super) fn text_history_budget(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    group_heading(ui, "Undo limits");
     let original = app.state.app_settings.history.budget;
     let mut budget = original;
     byte_budget_row(
@@ -166,9 +165,6 @@ pub(super) fn text_history_budget(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     );
     if budget != original {
         crate::app::app_state::settings_controller::set_history_budget(app, budget);
-    }
-    if action_row(ui, "Recommended limits", "Use recommended", None) {
-        crate::app::app_state::settings_controller::reset_history_budget_to_auto(app);
     }
 }
 

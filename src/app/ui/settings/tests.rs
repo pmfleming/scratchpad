@@ -661,7 +661,7 @@ fn exact_value_inputs_and_recommended_limits_keep_slider_values_in_sync() {
         .build_ui_state(
             |ui, app| {
                 ui.set_width(880.0);
-                sections::text_history_budget(ui, app);
+                recovery::render_policy(ui, app);
             },
             app(),
         );

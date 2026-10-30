@@ -44,7 +44,7 @@ pub(super) fn render_recovery_category(ui: &mut egui::Ui, app: &mut ScratchpadAp
     }
 }
 
-fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+pub(super) fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let mut policy = app.state.app_settings.history.recovery.clone();
     toggle_select_row(
         ui,
@@ -62,7 +62,15 @@ fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         policy.open_changed_disk_files,
         |value| policy.open_changed_disk_files = value,
     );
-    group_heading(ui, "Retention");
+    if policy != app.state.app_settings.history.recovery {
+        crate::app::app_state::settings_controller::set_recovery_settings(app, policy);
+    }
+    if retention_limits_heading(ui) {
+        crate::app::app_state::settings_controller::reset_retention_and_limits_to_recommended(app);
+        let id = widget_ids::local(ui, "settings.retention.custom");
+        ui.data_mut(|data| data.insert_temp(id, false));
+    }
+    let mut policy = app.state.app_settings.history.recovery.clone();
     retention_row(ui, &mut policy.archive_retention_days);
     super::sections::byte_budget_row(
         ui,
@@ -81,6 +89,44 @@ fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     if policy != app.state.app_settings.history.recovery {
         crate::app::app_state::settings_controller::set_recovery_settings(app, policy);
     }
+    super::sections::text_history_budget(ui, app);
+}
+
+fn retention_limits_heading(ui: &mut egui::Ui) -> bool {
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("Retention & limits")
+                .size(12.5)
+                .strong()
+                .color(super::text_muted(ui)),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let response = widget_ids::surface_response(
+                ui,
+                "settings.retention.reset",
+                widget_ids::WidgetRole::IconButton,
+                |ui| {
+                    ui.add_sized(
+                        egui::Vec2::splat(SettingsUi::CONTROLS.height),
+                        egui::Button::new(
+                            egui::RichText::new(egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE)
+                                .font(egui_phosphor::font_id(18.0)),
+                        ),
+                    )
+                },
+            );
+            record_settings_control_box("button.Use recommended", response.rect);
+            response
+                .on_hover_text("Reset retention and all limits to recommended values.")
+                .accessible_name("Use recommended")
+                .clicked()
+        })
+        .inner
+    })
+    .inner
 }
 
 fn retention_row(ui: &mut egui::Ui, days: &mut u32) {
@@ -203,7 +249,6 @@ fn render_content(
     result: Option<Result<&StorageUsage, &str>>,
 ) {
     render_policy(ui, app);
-    super::sections::text_history_budget(ui, app);
     group_heading(ui, "Storage");
     match result {
         None => storage::notice(
