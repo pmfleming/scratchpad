@@ -2,8 +2,7 @@ use crate::app::services::settings_store::{TabListPosition, TabOrderDirection, T
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::{
-    TAB_BUTTON_WIDTH, TAB_LIST_SCROLLBAR_GUTTER, action_bg, action_hover_bg, border, tab_active_bg,
-    tab_selected_accent, text_primary,
+    action_bg, action_hover_bg, border, tab_active_bg, tab_selected_accent, text_primary,
 };
 use crate::app::ui::{visuals::with_visual_overrides, widget_ids};
 use eframe::egui;
@@ -15,7 +14,7 @@ use std::hash::Hash;
 pub(super) const WIDTH: f32 = 220.0;
 pub(super) const SUBMENU_WIDTH: f32 = 176.0;
 pub(super) const ORDER_SUBMENU_WIDTH: f32 = 116.0;
-pub(super) const OPEN_FILE_SUBMENU_WIDTH: f32 = TAB_BUTTON_WIDTH + TAB_LIST_SCROLLBAR_GUTTER;
+pub(super) const OPEN_FILE_SUBMENU_WIDTH: f32 = 380.0;
 pub(super) const ROW_HEIGHT: f32 = 28.0;
 pub(super) const CARET_WIDTH: f32 = 28.0;
 pub(super) const ORDER_DIRECTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
@@ -228,39 +227,6 @@ pub(super) fn primary_menu_button_enabled(
         }
         clicked
     })
-}
-
-/// A full-width submenu entry using the same label, icon and chevron layout as
-/// the split-action menu rows, with the entire row opening the submenu.
-pub(super) fn submenu_row(
-    ui: &mut egui::Ui,
-    id_source: impl Hash,
-    label: &str,
-    icon: &str,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    with_row_visuals(ui, |ui| {
-        let button = egui::Button::new("")
-            .min_size(egui::vec2(WIDTH, ROW_HEIGHT))
-            .stroke(egui::Stroke::NONE);
-        widget_ids::surface_widget(ui, id_source, "submenu", |ui| {
-            let (response, _) = egui::containers::menu::SubMenuButton::from_button(button)
-                .config(
-                    egui::containers::menu::MenuConfig::new()
-                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
-                )
-                .ui(ui, add_contents);
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
-            paint_row_label(ui, response.rect, Some(icon), label, true);
-            ui.painter().text(
-                response.rect.right_center() - egui::vec2(CARET_WIDTH * 0.5, 0.0),
-                egui::Align2::CENTER_CENTER,
-                CARET_RIGHT,
-                egui_phosphor::font_id(14.0),
-                text_primary(ui),
-            );
-        });
-    });
 }
 
 pub(super) fn submenu_button(

@@ -2,7 +2,7 @@ use super::activate_slot;
 use super::menu_ui::{
     OPEN_DISPOSITION_BUTTON_SIZE, OPEN_FILE_SUBMENU_WIDTH, SUBMENU_WIDTH,
     WIDTH as TAB_CONTEXT_MENU_WIDTH, menu_button, open_disposition_button,
-    primary_menu_button_enabled, submenu_button, submenu_button_sized, submenu_row,
+    primary_menu_button_enabled, submenu_button, submenu_button_sized,
 };
 use crate::app::app_state::{ScratchpadApp, workspace::accessors as workspace_accessors};
 use crate::app::commands::{AppCommand, FileCommand, WorkspaceCommand};
@@ -11,8 +11,7 @@ use crate::app::services::settings_store::FileOpenDisposition;
 
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROW_SQUARE_IN, CLOCK_COUNTER_CLOCKWISE, FILE_PLUS, FLOPPY_DISK, FOLDER_OPEN,
-    PENCIL_SIMPLE_LINE, PLUS,
+    ARROW_SQUARE_IN, FILE_PLUS, FLOPPY_DISK, FOLDER_OPEN, PENCIL_SIMPLE_LINE, PLUS,
 };
 use std::path::PathBuf;
 
@@ -35,26 +34,8 @@ pub(super) fn render_file_actions(
         crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::NewTab));
         ui.close();
     }
-    if app.state.app_settings.recent_files_enabled() {
-        render_open_file_actions(ui, app, slot_index, open_here_enabled);
-    } else if menu_button(
-        ui,
-        TAB_CONTEXT_MENU_WIDTH,
-        "Open File Here",
-        Some(FOLDER_OPEN),
-        open_here_enabled,
-    ) {
-        activate_slot(app, slot_index);
-        crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFileHere));
-        ui.close();
-    }
-    submenu_row(
-        ui,
-        "tab_context.recently_closed",
-        "Recently Closed",
-        CLOCK_COUNTER_CLOCKWISE,
-        |ui| render_recently_closed_files(ui, app, slot_index),
-    );
+    // Retained tabs stay accessible here even when recent-file tracking is off.
+    render_open_file_actions(ui, app, slot_index, open_here_enabled);
     if menu_button(
         ui,
         TAB_CONTEXT_MENU_WIDTH,
@@ -99,25 +80,34 @@ fn render_open_file_actions(
     slot_index: usize,
     open_enabled: bool,
 ) {
+    let (label, command) = if app.state.app_settings.recent_files_enabled() {
+        ("Open File", FileCommand::OpenFile)
+    } else {
+        ("Open File Here", FileCommand::OpenFileHere)
+    };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
 
         if primary_menu_button_enabled(
             ui,
             "tab_context.open_file_primary",
-            "Open File",
+            label,
             FOLDER_OPEN,
             open_enabled,
         ) {
             activate_slot(app, slot_index);
-            crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFile));
+            crate::app::commands::handle_command(app, AppCommand::File(command));
             ui.close();
         }
         submenu_button_sized(
             ui,
             "tab_context.open_file_caret",
             OPEN_FILE_SUBMENU_WIDTH,
-            |ui| render_open_file_disposition_buttons(ui, app),
+            |ui| {
+                render_open_file_disposition_buttons(ui, app);
+                ui.separator();
+                render_recently_closed_files(ui, app, slot_index);
+            },
         );
     });
 }

@@ -1,4 +1,4 @@
-use super::super::menu_ui::{ROW_HEIGHT, with_row_visuals};
+use super::super::menu_ui::{OPEN_FILE_SUBMENU_WIDTH as LIST_WIDTH, ROW_HEIGHT, with_row_visuals};
 use crate::app::{
     app_state::{ScratchpadApp, workspace::lifecycle},
     services::{session_store::ClosedTabInfo, settings_store::RecentlyClosedFile},
@@ -14,8 +14,6 @@ use std::{
 
 #[cfg(test)]
 mod tests;
-
-const LIST_WIDTH: f32 = 380.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DiskStatus {
