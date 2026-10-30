@@ -11,7 +11,9 @@ pub const CLOSE_BG: Color32 = Color32::from_rgb(124, 49, 49);
 pub const CLOSE_HOVER_BG: Color32 = Color32::from_rgb(164, 58, 58);
 pub const BORDER: Color32 = Color32::from_rgb(59, 66, 76);
 pub const TEXT_PRIMARY: Color32 = Color32::WHITE;
-pub const TEXT_MUTED: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 160);
+// Opaque secondary colors keep the hierarchy predictable on every surface.
+// Full RGB with a reduced premultiplied alpha would brighten dark backgrounds.
+pub const TEXT_MUTED: Color32 = Color32::from_rgb(160, 173, 181);
 const HEADER_BG_LIGHT: Color32 = Color32::from_rgb(240, 243, 248);
 const TAB_ACTIVE_BG_LIGHT: Color32 = Color32::from_rgb(255, 255, 255);
 const TAB_HOVER_BG_LIGHT: Color32 = Color32::from_rgb(226, 232, 240);
@@ -21,7 +23,7 @@ const ACTION_BG_LIGHT: Color32 = Color32::from_rgb(230, 236, 244);
 const ACTION_HOVER_BG_LIGHT: Color32 = Color32::from_rgb(213, 222, 234);
 const BORDER_LIGHT: Color32 = Color32::from_rgb(184, 194, 208);
 const TEXT_PRIMARY_LIGHT: Color32 = Color32::from_rgb(28, 35, 45);
-const TEXT_MUTED_LIGHT: Color32 = Color32::from_rgba_premultiplied(28, 35, 45, 178);
+const TEXT_MUTED_LIGHT: Color32 = Color32::from_rgb(89, 99, 111);
 
 fn theme_color(dark_mode: bool, dark: Color32, light: Color32) -> Color32 {
     if dark_mode { dark } else { light }
@@ -88,4 +90,48 @@ pub fn tab_list_scroll_style() -> egui::style::ScrollStyle {
     let mut style = egui::style::ScrollStyle::floating();
     style.floating_allocated_width = TAB_LIST_SCROLLBAR_GUTTER;
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn luminance(color: Color32) -> f32 {
+        let linear = |channel: u8| {
+            let value = f32::from(channel) / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+    }
+
+    #[test]
+    fn secondary_text_is_readable_but_quieter_than_primary_in_both_themes() {
+        for (primary, secondary, backgrounds) in [
+            (
+                TEXT_PRIMARY,
+                TEXT_MUTED,
+                [HEADER_BG, Color32::from_rgb(25, 29, 32)],
+            ),
+            (
+                TEXT_PRIMARY_LIGHT,
+                TEXT_MUTED_LIGHT,
+                [HEADER_BG_LIGHT, Color32::from_rgb(250, 251, 252)],
+            ),
+        ] {
+            assert_eq!(secondary.a(), 255);
+            for background in backgrounds {
+                let contrast = |text| {
+                    let a = luminance(text);
+                    let b = luminance(background);
+                    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+                };
+                assert!(contrast(secondary) >= 4.5);
+                assert!(contrast(primary) > contrast(secondary));
+            }
+        }
+    }
 }
