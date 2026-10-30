@@ -65,7 +65,7 @@ fn cached_text_survives_font_atlas_rollover_and_selection_toggling() {
         "Normal text must remain readable.".into(),
         None,
     );
-    let original = buffer.text().to_string();
+    let original = buffer.text();
     let mut view = EditorViewState::new(buffer.id);
     let mut output = ctx.run_ui(input(), |ui| {
         let galley = editor_galley(ui, &buffer, &mut view);

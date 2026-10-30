@@ -29,7 +29,7 @@ fn zoom_status_is_read_only_tracks_the_active_pane_and_is_hidden_in_settings() {
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             ctx.set_fonts(fonts);
         })
-        .build_ui_state(|ui, app| super::show_status_bar(ui, app), app);
+        .build_ui_state(super::show_status_bar, app);
     harness.run();
     assert!(
         harness

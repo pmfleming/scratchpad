@@ -6,6 +6,24 @@ use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::startup::StartupOptions;
 use eframe::egui;
 
+fn press(ctx: &egui::Context, app: &mut ScratchpadApp, key: egui::Key, modifiers: egui::Modifiers) {
+    ctx.run_ui(
+        egui::RawInput {
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            ..Default::default()
+        },
+        |ui| handle_shortcuts(app, ui.ctx()),
+    )
+    .textures_delta
+    .clear();
+}
+
 #[test]
 fn zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers() {
     use crate::app::{app_state::test_support::test_app, domain::SplitAxis};
@@ -19,24 +37,7 @@ fn zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers() {
     let baseline = app.state.app_settings.font_size();
     let ctx = egui::Context::default();
     ctx.options_mut(|options| options.zoom_with_keyboard = false);
-    let press = |app: &mut ScratchpadApp, key, modifiers| {
-        ctx.run_ui(
-            egui::RawInput {
-                events: vec![egui::Event::Key {
-                    key,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers,
-                }],
-                ..Default::default()
-            },
-            |ui| handle_shortcuts(app, ui.ctx()),
-        )
-        .textures_delta
-        .clear();
-    };
-    press(&mut app, egui::Key::Equals, egui::Modifiers::CTRL);
+    press(&ctx, &mut app, egui::Key::Equals, egui::Modifiers::CTRL);
     assert_eq!(
         app.tab_manager
             .active_tab()
@@ -51,7 +52,7 @@ fn zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers() {
         .active_tab_mut()
         .unwrap()
         .activate_view(second);
-    press(&mut app, egui::Key::Minus, egui::Modifiers::CTRL);
+    press(&ctx, &mut app, egui::Key::Minus, egui::Modifiers::CTRL);
     assert_eq!(
         app.tab_manager
             .active_tab()
@@ -62,12 +63,12 @@ fn zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers() {
             .zoom_label(),
         "90%"
     );
-    press(&mut app, egui::Key::Num0, egui::Modifiers::CTRL);
+    press(&ctx, &mut app, egui::Key::Num0, egui::Modifiers::CTRL);
     let tab = app.tab_manager.active_tab().unwrap();
     assert_eq!(tab.layout.view(second).unwrap().zoom_factor(), 1.0);
     assert_eq!(tab.layout.view(first).unwrap().zoom_label(), "110%");
     assert!(!tab.layout.line_numbers_visible());
-    press(&mut app, egui::Key::Num9, egui::Modifiers::CTRL);
+    press(&ctx, &mut app, egui::Key::Num9, egui::Modifiers::CTRL);
     assert!(
         app.tab_manager
             .active_tab()
@@ -80,8 +81,8 @@ fn zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers() {
         .shortcuts
         .bindings
         .insert("reset_zoom".into(), "alt+r".into());
-    press(&mut app, egui::Key::Equals, egui::Modifiers::CTRL);
-    press(&mut app, egui::Key::Num0, egui::Modifiers::CTRL);
+    press(&ctx, &mut app, egui::Key::Equals, egui::Modifiers::CTRL);
+    press(&ctx, &mut app, egui::Key::Num0, egui::Modifiers::CTRL);
     assert_eq!(
         app.tab_manager
             .active_tab()
@@ -92,7 +93,7 @@ fn zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers() {
             .zoom_label(),
         "110%"
     );
-    press(&mut app, egui::Key::R, egui::Modifiers::ALT);
+    press(&ctx, &mut app, egui::Key::R, egui::Modifiers::ALT);
     assert_eq!(
         app.tab_manager
             .active_tab()
@@ -109,7 +110,7 @@ fn zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers() {
             crate::app::commands::SettingsCommand::OpenSettings,
         ),
     );
-    press(&mut app, egui::Key::Equals, egui::Modifiers::CTRL);
+    press(&ctx, &mut app, egui::Key::Equals, egui::Modifiers::CTRL);
     assert_eq!(
         app.tab_manager
             .active_tab()
@@ -198,19 +199,12 @@ fn configured_utility_keys_reach_their_application_actions() {
             .map(|action| (action.config_key().into(), "alt+q".into()))
             .collect();
         assert!(!check(&app), "{action:?} must start inactive");
-        let input = egui::RawInput {
-            events: vec![egui::Event::Key {
-                key: egui::Key::Q,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::ALT,
-            }],
-            ..Default::default()
-        };
-        let mut output =
-            egui::Context::default().run_ui(input, |ui| handle_shortcuts(&mut app, ui.ctx()));
-        output.textures_delta.clear();
+        press(
+            &egui::Context::default(),
+            &mut app,
+            egui::Key::Q,
+            egui::Modifiers::ALT,
+        );
         assert!(check(&app), "{action:?} was not dispatched");
         assert_eq!(
             app.tab_manager

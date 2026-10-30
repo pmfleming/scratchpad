@@ -1,7 +1,7 @@
 use super::{render_file_actions, render_recently_closed_files};
 use crate::app::{
     app_state::{
-        settings_controller,
+        ScratchpadApp, settings_controller,
         test_support::{test_app, wait_for_background_io},
         workspace::lifecycle,
     },
@@ -66,15 +66,7 @@ fn open_file_submenu_contains_closed_files_without_a_separate_menu_item() {
             } else {
                 "No recently closed files"
             };
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while harness.query_by_label(label).is_none() {
-                assert!(
-                    Instant::now() < deadline,
-                    "Open File submenu did not show {label}"
-                );
-                std::thread::sleep(Duration::from_millis(1));
-                harness.run_steps(1);
-            }
+            wait_for_menu_entry(&mut harness, label);
             assert!(harness.query_by_label("Recently Closed").is_none());
             if with_entry {
                 harness
@@ -141,49 +133,8 @@ fn recently_closed_menu_has_single_action_rows_and_reopens_retained_and_disk_ent
             })
             .with_size(egui::vec2(1000.0, 700.0))
             .build_ui_state(|ui, app| render_recently_closed_files(ui, app, 0), app);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while harness
-            .query_by_role_and_label(egui::Role::Button, "note.txt")
-            .is_none()
-        {
-            assert!(Instant::now() < deadline, "archive query did not finish");
-            std::thread::sleep(Duration::from_millis(1));
-            harness.run_steps(1);
-        }
-        assert_eq!(
-            harness
-                .get_all_by_role_and_label(egui::Role::Button, "note.txt")
-                .count(),
-            1,
-            "archive path must not be duplicated as disk-only entry"
-        );
-        assert_eq!(harness.get_all_by_role(egui::Role::Button).count(), 2);
-        for removed in ["Pin", "Archived text", "Files on disk"] {
-            assert!(harness.query_by_label(removed).is_none());
-        }
-        let painted = |label: &str| {
-            harness
-                .output()
-                .shapes
-                .iter()
-                .find_map(|shape| {
-                    if let egui::Shape::Text(text) = &shape.shape
-                        && text.galley.text() == label
-                    {
-                        Some(text.pos)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_else(|| panic!("missing painted label: {label}"))
-        };
-        assert_eq!(painted("note.txt").x, painted("other.txt").x);
-        painted(egui_phosphor::regular::DOT);
-        painted(if missing {
-            egui_phosphor::regular::FILE_X
-        } else {
-            egui_phosphor::regular::FILE
-        });
+        wait_for_menu_entry(&mut harness, "note.txt");
+        assert_closed_menu_layout(&harness, missing);
         harness
             .get_by_role_and_label(egui::Role::Button, "note.txt")
             .click_accesskit();
@@ -230,5 +181,51 @@ fn recently_closed_menu_has_single_action_rows_and_reopens_retained_and_disk_ent
         } else {
             assert_eq!(std::fs::read_to_string(&path).unwrap(), "disk");
         }
+    }
+}
+
+fn assert_closed_menu_layout(harness: &Harness<'_, ScratchpadApp>, missing: bool) {
+    assert_eq!(
+        harness
+            .get_all_by_role_and_label(egui::Role::Button, "note.txt")
+            .count(),
+        1,
+        "archive path must not be duplicated as disk-only entry"
+    );
+    assert_eq!(harness.get_all_by_role(egui::Role::Button).count(), 2);
+    for removed in ["Pin", "Archived text", "Files on disk"] {
+        assert!(harness.query_by_label(removed).is_none());
+    }
+    let painted = |label: &str| {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .find_map(|shape| {
+                if let egui::Shape::Text(text) = &shape.shape
+                    && text.galley.text() == label
+                {
+                    Some(text.pos)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| panic!("missing painted label: {label}"))
+    };
+    assert_eq!(painted("note.txt").x, painted("other.txt").x);
+    painted(egui_phosphor::regular::DOT);
+    painted(if missing {
+        egui_phosphor::regular::FILE_X
+    } else {
+        egui_phosphor::regular::FILE
+    });
+}
+
+fn wait_for_menu_entry(harness: &mut Harness<'_, ScratchpadApp>, label: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while harness.query_by_label(label).is_none() {
+        assert!(Instant::now() < deadline, "menu did not show {label}");
+        std::thread::sleep(Duration::from_millis(1));
+        harness.run_steps(1);
     }
 }

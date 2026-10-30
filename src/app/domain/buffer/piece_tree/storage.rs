@@ -333,13 +333,10 @@ impl AddTextStorage {
             return span;
         }
 
-        let can_extend_tail = text.len() < ADD_TAIL_BYTES
-            && self.chunks.last().is_some_and(|chunk| {
-                chunk.text.len() < ADD_TAIL_BYTES
-                    && chunk.text.len().saturating_add(text.len()) <= ADD_TAIL_BYTES
-            });
-        if can_extend_tail {
-            let tail = self.chunks.last_mut().expect("tail exists");
+        if text.len() < ADD_TAIL_BYTES
+            && let Some(tail) = self.chunks.last_mut()
+            && tail.text.len().saturating_add(text.len()) <= ADD_TAIL_BYTES
+        {
             Arc::make_mut(&mut tail.text).push_str(text);
         } else {
             self.chunks.push(AddTextChunk {
@@ -385,12 +382,11 @@ impl AddTextStorage {
     }
 
     fn take_if_nonempty(&mut self) -> Option<String> {
-        if self.is_empty() {
-            return None;
-        }
-        if self.chunks.len() == 1 {
-            let chunk = self.chunks.pop().expect("single add chunk exists");
-            return Some(Arc::try_unwrap(chunk.text).unwrap_or_else(|text| (*text).clone()));
+        if self.chunks.len() <= 1 {
+            return self
+                .chunks
+                .pop()
+                .map(|chunk| Arc::unwrap_or_clone(chunk.text));
         }
 
         let mut text = String::with_capacity(self.len());

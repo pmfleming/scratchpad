@@ -71,7 +71,7 @@ impl<'a> States<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{States, TextHistoryEntryView};
     use crate::app::domain::PieceSource;
 
     fn entries() -> Vec<TextHistoryEntryView> {

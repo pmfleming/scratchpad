@@ -32,7 +32,7 @@ max = 0
 
 [policy.rules."rust.reliability.expect"]
 level = "error"
-max = 12
+max = 10
 exclude_paths = ["src/bin/**", "src/profile/**"]
 
 [policy.rules."rust.reliability.unwrap"]

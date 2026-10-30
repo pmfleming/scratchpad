@@ -3,13 +3,13 @@ use crate::app::text_history::TextHistoryEntryView;
 use egui_phosphor::regular::{
     ARROWS_LEFT_RIGHT, BACKSPACE, CLIPBOARD, MAGNIFYING_GLASS, PENCIL_SIMPLE, SCISSORS, STACK,
 };
+use std::collections::HashMap;
 
-#[derive(Clone)]
-pub(super) struct TextHistoryRow {
+pub(super) struct TextHistoryRow<'a> {
     pub(super) buffer_id: BufferId,
     pub(super) entry_id: u64,
     pub(super) global_seq: u64,
-    pub(super) title: String,
+    pub(super) title: &'a str,
     pub(super) detail: String,
     pub(super) icon: &'static str,
     pub(super) undone: bool,
@@ -39,19 +39,12 @@ pub(super) enum HistoryAction {
     },
 }
 
-#[derive(Clone)]
-pub(super) struct TextHistoryFileGroup {
-    pub(super) buffer_id: BufferId,
-    pub(super) label: String,
-    pub(super) rows: Vec<TextHistoryRow>,
-}
-
-pub(super) fn row_from_entry(entry: &TextHistoryEntryView) -> TextHistoryRow {
+pub(super) fn row_from_entry(entry: &TextHistoryEntryView) -> TextHistoryRow<'_> {
     TextHistoryRow {
         buffer_id: entry.buffer_id,
         entry_id: entry.id,
         global_seq: entry.global_seq,
-        title: entry.summary.clone(),
+        title: &entry.summary,
         detail: format!("{} · {}", entry.label, source_label(entry.source)),
         icon: entry_icon(entry),
         undone: entry.undone,
@@ -63,54 +56,8 @@ pub(super) fn row_from_entry(entry: &TextHistoryEntryView) -> TextHistoryRow {
 
 pub(super) fn timeline_rows_from_entries<'a>(
     entries: impl Iterator<Item = &'a TextHistoryEntryView>,
-) -> Vec<TextHistoryRow> {
+) -> Vec<TextHistoryRow<'a>> {
     let mut rows = entries.map(row_from_entry).collect::<Vec<_>>();
-    sort_chronological_rows(&mut rows);
-    rows
-}
-
-pub(super) fn file_groups_from_entries<'a>(
-    entries: impl Iterator<Item = &'a TextHistoryEntryView>,
-) -> Vec<TextHistoryFileGroup> {
-    let mut groups = Vec::<TextHistoryFileGroup>::new();
-    for entry in entries {
-        let row = row_from_entry(entry);
-        if let Some(group) = groups
-            .iter_mut()
-            .find(|group| group.buffer_id == entry.buffer_id)
-        {
-            group.rows.push(row);
-        } else {
-            groups.push(TextHistoryFileGroup {
-                buffer_id: entry.buffer_id,
-                label: entry.label.clone(),
-                rows: vec![row],
-            });
-        }
-    }
-    for group in &mut groups {
-        sort_chronological_rows(&mut group.rows);
-    }
-    groups.sort_by(|left, right| {
-        let left_seq = left
-            .rows
-            .first()
-            .map(|row| row.global_seq)
-            .unwrap_or_default();
-        let right_seq = right
-            .rows
-            .first()
-            .map(|row| row.global_seq)
-            .unwrap_or_default();
-        right_seq
-            .cmp(&left_seq)
-            .then_with(|| left.label.cmp(&right.label))
-            .then_with(|| left.buffer_id.cmp(&right.buffer_id))
-    });
-    groups
-}
-
-fn sort_chronological_rows(rows: &mut [TextHistoryRow]) {
     rows.sort_by(|left, right| {
         right
             .global_seq
@@ -118,6 +65,15 @@ fn sort_chronological_rows(rows: &mut [TextHistoryRow]) {
             .then_with(|| left.buffer_id.cmp(&right.buffer_id))
             .then_with(|| left.entry_id.cmp(&right.entry_id))
     });
+    rows
+}
+
+pub(super) fn entry_counts(entries: &[TextHistoryEntryView]) -> HashMap<BufferId, usize> {
+    let mut counts = HashMap::new();
+    for entry in entries {
+        *counts.entry(entry.buffer_id).or_default() += 1;
+    }
+    counts
 }
 
 fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {

@@ -116,29 +116,6 @@ fn matches_category(category: &Category, query: &str) -> bool {
         .all(|term| haystack.contains(term))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{CATEGORIES, matches_category};
-
-    #[test]
-    fn search_supports_labels_and_legacy_aliases() {
-        for (query, key) in [
-            ("auto-hide", "workspace"),
-            ("gutter", "editors"),
-            ("persisted per-file", "history"),
-            ("font size", "appearance"),
-            ("toml", "application"),
-        ] {
-            let matches: Vec<_> = CATEGORIES
-                .iter()
-                .filter(|item| matches_category(item, query))
-                .map(|item| item.key)
-                .collect();
-            assert_eq!(matches, vec![key], "{query}");
-        }
-    }
-}
-
 pub(super) fn text_history_budget(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let original = app.state.app_settings.history.budget;
     let mut budget = original;
@@ -173,5 +150,28 @@ pub(super) fn byte_budget_row(ui: &mut egui::Ui, label: &str, bytes: &mut u64, m
     let mut value = *bytes / MIB;
     if numeric_slider(ui, label, &mut value, min..=max, "MiB") {
         *bytes = value * MIB;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CATEGORIES, matches_category};
+
+    #[test]
+    fn search_supports_labels_and_legacy_aliases() {
+        for (query, key) in [
+            ("auto-hide", "workspace"),
+            ("gutter", "editors"),
+            ("persisted per-file", "history"),
+            ("font size", "appearance"),
+            ("toml", "application"),
+        ] {
+            let matches: Vec<_> = CATEGORIES
+                .iter()
+                .filter(|item| matches_category(item, query))
+                .map(|item| item.key)
+                .collect();
+            assert_eq!(matches, vec![key], "{query}");
+        }
     }
 }

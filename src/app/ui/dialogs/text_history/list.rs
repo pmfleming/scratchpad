@@ -37,37 +37,24 @@ pub(super) fn render(
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             if let Some(id) = target {
-                let states = States::new(entries, id);
-                let markers = snapshots::covered_positions(catalog, id, &states);
-                for k in (0..=states.entries.len()).rev() {
-                    let row = k.checked_sub(1).map(|i| row_from_entry(states.entries[i]));
-                    focus_requested |= render_state(
-                        ui,
-                        id,
-                        &states,
-                        k,
-                        row.as_ref(),
-                        None,
-                        &markers,
-                        catalog,
-                        previous_hover,
-                        action,
-                    );
+                let file = FileStates::new(entries, catalog, id);
+                for k in (0..=file.states.entries.len()).rev() {
+                    let row = k
+                        .checked_sub(1)
+                        .map(|i| row_from_entry(file.states.entries[i]));
+                    focus_requested |=
+                        file.render_state(ui, k, row.as_ref(), None, previous_hover, action);
                 }
             } else {
                 // Build each file's path once, not once per timeline row.
                 let paths: std::collections::HashMap<_, _> = ids
                     .iter()
-                    .map(|&id| {
-                        let states = States::new(entries, id);
-                        let markers = snapshots::covered_positions(catalog, id, &states);
-                        (id, (states, markers))
-                    })
+                    .map(|&id| (id, FileStates::new(entries, catalog, id)))
                     .collect();
                 let positions: std::collections::HashMap<_, _> = paths
                     .iter()
-                    .flat_map(|(&id, (states, _))| {
-                        states
+                    .flat_map(|(&id, file)| {
+                        file.states
                             .entries
                             .iter()
                             .enumerate()
@@ -76,40 +63,19 @@ pub(super) fn render(
                     .collect();
                 let rows = timeline_rows_from_entries(entries.iter());
                 for row in rows {
-                    let Some((states, markers)) = paths.get(&row.buffer_id) else {
+                    let Some(file) = paths.get(&row.buffer_id) else {
                         continue;
                     };
                     let k = positions[&(row.buffer_id, row.entry_id)];
-                    let name = states.entries.first().map(|e| short_name(&e.label));
-                    focus_requested |= render_state(
-                        ui,
-                        row.buffer_id,
-                        states,
-                        k,
-                        Some(&row),
-                        name,
-                        markers,
-                        catalog,
-                        previous_hover,
-                        action,
-                    );
+                    let name = file.states.entries.first().map(|e| short_name(&e.label));
+                    focus_requested |=
+                        file.render_state(ui, k, Some(&row), name, previous_hover, action);
                 }
                 // A file at position zero still needs its own current-state marker.
                 for &id in ids {
-                    let (states, markers) = &paths[&id];
+                    let file = &paths[&id];
                     let name = catalog.get(&id).map(|f| f.label.as_str());
-                    focus_requested |= render_state(
-                        ui,
-                        id,
-                        states,
-                        0,
-                        None,
-                        name,
-                        markers,
-                        catalog,
-                        previous_hover,
-                        action,
-                    );
+                    focus_requested |= file.render_state(ui, 0, None, name, previous_hover, action);
                 }
             }
             for &id in ids {
@@ -155,114 +121,131 @@ fn short_name(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_state(
-    ui: &mut egui::Ui,
+struct FileStates<'a> {
     id: u64,
-    states: &States<'_>,
-    k: usize,
-    row: Option<&TextHistoryRow>,
-    name: Option<&str>,
-    markers: &[(usize, String)],
-    catalog: &Catalog,
-    hovered: Option<(u64, usize)>,
-    action: &mut Option<HistoryAction>,
-) -> bool {
-    let visiting = catalog.get(&id).is_some_and(|f| f.selected.is_some());
-    let current = !visiting && k == states.position;
-    let reachable = states.reachable(k);
-    let undone = k > states.position;
-    let label = row.map_or("Oldest retained state", |r| r.title.as_str());
-    let hint = if !reachable {
-        "Cannot replay across this change".to_owned()
-    } else if visiting {
-        "Return to this state".into()
-    } else if current {
-        "Current state".into()
-    } else {
-        format!(
-            "{} {}",
-            if k < states.position { "Undo" } else { "Redo" },
-            k.abs_diff(states.position)
-        )
-    };
-    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 34.0));
-    if current {
-        reveal_changed_state(ui, rect, id, k);
+    states: States<'a>,
+    markers: Vec<(usize, String)>,
+    visiting: bool,
+}
+
+impl<'a> FileStates<'a> {
+    fn new(entries: &'a [TextHistoryEntryView], catalog: &Catalog, id: u64) -> Self {
+        let states = States::new(entries, id);
+        Self {
+            id,
+            markers: snapshots::covered_positions(catalog, id, &states),
+            visiting: catalog.get(&id).is_some_and(|f| f.selected.is_some()),
+            states,
+        }
     }
-    if !ui.is_rect_visible(rect) {
-        return false;
-    }
-    let response = widget_ids::interact(
-        ui,
-        rect,
-        widget_ids::local(ui, ("state", id, k)),
-        egui::Sense::click(),
-        "history.state",
-    )
-    .on_hover_text(format!(
-        "{label}\n{hint}{}",
-        row.map_or(String::new(), |r| format!("\n{}", r.detail))
-    ));
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::Role::Button,
-            reachable,
-            current,
-            format!("State: {label}"),
-        )
-    });
-    if response.hovered() && reachable {
-        ui.ctx().data_mut(|d| d.insert_temp(hover_id(), (id, k)));
-    }
-    let affected = hovered.is_some_and(|(buffer, destination)| {
-        buffer == id
-            && states.reachable(destination)
-            && k > destination.min(states.position)
-            && k <= destination.max(states.position)
-    });
-    if current || affected || response.hovered() {
-        ui.painter().rect_filled(
+
+    fn render_state(
+        &self,
+        ui: &mut egui::Ui,
+        k: usize,
+        row: Option<&TextHistoryRow<'_>>,
+        name: Option<&str>,
+        hovered: Option<(u64, usize)>,
+        action: &mut Option<HistoryAction>,
+    ) -> bool {
+        let id = self.id;
+        let states = &self.states;
+        let visiting = self.visiting;
+        let current = !visiting && k == states.position;
+        let reachable = states.reachable(k);
+        let undone = k > states.position;
+        let label = row.map_or("Oldest retained state", |r| r.title);
+        let hint = if !reachable {
+            "Cannot replay across this change".to_owned()
+        } else if visiting {
+            "Return to this state".into()
+        } else if current {
+            "Current state".into()
+        } else {
+            format!(
+                "{} {}",
+                if k < states.position { "Undo" } else { "Redo" },
+                k.abs_diff(states.position)
+            )
+        };
+        let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 34.0));
+        if current {
+            reveal_changed_state(ui, rect, id, k);
+        }
+        if !ui.is_rect_visible(rect) {
+            return false;
+        }
+        let response = widget_ids::interact(
+            ui,
             rect,
-            6,
-            if current || affected {
-                theme::tab_selected_bg(ui)
-            } else {
-                theme::action_bg(ui)
-            },
-        );
-    }
-    paint_node(
-        ui,
-        rect,
-        (id, k),
-        current,
-        undone,
-        markers
-            .iter()
-            .find(|(position, _)| *position == k)
-            .map(|(_, time)| time.as_str()),
-    );
-    let icon = if reachable {
-        row.map_or(egui_phosphor::regular::FILE_DASHED, |r| r.icon)
-    } else {
-        egui_phosphor::regular::LOCK_SIMPLE
-    };
-    ui.painter().text(
-        egui::pos2(rect.left() + 32.0, rect.center().y),
-        egui::Align2::CENTER_CENTER,
-        icon,
-        egui_phosphor::font_id(15.0),
-        callout::muted_text(ui),
-    );
-    paint_label(ui, rect, row, name);
-    if response.clicked() && reachable && (!current || visiting) {
-        *action = Some(HistoryAction::State {
-            buffer_id: id,
-            after: states.after(k),
+            widget_ids::local(ui, ("state", id, k)),
+            egui::Sense::click(),
+            "history.state",
+        )
+        .on_hover_text(format!(
+            "{label}\n{hint}{}",
+            row.map_or(String::new(), |r| format!("\n{}", r.detail))
+        ));
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::Role::Button,
+                reachable,
+                current,
+                format!("State: {label}"),
+            )
         });
+        if response.hovered() && reachable {
+            ui.ctx().data_mut(|d| d.insert_temp(hover_id(), (id, k)));
+        }
+        let affected = hovered.is_some_and(|(buffer, destination)| {
+            buffer == id
+                && states.reachable(destination)
+                && k > destination.min(states.position)
+                && k <= destination.max(states.position)
+        });
+        if current || affected || response.hovered() {
+            ui.painter().rect_filled(
+                rect,
+                6,
+                if current || affected {
+                    theme::tab_selected_bg(ui)
+                } else {
+                    theme::action_bg(ui)
+                },
+            );
+        }
+        paint_node(
+            ui,
+            rect,
+            (id, k),
+            current,
+            undone,
+            self.markers
+                .iter()
+                .find(|(position, _)| *position == k)
+                .map(|(_, time)| time.as_str()),
+        );
+        let icon = if reachable {
+            row.map_or(egui_phosphor::regular::FILE_DASHED, |r| r.icon)
+        } else {
+            egui_phosphor::regular::LOCK_SIMPLE
+        };
+        ui.painter().text(
+            egui::pos2(rect.left() + 32.0, rect.center().y),
+            egui::Align2::CENTER_CENTER,
+            icon,
+            egui_phosphor::font_id(15.0),
+            callout::muted_text(ui),
+        );
+        paint_label(ui, rect, row, name);
+        if response.clicked() && reachable && (!current || visiting) {
+            *action = Some(HistoryAction::State {
+                buffer_id: id,
+                after: states.after(k),
+            });
+        }
+        response.clicked()
     }
-    response.clicked()
 }
 
 fn reveal_changed_state(ui: &mut egui::Ui, rect: egui::Rect, buffer: u64, position: usize) {
@@ -277,7 +260,12 @@ fn reveal_changed_state(ui: &mut egui::Ui, rect: egui::Rect, buffer: u64, positi
     }
 }
 
-fn paint_label(ui: &egui::Ui, rect: egui::Rect, row: Option<&TextHistoryRow>, name: Option<&str>) {
+fn paint_label(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    row: Option<&TextHistoryRow<'_>>,
+    name: Option<&str>,
+) {
     let mut job = egui::text::LayoutJob::default();
     if let Some(name) = name {
         append(
@@ -382,9 +370,13 @@ fn append(job: &mut egui::text::LayoutJob, text: &str, color: egui::Color32, del
     );
 }
 
-pub(super) fn append_diff(ui: &egui::Ui, job: &mut egui::text::LayoutJob, row: &TextHistoryRow) {
+pub(super) fn append_diff(
+    ui: &egui::Ui,
+    job: &mut egui::text::LayoutJob,
+    row: &TextHistoryRow<'_>,
+) {
     if row.deleted.is_empty() && row.inserted.is_empty() {
-        append(job, &row.title, callout::text(ui), false);
+        append(job, row.title, callout::text(ui), false);
         return;
     }
     append(

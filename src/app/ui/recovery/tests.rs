@@ -32,7 +32,7 @@ fn retry_expires_the_cache_without_discarding_an_inflight_worker() {
     }));
     ctx.data_mut(|data| data.insert_temp(key, cache.clone()));
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-        super::refresh_query::<u64>(ui, "retry")
+        super::refresh_query::<u64>(ui, "retry");
     });
     output.textures_delta.clear();
     let state = cache.lock().unwrap();

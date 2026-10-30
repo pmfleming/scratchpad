@@ -91,17 +91,41 @@ fn other_file_jumps_can_leave_the_active_file_untouched() {
     let id = first.active_buffer().id;
     let other = WorkspaceTab::new(BufferState::new("other".into(), "untouched".into(), None));
     app.tab_manager.set_tabs(vec![first, other], 1);
-    let ctx = egui::Context::default();
-    super::super::write_follow_focus(&ctx, false);
-    ctx.run_ui(egui::RawInput::default(), |_| {})
-        .textures_delta
-        .clear();
-    assert!(jump(&ctx, &mut app, id, 1));
-    assert_eq!(text(&app), "middle");
-    assert_eq!(app.tab_manager.active_tab_index, 1);
+    app.state.dialogs.text_history.open();
+    let mut h = harness(app);
+    super::super::write_follow_focus(&h.ctx, false);
+    h.run_steps(3);
+    h.get_by_label("All files").click();
+    h.run_steps(3);
+    let oldest: Vec<_> = h
+        .get_all_by_role_and_label(egui::Role::Button, "State: Oldest retained state")
+        .collect();
+    assert_eq!(oldest.len(), 2);
+    oldest[0].click();
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "old");
+    assert_eq!(h.state().tab_manager.active_tab_index, 1);
     assert_eq!(
-        app.tab_manager.active_tab().unwrap().active_buffer().text(),
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .text(),
         "untouched"
+    );
+    h.get_by_label("Choose file").click();
+    h.run_steps(3);
+    h.get_by_label("note.txt  ·  2").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.get_all_by_role_and_label(egui::Role::Button, "State: Oldest retained state")
+            .count(),
+        1
+    );
+    assert_eq!(
+        h.state().tab_manager.tabs.as_slice()[0].active_buffer().id,
+        id
     );
 }
 

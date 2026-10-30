@@ -3,19 +3,23 @@ use super::EditorViewState;
 pub const MIN_ZOOM_FACTOR: f32 = 0.25;
 pub const MAX_ZOOM_FACTOR: f32 = 4.0;
 
+#[must_use]
 pub const fn default_zoom_factor() -> f32 {
     1.0
 }
 
 impl EditorViewState {
+    #[must_use]
     pub fn zoom_factor(&self) -> f32 {
         self.zoom_factor
     }
 
+    #[must_use]
     pub fn zoom_label(&self) -> String {
         format!("{:.0}%", self.zoom_factor * 100.0)
     }
 
+    #[must_use]
     pub fn effective_font_size(&self, base_size: f32) -> f32 {
         base_size * self.zoom_factor
     }
@@ -39,7 +43,7 @@ impl EditorViewState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::EditorViewState;
 
     #[test]
     fn zoom_is_bounded_and_relative_to_the_configured_font_size() {

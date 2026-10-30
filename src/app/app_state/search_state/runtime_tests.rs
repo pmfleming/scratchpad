@@ -1,4 +1,4 @@
-use super::*;
+use super::{ScratchpadApp, SearchScope, collect_search_targets, search_tab_label};
 use crate::app::domain::{BufferState, WorkspaceTab};
 use crate::app::services::session_store::SessionStore;
 

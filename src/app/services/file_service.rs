@@ -236,9 +236,8 @@ impl FileService {
         content: &str,
         format: &TextFormatMetadata,
     ) -> io::Result<()> {
-        let encoding = resolve_encoding(&format.encoding_name)?;
-        let content = write::serialized_content(content, format)?;
-        let bytes = write::encode_content(&content, encoding, format.has_bom)?;
+        let mut bytes = Vec::with_capacity(content.len());
+        write::write_content_to_writer(&mut bytes, content, format)?;
         write_document_bytes(path, &bytes).inspect_err(|error| {
             diagnostics::record_io_error_with_details(
                 "write_file_with_format",
@@ -271,7 +270,7 @@ impl FileService {
 
     pub fn write_snapshot_utf8(path: &Path, snapshot: &DocumentSnapshot) -> io::Result<()> {
         document_write::write_document_with(path, |file| {
-            write::write_snapshot_utf8_to_writer(file, snapshot, false)
+            write::write_snapshot_utf8_to_writer(file, snapshot)
         })
         .inspect_err(|error| {
             diagnostics::record_io_error(

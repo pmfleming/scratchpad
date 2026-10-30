@@ -9,13 +9,15 @@ use crate::app::{
 /// prevent future default shortcut changes from taking effect.
 pub(super) fn append(toml: &mut String, settings: &AppSettings) {
     let profile = resolved_profile(settings.platform.profile);
-    toml.push_str(&format!(
-        "\n# Keyboard shortcuts — defaults for {profile:?}.\n\
+    toml.extend([
+        "\n# Keyboard shortcuts — defaults for ",
+        &format!("{profile:?}"),
+        ".\n\
          # Uncomment a line to customize it; separate alternatives with commas.\n\
          # Existing overrides are listed above and are not repeated below.\n\
          # Commented defaults follow the selected platform profile.\n\
-         # increase_font_size / decrease_font_size control per-pane zoom.\n"
-    ));
+         # increase_font_size / decrease_font_size control per-pane zoom.\n",
+    ]);
     for action in ShortcutAction::ALL {
         if settings.shortcuts.binding(action.config_key()).is_some() {
             continue;
@@ -25,7 +27,7 @@ pub(super) fn append(toml: &mut String, settings: &AppSettings) {
             .map(binding_text)
             .collect::<Vec<_>>()
             .join(", ");
-        toml.push_str(&format!("# {} = \"{bindings}\"\n", action.config_key()));
+        toml.extend(["# ", action.config_key(), " = \"", &bindings, "\"\n"]);
     }
     toml.push_str(include_str!("shortcut_reference.txt"));
 }

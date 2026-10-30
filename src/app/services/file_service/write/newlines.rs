@@ -1,27 +1,5 @@
 use crate::app::domain::{LineEndingStyle, TextFormatMetadata};
-use std::borrow::Cow;
 use std::io;
-
-pub(in crate::app::services::file_service) fn serialized_content<'a>(
-    content: &'a str,
-    format: &TextFormatMetadata,
-) -> io::Result<Cow<'a, str>> {
-    if preserves_raw_line_endings(format) {
-        return Ok(Cow::Borrowed(content));
-    }
-
-    let mut serialized = String::with_capacity(content.len());
-    let mut serializer = NewlineSerializer::new(format.preferred_line_ending_style());
-    serializer.write_span(content, &mut |span| {
-        serialized.push_str(span);
-        Ok(())
-    })?;
-    serializer.finish(&mut |span| {
-        serialized.push_str(span);
-        Ok(())
-    })?;
-    Ok(Cow::Owned(serialized))
-}
 
 pub(super) fn preserves_raw_line_endings(format: &TextFormatMetadata) -> bool {
     matches!(format.line_endings, LineEndingStyle::Mixed)

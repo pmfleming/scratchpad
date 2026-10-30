@@ -1,8 +1,5 @@
+use super::common::{HISTORY_DIALOG_SIZE, truncated_label};
 use super::common::{history_dialog_card, history_dialog_header, show_centered_callout};
-use super::text_history::{
-    HISTORY_PILL_CORNER_RADIUS, HISTORY_PILL_INNER_MARGIN, HISTORY_PILL_SPACING,
-    TEXT_HISTORY_LIST_MIN_HEIGHT, TEXT_HISTORY_SIZE, truncated_label,
-};
 use crate::app::app_state::{
     DialogState, StatusDomain, StatusMessage, StatusSeverity, StatusState,
 };
@@ -10,6 +7,11 @@ use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg}
 use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{BRACKETS_SQUARE, EXCLAMATION_MARK, QUESTION_MARK, X};
+
+const STATUS_LIST_MIN_HEIGHT: f32 = 330.0;
+const STATUS_PILL_CORNER_RADIUS: u8 = 8;
+const STATUS_PILL_INNER_MARGIN: i8 = 10;
+const STATUS_PILL_SPACING: f32 = 6.0;
 
 const STATUS_TITLE_SIZE: f32 = 24.0;
 const STATUS_FILTER_BUTTON_HEIGHT: f32 = 30.0;
@@ -63,7 +65,7 @@ pub(crate) fn show_status_history_window(
         ctx,
         "status_history_window",
         "Status history",
-        TEXT_HISTORY_SIZE,
+        HISTORY_DIALOG_SIZE,
         |ui| {
             widget_ids::feature_scope(ui, "status_history_dialog", |ui| {
                 render_status_history_window(
@@ -201,7 +203,7 @@ fn render_history_rows(ui: &mut egui::Ui, rows: &[&StatusHistoryRow]) {
             .id_salt(widget_ids::ctx_key("status_history.scroll.content"))
             .auto_shrink([false, false])
             .max_height(ui.available_height())
-            .min_scrolled_height(TEXT_HISTORY_LIST_MIN_HEIGHT)
+            .min_scrolled_height(STATUS_LIST_MIN_HEIGHT)
             .show(ui, |ui| {
                 ui.set_max_width(ui.available_width());
                 for row in rows {
@@ -215,15 +217,15 @@ fn render_status_history_row(ui: &mut egui::Ui, row: &StatusHistoryRow) {
     widget_ids::scope(ui, ("status_history.row", row.id), |ui| {
         status_pill(ui, row);
     });
-    ui.add_space(HISTORY_PILL_SPACING);
+    ui.add_space(STATUS_PILL_SPACING);
 }
 
 fn status_pill(ui: &mut egui::Ui, row: &StatusHistoryRow) {
     egui::Frame::NONE
         .fill(action_bg(ui))
         .stroke(egui::Stroke::new(1.0, border(ui)))
-        .corner_radius(egui::CornerRadius::same(HISTORY_PILL_CORNER_RADIUS))
-        .inner_margin(egui::Margin::same(HISTORY_PILL_INNER_MARGIN))
+        .corner_radius(egui::CornerRadius::same(STATUS_PILL_CORNER_RADIUS))
+        .inner_margin(egui::Margin::same(STATUS_PILL_INNER_MARGIN))
         .show(ui, |ui| render_row_pill_contents(ui, row));
 }
 

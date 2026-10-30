@@ -1,17 +1,39 @@
-use scratchpad::app::domain::{EncodingSource, LineEndingStyle, TextDocument, TextFormatMetadata};
+use scratchpad::app::domain::{EncodingSource, TextDocument, TextFormatMetadata};
 use scratchpad::app::services::file_service::FileService;
 
 #[test]
-fn read_write_utf8_round_trips_text() {
+fn formatted_saves_round_trip_with_exact_boms_and_stateful_encoding_bytes() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("utf8.txt");
-    let text = "alpha\nβeta\n😀";
-
-    FileService::write_file_with_bom(&path, text, "UTF-8", false).unwrap();
-    let loaded = FileService::read_file(&path).unwrap();
-
-    assert_eq!(loaded.document.extract_text(), text);
-    assert_eq!(loaded.format.encoding_name, "UTF-8");
+    let path = directory.path().join("encoded.txt");
+    for (encoding, text, expected) in [
+        ("UTF-8", "é😀", &b"\xef\xbb\xbf\xc3\xa9\xf0\x9f\x98\x80"[..]),
+        ("UTF-16LE", "é😀", &b"\xff\xfe\xe9\x00\x3d\xd8\x00\xde"[..]),
+        ("UTF-16BE", "é😀", &b"\xfe\xff\x00\xe9\xd8\x3d\xde\x00"[..]),
+        ("windows-1252", "café", &b"caf\xe9"[..]),
+        ("ISO-2022-JP", "日本", &b"\x1b$BF|K\\\x1b(B"[..]),
+    ] {
+        FileService::write_file_with_bom(&path, text, encoding, true).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), expected, "{encoding}");
+        let loaded = FileService::read_file_with_encoding(&path, encoding).unwrap();
+        assert_eq!(loaded.document.extract_text(), text, "{encoding}");
+        assert_eq!(loaded.format.encoding_name, encoding);
+        assert_eq!(
+            loaded.format.encoding_source,
+            EncodingSource::ExplicitUserChoice
+        );
+        if encoding.starts_with("UTF") {
+            let detected = FileService::read_file(&path).unwrap();
+            assert_eq!(detected.document.extract_text(), text);
+            assert!(detected.format.has_bom);
+        }
+        FileService::write_snapshot_with_format(&path, &loaded.document.snapshot(), &loaded.format)
+            .unwrap();
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            expected,
+            "snapshot {encoding}"
+        );
+    }
 }
 
 #[test]
@@ -21,28 +43,9 @@ fn read_large_utf8_file_round_trips_across_decode_chunks() {
     let mut text = "header café 東京\n".repeat(12_000);
     text.push_str("tail 😀");
     std::fs::write(&path, &text).unwrap();
-
     let loaded = FileService::read_file(&path).unwrap();
-
     assert_eq!(loaded.document.extract_text(), text);
     assert_eq!(loaded.document.snapshot().line_count(), 12_001);
-}
-
-#[test]
-fn read_write_utf16le_round_trips_text_with_bom() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("utf16le.txt");
-    let text = "alpha\nβeta";
-
-    FileService::write_file_with_bom(&path, text, "UTF-16LE", true).unwrap();
-    let bytes = std::fs::read(&path).unwrap();
-    assert_eq!(&bytes[..2], &[0xff, 0xfe]);
-
-    let loaded = FileService::read_file(&path).unwrap();
-
-    assert_eq!(loaded.document.extract_text(), text);
-    assert_eq!(loaded.format.encoding_name, "UTF-16LE");
-    assert!(loaded.format.has_bom);
 }
 
 #[test]
@@ -50,66 +53,39 @@ fn detects_binary_file() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("binary.bin");
     std::fs::write(&path, b"abc\0def").unwrap();
-
-    let error = match FileService::read_file(&path) {
-        Ok(_) => panic!("binary file unexpectedly loaded"),
-        Err(error) => error,
-    };
-
+    let error = FileService::read_file(&path).err().unwrap();
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     assert!(error.to_string().contains("Binary files are not supported"));
 }
 
 #[test]
-fn explicit_reopen_with_encoding_uses_selected_encoding() {
+fn invalid_encoding_and_unrepresentable_text_fail_before_replacing_original() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("ansi.txt");
-    std::fs::write(&path, [0x63, 0x61, 0x66, 0xe9]).unwrap();
-
-    let loaded = FileService::read_file_with_encoding(&path, "windows-1252").unwrap();
-
-    assert_eq!(loaded.document.extract_text(), "café");
-    assert_eq!(
-        loaded.format.encoding_source,
-        EncodingSource::ExplicitUserChoice
-    );
-}
-
-#[test]
-fn saving_unencodable_text_fails_for_legacy_encoding() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("ansi.txt");
-    let format = TextFormatMetadata::detected(
-        "plain",
-        "windows-1252".to_owned(),
-        false,
-        EncodingSource::Heuristic,
-        false,
-    );
-
-    let error = FileService::write_file_with_format(&path, "plain 😀", &format).unwrap_err();
-
-    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-}
-
-#[test]
-fn snapshot_save_applies_configured_line_ending_policy() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("crlf.txt");
-    let document = TextDocument::new("alpha\r\nbeta\ngamma\rdelta".to_owned());
-    let mut format = TextFormatMetadata::detected(
-        "alpha\r\nbeta",
-        "UTF-8".to_owned(),
-        false,
-        EncodingSource::Heuristic,
-        false,
-    );
-    format.preferred_line_ending = LineEndingStyle::Crlf;
-
-    FileService::write_snapshot_with_format(&path, &document.snapshot(), &format).unwrap();
-
-    assert_eq!(
-        std::fs::read_to_string(&path).unwrap(),
-        "alpha\r\nbeta\r\ngamma\r\ndelta"
-    );
+    let path = directory.path().join("original.txt");
+    let document = TextDocument::new("plain 😀".into());
+    for (encoding, kind) in [
+        ("invalid", std::io::ErrorKind::InvalidInput),
+        ("windows-1252", std::io::ErrorKind::InvalidData),
+    ] {
+        let format = TextFormatMetadata::detected(
+            "plain",
+            encoding.into(),
+            false,
+            EncodingSource::Heuristic,
+            false,
+        );
+        for snapshot in [false, true] {
+            std::fs::write(&path, "original").unwrap();
+            let result = if snapshot {
+                FileService::write_snapshot_with_format(&path, &document.snapshot(), &format)
+            } else {
+                FileService::write_file_with_format(&path, "plain 😀", &format)
+            };
+            assert_eq!(result.unwrap_err().kind(), kind);
+            // Linux stages snapshot writes; other platforms currently write directly.
+            if cfg!(target_os = "linux") || !snapshot {
+                assert_eq!(std::fs::read_to_string(&path).unwrap(), "original");
+            }
+        }
+    }
 }

@@ -1,3 +1,4 @@
+use super::common::{HISTORY_DIALOG_SIZE, truncated_label};
 mod list;
 mod model;
 mod navigation;
@@ -6,7 +7,7 @@ mod scrubber;
 mod snapshots;
 mod states;
 
-use self::model::{HistoryAction, TextHistoryFileGroup, file_groups_from_entries};
+use self::model::HistoryAction;
 use self::persistence::{read_active_tab, read_follow_focus, write_active_tab, write_follow_focus};
 use crate::app::app_state::{ScratchpadApp, workspace::mutation as workspace_mutation};
 use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg};
@@ -14,14 +15,6 @@ use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{ARROW_U_UP_LEFT, DOTS_THREE, FILE_TEXT, FILES, FOLDER_OPEN};
 
-pub(super) const TEXT_HISTORY_SIZE: egui::Vec2 = egui::vec2(
-    crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH - 20.0,
-    520.0,
-);
-pub(super) const TEXT_HISTORY_LIST_MIN_HEIGHT: f32 = 330.0;
-pub(super) const HISTORY_PILL_CORNER_RADIUS: u8 = 8;
-pub(super) const HISTORY_PILL_INNER_MARGIN: i8 = 10;
-pub(super) const HISTORY_PILL_SPACING: f32 = 6.0;
 const UNDONE_OPACITY: f32 = 0.65;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,10 +163,10 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
         "text_history_window",
         "History",
         egui::pos2(
-            (screen.right() - TEXT_HISTORY_SIZE.x - 24.0).max(screen.left()),
+            (screen.right() - HISTORY_DIALOG_SIZE.x - 24.0).max(screen.left()),
             screen.top() + 72.0,
         ),
-        TEXT_HISTORY_SIZE.x,
+        HISTORY_DIALOG_SIZE.x,
         |ui| {
             widget_ids::feature_scope(ui, "text_history_dialog", |ui| {
                 settings::apply_dialog_typography(ui);
@@ -188,8 +181,7 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
                     18.0,
                 );
                 let entries = snapshots::state_entries(ctx, app);
-                let groups = file_groups_from_entries(entries.iter());
-                controls(ui, app, &groups, &mut selected);
+                controls(ui, app, &entries, &mut selected);
                 let target = scope_buffer(selected, app);
                 let ids: Vec<_> = app
                     .tab_manager
@@ -324,7 +316,7 @@ fn snapshot_returns(
 fn controls(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
-    groups: &[TextHistoryFileGroup],
+    entries: &[crate::app::text_history::TextHistoryEntryView],
     selected: &mut HistoryTab,
 ) {
     ui.horizontal(|ui| {
@@ -352,6 +344,7 @@ fn controls(
             true,
         );
         egui::Popup::menu(&picker).show(|ui| {
+            let counts = model::entry_counts(entries);
             for buffer in app
                 .tab_manager
                 .tabs
@@ -359,10 +352,7 @@ fn controls(
                 .iter()
                 .flat_map(|tab| tab.buffers())
             {
-                let count = groups
-                    .iter()
-                    .find(|g| g.buffer_id == buffer.id)
-                    .map_or(0, |g| g.rows.len());
+                let count = counts.get(&buffer.id).copied().unwrap_or_default();
                 if ui
                     .selectable_label(
                         *selected == HistoryTab::File(buffer.id),
@@ -455,23 +445,6 @@ pub(super) fn dim_if(undone: bool, color: egui::Color32) -> egui::Color32 {
     } else {
         color
     }
-}
-
-pub(super) fn truncated_label(
-    ui: &mut egui::Ui,
-    text: &str,
-    width: f32,
-    size: f32,
-    color: egui::Color32,
-    sense: egui::Sense,
-) -> egui::Response {
-    ui.add_sized(
-        egui::vec2(width.max(0.0), 0.0),
-        egui::Label::new(egui::RichText::new(text).size(size).color(color))
-            .truncate()
-            .show_tooltip_when_elided(false)
-            .sense(sense),
-    )
 }
 
 #[cfg(test)]

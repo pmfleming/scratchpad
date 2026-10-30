@@ -1,5 +1,8 @@
 use super::*;
-use egui_kittest::{Harness, kittest::Queryable};
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT, Queryable},
+};
 use widgets::{
     reset_settings_layout_measurements, settings_card_measurements, settings_control_measurements,
 };
@@ -675,7 +678,6 @@ fn exact_value_inputs_and_recommended_limits_keep_slider_values_in_sync() {
             .get_by_role_and_label(egui::Role::SpinButton, label)
             .set_value_accesskit(value);
         harness.run_steps(2);
-        use egui_kittest::kittest::NodeT;
         assert_eq!(
             harness
                 .get_by_role_and_label(egui::Role::Slider, label)

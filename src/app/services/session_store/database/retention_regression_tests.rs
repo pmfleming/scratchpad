@@ -163,7 +163,7 @@ fn protected_archives_do_not_evict_new_archives_or_live_undo_boundaries() {
                 archive_byte_budget: 4000,
                 snapshot_byte_budget: 4000,
                 archive_migration_grace_until: if quarantine {
-                    Default::default()
+                    std::collections::BTreeMap::default()
                 } else {
                     [(token, i64::MAX)].into()
                 },

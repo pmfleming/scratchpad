@@ -8,14 +8,18 @@ use std::io::Write;
 
 #[test]
 fn cloned_tree_keeps_add_tail_stable_when_current_tree_appends() {
-    let mut tree = PieceTreeLite::from_string("base".to_owned());
-    tree.insert_with_source(4, " first", PieceSource::Edit);
-    let snapshot = tree.clone();
-
-    tree.insert_with_source(tree.len_chars(), " second", PieceSource::Edit);
-
-    assert_eq!(snapshot.extract_text(), "base first");
-    assert_eq!(tree.extract_text(), "base first second");
+    for length in [0, 1, 256 * 1024 - 1, 256 * 1024, 256 * 1024 + 1] {
+        let first = "x".repeat(length);
+        let mut tree = PieceTreeLite::from_string("base".to_owned());
+        tree.compact_add_buffer(&mut []);
+        assert_eq!(tree.append_history_text("", PieceSource::Edit).byte_len, 0);
+        tree.insert_with_source(4, &first, PieceSource::Edit);
+        let snapshot = tree.clone();
+        tree.insert_with_source(tree.len_chars(), " second", PieceSource::Edit);
+        tree.compact_add_buffer(&mut []);
+        assert_eq!(snapshot.extract_text(), format!("base{first}"));
+        assert_eq!(tree.extract_text(), format!("base{first} second"));
+    }
 }
 
 #[test]

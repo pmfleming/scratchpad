@@ -69,125 +69,120 @@ fn cold_file_shell_retains_path_and_disk_length_without_text_ingest() {
 }
 
 #[test]
-fn snapshot_save_applies_crlf_policy_for_utf8() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("crlf.txt");
-    let document = TextDocument::new("alpha\r\nbeta\ngamma\rdelta".to_owned());
-    let format = TextFormatMetadata::detected(
-        "alpha\r\nbeta",
-        "UTF-8".to_owned(),
-        false,
-        EncodingSource::Heuristic,
-        false,
-    );
+fn formatted_writers_agree_across_encodings_newlines_and_piece_boundaries() {
+    let text = "café\r\nx\ry\nz\r";
+    for encoding in [
+        encoding_rs::UTF_8,
+        encoding_rs::UTF_16LE,
+        encoding_rs::UTF_16BE,
+        encoding_rs::WINDOWS_1252,
+    ] {
+        for (style, normalized) in [
+            (LineEndingStyle::Lf, "café\nx\ny\nz\n"),
+            (LineEndingStyle::Cr, "café\rx\ry\rz\r"),
+            (LineEndingStyle::Crlf, "café\r\nx\r\ny\r\nz\r\n"),
+            (LineEndingStyle::Mixed, text),
+        ] {
+            for has_bom in [false, true] {
+                let mut format = TextFormatMetadata::detected(
+                    text,
+                    encoding.name().into(),
+                    has_bom,
+                    EncodingSource::ExplicitUserChoice,
+                    false,
+                );
+                format.line_endings = style;
+                format.preferred_line_ending = style;
+                let expected = encoded_bytes(normalized, encoding, has_bom);
+                assert_piece_boundaries(text, &format, &expected);
+            }
+        }
+    }
+}
 
-    FileService::write_snapshot_with_format(&path, &document.snapshot(), &format).unwrap();
-
-    assert_eq!(
-        std::fs::read(&path).unwrap(),
-        b"alpha\r\nbeta\r\ngamma\r\ndelta"
-    );
+fn encoded_bytes(text: &str, encoding: &'static encoding_rs::Encoding, bom: bool) -> Vec<u8> {
+    let (mut bytes, payload) = match encoding.name() {
+        "UTF-16LE" => (
+            vec![0xff, 0xfe],
+            text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+        ),
+        "UTF-16BE" => (
+            vec![0xfe, 0xff],
+            text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
+        ),
+        "UTF-8" => (vec![0xef, 0xbb, 0xbf], text.as_bytes().to_vec()),
+        _ => (Vec::new(), encoding.encode(text).0.into_owned()),
+    };
+    if !bom {
+        bytes.clear();
+    }
+    bytes.extend(payload);
+    bytes
 }
 
 #[test]
-fn snapshot_save_handles_crlf_split_across_spans() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("split-crlf.txt");
-    let mut document = TextDocument::new("alpha\r".to_owned());
-    document.insert_direct(6, "\nbeta\ngamma");
-    let format = TextFormatMetadata::detected(
-        "alpha\r\nbeta",
-        "UTF-8".to_owned(),
-        false,
-        EncodingSource::Heuristic,
-        false,
-    );
-
-    FileService::write_snapshot_with_format(&path, &document.snapshot(), &format).unwrap();
-
-    assert_eq!(std::fs::read(&path).unwrap(), b"alpha\r\nbeta\r\ngamma");
+fn encoded_streams_flush_state_and_propagate_write_errors() {
+    for (encoding, text) in [
+        ("UTF-8", "😀"),
+        ("UTF-16LE", "😀"),
+        ("UTF-16BE", "😀"),
+        ("windows-1252", "café"),
+        ("ISO-2022-JP", "日本"),
+    ] {
+        for text in [String::new(), text.repeat(9000)] {
+            let format = TextFormatMetadata::detected(
+                &text,
+                encoding.into(),
+                true,
+                EncodingSource::ExplicitUserChoice,
+                false,
+            );
+            let document = TextDocument::new(text.clone());
+            let mut bytes = Vec::new();
+            super::write::write_snapshot_to_writer(&mut bytes, &document.snapshot(), &format)
+                .unwrap();
+            assert_eq!(
+                bytes,
+                encoded_bytes(
+                    &text,
+                    encoding_rs::Encoding::for_label(encoding.as_bytes()).unwrap(),
+                    true
+                )
+            );
+            assert_write_errors(&document, &format, bytes.len());
+        }
+    }
 }
 
-#[test]
-fn string_save_applies_line_ending_policy() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("string-write.txt");
-    let format = TextFormatMetadata::detected(
-        "alpha\r\nbeta",
-        "UTF-8".to_owned(),
-        false,
-        EncodingSource::Heuristic,
-        false,
-    );
-
-    FileService::write_file_with_format(&path, "alpha\r\nbeta\ngamma", &format).unwrap();
-
-    assert_eq!(std::fs::read(&path).unwrap(), b"alpha\r\nbeta\r\ngamma");
+fn assert_piece_boundaries(text: &str, format: &TextFormatMetadata, expected: &[u8]) {
+    let mut bytes = Vec::new();
+    super::write::write_content_to_writer(&mut bytes, text, format).unwrap();
+    assert_eq!(bytes, expected, "{format:?}");
+    for split in 0..=text.chars().count() {
+        let mut document = TextDocument::new(text.chars().take(split).collect());
+        document.insert_direct(split, &text.chars().skip(split).collect::<String>());
+        bytes.clear();
+        super::write::write_snapshot_to_writer(&mut bytes, &document.snapshot(), format).unwrap();
+        assert_eq!(bytes, expected, "{format:?} split={split}");
+    }
 }
 
-#[test]
-fn snapshot_save_preserves_mixed_line_endings() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("mixed.txt");
-    let text = "alpha\r\nbeta\ngamma\rdelta";
-    let document = TextDocument::new(text.to_owned());
-    let format = TextFormatMetadata::detected(
-        text,
-        "UTF-8".to_owned(),
-        false,
-        EncodingSource::Heuristic,
-        false,
-    );
-
-    FileService::write_snapshot_with_format(&path, &document.snapshot(), &format).unwrap();
-
-    assert_eq!(std::fs::read(&path).unwrap(), text.as_bytes());
-}
-
-#[test]
-fn snapshot_save_applies_lf_policy_for_utf16le() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("utf16le.txt");
-    let document = TextDocument::new("alpha\r\nbeta\ngamma\rdelta".to_owned());
-    let mut format = TextFormatMetadata::detected(
-        "alpha\nbeta",
-        "UTF-16LE".to_owned(),
-        true,
-        EncodingSource::Bom,
-        false,
-    );
-    format.preferred_line_ending = LineEndingStyle::Lf;
-
-    FileService::write_snapshot_with_format(&path, &document.snapshot(), &format).unwrap();
-
-    let bytes = std::fs::read(&path).unwrap();
-    assert_eq!(&bytes[..2], &[0xFF, 0xFE]);
-    let decoded = String::from_utf16(
-        &bytes[2..]
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-            .collect::<Vec<_>>(),
-    )
-    .unwrap();
-    assert_eq!(decoded, "alpha\nbeta\ngamma\ndelta");
-}
-
-#[test]
-fn snapshot_save_fails_for_unrepresentable_windows_1252_text() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("ansi.txt");
-    let document = TextDocument::new("plain 😀".to_owned());
-    let format = TextFormatMetadata::detected(
-        "plain",
-        "windows-1252".to_owned(),
-        false,
-        EncodingSource::Heuristic,
-        false,
-    );
-
-    let error =
-        FileService::write_snapshot_with_format(&path, &document.snapshot(), &format).unwrap_err();
-
-    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    assert!(error.to_string().contains("not representable"));
+fn assert_write_errors(document: &TextDocument, format: &TextFormatMetadata, byte_len: usize) {
+    let Some(last_byte) = byte_len.checked_sub(1) else {
+        return;
+    };
+    for limit in [0, last_byte] {
+        let mut space = vec![0; limit];
+        let error = super::write::write_snapshot_to_writer(
+            &mut space.as_mut_slice(),
+            &document.snapshot(),
+            format,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            io::ErrorKind::WriteZero,
+            "{format:?} limit={limit}"
+        );
+    }
 }
