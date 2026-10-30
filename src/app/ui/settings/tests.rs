@@ -454,6 +454,71 @@ fn both_reset_actions_are_destructive_without_restyling_ordinary_buttons() {
 }
 
 #[test]
+fn quote_preview_is_right_aligned_and_vertically_centered_without_clipping() {
+    for width in [300.0, 880.0] {
+        for wrap in [true, false] {
+            for (size, padding) in [(20.0, 0), (32.0, 16)] {
+                for (quote, &(quote_text, _)) in PREVIEW_QUOTES.iter().enumerate() {
+                    reset_settings_layout_measurements();
+                    let ctx = egui::Context::default();
+                    crate::app::fonts::apply_editor_fonts(
+                        &ctx,
+                        &crate::app::fonts::EditorFontSelection::scratchpad(EditorFontPreset::Mono),
+                        4.0,
+                    )
+                    .unwrap();
+                    let mut app = app();
+                    app.state.settings_preview_quote_index = quote;
+                    app.state.app_settings.editor.font_size = size;
+                    app.state.app_settings.editor.editor_gutter = padding;
+                    app.state.app_settings.editor.word_wrap = wrap;
+                    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                        ui.set_width(width);
+                        ui.set_min_height(1600.0);
+                        widgets::render_preview_panel(ui, &app, false);
+                    });
+                    output.textures_delta.clear();
+                    let measurements = settings_control_measurements();
+                    let find =
+                        |name: &str| measurements.iter().find(|m| m.label == name).unwrap().rect;
+                    let content = find("preview.quote.content");
+                    let text = find("preview.quote.text");
+                    let panel = find("preview.text");
+                    assert!((text.right() - content.right()).abs() < 1.0);
+                    assert!((text.center().y - content.center().y).abs() < 1.0);
+                    assert!(content.height() >= 96.0);
+                    assert!(text.top() >= panel.top() && text.bottom() <= panel.bottom());
+                    assert!(panel.right() <= width + 1.0);
+                    if wrap {
+                        assert!(text.left() >= panel.left() && text.right() <= panel.right());
+                    }
+                    let shape = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.job.text == quote_text => {
+                                Some(text)
+                            }
+                            _ => None,
+                        })
+                        .expect("quote text remains painted");
+                    assert_eq!(shape.galley.job.halign, egui::Align::RIGHT);
+                    assert!(
+                        shape
+                            .galley
+                            .job
+                            .sections
+                            .iter()
+                            .any(|section| section.format.background
+                                == app.state.app_settings.editor_text_highlight_color())
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn rendering_byte_budgets_does_not_round_or_clamp_stored_values() {
     let ctx = egui::Context::default();
     let mut bytes = 64 * 1024 * 1024 + 123;

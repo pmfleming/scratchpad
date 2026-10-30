@@ -1,7 +1,7 @@
 use super::{ScratchpadApp, SettingsUi, egui, record_settings_control_box, text_muted};
 use crate::app::{
     services::settings_store::{IndentationStyle, TabDisplayMode},
-    ui::settings::EDITOR_FONT_FAMILY,
+    ui::{settings::EDITOR_FONT_FAMILY, widget_ids},
 };
 
 pub(in crate::app::ui::settings) fn settings_card_frame(
@@ -16,7 +16,8 @@ pub(in crate::app::ui::settings) fn settings_card_frame(
     super::layout_state::record_settings_card_box("settings_card_frame", response.response.rect);
 }
 
-/// Both previews use the same font, palette, highlight, padding and wrapping.
+/// Both previews share font, palette, highlight, padding and wrapping. Quotes
+/// align right/center; the indentation sample keeps its meaningful leading edge.
 pub(in crate::app::ui::settings) fn render_preview_panel(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
@@ -92,16 +93,52 @@ pub(in crate::app::ui::settings) fn render_preview_panel(
             job.append(&text[start..end], 0.0, highlighted);
             job.append(&text[end..], 0.0, format);
             // An unwrapped preview must not widen the settings page.
+            let preview_width = ui.available_width();
             egui::ScrollArea::horizontal()
                 .id_salt(("settings.preview", tabs))
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    ui.label(job);
+                    if tabs {
+                        ui.label(job);
+                    } else {
+                        right_centered_quote(ui, job, preview_width);
+                    }
                 });
         });
     record_settings_control_box(
         if tabs { "preview.tabs" } else { "preview.text" },
         response.response.rect,
     );
+}
+
+fn right_centered_quote(ui: &mut egui::Ui, mut job: egui::text::LayoutJob, viewport_width: f32) {
+    job.halign = egui::Align::RIGHT;
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    // Grow for tall wrapped text or wide unwrapped text, preserving scrolling
+    // instead of clipping or widening the settings card.
+    let content = widget_ids::allocate_exact_rect(
+        ui,
+        egui::vec2(
+            viewport_width.max(galley.size().x),
+            96.0_f32.max(galley.size().y),
+        ),
+    );
+    let text = egui::Rect::from_min_size(
+        egui::pos2(
+            content.right() - galley.size().x,
+            content.center().y - galley.size().y / 2.0,
+        ),
+        galley.size(),
+    );
+    let response = widget_ids::rect_scope_with_layout(
+        ui,
+        text,
+        "settings.preview.quote",
+        egui::Layout::top_down(egui::Align::LEFT),
+        |ui| ui.label(galley),
+    );
+    record_settings_control_box("preview.quote.content", content);
+    record_settings_control_box("preview.quote.text", response.inner.rect);
 }
 
 fn tab_preview_text(style: IndentationStyle, display: TabDisplayMode, columns: u8) -> String {
