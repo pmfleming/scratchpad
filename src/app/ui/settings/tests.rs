@@ -364,6 +364,88 @@ fn global_reset_requires_confirmation_and_cancel_does_not_change_settings() {
     );
 }
 
+fn has_button_border(
+    shapes: &[egui::epaint::ClippedShape],
+    target: egui::Rect,
+    color: egui::Color32,
+) -> bool {
+    fn matches(shape: &egui::Shape, target: egui::Rect, color: egui::Color32) -> bool {
+        match shape {
+            egui::Shape::Rect(rect) => {
+                (rect.rect.center() - target.center()).length() < 1.0
+                    && rect.stroke.color == color
+                    && rect.stroke.width >= 1.0
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| matches(shape, target, color)),
+            _ => false,
+        }
+    }
+    shapes
+        .iter()
+        .any(|shape| matches(&shape.shape, target, color))
+}
+
+#[test]
+fn both_reset_actions_are_destructive_without_restyling_ordinary_buttons() {
+    for dark in [true, false] {
+        let border = SettingsUi::destructive_colors(dark)[1];
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(1000.0, 1400.0))
+            .with_context_setup(move |ctx| {
+                setup(ctx);
+                ctx.set_visuals(if dark {
+                    egui::Visuals::dark()
+                } else {
+                    egui::Visuals::light()
+                });
+            })
+            .build_ui_state(
+                |ui, app| {
+                    ui.set_width(880.0);
+                    SettingsUi::apply_typography(ui);
+                    SettingsUi::apply_controls(ui);
+                    opening::render_application(ui, app);
+                    opening::reset_confirmation(ui.ctx(), app);
+                },
+                app(),
+            );
+        harness.run();
+        let reset = harness
+            .get_by_role_and_label(egui::Role::Button, "Reset settings…")
+            .rect();
+        assert!(reset.height() >= 36.0);
+        assert!(has_button_border(&harness.output().shapes, reset, border));
+        assert!(!has_button_border(
+            &harness.output().shapes,
+            harness.get_by_label("Open file").rect(),
+            border
+        ));
+        harness.get_by_label("Reset settings…").click_accesskit();
+        harness.run_steps(2);
+        // Focus Cancel so the destructive action is in its resting state.
+        harness.get_by_label("Cancel").focus();
+        harness.run_steps(2);
+        let confirm = harness
+            .get_by_role_and_label(egui::Role::Button, "Reset all settings")
+            .rect();
+        assert!(confirm.height() >= 36.0);
+        assert!(has_button_border(&harness.output().shapes, confirm, border));
+        assert!(!has_button_border(
+            &harness.output().shapes,
+            harness.get_by_label("Cancel").rect(),
+            border
+        ));
+        harness
+            .get_by_role_and_label(egui::Role::Button, "Reset all settings")
+            .focus();
+        harness.run_steps(2);
+        assert!(
+            !has_button_border(&harness.output().shapes, confirm, border),
+            "focus must stand out from the resting red border"
+        );
+    }
+}
+
 #[test]
 fn rendering_byte_budgets_does_not_round_or_clamp_stored_values() {
     let ctx = egui::Context::default();

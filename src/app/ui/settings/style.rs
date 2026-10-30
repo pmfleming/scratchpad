@@ -110,6 +110,15 @@ impl SettingsUi {
     pub(super) fn icon_color(ui: &egui::Ui) -> egui::Color32 {
         crate::app::theme::text_muted(ui)
     }
+    /// Foreground, resting border, and hover fill for destructive actions.
+    pub(super) fn destructive_colors(dark: bool) -> [egui::Color32; 3] {
+        let colors = if dark {
+            [[240, 164, 164], [98, 67, 69], [57, 40, 43]]
+        } else {
+            [[157, 45, 56], [179, 109, 118], [251, 233, 236]]
+        };
+        colors.map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
+    }
     pub(super) fn accent() -> egui::Color32 {
         egui::Color32::from_rgb(111, 177, 149)
     }

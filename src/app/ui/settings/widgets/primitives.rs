@@ -69,5 +69,34 @@ pub(super) fn toggle_switch(
     response
 }
 
+/// Style only the action, not the entire row or subsequent ordinary buttons.
+pub(in crate::app::ui::settings) fn destructive_button(
+    ui: &mut egui::Ui,
+    text: &str,
+) -> egui::Response {
+    let [foreground, border, hover] = SettingsUi::destructive_colors(ui.visuals().dark_mode);
+    let field = SettingsUi::field_bg(ui);
+    widget_ids::scope(ui, ("settings.destructive", text), |ui| {
+        let visuals = ui.visuals_mut();
+        for widget in [
+            &mut visuals.widgets.inactive,
+            &mut visuals.widgets.hovered,
+            &mut visuals.widgets.active,
+        ] {
+            widget.fg_stroke.color = foreground;
+            widget.bg_stroke = egui::Stroke::new(1.0, border);
+            widget.bg_fill = hover;
+            widget.weak_bg_fill = hover;
+            widget.corner_radius = egui::CornerRadius::same(7);
+        }
+        visuals.widgets.inactive.bg_fill = field;
+        visuals.widgets.inactive.weak_bg_fill = field;
+        // Keep keyboard focus distinct from the resting destructive border.
+        visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, visuals.selection.stroke.color);
+        ui.add(egui::Button::new(text).min_size(egui::vec2(0.0, SettingsUi::CONTROLS.height)))
+    })
+    .inner
+}
+
 #[cfg(test)]
 mod tests;

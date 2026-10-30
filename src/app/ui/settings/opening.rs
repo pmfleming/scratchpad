@@ -1,6 +1,8 @@
 use super::{
     ScratchpadApp, egui,
-    widgets::{action_row, group_heading, segmented_row},
+    widgets::{
+        action_row, destructive_action_row, destructive_button, group_heading, segmented_row,
+    },
 };
 use crate::app::{
     app_state::settings_controller as settings,
@@ -56,7 +58,7 @@ pub(super) fn render_application(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             .color(super::text_muted(ui)),
     );
     let confirm_id = egui::Id::unique("settings.confirm_reset");
-    if action_row(
+    if destructive_action_row(
         ui,
         "Reset all settings",
         "Reset settings…",
@@ -78,6 +80,8 @@ pub(super) fn reset_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp) {
     }
     let mut close = false;
     let response = egui::Modal::new(id).show(ctx, |ui| {
+        super::SettingsUi::apply_typography(ui);
+        super::SettingsUi::apply_controls(ui);
         ui.set_max_width(360.0);
         ui.heading("Reset all settings?");
         ui.label("Restore default preferences. Documents and recovery data will not be deleted.");
@@ -85,7 +89,7 @@ pub(super) fn reset_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp) {
             if ui.button("Cancel").clicked() {
                 close = true;
             }
-            if ui.button("Reset all settings").clicked() {
+            if destructive_button(ui, "Reset all settings").clicked() {
                 settings::reset_settings_to_defaults(app);
                 ctx.data_mut(|data| {
                     data.remove::<bool>(egui::Id::unique("settings.custom_palette"));

@@ -31,7 +31,7 @@ fn keyboard_focus_is_painted_for_on_and_off_switches_in_both_themes() {
                         egui::Visuals::dark()
                     } else {
                         egui::Visuals::light()
-                    })
+                    });
                 })
                 .build_ui_state(
                     |ui, state: &mut (bool, bool, egui::Color32)| {

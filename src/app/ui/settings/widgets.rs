@@ -5,6 +5,7 @@ use std::{hash::Hash, ops::RangeInclusive};
 mod card;
 mod layout_state;
 mod primitives;
+pub(super) use primitives::destructive_button;
 mod segmented;
 pub(super) use card::{render_preview_panel, settings_card_frame};
 #[cfg(test)]
@@ -385,10 +386,29 @@ pub(super) fn numeric_slider(
 }
 
 pub(super) fn action_row(ui: &mut egui::Ui, label: &str, button: &str, help: Option<&str>) -> bool {
+    action_row_with(ui, label, button, help, |ui, text| ui.button(text))
+}
+
+pub(super) fn destructive_action_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    button: &str,
+    help: Option<&str>,
+) -> bool {
+    action_row_with(ui, label, button, help, destructive_button)
+}
+
+fn action_row_with(
+    ui: &mut egui::Ui,
+    label: &str,
+    button: &str,
+    help: Option<&str>,
+    add_button: impl FnOnce(&mut egui::Ui, &str) -> egui::Response,
+) -> bool {
     let mut clicked = false;
     inner_select_row(ui, label, help, |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let response = ui.button(button);
+            let response = add_button(ui, button);
             record_settings_control_box(format!("button.{button}"), response.rect);
             clicked = response.clicked();
         });
