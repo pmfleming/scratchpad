@@ -121,7 +121,7 @@ impl Database {
 
     /// Thin interior points, retaining each buffer's earliest and latest states.
     async fn thin_archive_versions(
-        &self,
+        &mut self,
         archive: &CapturedClosedTab,
         needed: u64,
         expired: &mut Vec<i64>,

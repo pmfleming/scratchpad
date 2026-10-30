@@ -110,9 +110,56 @@ impl Database {
         Ok(old)
     }
 
-    pub(super) async fn write_closed(&self, rows: &[ClosedRow]) -> io::Result<()> {
-        self.execute_cached("DELETE FROM closed_tabs", ()).await?;
-        for row in rows {
+    pub(super) async fn write_closed(
+        &self,
+        rows: &[ClosedRow],
+        old: &[ClosedRow],
+    ) -> io::Result<()> {
+        let positions: std::collections::HashMap<_, _> = old
+            .iter()
+            .enumerate()
+            .map(|(index, row)| (row.token.as_str(), index))
+            .collect();
+        // Keep existing sequence numbers for the ordered retained prefix. New
+        // or reordered archives append after it; ordinary eviction never rewrites
+        // the surviving archives. All deletes precede inserts (token is UNIQUE).
+        let mut next = 0;
+        let retained = rows
+            .iter()
+            .take_while(|row| {
+                if let Some(&index) = positions.get(row.token.as_str())
+                    && index >= next
+                {
+                    next = index + 1;
+                    true
+                } else {
+                    false
+                }
+            })
+            .count();
+        let keep: HashSet<_> = rows[..retained]
+            .iter()
+            .map(|row| row.token.as_str())
+            .collect();
+        for row in old {
+            if !keep.contains(row.token.as_str()) {
+                self.execute_cached(
+                    "DELETE FROM closed_tabs WHERE token=?",
+                    [row.token.as_str()],
+                )
+                .await?;
+            }
+        }
+        for row in &rows[..retained] {
+            if row != &old[positions[row.token.as_str()]] {
+                self.execute_cached(
+                    "UPDATE closed_tabs SET closed_at=?, payload=? WHERE token=?",
+                    params![row.closed_at, row.payload.as_slice(), row.token.as_str()],
+                )
+                .await?;
+            }
+        }
+        for row in &rows[retained..] {
             self.execute_cached(
                 "INSERT INTO closed_tabs(token, closed_at, payload) VALUES(?, ?, ?)",
                 params![row.token.as_str(), row.closed_at, row.payload.as_slice()],
@@ -142,10 +189,19 @@ impl Database {
         token: &str,
     ) -> io::Result<(SessionTab, std::collections::HashMap<String, String>)> {
         let row = self
-            .closed_rows()
+            .query_collect(
+                "SELECT token, closed_at, payload FROM closed_tabs WHERE token=?",
+                [token],
+                |row| {
+                    ClosedRow::new(
+                        row.get(0).map_err(error)?,
+                        row.get(1).map_err(error)?,
+                        row.get(2).map_err(error)?,
+                    )
+                },
+            )
             .await?
-            .into_iter()
-            .find(|row| row.token == token)
+            .pop()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "closed tab expired"))?;
         let mut tab = row.tab;
         let contents = match self.read_tab_contents(std::slice::from_ref(&tab)).await {

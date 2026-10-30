@@ -30,7 +30,7 @@ pub(super) fn history_anchor(history: &[PersistedHistoryEntry]) -> Option<(u64, 
 }
 
 impl Database {
-    pub(super) async fn version_text_digest(&self, id: i64) -> io::Result<Vec<u8>> {
+    pub(super) async fn version_text_digest(&mut self, id: i64) -> io::Result<Vec<u8>> {
         use super::super::chunking::{ChunkMeta, MAX_BYTES, hash_part, manifest_hasher};
         let (length, expected) = self
             .query_collect(
@@ -76,13 +76,13 @@ impl Database {
             return Err(invalid("snapshot checksum or length mismatch"));
         }
         let digest = content.finalize().as_bytes().to_vec();
-        self.conn
-            .execute(
-                "UPDATE buffer_versions SET text_digest=? WHERE id=?",
-                params![digest.as_slice(), id],
-            )
-            .await
-            .map_err(error)?;
+        let before = self.integer("SELECT total_changes()").await?;
+        self.execute_cached(
+            "UPDATE buffer_versions SET text_digest=? WHERE id=?",
+            params![digest.as_slice(), id],
+        )
+        .await?;
+        self.acknowledge_inventory_writes(before).await;
         Ok(digest)
     }
 
@@ -91,20 +91,23 @@ impl Database {
         id: i64,
         anchor: Option<(u64, bool)>,
         high_water: u64,
+        snapshot: &DocumentSnapshot,
     ) -> io::Result<()> {
-        self.version_text_digest(id).await?;
-        self.conn
-            .execute(
-                "UPDATE buffer_versions SET anchor_seq=?,anchor_before=?,history_high_water=? WHERE id=?",
+        let mut digest = blake3::Hasher::new();
+        for span in snapshot.spans_for_range(0..snapshot.len_chars()) {
+            digest.update(span.text.as_bytes());
+        }
+        self.execute_cached(
+                "UPDATE buffer_versions SET text_digest=?,anchor_seq=?,anchor_before=?,history_high_water=? WHERE id=?",
                 params![
+                    digest.finalize().as_bytes().as_slice(),
                     anchor.map(|(seq, _)| seq as i64),
                     i64::from(anchor.is_some_and(|(_, before)| before)),
                     high_water.max(anchor.map_or(0, |(seq, _)| seq)) as i64,
                     id
                 ],
             )
-            .await
-            .map_err(error)?;
+            .await?;
         Ok(())
     }
 
@@ -137,8 +140,8 @@ impl Database {
             hash_part(&mut digest, chunk.meta);
             let hash = chunk.meta.digest.as_bytes().to_vec();
             if let Some(data) = chunk.data {
-                self.execute_cached("INSERT INTO blobs(digest,body,bytes) SELECT ?,?,? WHERE NOT EXISTS(SELECT 1 FROM blobs WHERE digest=?)",
-                    params![hash.as_slice(), data.as_slice(), data.len() as i64, hash.as_slice()]).await?;
+                self.execute_cached("INSERT INTO blobs(digest,body,bytes) VALUES(?,?,?) ON CONFLICT(digest) DO NOTHING",
+                    params![hash.as_slice(), data.as_slice(), data.len() as i64]).await?;
             }
             parts.push(hash);
         }
@@ -168,6 +171,7 @@ impl Database {
                 .map(|entry| entry.global_seq)
                 .max()
                 .unwrap_or(0),
+            &point.snapshot,
         )
         .await?;
         Ok(id)
@@ -243,6 +247,7 @@ impl Database {
             .unwrap_or_default()
             .as_secs()
             .min(i64::MAX as u64) as i64;
+        let before = self.integer("SELECT total_changes()").await?;
         self.conn
             .execute("BEGIN IMMEDIATE", ())
             .await
@@ -262,7 +267,7 @@ impl Database {
         };
         let return_version = result.as_ref().ok().copied();
         self.finish_transaction(result.map(|_| ())).await?;
-        self.inventory = None;
+        self.acknowledge_inventory_writes(before).await;
         let return_version = return_version.ok_or_else(|| invalid("missing return checkpoint"))?;
         self.navigation_roots
             .insert(point.temp_id, (target, return_version));

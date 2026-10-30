@@ -27,7 +27,9 @@ failure status means recovery protection is unavailable.
 
 Use **Recently Closed**, including after restarting.
 One scrollable list merges archives and disk-only recent-file entries, newest
-first. Old path-only settings lack closing times and appear last in their original
+first. Archive lookup uses the unique token index; archive saves update only
+changed metadata, append new rows and delete expired/reopened rows, retaining
+unchanged rows and their order. Old path-only settings lack closing times and appear last in their original
 order. File-only duplicates are hidden when an archive covers the path; distinct
 archived versions remain separate, identified by closing time.
 
@@ -80,6 +82,23 @@ whole database/WAL using the documented safe backup procedure for full recovery.
 Tests cover close-last/restart/undo, bounded retention and blob sharing, idempotent
 retries, and transaction failure before archive commit.
 
+The pinned Turso bindings and engine are **0.8.3**; run
+`cargo xtask check-turso-locks` to verify matching application/contract lockfiles.
+The isolated contract now also probes `VACUUM INTO` with a live source WAL,
+STRICT/foreign-key schemas, header IDs and integrity checks. It exposes a path
+limitation: SQL-doubled apostrophes remain doubled in the actual output filename.
+A production backup must handle this explicitly and verify the intended output
+exists before opening it (opening a missing path creates an empty database).
+Online backup, automatic pre-reset backup and startup compaction are not enabled
+by this change; the existing backup procedure below still applies.
+
+Performance orchestration and validation live in **scratchpad-performance-lens**:
+`splens measure-session-maintenance --binary /path/to/resource_probe --output NEW_RUN_DIR --launches 3`.
+This opt-in diagnostic covers usage, archive token reads/appends, saves following
+legacy-digest backfill/navigation, and new periodic snapshots. Scratchpad supplies
+only the production-path fixture and raw measurements; correctness tests do not
+assert wall-clock budgets.
+
 ## Per-buffer save points (item 2)
 
 The first persisted recovery snapshot creates a recovery point. Subsequent changed
@@ -104,7 +123,12 @@ Maintenance runs on saves, and periodically while idle.
 `buffer_versions` holds timestamp/length/checksum metadata; `version_parts` holds
 references to existing content-addressed chunks. Creating a point copies chunk
 references, not text bodies. Unchanged chunks are shared. Version roots participate
-in both targeted and full garbage collection. Points expire with their buffer
+in both targeted and full garbage collection. New point text fingerprints are
+hashed from the captured document, not reread from database blobs. Legacy digest
+backfills and committed navigation checkpoints acknowledge their own connection
+change counts, preserving the save inventory and chunk cache. Unexpected writes
+and failed transactions still force conservative cache invalidation.
+Points expire with their buffer
 when it is no longer live, retained-closed, or quarantined.
 
 ### One file-history navigator
@@ -173,7 +197,11 @@ reusable pages and overlapping archive references are excluded. Payloads are
 already included in the physical files, not additional disk usage.
 
 Usage and archive-cost queries read covering byte-count indexes, not the undo or
-text blobs themselves. Closed metadata is decoded once per preparation pass and
+text blobs themselves. Usage uses cached bulk queries: archive buffer IDs are
+projected in SQL and blob roots are deduplicated before aggregation, rather than
+issuing one query per archived buffer or returning every blob to Rust. This still
+runs on the save worker; it is not concurrent read-only query isolation.
+Closed metadata is decoded once per preparation pass and
 reused for policy decisions. Preparation still walks archive metadata and size
 indexes; this is not a claim of constant-time saves. Actual over-budget undo
 compaction necessarily reads archived content. Damage encountered there is

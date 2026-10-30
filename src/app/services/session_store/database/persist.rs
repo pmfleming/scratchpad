@@ -30,6 +30,7 @@ struct Prepared {
     full_cleanup: bool,
     closed: Vec<super::closed::ClosedRow>,
     closed_changed: bool,
+    old_closed: Vec<super::closed::ClosedRow>,
     version_history: bool,
     recovery_policy: crate::app::services::settings_store::RecoverySettings,
     expired_versions: Vec<i64>,
@@ -72,6 +73,7 @@ impl Prepared {
             });
         }
         prepared.closed_changed = prepared.closed != old_closed;
+        prepared.old_closed = old_closed;
         Ok(prepared)
     }
     fn push_tab(&mut self, mut tab: CapturedSessionTab) -> io::Result<(Vec<u8>, SessionTab)> {
@@ -399,7 +401,7 @@ impl Database {
                 .chunk_checkpoints
                 .insert(buffer.temp_id.clone(), checkpoint);
             if prepared.version_history {
-                self.checkpoint_version(&buffer.temp_id, now, removed_digests)
+                self.checkpoint_version(&buffer.temp_id, now, &buffer.snapshot)
                     .await?;
             }
         }
@@ -423,7 +425,8 @@ impl Database {
         .await?;
         self.execute_cached("INSERT INTO session_state VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", [prepared.state.as_slice()]).await?;
         if prepared.closed_changed {
-            self.write_closed(&prepared.closed).await?;
+            self.write_closed(&prepared.closed, &prepared.old_closed)
+                .await?;
         }
         Ok(())
     }

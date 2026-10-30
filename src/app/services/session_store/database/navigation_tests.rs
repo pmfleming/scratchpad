@@ -181,7 +181,7 @@ fn schema_eight_upgrades_and_legacy_snapshot_identity_is_backfilled() {
             .await
             .unwrap();
         drop(db);
-        let db = Database::open(root.path()).await.unwrap();
+        let mut db = Database::open(root.path()).await.unwrap();
         assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 9);
         let points = db.version_history(&id).await.unwrap();
         assert_eq!(points.len(), 1);

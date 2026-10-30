@@ -29,19 +29,17 @@ fn versions_are_periodic_durable_and_gc_roots_without_hidden_count_limit() {
         db.persist(captured(&tabs), 2).await.unwrap();
         assert_eq!(db.version_history(&id).await.unwrap().len(), 1);
         assert_eq!(db.read_version(initial).await.unwrap(), "initial");
-        let mut removed = std::collections::HashSet::new();
+        let snapshot = tabs[0].active_buffer().document_snapshot();
         // Clock rollback, just before/at the boundary, and unchanged content after it.
         for (time, count) in [(now - 1, 1), (now + 299, 1), (now + 300, 2), (now + 600, 2)] {
-            db.checkpoint_version(&id, time, &mut removed)
-                .await
-                .unwrap();
+            db.checkpoint_version(&id, time, &snapshot).await.unwrap();
             assert_eq!(
                 db.version_history(&id).await.unwrap().len(),
                 count,
                 "time {time}"
             );
         }
-        db.checkpoint_version("missing snapshot", now, &mut removed)
+        db.checkpoint_version("missing snapshot", now, &snapshot)
             .await
             .unwrap();
         assert!(
@@ -50,7 +48,6 @@ fn versions_are_periodic_durable_and_gc_roots_without_hidden_count_limit() {
                 .unwrap()
                 .is_empty()
         );
-        assert!(removed.is_empty());
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
         assert_eq!(db.read_version(initial).await.unwrap(), "initial");

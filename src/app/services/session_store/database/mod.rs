@@ -3,6 +3,8 @@
 mod app_safety_tests;
 mod chunking;
 pub(super) mod closed;
+#[cfg(test)]
+mod closed_tests;
 mod content;
 #[cfg(test)]
 mod fault_tests;
@@ -16,6 +18,8 @@ mod inventory_tests;
 #[cfg(test)]
 mod navigation_tests;
 mod persist;
+mod profiling;
+pub use profiling::SessionMaintenanceFixture;
 mod quarantine;
 #[cfg(test)]
 mod quarantine_tests;
@@ -254,7 +258,10 @@ impl Database {
     }
     async fn integer(&self, sql: &str) -> io::Result<i64> {
         self.conn
-            .query(sql, ())
+            .prepare_cached(sql)
+            .await
+            .map_err(error)?
+            .query(())
             .await
             .map_err(error)?
             .next()
@@ -272,7 +279,8 @@ impl Database {
         params: impl turso::IntoParams,
         mut map: impl FnMut(&turso::Row) -> io::Result<T>,
     ) -> io::Result<Vec<T>> {
-        let mut rows = self.conn.query(sql, params).await.map_err(error)?;
+        let mut statement = self.conn.prepare_cached(sql).await.map_err(error)?;
+        let mut rows = statement.query(params).await.map_err(error)?;
         let mut values = Vec::new();
         while let Some(row) = rows.next().await.map_err(error)? {
             values.push(map(&row)?);
@@ -328,6 +336,17 @@ impl Database {
             .map_err(error)?;
         Ok(())
     }
+    // Only acknowledge our own writes: an earlier unexpected write must still
+    // invalidate the inventory on the next save.
+    async fn acknowledge_inventory_writes(&mut self, before: i64) {
+        let after = self.integer("SELECT total_changes()").await.ok();
+        if let Some(inventory) = &mut self.inventory
+            && inventory.connection_changes == Some(before)
+        {
+            inventory.connection_changes = after;
+        }
+    }
+
     async fn finish_transaction(&mut self, result: io::Result<()>) -> io::Result<()> {
         let result = match result {
             Ok(()) => self

@@ -14,6 +14,7 @@ fn main() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("session.db");
     block_on(check_transactions(&path))?;
+    block_on(check_vacuum_into(&path))?;
     for mode in ["commit", "rollback"] {
         let status = Command::new(std::env::current_exe()?)
             .arg(&path)
@@ -23,7 +24,7 @@ fn main() -> Result<()> {
         block_on(check_recovery(&path))?;
     }
     println!(
-        "PASS: Turso bindings 0.8.3 commit/rollback, 16 MiB BLOB, abrupt exit, WAL recovery, checkpoint and integrity"
+        "PASS: Turso bindings 0.8.3 commit/rollback, 16 MiB BLOB, abrupt exit, WAL recovery, VACUUM INTO, checkpoint and integrity"
     );
     Ok(())
 }
@@ -57,6 +58,127 @@ async fn check_transactions(path: &Path) -> Result<()> {
             .ok_or("missing content")?
             .get::<Vec<u8>>(0)?,
         body
+    );
+    Ok(())
+}
+
+async fn check_vacuum_into(path: &Path) -> Result<()> {
+    let (_database, connection) = open(path).await?;
+    connection.execute_batch(
+        "PRAGMA foreign_keys=ON; PRAGMA application_id=1397769040; PRAGMA user_version=9;
+         CREATE TABLE parents(id INTEGER PRIMARY KEY) STRICT;
+         CREATE TABLE children(id INTEGER PRIMARY KEY, parent INTEGER REFERENCES parents(id)) STRICT;
+         INSERT INTO parents VALUES(1); INSERT INTO children VALUES(1,1);"
+    ).await?;
+    for (sql, expected) in [
+        ("PRAGMA application_id", 1397769040),
+        ("PRAGMA user_version", 9),
+    ] {
+        assert_eq!(
+            connection
+                .query(sql, ())
+                .await?
+                .next()
+                .await?
+                .ok_or("missing source header")?
+                .get::<i64>(0)?,
+            expected,
+            "source header before VACUUM INTO"
+        );
+    }
+    // Keep the source open, including committed WAL content. Paths are SQL
+    // literals (bind parameters are not supported by VACUUM INTO on 0.8.3).
+    let destination = path.with_file_name("backup'quoted.db");
+    let quoted = destination
+        .to_str()
+        .ok_or("non-UTF8 backup path")?
+        .replace('\'', "''");
+    connection
+        .execute(&format!("VACUUM INTO '{quoted}'"), ())
+        .await?;
+    // 0.8.3 trims literal delimiters but does not unescape doubled apostrophes.
+    // Characterize that limitation, rather than opening the intended path and
+    // accidentally creating an empty database that looks like a broken backup.
+    let actual = path.with_file_name("backup''quoted.db");
+    assert!(
+        !destination.exists(),
+        "review quote handling when upgrading Turso"
+    );
+    assert!(actual.is_file(), "VACUUM output is missing");
+    eprintln!(
+        "VACUUM INTO caveat: 0.8.3 retains doubled apostrophes in output filenames; application adoption requires a path workaround"
+    );
+    let (_backup, copy) = open(&actual).await?;
+    for (sql, expected) in [
+        ("PRAGMA application_id", 1397769040),
+        ("PRAGMA user_version", 9),
+        ("SELECT count(*) FROM children WHERE parent=1", 1),
+        (
+            "SELECT length(body) FROM content WHERE id=1",
+            16 * 1024 * 1024,
+        ),
+    ] {
+        assert_eq!(
+            copy.query(sql, ())
+                .await?
+                .next()
+                .await?
+                .ok_or("missing backup result")?
+                .get::<i64>(0)?,
+            expected
+        );
+    }
+    assert_eq!(
+        copy.query("SELECT body FROM content WHERE id=1", ())
+            .await?
+            .next()
+            .await?
+            .ok_or("missing copied body")?
+            .get::<Vec<u8>>(0)?,
+        vec![0x42; 16 * 1024 * 1024]
+    );
+    let mut rows = copy.query("PRAGMA integrity_check", ()).await?;
+    assert_eq!(
+        rows.next()
+            .await?
+            .ok_or("missing integrity result")?
+            .get::<String>(0)?,
+        "ok"
+    );
+    assert!(rows.next().await?.is_none());
+    drop(rows);
+    assert!(
+        copy.query("PRAGMA foreign_key_check", ())
+            .await?
+            .next()
+            .await?
+            .is_none()
+    );
+    copy.execute("PRAGMA foreign_keys=ON", ()).await?;
+    assert!(
+        copy.execute("INSERT INTO children VALUES(2,999)", ())
+            .await
+            .is_err()
+    );
+    assert!(
+        copy.execute("INSERT INTO parents VALUES('not an integer')", ())
+            .await
+            .is_err()
+    );
+    let schema = copy
+        .query("SELECT sql FROM sqlite_master WHERE name='children'", ())
+        .await?
+        .next()
+        .await?
+        .ok_or("missing STRICT schema")?
+        .get::<String>(0)?;
+    assert!(schema.contains("STRICT"));
+    // A destination with data must never be silently replaced.
+    assert!(
+        connection
+            .execute(&format!("VACUUM INTO '{quoted}'"), ())
+            .await
+            .is_err()
     );
     Ok(())
 }

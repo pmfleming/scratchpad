@@ -66,7 +66,7 @@ impl Database {
         &self,
         id: &str,
         now: i64,
-        _removed: &mut HashSet<Vec<u8>>,
+        snapshot: &crate::app::domain::DocumentSnapshot,
     ) -> io::Result<()> {
         // Select and create the point together; RETURNING identifies this insert,
         // never an unrelated previous row when no snapshot/eligible version exists.
@@ -96,6 +96,7 @@ impl Database {
                 .map(|entry| entry.global_seq)
                 .max()
                 .unwrap_or(0),
+            snapshot,
         )
         .await?;
         Ok(())
@@ -110,7 +111,7 @@ impl Database {
     }
 
     pub(in crate::app::services::session_store) async fn version_history(
-        &self,
+        &mut self,
         id: &str,
     ) -> io::Result<Vec<BufferVersionInfo>> {
         self.ensure_healthy()?;

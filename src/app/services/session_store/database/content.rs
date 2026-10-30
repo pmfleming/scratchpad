@@ -182,10 +182,10 @@ impl Database {
             checkpoint.parts.push(chunk.meta);
             if let Some(data) = chunk.data {
                 profile.snapshot_bytes_hashed += data.len() as u64;
-                // The SELECT prevents inserts (and trigger work) for shared bodies.
+                // Avoid even an insert attempt for this buffer's known bodies.
                 if !known.contains(hash.as_bytes().as_slice()) {
-                    self.execute_cached("INSERT INTO blobs(digest, body, bytes) SELECT ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM blobs WHERE digest=?)",
-                        params![hash.as_bytes().as_slice(), data.as_slice(), data.len() as i64, hash.as_bytes().as_slice()]).await?;
+                    self.execute_cached("INSERT INTO blobs(digest, body, bytes) VALUES(?, ?, ?) ON CONFLICT(digest) DO NOTHING",
+                        params![hash.as_bytes().as_slice(), data.as_slice(), data.len() as i64]).await?;
                 }
             }
             if old.get(&count).map(Vec::as_slice) != Some(hash.as_bytes().as_slice()) {

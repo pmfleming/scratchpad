@@ -4,6 +4,8 @@ mod alloc_metrics;
 mod events;
 #[path = "resource_probe/scenarios.rs"]
 mod scenarios;
+#[path = "resource_probe/session_maintenance.rs"]
+mod session_maintenance;
 #[path = "resource_probe/session_save.rs"]
 mod session_save;
 
@@ -45,6 +47,8 @@ const FRAGMENT_UNIT: &str = "hay needle café 東京\n";
 fn main() {
     if std::env::args().any(|arg| arg == "--large-dirty-save") {
         session_save::run();
+    } else if std::env::args().any(|arg| arg == "--session-maintenance") {
+        session_maintenance::run();
     } else {
         scenarios::run_all();
     }

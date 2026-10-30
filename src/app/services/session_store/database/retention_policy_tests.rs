@@ -180,7 +180,7 @@ fn schema_six_migrates_without_discarding_existing_versions() {
             .await
             .unwrap();
         drop(db);
-        let db = Database::open(root.path()).await.unwrap();
+        let mut db = Database::open(root.path()).await.unwrap();
         assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 9);
         let point = db
             .version_history(&tabs[0].active_buffer().temp_id)

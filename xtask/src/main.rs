@@ -7,7 +7,7 @@ mod quality;
 
 // Engine upgrades require matching app/probe locks and contract review.
 const EXPECTED: &[(&str, &str)] = &[
-    ("turso", "0.8.0"),
+    ("turso", "0.8.3"),
     ("turso_core", "0.8.3"),
     ("turso_ext", "0.8.3"),
     ("turso_macros", "0.8.3"),
@@ -90,7 +90,7 @@ fn check_turso_locks(root: &Path) -> Result<(), String> {
     let app = read_identity("Cargo.lock")?;
     let probe = read_identity("tools/turso-contract/Cargo.lock")?;
     matching_identities(&app, &probe)?;
-    println!("Turso bindings 0.8.0, engine/SDK 0.8.3: matching lockfile identities");
+    println!("Turso bindings 0.8.3, engine/SDK 0.8.3: matching lockfile identities");
     Ok(())
 }
 

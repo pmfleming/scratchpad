@@ -26,7 +26,7 @@ fn insert(buffer: &mut BufferState, at: usize, text: &str) {
 }
 
 // Stable, non-repeating ASCII: a repeated line would grossly overstate deduplication.
-fn fixture(bytes: usize) -> String {
+pub(super) fn fixture(bytes: usize) -> String {
     let mut state = 0x1234_5678_u64;
     (0..bytes)
         .map(|i| {

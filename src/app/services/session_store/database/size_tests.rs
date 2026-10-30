@@ -61,6 +61,64 @@ fn sizes_track_writes_coalescing_undo_and_shared_recovery_chunks() {
 }
 
 #[test]
+fn bulk_usage_matches_reference_accounting_for_archives_and_all_blob_classes() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let mut live = vec![tab("recovery λ"), tab("live only"), tab("shared unchanged")];
+        let mut save = request(&[live[0].clone(), live[2].clone()]);
+        save.version_history = true;
+        db.persist(save, 1).await.unwrap();
+        live[0].active_buffer_mut().replace_text("new live".into());
+        db.persist(request(&live), 2).await.unwrap();
+        let mut close = request(&live[1..]);
+        close
+            .closed_tabs
+            .push(crate::app::services::session_store::CapturedClosedTab::capture(&live[0], None));
+        db.persist(close, 3).await.unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO blobs(digest,body,bytes) VALUES(x'01',x'6162',2)",
+                (),
+            )
+            .await
+            .unwrap();
+        let usage = db.stored_usage().await.unwrap();
+        let archives = db.closed_rows().await.unwrap();
+        let mut referenced = 0;
+        for archive in &archives {
+            referenced += archive.payload.len() as u64;
+            for buffer in &archive.tab.buffers {
+                referenced += db.query_collect(
+                    "SELECT coalesce((SELECT bytes FROM snapshots WHERE id=?1),0) + coalesce((SELECT sum(bytes) FROM history WHERE temp_id=?1),0) + coalesce((SELECT sum(bytes+branch_bytes) FROM buffer_versions WHERE temp_id=?1),0)",
+                    [buffer.temp_id.as_str()], |row| row.get::<i64>(0).map_err(super::error),
+                ).await.unwrap()[0] as u64;
+            }
+        }
+        assert_eq!(usage.archives, archives.len());
+        assert_eq!(usage.archive_referenced_bytes, referenced);
+        let mut classes = [0u64; 4];
+        for (bytes, kind) in db.query_collect(
+            "SELECT bytes, EXISTS(SELECT 1 FROM parts WHERE parts.digest=blobs.digest) + 2*EXISTS(SELECT 1 FROM version_parts WHERE version_parts.digest=blobs.digest) FROM blobs",
+            (), |row| Ok((row.get::<i64>(0).map_err(super::error)?, row.get::<i64>(1).map_err(super::error)?)),
+        ).await.unwrap() {
+            classes[kind as usize] += bytes as u64;
+        }
+        assert_eq!(
+            [
+                usage.unreferenced_text,
+                usage.live_text,
+                usage.recovery_text,
+                usage.shared_text
+            ],
+            classes
+        );
+        assert_eq!(usage.unreferenced_text, 2);
+        assert!(classes.iter().all(|bytes| *bytes > 0));
+        assert_sizes(&db).await;
+    });
+}
+
+#[test]
 fn schema_seven_backfills_byte_counts_and_preserves_text_history_and_versions() {
     block_on(async {
         let (root, mut db) = database().await;
