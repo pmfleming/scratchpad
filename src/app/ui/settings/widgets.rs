@@ -311,7 +311,7 @@ pub(super) fn numeric_slider(
     inner_select_row(ui, label, None, |ui| {
         available_width_control(ui, |ui| {
             let lane = ui.max_rect();
-            let width = lane.width().min(256.0);
+            let width = lane.width().min(SettingsUi::CONTROLS.column_width);
             let start = lane.right() - width;
             let number_width = 78.0;
             let unit_width = 32.0;
@@ -328,11 +328,23 @@ pub(super) fn numeric_slider(
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                     ui.spacing_mut().slider_width = track_width;
-                    let response = ui.add(
-                        egui::Slider::new(value, range.clone())
-                            .step_by(1.0)
-                            .clamping(egui::SliderClamping::Edits)
-                            .show_value(false),
+                    SettingsUi::apply_slider_style(ui);
+                    // Preview resizing moves this row. Keep drag identity
+                    // independent of the surrounding rectangle-based scopes.
+                    let response = widget_ids::surface_response(
+                        ui,
+                        ("settings.numeric", label),
+                        "slider",
+                        |ui| {
+                            ui.add(
+                                egui::Slider::new(value, range.clone())
+                                    .step_by(1.0)
+                                    .clamping(egui::SliderClamping::Edits)
+                                    .handle_shape(egui::style::HandleShape::Circle)
+                                    .trailing_fill(true)
+                                    .show_value(false),
+                            )
+                        },
                     );
                     changed |= response.changed();
                     record_settings_control_box(format!("slider.{label}"), response.rect);
@@ -348,13 +360,20 @@ pub(super) fn numeric_slider(
                 (label, "number"),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
-                    let response = ui.add_sized(
-                        egui::vec2(number_width, SettingsUi::CONTROLS.height),
-                        egui::DragValue::new(value)
-                            .range(range)
-                            .clamp_existing_to_range(false)
-                            .update_while_editing(false)
-                            .speed(1),
+                    let response = widget_ids::surface_response(
+                        ui,
+                        ("settings.numeric", label),
+                        "number",
+                        |ui| {
+                            ui.add_sized(
+                                egui::vec2(number_width, SettingsUi::CONTROLS.height),
+                                egui::DragValue::new(value)
+                                    .range(range)
+                                    .clamp_existing_to_range(false)
+                                    .update_while_editing(false)
+                                    .speed(1),
+                            )
+                        },
                     );
                     changed |= response.changed();
                     record_settings_control_box(format!("number.{label}"), response.rect);

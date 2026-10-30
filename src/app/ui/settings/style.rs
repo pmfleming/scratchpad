@@ -79,6 +79,22 @@ impl SettingsUi {
         style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, accent);
         style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, accent);
     }
+    /// Scoped to sliders so their rail and handle don't inherit dark field fills.
+    pub(super) fn apply_slider_style(ui: &mut egui::Ui) {
+        let rail = if ui.visuals().dark_mode {
+            egui::Color32::from_rgb(110, 128, 137)
+        } else {
+            egui::Color32::from_rgb(105, 122, 132)
+        };
+        let accent = ui.visuals().selection.stroke.color;
+        let style = ui.style_mut();
+        style.spacing.slider_rail_height = 6.0;
+        style.visuals.widgets.inactive.bg_fill = rail;
+        style.visuals.widgets.hovered.bg_fill = accent;
+        style.visuals.widgets.active.bg_fill = accent;
+        style.visuals.selection.bg_fill = accent;
+    }
+
     pub(super) fn field_bg(ui: &egui::Ui) -> egui::Color32 {
         if ui.visuals().dark_mode {
             egui::Color32::from_rgb(23, 27, 30)

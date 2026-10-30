@@ -527,6 +527,63 @@ fn both_previews_are_right_aligned_and_vertically_centered_without_clipping() {
 }
 
 #[test]
+fn padding_slider_keeps_dragging_while_preview_resize_moves_the_row() {
+    let mut state = app();
+    state.state.app_settings.editor.editor_gutter = 0;
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1100.0, 6000.0))
+        .with_context_setup(setup)
+        .build_ui_state(
+            |ui, app| {
+                reset_settings_layout_measurements();
+                render_page_body(ui, app, 1100.0);
+            },
+            state,
+        );
+    harness.run();
+    let slider_rect = || {
+        settings_control_measurements()
+            .into_iter()
+            .find(|m| m.label == "slider.Editor padding")
+            .unwrap()
+            .rect
+    };
+    let initial = slider_rect();
+    let start = egui::pos2(initial.left() + 1.0, initial.center().y);
+    harness.event(egui::Event::PointerMoved(start));
+    harness.event(egui::Event::PointerButton {
+        pos: start,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    let mut previous = harness.state().state.app_settings.editor_gutter();
+    for fraction in [0.25, 0.5, 0.75, 0.99] {
+        // Keep the button held and pointer on its original horizontal path,
+        // even when the changing preview padding moves the entire row.
+        let pos = egui::pos2(initial.left() + initial.width() * fraction, start.y);
+        harness.event(egui::Event::PointerMoved(pos));
+        harness.run_steps(2);
+        let current = harness.state().state.app_settings.editor_gutter();
+        assert!(
+            current > previous,
+            "drag stopped at {current}, fraction {fraction}"
+        );
+        previous = current;
+    }
+    assert_eq!(previous, 32);
+    assert!(slider_rect().top() > initial.top());
+    harness.event(egui::Event::PointerButton {
+        pos: initial.right_center(),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+}
+
+#[test]
 fn rendering_byte_budgets_does_not_round_or_clamp_stored_values() {
     let ctx = egui::Context::default();
     let mut bytes = 64 * 1024 * 1024 + 123;
