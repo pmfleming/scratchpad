@@ -161,7 +161,7 @@ store does not prevent exit. Retryable save errors still keep the window open,
 without retrying automatic last-tab shutdown every frame.
 
 **Scrubber** (`Ctrl+Alt+Z`) steps through the active file's retained edits. Drag to
-preview a destination and release to apply; Left/Right and Home/End work while
+update the file live, with a subtle highlight on each change; Left/Right and Home/End work while
 its track has focus. **History…** (`Ctrl+Shift+H`) shows the current file, all files,
 or a chosen file. Click a row to restore the state **after** that change; Up/Down
 follow the on-screen order only while the list has focus. A subtle tint marks the

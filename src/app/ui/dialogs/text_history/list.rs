@@ -32,8 +32,8 @@ pub(super) fn render(
     let scroll = egui::ScrollArea::vertical()
         .id_salt(("history.states", target))
         .auto_shrink([false, false])
-        .max_height(350.0)
-        .min_scrolled_height(240.0)
+        .max_height((ui.available_height() - 20.0 - ui.spacing().item_spacing.y).max(64.0))
+        .min_scrolled_height(64.0)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             if let Some(id) = target {
@@ -110,7 +110,7 @@ fn focus_rail(ui: &mut egui::Ui, rect: egui::Rect, focus_requested: bool) {
         super::lock_navigation_focus(ui.ctx(), focus_id());
         ui.painter().rect_stroke(
             rect,
-            6,
+            0,
             egui::Stroke::new(1.0, theme::tab_selected_accent(ui)),
             egui::StrokeKind::Inside,
         );
@@ -206,7 +206,7 @@ impl<'a> FileStates<'a> {
         if current || affected || response.hovered() {
             ui.painter().rect_filled(
                 rect,
-                6,
+                0,
                 if current || affected {
                     theme::tab_selected_bg(ui)
                 } else {
@@ -334,7 +334,7 @@ fn paint_node(
         center,
         if current { 5.0 } else { 3.5 },
         if undone {
-            ui.visuals().window_fill()
+            ui.visuals().panel_fill
         } else {
             color
         },

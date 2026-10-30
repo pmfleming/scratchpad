@@ -41,6 +41,11 @@ fn current(ctx: &egui::Context, buffer: &BufferState) -> Option<(usize, f32)> {
     Some((feedback.offset, (1.0 - elapsed.max(0.0) / LIFETIME) as f32))
 }
 
+#[cfg(test)]
+pub(crate) fn active_offset(ctx: &egui::Context, buffer: &BufferState) -> Option<usize> {
+    current(ctx, buffer).map(|(offset, _)| offset)
+}
+
 pub(super) fn paint(ui: &egui::Ui, frame: &EditorFrame<'_>) {
     let Some((offset, opacity)) = current(ui.ctx(), frame.buffer) else {
         return;

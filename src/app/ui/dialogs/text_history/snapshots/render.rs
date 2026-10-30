@@ -98,8 +98,8 @@ pub(in super::super) fn footer(ui: &mut egui::Ui, catalog: &Catalog) {
                 .any(|f| f.loading)
                 .then(|| "Loading snapshots…".into())
         });
-    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 20.0));
     if let Some(status) = status {
+        let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 20.0));
         ui.put(
             rect,
             egui::Label::new(egui::RichText::new(status).small().color(text_muted(ui))).truncate(),

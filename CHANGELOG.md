@@ -11,6 +11,11 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Made History resizable with square corners and the workspace background; Linux and Hyprland dismiss it with Escape or an outside click instead of a close button.
+- Replaced History's overflow menu with a direct X button to clear history and a visible follow-file checkbox.
+- Limited the History file picker to files with changes and matched tab-overflow typography, row sizing, and scrolling, with aligned counts and truncated names.
+- Made the history scrubber update the file and highlight the current change while dragging, retaining guards against edits or file switches during a drag.
+- Enlarged the history scrubber's width, track, and handle to 1.5×, with a content-sized height and no empty status footer, while retaining the project's text sizing.
 - Shared cached recovery-query results across UI frames instead of copying archive/version lists, and removed the obsolete startup-conflict dialog workflow.
 - Reduced session-worker history caches to per-row fingerprints and reused unchanged chunk hashes through bounded byte-range edit tracking.
 - Advanced session storage to schema 8 with transactional upgrades from schemas 6 and 7. Stored byte counts and covering indexes avoid scanning undo/text payloads during retention accounting and disk-usage refreshes. Older schemas are preserved but not migrated.

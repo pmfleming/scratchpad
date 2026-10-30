@@ -1,7 +1,9 @@
-use super::common::{HISTORY_DIALOG_SIZE, truncated_label};
+use super::common::truncated_label;
+mod file_picker;
 mod list;
 mod model;
 mod navigation;
+mod panel;
 mod persistence;
 mod scrubber;
 mod snapshots;
@@ -10,10 +12,11 @@ mod states;
 use self::model::HistoryAction;
 use self::persistence::{read_active_tab, read_follow_focus, write_active_tab, write_follow_focus};
 use crate::app::app_state::{ScratchpadApp, workspace::mutation as workspace_mutation};
+use crate::app::platform::{PlatformProfile, resolved_profile};
 use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg};
-use crate::app::ui::{callout, settings, widget_ids};
+use crate::app::ui::{callout, widget_ids};
 use eframe::egui;
-use egui_phosphor::regular::{ARROW_U_UP_LEFT, DOTS_THREE, FILE_TEXT, FILES, FOLDER_OPEN};
+use egui_phosphor::regular::{ARROW_U_UP_LEFT, FILE_TEXT, FILES, FOLDER_OPEN, X};
 
 const UNDONE_OPACITY: f32 = 0.65;
 
@@ -54,6 +57,13 @@ fn active_buffer(app: &ScratchpadApp) -> Option<u64> {
         .map(|tab| tab.active_buffer().id)
 }
 
+fn dismissible_history(app: &ScratchpadApp) -> bool {
+    matches!(
+        resolved_profile(app.state.app_settings.platform_profile()),
+        PlatformProfile::LinuxGeneric | PlatformProfile::Hyprland
+    )
+}
+
 fn scope_buffer(scope: HistoryTab, app: &ScratchpadApp) -> Option<u64> {
     match scope {
         HistoryTab::CurrentFile => active_buffer(app),
@@ -74,6 +84,21 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
         app.state.dialogs.text_history.is_open() && ctx.memory(|m| m.has_focus(list::focus_id()));
     let scrub = app.state.dialogs.history_scrubber.is_open()
         && ctx.memory(|m| m.has_focus(scrubber::focus_id()));
+    let dismiss_history = dismissible_history(app) && app.state.dialogs.text_history.is_open();
+    // Give an open menu the first Escape, even when the timeline retains focus.
+    if egui::Popup::is_any_open(ctx) {
+        return;
+    }
+    if (rail || scrub || dismiss_history)
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        if scrub {
+            app.state.dialogs.history_scrubber.close();
+        } else {
+            app.state.dialogs.text_history.close();
+        }
+        return;
+    }
     if !rail && !scrub {
         return;
     }
@@ -86,14 +111,6 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
         })
     {
         ctx.data_mut(|d| d.insert_temp(confirm_key(), true));
-        return;
-    }
-    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-        if scrub {
-            app.state.dialogs.history_scrubber.close();
-        } else {
-            app.state.dialogs.text_history.close();
-        }
         return;
     }
     let id = if scrub {
@@ -154,79 +171,54 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
 
 fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let mut action = None;
-    let mut close = false;
     let mut clear = false;
     let mut selected = scope(ctx, app);
-    let screen = ctx.content_rect();
-    callout::show_floating(
-        ctx,
-        "text_history_window",
-        "History",
-        egui::pos2(
-            (screen.right() - HISTORY_DIALOG_SIZE.x - 24.0).max(screen.left()),
-            screen.top() + 72.0,
-        ),
-        HISTORY_DIALOG_SIZE.x,
-        |ui| {
-            widget_ids::feature_scope(ui, "text_history_dialog", |ui| {
-                settings::apply_dialog_typography(ui);
-                callout::apply_spacing(ui);
-                snapshots::poll(ui, app);
-                snapshots::hydrate(ui, app);
-                close = super::common::history_dialog_header(
-                    ui,
-                    "text_history.header",
-                    "Close history",
-                    "History",
-                    18.0,
-                );
-                let entries = snapshots::state_entries(ctx, app);
-                controls(ui, app, &entries, &mut selected);
-                let target = scope_buffer(selected, app);
-                let ids: Vec<_> = app
-                    .tab_manager
-                    .tabs
-                    .as_slice()
-                    .iter()
-                    .flat_map(|tab| tab.buffers())
-                    .filter(|buffer| target.is_none_or(|id| id == buffer.id))
-                    .map(|b| b.id)
-                    .collect();
-                let catalog = snapshots::collect(ui, app, &ids);
-                if let Some(id) = target {
-                    file_caption(ui, app, id, &entries);
-                }
-                snapshot_returns(ui, app, &ids, &catalog, &mut action);
-                let confirming =
-                    ctx.data(|data| data.get_temp::<bool>(confirm_key()).unwrap_or(false));
-                if confirming {
-                    callout::section_frame(ui).show(ui, |ui| {
-                        ui.label("Clear undo/redo history in all open files?");
-                        ui.weak("This cannot be undone. Saved snapshots are kept.");
-                        ui.horizontal(|ui| {
-                            if ui.button("Cancel").clicked() {
-                                ctx.data_mut(|d| d.remove::<bool>(confirm_key()));
-                            }
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("Clear history")
-                                            .color(egui::Color32::WHITE),
-                                    )
-                                    .fill(crate::app::theme::CLOSE_HOVER_BG),
-                                )
-                                .clicked()
-                            {
-                                clear = true;
-                            }
-                        });
-                    });
-                }
-                list::render(ui, &entries, &catalog, target, &ids, &mut action);
-                snapshots::footer(ui, &catalog);
+    let close = panel::show(ctx, app, |ui, app| {
+        snapshots::poll(ui, app);
+        snapshots::hydrate(ui, app);
+        let entries = snapshots::state_entries(ctx, app);
+        controls(ui, app, &entries, &mut selected);
+        let target = scope_buffer(selected, app);
+        let ids: Vec<_> = app
+            .tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .flat_map(|tab| tab.buffers())
+            .filter(|buffer| target.is_none_or(|id| id == buffer.id))
+            .map(|b| b.id)
+            .collect();
+        let catalog = snapshots::collect(ui, app, &ids);
+        if let Some(id) = target {
+            file_caption(ui, app, id, &entries);
+        }
+        snapshot_returns(ui, app, &ids, &catalog, &mut action);
+        let confirming = ctx.data(|data| data.get_temp::<bool>(confirm_key()).unwrap_or(false));
+        if confirming {
+            callout::section_frame(ui).corner_radius(0).show(ui, |ui| {
+                ui.label("Clear undo/redo history in all open files?");
+                ui.weak("This cannot be undone. Saved snapshots are kept.");
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        ctx.data_mut(|d| d.remove::<bool>(confirm_key()));
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Clear history").color(egui::Color32::WHITE),
+                            )
+                            .fill(crate::app::theme::CLOSE_HOVER_BG),
+                        )
+                        .clicked()
+                    {
+                        clear = true;
+                    }
+                });
             });
-        },
-    );
+        }
+        list::render(ui, &entries, &catalog, target, &ids, &mut action);
+        snapshots::footer(ui, &catalog);
+    });
     if close {
         crate::app::commands::close_text_history(&mut app.state.dialogs);
     }
@@ -343,52 +335,19 @@ fn controls(
             matches!(selected, HistoryTab::File(_)),
             true,
         );
-        egui::Popup::menu(&picker).show(|ui| {
-            let counts = model::entry_counts(entries);
-            for buffer in app
-                .tab_manager
-                .tabs
-                .as_slice()
-                .iter()
-                .flat_map(|tab| tab.buffers())
+        file_picker::show(ui, &picker, app, entries, selected);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if control_icon_button(ui, "clear", X, "Clear undo/redo history", false, true).clicked()
             {
-                let count = counts.get(&buffer.id).copied().unwrap_or_default();
-                if ui
-                    .selectable_label(
-                        *selected == HistoryTab::File(buffer.id),
-                        format!("{}  ·  {count}", buffer.name),
-                    )
-                    .on_hover_text(
-                        buffer
-                            .path
-                            .as_ref()
-                            .map_or_else(|| buffer.name.clone(), |p| p.display().to_string()),
-                    )
-                    .clicked()
-                {
-                    *selected = HistoryTab::File(buffer.id);
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(scope_key(), buffer.id));
-                    ui.close();
-                }
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(confirm_key(), true));
             }
         });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let more = control_icon_button(ui, "more", DOTS_THREE, "History options", false, true);
-            egui::Popup::menu(&more).show(|ui| {
-                let mut follow = read_follow_focus(ui.ctx());
-                if ui.checkbox(&mut follow, "Switch to changed file").changed() {
-                    write_follow_focus(ui.ctx(), follow);
-                }
-                ui.separator();
-                if ui.button("Clear history…").clicked() {
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(confirm_key(), true));
-                    ui.close();
-                }
-            });
-        });
     });
+    let mut follow = read_follow_focus(ui.ctx());
+    if ui.checkbox(&mut follow, "Switch to changed file").changed() {
+        write_follow_focus(ui.ctx(), follow);
+    }
 }
 
 fn lock_navigation_focus(ctx: &egui::Context, id: egui::Id) {
@@ -430,7 +389,7 @@ fn control_icon_button(
     .min_size(egui::vec2(36.0, 30.0))
     .fill(fill)
     .stroke(egui::Stroke::new(1.0, stroke_color))
-    .corner_radius(8);
+    .corner_radius(0);
     widget_ids::scope(ui, ("text_history.control", id_source), |ui| {
         ui.add_enabled(enabled, button)
     })

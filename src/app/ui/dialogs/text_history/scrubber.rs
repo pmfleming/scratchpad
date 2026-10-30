@@ -1,4 +1,4 @@
-//! Active-buffer-only, deferred-commit history navigation.
+//! Active-buffer-only, live history navigation.
 use super::{
     active_buffer, control_icon_button,
     model::{HistoryAction, row_from_entry},
@@ -13,6 +13,10 @@ use crate::app::{
 };
 use eframe::egui;
 use egui_phosphor::regular::{CARET_LEFT, CARET_RIGHT};
+
+const SCRUBBER_SCALE: f32 = 1.5;
+const SCRUBBER_WIDTH: f32 = 360.0 * SCRUBBER_SCALE;
+const SCRUBBER_DEFAULT_HEIGHT: f32 = 205.0;
 
 pub(super) fn focus_id() -> egui::Id {
     egui::Id::unique("history.scrubber.focus")
@@ -74,8 +78,8 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
             egui::Vec2::ZERO,
         ));
     let position = egui::pos2(
-        (anchor.right() - 360.0).max(screen.left()),
-        (anchor.top() - 205.0).max(screen.top()),
+        (anchor.right() - SCRUBBER_WIDTH).max(screen.left()),
+        (anchor.top() - SCRUBBER_DEFAULT_HEIGHT).max(screen.top()),
     );
     let mut action = None;
     let mut close = false;
@@ -84,7 +88,7 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
         "history_scrubber_window",
         "Scrubber",
         position,
-        360.0,
+        SCRUBBER_WIDTH,
         |ui| {
             widget_ids::feature_scope(ui, "history_scrubber", |ui| {
                 (close, action) = render(ui, app, id);
@@ -94,9 +98,37 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if close {
         app.state.dialogs.history_scrubber.close();
     }
-    if let Some(action) = action {
-        snapshots::execute(ctx, app, action);
+    if let Some(HistoryAction::State { buffer_id, after }) = action {
+        let applied = snapshots::go_to_state(ctx, app, buffer_id, after);
+        refresh_drag_after_replay(ctx, app, buffer_id, applied);
     }
+}
+
+fn refresh_drag_after_replay(
+    ctx: &egui::Context,
+    app: &ScratchpadApp,
+    buffer_id: u64,
+    applied: bool,
+) {
+    ctx.data_mut(|data| {
+        let Some(mut drag) = data.get_temp::<Drag>(drag_id()) else {
+            return;
+        };
+        if applied
+            && !drag.cancelled
+            && drag.buffer == buffer_id
+            && let Some(buffer) = app.tab_manager.active_tab().map(|tab| tab.active_buffer())
+            && buffer.id == buffer_id
+        {
+            // Accept only this drag's replay. Subsequent external edits still
+            // invalidate the guard on the next frame.
+            drag.revision = buffer.document().revision_key();
+            drag.history_revision = buffer.document().history_revision_counter();
+        } else {
+            drag.cancelled = true;
+        }
+        data.insert_temp(drag_id(), drag);
+    });
 }
 
 fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp, id: u64) -> (bool, Option<HistoryAction>) {
@@ -123,7 +155,10 @@ fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp, id: u64) -> (bool, Option<
         );
     });
     let visiting = snapshots::is_browsing(ui.ctx(), app, id);
-    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 42.0));
+    let rect = widget_ids::allocate_exact_rect(
+        ui,
+        egui::vec2(ui.available_width(), 42.0 * SCRUBBER_SCALE),
+    );
     let track = Track {
         id,
         revision: buffer.document().revision_key(),
@@ -156,22 +191,9 @@ fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp, id: u64) -> (bool, Option<
         );
     }
     response.on_hover_text(if visiting { "Viewing a snapshot. Return to latest in History before scrubbing." }
-        else { "Drag to preview; release to apply. ←/→ step · Home/End jump · Esc close. Shaded ranges cannot be replayed." });
+        else { "Drag to move through changes in the file. ←/→ step · Home/End jump · Esc close. Shaded ranges cannot be replayed." });
     render_step_controls(ui, &track, preview, &mut action);
-    let delta = preview.abs_diff(states.position);
-    ui.weak(if delta == 0 {
-        format!("{preview} / {}", states.entries.len())
-    } else {
-        format!(
-            "{preview} / {} · {} {delta} on release",
-            states.entries.len(),
-            if preview < states.position {
-                "Undo"
-            } else {
-                "Redo"
-            }
-        )
-    });
+    ui.weak(format!("{preview} / {}", states.entries.len()));
     snapshots::footer(ui, &catalog);
     (close, action)
 }
@@ -211,6 +233,9 @@ fn interact_track(
             if let Some(position) = pointer_position {
                 drag.position = position;
             }
+            if drag.position != track.states.position {
+                *action = Some(track.action(drag.position));
+            }
         } else {
             drag.cancelled = true;
         }
@@ -220,9 +245,6 @@ fn interact_track(
         .filter(|d| !d.cancelled)
         .map_or(track.states.position, |d| d.position);
     if response.drag_stopped() {
-        if track.enabled && drag.as_ref().is_some_and(|d| !d.cancelled) {
-            *action = Some(track.action(preview));
-        }
         drag = None;
     } else if response.clicked() {
         response.request_focus();
@@ -298,7 +320,7 @@ fn paint_track(ui: &mut egui::Ui, track: &Track<'_>, preview: usize) {
     }
     ui.painter().circle_filled(
         egui::pos2(track.x(preview), y),
-        6.0,
+        6.0 * SCRUBBER_SCALE,
         if track.enabled {
             theme::tab_selected_accent(ui)
         } else {
