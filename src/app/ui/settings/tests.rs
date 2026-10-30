@@ -454,11 +454,16 @@ fn both_reset_actions_are_destructive_without_restyling_ordinary_buttons() {
 }
 
 #[test]
-fn quote_preview_is_right_aligned_and_vertically_centered_without_clipping() {
+fn both_previews_are_right_aligned_and_vertically_centered_without_clipping() {
     for width in [300.0, 880.0] {
         for wrap in [true, false] {
             for (size, padding) in [(20.0, 0), (32.0, 16)] {
-                for (quote, &(quote_text, _)) in PREVIEW_QUOTES.iter().enumerate() {
+                for (quote, quote_text, tabs) in PREVIEW_QUOTES
+                    .iter()
+                    .enumerate()
+                    .map(|(index, &(text, _))| (index, text, false))
+                    .chain(std::iter::once((0, "Think you're escaping", true)))
+                {
                     reset_settings_layout_measurements();
                     let ctx = egui::Context::default();
                     crate::app::fonts::apply_editor_fonts(
@@ -475,15 +480,16 @@ fn quote_preview_is_right_aligned_and_vertically_centered_without_clipping() {
                     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                         ui.set_width(width);
                         ui.set_min_height(1600.0);
-                        widgets::render_preview_panel(ui, &app, false);
+                        widgets::render_preview_panel(ui, &app, tabs);
                     });
                     output.textures_delta.clear();
                     let measurements = settings_control_measurements();
                     let find =
                         |name: &str| measurements.iter().find(|m| m.label == name).unwrap().rect;
-                    let content = find("preview.quote.content");
-                    let text = find("preview.quote.text");
-                    let panel = find("preview.text");
+                    let key = if tabs { "preview.tabs" } else { "preview.text" };
+                    let content = find(&format!("{key}.content"));
+                    let text = find(&format!("{key}.label"));
+                    let panel = find(key);
                     assert!((text.right() - content.right()).abs() < 1.0);
                     assert!((text.center().y - content.center().y).abs() < 1.0);
                     assert!(content.height() >= 96.0);
@@ -496,7 +502,9 @@ fn quote_preview_is_right_aligned_and_vertically_centered_without_clipping() {
                         .shapes
                         .iter()
                         .find_map(|shape| match &shape.shape {
-                            egui::Shape::Text(text) if text.galley.job.text == quote_text => {
+                            egui::Shape::Text(text)
+                                if text.galley.job.text.starts_with(quote_text) =>
+                            {
                                 Some(text)
                             }
                             _ => None,

@@ -16,14 +16,15 @@ pub(in crate::app::ui::settings) fn settings_card_frame(
     super::layout_state::record_settings_card_box("settings_card_frame", response.response.rect);
 }
 
-/// Both previews share font, palette, highlight, padding and wrapping. Quotes
-/// align right/center; the indentation sample keeps its meaningful leading edge.
+/// Both previews share font, palette, highlight, padding, wrapping and
+/// right-aligned, vertically centered quote layout.
 pub(in crate::app::ui::settings) fn render_preview_panel(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
     tabs: bool,
 ) {
     let settings = &app.state.app_settings;
+    let key = if tabs { "preview.tabs" } else { "preview.text" };
     ui.add_space(12.0);
     ui.horizontal(|ui| {
         ui.label(
@@ -60,7 +61,7 @@ pub(in crate::app::ui::settings) fn render_preview_panel(
                         settings.tab_display(),
                         settings.editor_tab_width(),
                     ),
-                    "A small idea",
+                    "run into yourself",
                 )
             } else {
                 let (text, highlight) = crate::app::ui::settings::PREVIEW_QUOTES
@@ -98,20 +99,18 @@ pub(in crate::app::ui::settings) fn render_preview_panel(
                 .id_salt(("settings.preview", tabs))
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    if tabs {
-                        ui.label(job);
-                    } else {
-                        right_centered_quote(ui, job, preview_width);
-                    }
+                    right_centered_quote(ui, job, preview_width, key);
                 });
         });
-    record_settings_control_box(
-        if tabs { "preview.tabs" } else { "preview.text" },
-        response.response.rect,
-    );
+    record_settings_control_box(key, response.response.rect);
 }
 
-fn right_centered_quote(ui: &mut egui::Ui, mut job: egui::text::LayoutJob, viewport_width: f32) {
+fn right_centered_quote(
+    ui: &mut egui::Ui,
+    mut job: egui::text::LayoutJob,
+    viewport_width: f32,
+    key: &str,
+) {
     job.halign = egui::Align::RIGHT;
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
     // Grow for tall wrapped text or wide unwrapped text, preserving scrolling
@@ -133,12 +132,12 @@ fn right_centered_quote(ui: &mut egui::Ui, mut job: egui::text::LayoutJob, viewp
     let response = widget_ids::rect_scope_with_layout(
         ui,
         text,
-        "settings.preview.quote",
+        (key, "quote"),
         egui::Layout::top_down(egui::Align::LEFT),
         |ui| ui.label(galley),
     );
-    record_settings_control_box("preview.quote.content", content);
-    record_settings_control_box("preview.quote.text", response.inner.rect);
+    record_settings_control_box(format!("{key}.content"), content);
+    record_settings_control_box(format!("{key}.label"), response.inner.rect);
 }
 
 fn tab_preview_text(style: IndentationStyle, display: TabDisplayMode, columns: u8) -> String {
@@ -152,26 +151,41 @@ fn tab_preview_text(style: IndentationStyle, display: TabDisplayMode, columns: u
             format!("│{}", " ".repeat(usize::from(columns.saturating_sub(1))))
         }
     };
-    format!("Project notes\n{indent}A small idea\n{indent}Something to come back to")
+    // James Joyce, Ulysses, episode 13 (Nausicaa), with preview line breaks.
+    format!(
+        "Think you're escaping\n{indent}and run into yourself.\n{indent}Longest way round is the shortest way home."
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
+    fn indentation_preview_uses_joyce_quote() {
+        for style in [IndentationStyle::Spaces, IndentationStyle::TabCharacter] {
+            let text = tab_preview_text(style, TabDisplayMode::Hidden, 4);
+            assert_eq!(
+                text.split_whitespace().collect::<Vec<_>>().join(" "),
+                "Think you're escaping and run into yourself. Longest way round is the shortest way home."
+            );
+        }
+    }
+
+    #[test]
     fn tab_markers_only_represent_actual_tabs() {
         for mode in TabDisplayMode::ALL {
             assert!(
-                tab_preview_text(IndentationStyle::Spaces, mode, 4).contains("\n    A small idea")
+                tab_preview_text(IndentationStyle::Spaces, mode, 4)
+                    .contains("\n    and run into yourself.")
             );
         }
         assert!(
             tab_preview_text(IndentationStyle::TabCharacter, TabDisplayMode::Character, 4)
-                .contains("\n→   A small idea")
+                .contains("\n→   and run into yourself.")
         );
         assert!(
             tab_preview_text(IndentationStyle::TabCharacter, TabDisplayMode::Tablines, 2)
-                .contains("\n│ A small idea")
+                .contains("\n│ and run into yourself.")
         );
     }
 }
