@@ -31,6 +31,7 @@ struct StatusBarActions {
     toggle_control_chars: bool,
     open_status_history: bool,
     open_text_history: bool,
+    open_history_scrubber: bool,
     open_encoding_dialog: bool,
     open_settings: bool,
 }
@@ -232,6 +233,27 @@ fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     }
 }
 
+fn show_history_scrubber_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
+    ui.separator();
+    let response = status_bar_icon_button(
+        ui,
+        "status_history_scrubber",
+        egui_phosphor::regular::SLIDERS_HORIZONTAL,
+    )
+    .accessible_name("Scrubber")
+    .on_hover_text(shortcut_tooltips::action(
+        ui.ctx(),
+        ShortcutAction::OpenHistoryScrubber,
+        "Scrubber",
+    ));
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(egui::Id::unique("history.scrubber.anchor"), response.rect)
+    });
+    if response.clicked() {
+        actions.open_history_scrubber = true;
+    }
+}
+
 fn show_text_history_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
     let response = status_bar_icon_button(
@@ -239,6 +261,7 @@ fn show_text_history_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
         "status_text_history",
         egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
     )
+    .accessible_name("History")
     .on_hover_cursor(egui::CursorIcon::PointingHand)
     .on_hover_text(shortcut_tooltips::action(
         ui.ctx(),
@@ -411,6 +434,10 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
         frame::open_encoding_dialog(app);
     }
 
+    if actions.open_history_scrubber {
+        app.state.dialogs.history_scrubber.open();
+    }
+
     if actions.open_text_history {
         crate::app::commands::handle_command(
             app,
@@ -464,6 +491,7 @@ fn render_status_item(
         }
         StatusBarItemKind::ControlChars => show_control_char_toggle(ui, details, actions),
         StatusBarItemKind::TextHistory => show_text_history_button(ui, actions),
+        StatusBarItemKind::HistoryScrubber => show_history_scrubber_button(ui, actions),
         StatusBarItemKind::Settings => show_settings_button(ui, actions),
         StatusBarItemKind::NonCompliant => show_non_compliant_warning(ui, details),
     }

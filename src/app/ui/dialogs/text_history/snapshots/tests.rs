@@ -33,8 +33,8 @@ fn point(id: i64, text: &str) -> BufferVersionInfo {
 }
 
 #[test]
-fn file_groups_require_real_changes_not_loading_errors_or_current_state_snapshots() {
-    use super::{Catalog, FileSnapshots, add_changed_snapshot_groups};
+fn older_snapshot_counts_exclude_loading_errors_and_reachable_states() {
+    use super::{Catalog, FileSnapshots};
     let current = TextDocument::new("current".into());
     let catalog: Catalog = [
         (
@@ -68,11 +68,9 @@ fn file_groups_require_real_changes_not_loading_errors_or_current_state_snapshot
         ),
     ]
     .into();
-    let mut groups = Vec::new();
-    add_changed_snapshot_groups(&catalog, &mut groups);
-    add_changed_snapshot_groups(&catalog, &mut groups);
-    assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0].buffer_id, 4);
+    assert_eq!(catalog[&1].older_change_count(), 0);
+    assert_eq!(catalog[&2].older_change_count(), 0);
+    assert_eq!(catalog[&3].older_change_count(), 0);
     assert_eq!(catalog[&4].older_change_count(), 1);
 }
 

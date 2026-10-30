@@ -1,4 +1,4 @@
-use super::{TextHistoryAction, apply, step_target};
+use super::super::{snapshots, states::States};
 use crate::app::{
     app_state::{ScratchpadApp, test_support::test_app},
     domain::{BufferState, CursorRange, WorkspaceTab},
@@ -25,96 +25,16 @@ fn app_with_history(root: &std::path::Path) -> ScratchpadApp {
     app.tab_manager.set_tabs(vec![WorkspaceTab::new(buffer)], 0);
     app
 }
-
 fn text(app: &ScratchpadApp) -> String {
     app.tab_manager.tabs.as_slice()[0].active_buffer().text()
 }
-
-#[test]
-fn live_navigation_moves_both_directions_without_replacement_edits_or_disk_writes() {
-    let root = tempfile::tempdir().unwrap();
-    let mut app = app_with_history(root.path());
-    let ctx = egui::Context::default();
-    for (undo, expected) in [
-        (true, "middle"),
-        (true, "old"),
-        (false, "middle"),
-        (false, "current"),
-    ] {
-        let action = step_target(&ctx, &mut app, undo).unwrap();
-        assert!(apply(&ctx, &mut app, action));
-        assert_eq!(text(&app), expected);
-        let buffer = app.tab_manager.tabs.as_slice()[0].active_buffer();
-        assert_eq!(buffer.document().history_entries().len(), 2);
-        assert_eq!(
-            std::fs::read_to_string(root.path().join("note.txt")).unwrap(),
-            "old"
-        );
-        if expected == "old" || expected == "current" {
-            assert!(step_target(&ctx, &mut app, undo).is_none());
-        }
-    }
+fn jump(ctx: &egui::Context, app: &mut ScratchpadApp, id: u64, k: usize) -> bool {
+    let entries = snapshots::state_entries(ctx, app);
+    let states = States::new(&entries, id);
+    snapshots::go_to_state(ctx, app, id, states.after(k))
 }
-
-#[test]
-fn selected_buffer_is_navigated_without_changing_other_files_or_stealing_focus() {
-    let root = tempfile::tempdir().unwrap();
-    let mut app = app_with_history(root.path());
-    let first = app.tab_manager.tabs.as_slice()[0].clone();
-    let mut other = BufferState::new("other".into(), "other".into(), None);
-    other
-        .replace_char_ranges_with_undo(
-            &[(0..5, "unrelated".into())],
-            CursorRange::default(),
-            CursorRange::default(),
-        )
-        .unwrap();
-    app.tab_manager
-        .set_tabs(vec![first, WorkspaceTab::new(other)], 1);
-    let ctx = egui::Context::default();
-    super::super::write_follow_focus(&ctx, false);
-    ctx.run_ui(egui::RawInput::default(), |_| {})
-        .textures_delta
-        .clear();
-    let buffer = app.tab_manager.tabs.as_slice()[0].active_buffer();
-    let action = TextHistoryAction {
-        buffer_id: buffer.id,
-        entry_id: buffer.document().history_entries()[0].id,
-    };
-    assert!(apply(&ctx, &mut app, action));
-    assert_eq!(text(&app), "old");
-    let redo = step_target(&ctx, &mut app, false).unwrap();
-    assert_eq!(redo.buffer_id, action.buffer_id);
-    assert!(apply(&ctx, &mut app, redo));
-    assert_eq!(text(&app), "middle");
-    assert_eq!(app.tab_manager.active_tab_index, 1);
-    assert_eq!(
-        app.tab_manager.tabs.as_slice()[1].active_buffer().text(),
-        "unrelated"
-    );
-    assert!(!apply(
-        &ctx,
-        &mut app,
-        TextHistoryAction {
-            entry_id: u64::MAX,
-            ..action
-        }
-    ));
-    assert_eq!(text(&app), "middle");
-}
-
-#[test]
-fn history_rows_buttons_and_arrow_keys_change_the_underlying_editor_without_a_preview() {
-    let root = tempfile::tempdir().unwrap();
-    let mut app = app_with_history(root.path());
-    app.state.dialogs.text_history.open();
-    let entries = app.tab_manager.tabs.as_slice()[0]
-        .active_buffer()
-        .document()
-        .history_entries();
-    let undo_all = format!("Undo: {}", entries[0].summary);
-    let redo_all = format!("Redo: {}", entries[1].summary);
-    let mut harness = Harness::builder()
+fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
+    Harness::builder()
         .with_size(egui::vec2(1200.0, 850.0))
         .with_context_setup(|ctx| {
             apply_editor_fonts(
@@ -123,68 +43,285 @@ fn history_rows_buttons_and_arrow_keys_change_the_underlying_editor_without_a_pr
                 4.0,
             )
             .unwrap();
-            super::super::write_active_tab(ctx, super::super::HistoryTab::Timeline);
         })
         .build_ui_state(
             |ui, app| App::ui(app, ui, &mut eframe::Frame::_new_kittest()),
             app,
+        )
+}
+
+#[test]
+fn state_jumps_are_after_edits_noop_at_current_and_never_write_disk() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    let ctx = egui::Context::default();
+    let id = app.tab_manager.tabs.as_slice()[0].active_buffer().id;
+    for (k, expected) in [
+        (1, "middle"),
+        (1, "middle"),
+        (0, "old"),
+        (2, "current"),
+        (0, "old"),
+        (1, "middle"),
+    ] {
+        assert!(jump(&ctx, &mut app, id, k));
+        assert_eq!(text(&app), expected);
+        assert_eq!(
+            app.tab_manager.tabs.as_slice()[0]
+                .active_buffer()
+                .document()
+                .history_entries()
+                .len(),
+            2
         );
-    harness.run_steps(3);
-    let undo = harness.get_by_label("Up: Older state in this file").rect();
-    let redo = harness
-        .get_by_label("Down: Newer state in this file")
-        .rect();
-    let delete = harness
-        .get_by_label("CTRL+SHIFT+DELETE: Clear history")
-        .rect();
-    assert_eq!(undo.size(), delete.size());
-    assert_eq!(redo.size(), delete.size());
-    assert_eq!(undo.center().y, delete.center().y);
-    assert_eq!(redo.center().y, delete.center().y);
-    assert!(undo.right() <= redo.left() && redo.right() <= delete.left());
-    assert!((redo.left() - undo.right() - 8.0).abs() < 1.0);
-    assert!((delete.left() - redo.right() - 8.0).abs() < 1.0);
-    assert!(
-        harness
-            .query_by_label("Changes apply directly; files are not saved.")
-            .is_none()
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("note.txt")).unwrap(),
+            "old"
+        );
+    }
+    assert!(!snapshots::go_to_state(&ctx, &mut app, id, Some(u64::MAX)));
+    assert_eq!(text(&app), "middle");
+}
+
+#[test]
+fn other_file_jumps_can_leave_the_active_file_untouched() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    let first = app.tab_manager.tabs.as_slice()[0].clone();
+    let id = first.active_buffer().id;
+    let other = WorkspaceTab::new(BufferState::new("other".into(), "untouched".into(), None));
+    app.tab_manager.set_tabs(vec![first, other], 1);
+    let ctx = egui::Context::default();
+    super::super::write_follow_focus(&ctx, false);
+    ctx.run_ui(egui::RawInput::default(), |_| {})
+        .textures_delta
+        .clear();
+    assert!(jump(&ctx, &mut app, id, 1));
+    assert_eq!(text(&app), "middle");
+    assert_eq!(app.tab_manager.active_tab_index, 1);
+    assert_eq!(
+        app.tab_manager.active_tab().unwrap().active_buffer().text(),
+        "untouched"
     );
-    harness
-        .get_all_by_role_and_label(egui::Role::Button, &undo_all)
+}
+
+#[test]
+fn rail_clicks_and_focused_keys_follow_screen_direction_without_stealing_editor_keys() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    app.state.dialogs.text_history.open();
+    let summary = app.tab_manager.tabs.as_slice()[0]
+        .active_buffer()
+        .document()
+        .history_entries()[0]
+        .summary
+        .clone();
+    let mut h = harness(app);
+    h.run_steps(3);
+    // Opening the nonmodal History panel leaves arrow keys with the editor.
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(2);
+    assert_eq!(text(h.state()), "current");
+    h.get_all_by_role_and_label(egui::Role::Button, &format!("State: {summary}"))
         .last()
         .unwrap()
-        .click_accesskit();
-    harness.run_steps(3);
-    assert_eq!(text(harness.state()), "old");
-    harness
-        .get_all_by_role_and_label(egui::Role::Button, &redo_all)
-        .next()
-        .unwrap()
-        .click_accesskit();
-    harness.run_steps(3);
-    assert_eq!(text(harness.state()), "current");
-    harness
-        .get_by_role_and_label(egui::Role::Button, "Up: Older state in this file")
         .click();
-    harness.run_steps(3);
-    assert_eq!(text(harness.state()), "middle");
-    harness.key_press(egui::Key::ArrowUp);
-    harness.run_steps(3);
-    assert_eq!(text(harness.state()), "old");
-    harness.key_press(egui::Key::ArrowDown);
-    harness.run_steps(3);
-    assert_eq!(text(harness.state()), "middle");
-    harness
-        .get_by_role_and_label(egui::Role::Button, "Down: Newer state in this file")
-        .click();
-    harness.run_steps(3);
-    assert_eq!(text(harness.state()), "current");
-    assert!(harness.query_by_label("History preview").is_none());
-    assert!(harness.query_by_label("Apply undo/redo").is_none());
-    assert!(harness.state().state.dialogs.text_history.is_open());
-    assert!(!harness.state().state.dialogs.any_modal_open());
-    assert_eq!(
-        std::fs::read_to_string(root.path().join("note.txt")).unwrap(),
-        "old"
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "middle");
+    assert!(
+        h.ctx
+            .memory(|m| m.has_focus(super::super::list::focus_id())),
+        "focus: {:?}",
+        h.ctx.memory(|m| m.focused())
     );
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "old");
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "middle");
+    h.key_press(egui::Key::Home);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "current");
+    h.key_press(egui::Key::End);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "old");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert!(!h.state().state.dialogs.text_history.is_open());
+}
+
+#[test]
+fn scrubber_steps_only_active_file_and_closes_independently() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    app.state.dialogs.text_history.open();
+    app.state.dialogs.history_scrubber.open();
+    let mut h = harness(app);
+    h.run_steps(3);
+    h.get_by_label("Undo one step").click();
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "middle");
+    h.key_press(egui::Key::ArrowLeft);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "old");
+    h.key_press(egui::Key::End);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "current");
+    h.get_by_label("Close history").click();
+    h.run_steps(3);
+    assert!(!h.state().state.dialogs.text_history.is_open());
+    assert!(h.state().state.dialogs.history_scrubber.is_open());
+    h.get_by_label("Undo one step").click();
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "middle");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(!h.state().state.dialogs.history_scrubber.is_open());
+}
+
+#[test]
+fn scrubber_drag_previews_then_commits_and_cancels_when_the_document_changes() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    app.state.dialogs.history_scrubber.open();
+    let mut h = harness(app);
+    h.run_steps(3);
+    let rect = h.get_by_label("History position").rect();
+    let start = egui::pos2(rect.right() - 9.0, rect.center().y);
+    let end = egui::pos2(rect.left() + 9.0, rect.center().y);
+    let press = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        pressed,
+        button: egui::PointerButton::Primary,
+        modifiers: egui::Modifiers::NONE,
+    };
+    h.event(egui::Event::PointerMoved(start));
+    h.event(press(start, true));
+    h.run_steps(2);
+    h.event(egui::Event::PointerMoved(end));
+    h.run_steps(2);
+    assert_eq!(text(h.state()), "current", "dragging must not mutate text");
+    h.event(press(end, false));
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "old");
+    h.event(egui::Event::PointerMoved(end));
+    h.event(press(end, true));
+    h.run_steps(2);
+    h.event(egui::Event::PointerMoved(start));
+    h.run_steps(2);
+    assert_eq!(text(h.state()), "old");
+    h.state_mut().tab_manager.tabs.as_mut_slice()[0]
+        .active_buffer_mut()
+        .replace_text("new edit".into());
+    h.run_steps(2);
+    h.event(press(start, false));
+    h.run_steps(3);
+    assert_eq!(
+        text(h.state()),
+        "new edit",
+        "stale drag must not replay over edits"
+    );
+}
+
+#[test]
+fn scrubber_follows_tabs_and_a_tab_switch_cancels_a_pending_drag() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    let first = app.tab_manager.tabs.as_slice()[0].clone();
+    let mut other = BufferState::new("other".into(), "before".into(), None);
+    other
+        .replace_char_ranges_with_undo(
+            &[(0..6, "after".into())],
+            CursorRange::default(),
+            CursorRange::default(),
+        )
+        .unwrap();
+    app.tab_manager
+        .set_tabs(vec![first, WorkspaceTab::new(other)], 0);
+    app.state.dialogs.history_scrubber.open();
+    let mut h = harness(app);
+    h.run_steps(3);
+    let rect = h.get_by_label("History position").rect();
+    let start = egui::pos2(rect.right() - 9.0, rect.center().y);
+    let end = egui::pos2(rect.left() + 9.0, rect.center().y);
+    h.event(egui::Event::PointerMoved(start));
+    h.event(egui::Event::PointerButton {
+        pos: start,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(2);
+    h.event(egui::Event::PointerMoved(end));
+    h.run_steps(2);
+    h.state_mut().tab_manager.set_active_tab_index_clamped(1);
+    h.run_steps(2);
+    h.event(egui::Event::PointerButton {
+        pos: end,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "current");
+    assert_eq!(
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .text(),
+        "after"
+    );
+    h.get_by_label("Undo one step").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .text(),
+        "before"
+    );
+    assert_eq!(text(h.state()), "current");
+}
+
+#[test]
+fn clear_requires_confirmation_and_cancel_preserves_history() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    app.state.dialogs.text_history.open();
+    let mut h = harness(app);
+    h.run_steps(3);
+    h.get_by_label("History options").click();
+    h.run_steps(2);
+    h.get_by_label("Clear history…").click();
+    h.run_steps(2);
+    assert_eq!(
+        h.state().tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .document()
+            .history_entries()
+            .len(),
+        2
+    );
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    h.get_by_label("History options").click();
+    h.run_steps(2);
+    h.get_by_label("Clear history…").click();
+    h.run_steps(2);
+    h.get_by_role_and_label(egui::Role::Button, "Clear history")
+        .click();
+    h.run_steps(3);
+    assert!(
+        h.state().tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .document()
+            .history_entries()
+            .is_empty()
+    );
+    assert_eq!(text(h.state()), "current");
 }

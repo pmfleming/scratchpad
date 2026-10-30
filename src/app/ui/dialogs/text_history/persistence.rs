@@ -9,7 +9,7 @@ pub(super) fn read_active_tab(ctx: &egui::Context) -> HistoryTab {
         widget_ids::ctx_key("text_history.active_tab"),
     )
     .and_then(tab_from_persisted)
-    .unwrap_or(HistoryTab::ByFile)
+    .unwrap_or(HistoryTab::CurrentFile)
 }
 
 pub(super) fn write_active_tab(ctx: &egui::Context, tab: HistoryTab) {
@@ -33,15 +33,15 @@ pub(super) fn write_follow_focus(ctx: &egui::Context, follow: bool) {
 
 fn tab_from_persisted(value: u8) -> Option<HistoryTab> {
     match value {
-        0 => Some(HistoryTab::Timeline),
-        1 | 2 => Some(HistoryTab::ByFile),
+        0 => Some(HistoryTab::AllFiles),
+        1 | 2 => Some(HistoryTab::CurrentFile),
         _ => None,
     }
 }
 
 fn tab_to_persisted(tab: HistoryTab) -> u8 {
     match tab {
-        HistoryTab::Timeline => 0,
-        HistoryTab::ByFile => 1,
+        HistoryTab::AllFiles => 0,
+        HistoryTab::CurrentFile | HistoryTab::File(_) => 1,
     }
 }

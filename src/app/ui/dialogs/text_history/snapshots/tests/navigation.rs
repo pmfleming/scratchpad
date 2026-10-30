@@ -92,43 +92,103 @@ fn snapshots_navigate_in_the_existing_editor_and_return_to_detailed_undo() {
     assert!(harness.query_by_label("Recovery points").is_none());
     assert!(harness.query_by_label("History preview").is_none());
     assert!(harness.query_by_label("Recovery point").is_none());
-    // Down first rejoins the oldest reconstructable state, then native redo.
-    harness.key_press(egui::Key::ArrowDown);
+    harness.get_by_label("Return to latest").click();
     harness.run_steps(3);
-    assert_eq!(text(&harness), "zero");
-    for expected in ["one", "two"] {
-        harness.key_press(egui::Key::ArrowDown);
-        harness.run_steps(3);
-        assert_eq!(text(&harness), expected);
-        assert_eq!(
-            harness.state().tab_manager.tabs.as_slice()[0]
-                .active_buffer()
-                .document()
-                .history_entries()
-                .len(),
-            2
-        );
-    }
+    assert_eq!(text(&harness), "two");
+    assert_eq!(
+        harness.state().tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .document()
+            .history_entries()
+            .len(),
+        2
+    );
     // A click on a normal row also returns from a snapshot to that exact state.
     let ctx = harness.ctx.clone();
     snapshots::request(&ctx, harness.state_mut(), id, point);
     wait(&mut harness, |h| text(h) == "ancient");
-    let entries = snapshots::entries(&ctx, harness.state_mut());
+    let entries = snapshots::state_entries(&ctx, harness.state_mut());
     let target = entries.iter().max_by_key(|entry| entry.global_seq).unwrap();
-    let action = crate::app::ui::dialogs::text_history::model::TextHistoryAction {
-        buffer_id: id,
-        entry_id: target.id,
-    };
-    assert!(crate::app::ui::dialogs::text_history::navigation::apply(
+    assert!(snapshots::go_to_state(
         &ctx,
         harness.state_mut(),
-        action
+        id,
+        Some(target.id)
     ));
     assert_eq!(text(&harness), "two");
     assert_eq!(
         std::fs::read_to_string(root.path().join("note.txt")).unwrap(),
         "disk contents"
     );
+}
+
+#[test]
+fn return_latest_preserves_redo_and_closing_history_does_not_cancel_the_scrubber_service() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut app, id, point, _) = fixture(root.path());
+    app.tab_manager.tabs.as_mut_slice()[0]
+        .active_buffer_mut()
+        .document_mut()
+        .undo_last_operation()
+        .unwrap();
+    app.state.dialogs.history_scrubber.open();
+    let mut h = harness(app);
+    let ctx = h.ctx.clone();
+    snapshots::request(&ctx, h.state_mut(), id, point);
+    h.state_mut().state.dialogs.text_history.close();
+    wait(&mut h, |h| text(h) == "ancient");
+    assert!(h.state().state.dialogs.history_scrubber.is_open());
+    assert!(visit::return_latest(&ctx, h.state_mut(), id));
+    assert_eq!(text(&h), "one");
+    let buffer = h.state().tab_manager.tabs.as_slice()[0].active_buffer();
+    assert_eq!(
+        buffer
+            .document()
+            .history_entries()
+            .iter()
+            .filter(|e| e.is_undone())
+            .count(),
+        1
+    );
+    let latest = buffer.document().history_entries().last().unwrap().id;
+    assert!(snapshots::go_to_state(
+        &ctx,
+        h.state_mut(),
+        id,
+        Some(latest)
+    ));
+    assert_eq!(text(&h), "two");
+}
+
+#[test]
+fn saved_branches_also_offer_return_to_latest() {
+    let root = tempfile::tempdir().unwrap();
+    let (app, id, point, _) = fixture(root.path());
+    let mut h = harness(app);
+    let ctx = h.ctx.clone();
+    snapshots::request(&ctx, h.state_mut(), id, point);
+    wait(&mut h, |h| text(h) == "ancient");
+    let saved_branch = visit::browse(
+        &ctx,
+        h.state().tab_manager.tabs.as_slice()[0].active_buffer(),
+    )
+    .unwrap()
+    .return_version;
+    assert!(visit::return_latest(&ctx, h.state_mut(), id));
+    h.state_mut().tab_manager.tabs.as_mut_slice()[0]
+        .active_buffer_mut()
+        .replace_text("new branch".into());
+    snapshots::request(&ctx, h.state_mut(), id, saved_branch);
+    wait(&mut h, |h| text(h) == "two");
+    assert!(
+        visit::browse(
+            &ctx,
+            h.state().tab_manager.tabs.as_slice()[0].active_buffer()
+        )
+        .is_some()
+    );
+    assert!(visit::return_latest(&ctx, h.state_mut(), id));
+    assert_eq!(text(&h), "new branch");
 }
 
 #[test]
@@ -145,18 +205,12 @@ fn snapshot_steps_follow_the_selected_file_without_forcing_focus() {
     assert!(!crate::app::ui::dialogs::text_history::read_follow_focus(
         &harness.ctx
     ));
-    crate::app::ui::dialogs::text_history::navigation::select_buffer(&harness.ctx, id);
-    for expected in ["one", "zero"] {
-        harness.key_press(egui::Key::ArrowUp);
-        harness.run_steps(3);
-        assert_eq!(text(&harness), expected);
-    }
-    wait(&mut harness, |h| {
-        h.ctx
-            .data(|data| data.get_temp::<snapshots::FileSnapshots>(snapshots::catalog_key(id)))
-            .is_some_and(|file| file.rows.iter().any(|row| row.point.id == point))
-    });
-    harness.key_press(egui::Key::ArrowUp);
+    let ctx = harness.ctx.clone();
+    // Explicitly choose a different file without retargeting the active editor.
+    ctx.data_mut(|d| d.insert_temp(crate::app::ui::dialogs::text_history::scope_key(), id));
+    assert!(snapshots::go_to_state(&ctx, harness.state_mut(), id, None));
+    assert_eq!(text(&harness), "zero");
+    snapshots::request(&ctx, harness.state_mut(), id, point);
     wait(&mut harness, |h| text(h) == "ancient");
     assert_eq!(
         harness
@@ -215,11 +269,9 @@ fn snapshot_position_and_native_return_history_survive_session_restart() {
         )
         .is_some()
     });
-    for expected in ["zero", "one", "two"] {
-        second.key_press(egui::Key::ArrowDown);
-        second.run_steps(3);
-        assert_eq!(text(&second), expected);
-    }
+    second.get_by_label("Return to latest").click();
+    second.run_steps(3);
+    assert_eq!(text(&second), "two");
 }
 
 #[test]
@@ -236,8 +288,12 @@ fn covered_snapshot_is_a_marker_and_becomes_selectable_after_undo_expires() {
         )
         .unwrap();
     let mut harness = harness(app);
-    let marker = format!("Snapshot · {label}");
-    wait(&mut harness, |h| h.query_by_label(&marker).is_some());
+    wait(&mut harness, |h| {
+        let id = h.state().tab_manager.tabs.as_slice()[0].active_buffer().id;
+        h.ctx
+            .data(|d| d.get_temp::<snapshots::FileSnapshots>(snapshots::catalog_key(id)))
+            .is_some_and(|file| file.rows.iter().any(|row| row.covered.is_some()))
+    });
     assert!(
         harness.query_by_label(&label).is_none(),
         "covered state must not have another selectable destination"

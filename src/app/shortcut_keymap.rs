@@ -13,6 +13,7 @@ pub enum ShortcutAction {
     CloseSearch,
     RenameTab,
     OpenTextHistory,
+    OpenHistoryScrubber,
     OpenEncodingDialog,
     OpenStatusHistory,
     CopyActivePath,
@@ -52,7 +53,7 @@ pub enum ShortcutAction {
 }
 
 impl ShortcutAction {
-    pub(crate) const ALL: [Self; 44] = [
+    pub(crate) const ALL: [Self; 45] = [
         Self::OpenUserManual,
         Self::OpenSearch,
         Self::OpenReplace,
@@ -61,6 +62,7 @@ impl ShortcutAction {
         Self::CloseSearch,
         Self::RenameTab,
         Self::OpenTextHistory,
+        Self::OpenHistoryScrubber,
         Self::OpenEncodingDialog,
         Self::OpenStatusHistory,
         Self::CopyActivePath,
@@ -115,6 +117,7 @@ impl ShortcutAction {
             Self::CloseSearch => CLOSE_SEARCH,
             Self::RenameTab => RENAME_TAB,
             Self::OpenTextHistory => OPEN_TEXT_HISTORY,
+            Self::OpenHistoryScrubber => OPEN_HISTORY_SCRUBBER,
             Self::OpenEncodingDialog => OPEN_ENCODING_DIALOG,
             Self::OpenStatusHistory => OPEN_STATUS_HISTORY,
             Self::CopyActivePath => COPY_ACTIVE_PATH,
@@ -239,6 +242,10 @@ const CLOSE_SEARCH: ShortcutDefinition = ShortcutDefinition::new(
 );
 const RENAME_TAB: ShortcutDefinition =
     ShortcutDefinition::new("rename_tab", &[KeyBinding::new(Modifiers::NONE, Key::F2)]);
+const OPEN_HISTORY_SCRUBBER: ShortcutDefinition = ShortcutDefinition::new(
+    "open_history_scrubber",
+    &[KeyBinding::new(CTRL_ALT, Key::Z)],
+);
 const OPEN_TEXT_HISTORY: ShortcutDefinition =
     ShortcutDefinition::new("open_text_history", &[KeyBinding::new(CTRL_SHIFT, Key::H)]);
 const OPEN_ENCODING_DIALOG: ShortcutDefinition = ShortcutDefinition::new(

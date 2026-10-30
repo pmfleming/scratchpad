@@ -1,4 +1,3 @@
-use super::super::model::TextHistoryAction;
 use super::{Source, source};
 use crate::app::{
     app_state::{ScratchpadApp, StatusDomain, workspace::mutation},
@@ -210,10 +209,10 @@ pub(in super::super) fn hydrate(ui: &mut egui::Ui, app: &ScratchpadApp) {
                 });
             }
             Some(Err(error)) => {
-                ui.weak("Newer history unavailable").on_hover_text(error);
+                set_status(ui.ctx(), format!("Newer history unavailable: {error}"));
             }
             None => {
-                ui.weak("Loading newer history…");
+                set_status(ui.ctx(), "Loading newer history…".into());
             }
         }
     }
@@ -227,7 +226,7 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         return;
     };
     let Some(result) = pending.result.lock().unwrap().take() else {
-        ui.weak("Loading snapshot…");
+        set_status(ui.ctx(), "Loading snapshot…".into());
         return;
     };
     ui.ctx()
@@ -255,7 +254,6 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             format!("Could not load snapshot: {error}"),
         ),
         Ok(result) => {
-            let branch = !result.history.is_empty();
             let mut document = TextDocument::with_preferred_line_ending(
                 result.text,
                 pending.source.buffer.format.preferred_line_ending_style(),
@@ -270,7 +268,9 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             ) {
                 ui.ctx()
                     .data_mut(|data| data.remove::<Browse>(browse_key(pending.buffer_id)));
-                if !branch {
+                // Every snapshot, including a saved branch with its own undo,
+                // retains a return route until the user edits or replays it.
+                {
                     let buffer = app
                         .tab_manager
                         .tabs
@@ -297,58 +297,62 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                         )
                     });
                 }
-                super::super::navigation::select_buffer(ui.ctx(), pending.buffer_id);
+                super::super::navigation::retain_tool_focus(ui.ctx(), app);
                 ui.ctx().request_repaint();
             }
         }
     }
 }
 
-pub(in super::super) fn return_for_edit(
+pub(in super::super) fn status_key() -> egui::Id {
+    egui::Id::unique("history.snapshot.status")
+}
+
+fn set_status(ctx: &egui::Context, status: String) {
+    ctx.data_mut(|data| data.insert_temp(status_key(), status));
+}
+
+pub(in super::super) fn return_to_state(
     ctx: &egui::Context,
     app: &mut ScratchpadApp,
-    action: TextHistoryAction,
+    id: u64,
+    after: Option<u64>,
 ) -> Option<bool> {
     let buffer = app
         .tab_manager
         .tabs
         .as_slice()
         .iter()
-        .find_map(|tab| tab.buffer_by_id(action.buffer_id))?;
+        .find_map(|tab| tab.buffer_by_id(id))?;
     let visit = browse(ctx, buffer)?;
-    let mut document = visit.source.buffer.document().clone();
-    let index = document
-        .history_entries()
-        .iter()
-        .position(|entry| entry.id == action.entry_id)?;
-    let result = if document.history_entries()[index].is_undone() {
-        document
-            .apply_text_history_redo(action.entry_id)
-            .map(|_| ())
-    } else {
-        let later = document.history_entries()[index + 1..]
-            .iter()
-            .find(|entry| !entry.is_undone())
-            .map(|entry| entry.id);
-        later.map_or(Ok(()), |id| {
-            document.apply_text_history_undo(id).map(|_| ())
-        })
+    let entries = crate::app::text_history::entries_for_buffer(&visit.source.buffer);
+    let states = super::super::states::States::new(&entries, id);
+    let Some(position) = states.index(after) else {
+        return Some(false);
     };
-    if result.is_err() {
-        app.state.status.set_error_status_in_domain(
-            StatusDomain::History,
-            "This history state is no longer replayable.",
-        );
+    if !states.reachable(position) {
         return Some(false);
     }
-    Some(install_return(ctx, app, action.buffer_id, document))
+    let mut document = visit.source.buffer.document().clone();
+    if let Some(action) = states.target(position) {
+        let result = if position < states.position {
+            document.apply_text_history_undo(action.entry_id)
+        } else {
+            document.apply_text_history_redo(action.entry_id)
+        };
+        if result.is_err() {
+            return Some(false);
+        }
+    }
+    Some(install_return(ctx, app, id, document))
 }
 
-pub(in super::super) fn return_to_undo(
+pub(in super::super) fn return_latest(
     ctx: &egui::Context,
     app: &mut ScratchpadApp,
     id: u64,
 ) -> bool {
+    cancel_pending(ctx);
     let Some(buffer) = app
         .tab_manager
         .tabs
@@ -361,9 +365,8 @@ pub(in super::super) fn return_to_undo(
     let Some(visit) = browse(ctx, buffer) else {
         return false;
     };
-    let mut document = visit.source.buffer.document().clone();
-    while document.undo_last_operation().is_some() {}
-    install_return(ctx, app, id, document)
+    // Return to the preserved live position, including any pre-existing redo tail.
+    install_return(ctx, app, id, visit.source.buffer.document().clone())
 }
 
 fn install_return(
@@ -377,6 +380,7 @@ fn install_return(
         return false;
     }
     ctx.data_mut(|data| data.remove::<Browse>(browse_key(id)));
+    super::super::navigation::retain_tool_focus(ctx, app);
     ctx.request_repaint();
     true
 }

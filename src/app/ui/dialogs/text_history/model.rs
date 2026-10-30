@@ -13,6 +13,9 @@ pub(super) struct TextHistoryRow {
     pub(super) detail: String,
     pub(super) icon: &'static str,
     pub(super) undone: bool,
+    pub(super) deleted: String,
+    pub(super) inserted: String,
+    pub(super) edit_count: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -23,13 +26,16 @@ pub(super) struct TextHistoryAction {
 
 #[derive(Clone, Copy)]
 pub(super) enum HistoryAction {
-    Edit(TextHistoryAction),
+    State {
+        buffer_id: BufferId,
+        after: Option<u64>,
+    },
+    Latest {
+        buffer_id: BufferId,
+    },
     Snapshot {
         buffer_id: BufferId,
         version_id: i64,
-    },
-    Return {
-        buffer_id: BufferId,
     },
 }
 
@@ -49,6 +55,9 @@ pub(super) fn row_from_entry(entry: &TextHistoryEntryView) -> TextHistoryRow {
         detail: format!("{} · {}", entry.label, source_label(entry.source)),
         icon: entry_icon(entry),
         undone: entry.undone,
+        deleted: crate::app::domain::buffer::preview_text(&entry.first_deleted_text),
+        inserted: crate::app::domain::buffer::preview_text(&entry.first_inserted_text),
+        edit_count: entry.edit_count,
     }
 }
 
@@ -56,7 +65,7 @@ pub(super) fn timeline_rows_from_entries<'a>(
     entries: impl Iterator<Item = &'a TextHistoryEntryView>,
 ) -> Vec<TextHistoryRow> {
     let mut rows = entries.map(row_from_entry).collect::<Vec<_>>();
-    sort_now_line_rows(&mut rows);
+    sort_chronological_rows(&mut rows);
     rows
 }
 
@@ -80,7 +89,7 @@ pub(super) fn file_groups_from_entries<'a>(
         }
     }
     for group in &mut groups {
-        sort_now_line_rows(&mut group.rows);
+        sort_chronological_rows(&mut group.rows);
     }
     groups.sort_by(|left, right| {
         let left_seq = left
@@ -101,12 +110,11 @@ pub(super) fn file_groups_from_entries<'a>(
     groups
 }
 
-fn sort_now_line_rows(rows: &mut [TextHistoryRow]) {
+fn sort_chronological_rows(rows: &mut [TextHistoryRow]) {
     rows.sort_by(|left, right| {
         right
-            .undone
-            .cmp(&left.undone)
-            .then_with(|| right.global_seq.cmp(&left.global_seq))
+            .global_seq
+            .cmp(&left.global_seq)
             .then_with(|| left.buffer_id.cmp(&right.buffer_id))
             .then_with(|| left.entry_id.cmp(&right.entry_id))
     });
@@ -127,13 +135,4 @@ fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
             (true, _) => PENCIL_SIMPLE,
         },
     }
-}
-
-/// Show the current boundary even at the oldest/newest retained state.
-pub(super) fn now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
-    (!rows.is_empty()).then(|| {
-        rows.iter()
-            .position(|row| !row.undone)
-            .unwrap_or(rows.len())
-    })
 }

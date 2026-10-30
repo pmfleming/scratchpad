@@ -1,33 +1,32 @@
-use super::super::model::HistoryAction;
-use super::{Catalog, coverage::Boundary};
+use super::super::{model::HistoryAction, states::States};
+use super::Catalog;
 use crate::app::{
-    theme::{border, text_muted},
-    ui::recovery::timestamp,
+    theme::{tab_selected_accent, text_muted},
+    ui::{recovery::timestamp, widget_ids},
 };
 use eframe::egui;
 
-pub(in super::super) fn covered_markers(
-    ui: &mut egui::Ui,
-    id: u64,
-    entry_id: Option<u64>,
-    before: bool,
+pub(in super::super) fn covered_positions(
     catalog: &Catalog,
-) {
+    id: u64,
+    states: &States<'_>,
+) -> Vec<(usize, String)> {
     let Some(file) = catalog.get(&id) else {
-        return;
+        return Vec::new();
     };
-    for row in &file.rows {
-        if row.covered == Some(Boundary { entry_id, before }) {
-            marker(
-                ui,
-                &format!(
-                    "Snapshot · {}",
-                    timestamp(row.point.created_at_unix_seconds)
-                ),
-            )
-            .on_hover_text("This state is already reachable through undo/redo.");
-        }
-    }
+    file.rows
+        .iter()
+        .filter_map(|row| {
+            let boundary = row.covered?;
+            let position = match boundary.entry_id {
+                Some(id) => {
+                    states.entries.iter().position(|e| e.id == id)? + usize::from(!boundary.before)
+                }
+                None => 0,
+            };
+            Some((position, timestamp(row.point.created_at_unix_seconds)))
+        })
+        .collect()
 }
 
 pub(in super::super) fn older_rows(
@@ -39,44 +38,24 @@ pub(in super::super) fn older_rows(
     let Some(file) = catalog.get(&id) else {
         return;
     };
-    if file.loading {
-        ui.weak("Loading snapshots…");
-    }
-    if let Some(error) = &file.error {
-        ui.weak("Snapshots unavailable").on_hover_text(error);
-    }
-    let older: Vec<_> = file
-        .rows
-        .iter()
-        .filter(|row| row.covered.is_none())
-        .collect();
-    if older.is_empty() {
-        return;
-    }
-    marker(ui, "Snapshots beyond undo");
-    for row in older {
-        crate::app::ui::widget_ids::scope(ui, ("history.snapshot", id, row.point.id), |ui| {
+    for row in file.rows.iter().filter(|row| row.covered.is_none()) {
+        widget_ids::scope(ui, ("history.snapshot", id, row.point.id), |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)
-                        .font(egui_phosphor::font_id(14.0))
-                        .color(text_muted(ui)),
-                );
                 let selected = file.selected == Some(row.point.id);
-                let label = format!(
-                    "{}{}",
-                    if row.point.has_history {
-                        "Saved branch · "
-                    } else {
-                        ""
-                    },
-                    timestamp(row.point.created_at_unix_seconds)
-                );
+                let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(20.0, 26.0));
+                diamond(ui, rect.center(), selected);
+                let label = timestamp(row.point.created_at_unix_seconds);
                 if ui
-                    .selectable_label(selected, label)
+                    .selectable_label(selected, &label)
                     .on_hover_text(format!(
-                        "{} bytes · Show this state in the editor",
-                        row.point.bytes
+                        "{} · {} bytes{}\nView snapshot; editing starts a new branch",
+                        file.label,
+                        row.point.bytes,
+                        if row.point.has_history {
+                            " · saved branch"
+                        } else {
+                            ""
+                        }
                     ))
                     .clicked()
                 {
@@ -85,33 +64,45 @@ pub(in super::super) fn older_rows(
                         version_id: row.point.id,
                     });
                 }
-                if selected {
-                    ui.weak("Now");
-                }
             });
         });
     }
 }
 
-fn marker(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    ui.horizontal(|ui| {
-        let response = ui.label(egui::RichText::new(label).size(11.5).color(text_muted(ui)));
-        let rect = crate::app::ui::widget_ids::allocate_exact_rect(
-            ui,
-            egui::vec2(ui.available_width().max(0.0), 14.0),
+pub(in super::super) fn diamond(ui: &egui::Ui, center: egui::Pos2, selected: bool) {
+    let points = vec![
+        center + egui::vec2(0.0, -5.0),
+        center + egui::vec2(5.0, 0.0),
+        center + egui::vec2(0.0, 5.0),
+        center + egui::vec2(-5.0, 0.0),
+    ];
+    ui.painter().add(egui::Shape::convex_polygon(
+        points,
+        if selected {
+            tab_selected_accent(ui)
+        } else {
+            ui.visuals().window_fill()
+        },
+        egui::Stroke::new(1.0, tab_selected_accent(ui)),
+    ));
+}
+
+pub(in super::super) fn footer(ui: &mut egui::Ui, catalog: &Catalog) {
+    let status = ui
+        .ctx()
+        .data(|d| d.get_temp::<String>(super::visit::status_key()))
+        .or_else(|| catalog.values().find_map(|f| f.error.clone()))
+        .or_else(|| {
+            catalog
+                .values()
+                .any(|f| f.loading)
+                .then(|| "Loading snapshots…".into())
+        });
+    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 20.0));
+    if let Some(status) = status {
+        ui.put(
+            rect,
+            egui::Label::new(egui::RichText::new(status).small().color(text_muted(ui))).truncate(),
         );
-        let mut x = rect.left();
-        while x < rect.right() {
-            ui.painter().line_segment(
-                [
-                    egui::pos2(x, rect.center().y),
-                    egui::pos2((x + 3.0).min(rect.right()), rect.center().y),
-                ],
-                egui::Stroke::new(1.0, border(ui)),
-            );
-            x += 7.0;
-        }
-        response
-    })
-    .inner
+    }
 }

@@ -1,117 +1,55 @@
 use super::{
-    HistoryTab, TextHistoryFileGroup, file_groups_from_entries,
-    model::{now_line_insert_index, row_from_entry, timeline_rows_from_entries},
+    HistoryTab, TextHistoryFileGroup, file_groups_from_entries, model::timeline_rows_from_entries,
     read_active_tab, read_follow_focus, write_active_tab, write_follow_focus,
 };
 use crate::app::{domain::PieceSource, text_history::TextHistoryEntryView};
 
 #[test]
-fn history_preferences_default_and_change_only_on_the_next_frame() {
+fn history_preferences_default_to_current_file_and_defer_changes() {
     let ctx = eframe::egui::Context::default();
-    assert_eq!(read_active_tab(&ctx), HistoryTab::ByFile);
+    assert_eq!(read_active_tab(&ctx), HistoryTab::CurrentFile);
     assert!(read_follow_focus(&ctx));
     for (old, new, follow) in [
-        (HistoryTab::ByFile, HistoryTab::Timeline, false),
-        (HistoryTab::Timeline, HistoryTab::ByFile, true),
+        (HistoryTab::CurrentFile, HistoryTab::AllFiles, false),
+        (HistoryTab::AllFiles, HistoryTab::CurrentFile, true),
     ] {
         write_active_tab(&ctx, new);
         write_follow_focus(&ctx, follow);
         assert_eq!(read_active_tab(&ctx), old);
         assert_eq!(read_follow_focus(&ctx), !follow);
-        let mut output = ctx.run_ui(eframe::egui::RawInput::default(), |_| {});
-        output.textures_delta.clear();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .textures_delta
+            .clear();
         assert_eq!(read_active_tab(&ctx), new);
         assert_eq!(read_follow_focus(&ctx), follow);
     }
 }
 
 #[test]
-fn by_file_only_lists_buffers_with_undo_or_redo_changes() {
-    use crate::app::{
-        app_state::test_support::test_app,
-        domain::{BufferState, CursorRange, WorkspaceTab},
-        fonts::{EditorFontPreset, EditorFontSelection, apply_editor_fonts},
-    };
-    use eframe::egui;
-    use egui_kittest::{Harness, kittest::Queryable};
-
-    for undone in [None, Some(false), Some(true)] {
-        let root = tempfile::tempdir().unwrap();
-        let mut app = test_app(root.path());
-        let mut changed = BufferState::new("changed.txt".into(), "before".into(), None);
-        if let Some(undone) = undone {
-            changed
-                .replace_char_ranges_with_undo(
-                    &[(0..6, "after".into())],
-                    CursorRange::default(),
-                    CursorRange::default(),
-                )
-                .unwrap();
-            if undone {
-                changed.document_mut().undo_last_operation().unwrap();
-            }
-        }
-        let unchanged = BufferState::new("unchanged.txt".into(), "untouched".into(), None);
-        app.tab_manager.set_tabs(
-            vec![WorkspaceTab::new(changed), WorkspaceTab::new(unchanged)],
-            1,
-        );
-        app.state.dialogs.text_history.open();
-        let mut harness = Harness::builder()
-            .with_size(egui::vec2(1200.0, 850.0))
-            .with_context_setup(|ctx| {
-                apply_editor_fonts(
-                    ctx,
-                    &EditorFontSelection::scratchpad(EditorFontPreset::Standard),
-                    4.0,
-                )
-                .unwrap();
-            })
-            .build_ui_state(
-                |ui, app| super::show_text_history_window(ui.ctx(), app),
-                app,
-            );
-        harness.run_steps(3);
-        assert!(harness.query_by_label("unchanged.txt").is_none());
-        assert!(harness.query_by_label("0 changes").is_none());
-        if undone.is_some() {
-            harness.get_by_label("changed.txt");
-            harness.get_by_label("1 change");
-            assert!(harness.query_by_label("No file history").is_none());
-        } else {
-            assert!(harness.query_by_label("changed.txt").is_none());
-            harness.get_by_label("No file history");
-        }
-    }
+fn picked_buffer_ids_are_not_persisted() {
+    let ctx = eframe::egui::Context::default();
+    write_active_tab(&ctx, HistoryTab::File(999));
+    ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+        .textures_delta
+        .clear();
+    assert_eq!(read_active_tab(&ctx), HistoryTab::CurrentFile);
 }
 
 #[test]
-fn now_line_marks_the_boundary_including_both_history_extremes() {
-    for (states, boundary) in [
-        (&[][..], None),
-        (&[true, true][..], Some(2)),
-        (&[false, false][..], Some(0)),
-        (&[true, true, false, false][..], Some(2)),
-    ] {
-        let rows = states
-            .iter()
-            .map(|&undone| {
-                let mut entry = entry(1, 1, 1, "change");
-                entry.undone = undone;
-                row_from_entry(&entry)
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(now_line_insert_index(&rows), boundary, "{states:?}");
-    }
-}
-
-#[test]
-fn per_file_groups_keep_rows_in_reverse_chronological_order() {
-    let entries = [
+fn timeline_keeps_global_order_even_when_files_have_different_undo_positions() {
+    let mut entries = [
         entry(1, 10, 1, "one"),
         entry(2, 11, 2, "other"),
         entry(3, 12, 1, "two"),
     ];
+    entries[1].undone = true;
+    let rows = timeline_rows_from_entries(entries.iter());
+    assert_eq!(
+        rows.iter()
+            .map(|r| (r.buffer_id, r.entry_id))
+            .collect::<Vec<_>>(),
+        [(1, 3), (2, 2), (1, 1)]
+    );
     assert_eq!(
         group_targets(&file_groups_from_entries(entries.iter()), 1),
         [(1, 3), (1, 1)]
@@ -119,87 +57,19 @@ fn per_file_groups_keep_rows_in_reverse_chronological_order() {
 }
 
 #[test]
-fn per_file_groups_put_redoable_rows_above_undoable_rows() {
-    let mut entries = [
-        entry(1, 10, 1, "one"),
-        entry(2, 11, 1, "two"),
-        entry(3, 12, 1, "three"),
-    ];
-    entries[1].undone = true;
-    let groups = file_groups_from_entries(entries.iter());
-    assert_eq!(group_targets(&groups, 1), [(1, 2), (1, 3), (1, 1)]);
-    assert_eq!(now_line_insert_index(&groups[0].rows), Some(1));
-}
-
-#[test]
-fn per_file_groups_sort_by_latest_change_first() {
+fn file_groups_sort_by_latest_change_and_preserve_colliding_ids() {
     let entries = [
         entry(1, 10, 1, "one"),
-        entry(2, 12, 2, "other"),
+        entry(1, 12, 2, "other"),
         entry(3, 11, 1, "two"),
     ];
     let groups = file_groups_from_entries(entries.iter());
     assert_eq!(
-        groups
-            .iter()
-            .map(|group| group.buffer_id)
-            .collect::<Vec<_>>(),
+        groups.iter().map(|g| g.buffer_id).collect::<Vec<_>>(),
         [2, 1]
     );
-}
-
-#[test]
-fn per_file_rows_preserve_buffer_id_when_entry_ids_collide() {
-    let entries = [entry(1, 10, 1, "one"), entry(1, 11, 2, "other")];
-    let groups = file_groups_from_entries(entries.iter());
-    assert_eq!(group_targets(&groups, 1), [(1, 1)]);
+    assert_eq!(group_targets(&groups, 1), [(1, 3), (1, 1)]);
     assert_eq!(group_targets(&groups, 2), [(2, 1)]);
-}
-
-#[test]
-fn timeline_aggregates_redoable_rows_before_one_global_boundary() {
-    for (input, expected, boundary) in [
-        (
-            &[
-                (3, 7, true),
-                (3, 6, true),
-                (2, 5, false),
-                (2, 4, false),
-                (1, 3, true),
-                (1, 2, false),
-                (1, 1, false),
-            ][..],
-            &[7, 6, 3, 5, 4, 2, 1][..],
-            3,
-        ),
-        (
-            &[
-                (1, 2, true),
-                (1, 1, false),
-                (2, 5, true),
-                (2, 4, false),
-                (2, 3, false),
-            ][..],
-            &[5, 2, 4, 3, 1][..],
-            2,
-        ),
-    ] {
-        let entries = input
-            .iter()
-            .map(|&(buffer, id, undone)| {
-                let mut entry = entry(id, id, buffer, "change");
-                entry.undone = undone;
-                entry
-            })
-            .collect::<Vec<_>>();
-        let rows = timeline_rows_from_entries(entries.iter());
-        assert_eq!(
-            rows.iter().map(|row| row.entry_id).collect::<Vec<_>>(),
-            expected,
-            "{input:?}"
-        );
-        assert_eq!(now_line_insert_index(&rows), Some(boundary));
-    }
 }
 
 fn entry(id: u64, global_seq: u64, buffer_id: u64, summary: &str) -> TextHistoryEntryView {
@@ -209,22 +79,21 @@ fn entry(id: u64, global_seq: u64, buffer_id: u64, summary: &str) -> TextHistory
         buffer_id,
         label: format!("file-{buffer_id}"),
         source: PieceSource::Edit,
-        summary: summary.to_owned(),
+        summary: summary.into(),
         undone: false,
         replayable: true,
         edit_count: 1,
         first_deleted_text: String::new(),
-        first_inserted_text: summary.to_owned(),
+        first_inserted_text: summary.into(),
     }
 }
-
 fn group_targets(groups: &[TextHistoryFileGroup], buffer_id: u64) -> Vec<(u64, u64)> {
     groups
         .iter()
-        .find(|group| group.buffer_id == buffer_id)
+        .find(|g| g.buffer_id == buffer_id)
         .unwrap()
         .rows
         .iter()
-        .map(|row| (row.buffer_id, row.entry_id))
+        .map(|r| (r.buffer_id, r.entry_id))
         .collect()
 }

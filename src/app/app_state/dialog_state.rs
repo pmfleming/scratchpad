@@ -82,6 +82,7 @@ impl StatusHistoryDialogState {
 pub(crate) struct DialogState {
     pub(crate) encoding: EncodingDialogState,
     pub(crate) text_history: TextHistoryDialogState,
+    pub(crate) history_scrubber: TextHistoryDialogState,
     pub(crate) status_history: StatusHistoryDialogState,
     pub(crate) tab_rename: Option<TabRenameState>,
     pub(crate) pending_tab_context_menu: Option<PendingTabContextMenu>,

@@ -14,6 +14,10 @@ pub const TEXT_PRIMARY: Color32 = Color32::WHITE;
 // Opaque secondary colors keep the hierarchy predictable on every surface.
 // Full RGB with a reduced premultiplied alpha would brighten dark backgrounds.
 pub const TEXT_MUTED: Color32 = Color32::from_rgb(160, 173, 181);
+pub const DIFF_ADD: Color32 = Color32::from_rgb(140, 200, 150);
+pub const DIFF_DEL: Color32 = Color32::from_rgb(229, 147, 147);
+const DIFF_ADD_LIGHT: Color32 = Color32::from_rgb(47, 122, 62);
+const DIFF_DEL_LIGHT: Color32 = Color32::from_rgb(176, 65, 62);
 const HEADER_BG_LIGHT: Color32 = Color32::from_rgb(240, 243, 248);
 const TAB_ACTIVE_BG_LIGHT: Color32 = Color32::from_rgb(255, 255, 255);
 const TAB_HOVER_BG_LIGHT: Color32 = Color32::from_rgb(226, 232, 240);
@@ -63,6 +67,8 @@ ui_theme_fn!(action_hover_bg, ACTION_HOVER_BG, ACTION_HOVER_BG_LIGHT);
 ui_theme_fn!(border, BORDER, BORDER_LIGHT);
 ui_theme_fn!(text_primary, TEXT_PRIMARY, TEXT_PRIMARY_LIGHT);
 ui_theme_fn!(text_muted, TEXT_MUTED, TEXT_MUTED_LIGHT);
+ui_theme_fn!(diff_add, DIFF_ADD, DIFF_ADD_LIGHT);
+ui_theme_fn!(diff_del, DIFF_DEL, DIFF_DEL_LIGHT);
 
 visuals_theme_fn!(
     tab_active_bg_for_visuals,

@@ -4,7 +4,7 @@ mod render;
 mod tests;
 mod visit;
 
-use super::model::{HistoryAction, TextHistoryFileGroup};
+use super::model::HistoryAction;
 use crate::app::{
     app_state::ScratchpadApp,
     domain::{BufferState, buffer::DocumentRevision},
@@ -12,7 +12,7 @@ use crate::app::{
 };
 use coverage::{SnapshotRow, classify_cancellable};
 use eframe::egui;
-pub(super) use render::{covered_markers, older_rows};
+pub(super) use render::{covered_positions, diamond, footer, older_rows};
 use std::{
     collections::{HashMap, HashSet},
     sync::{
@@ -21,9 +21,8 @@ use std::{
     },
 };
 use visit::browse;
-pub(super) use visit::{
-    cancel_pending, clear_history, hydrate, poll, request, return_for_edit, return_to_undo,
-};
+pub(super) use visit::status_key;
+pub(super) use visit::{cancel_pending, clear_history, hydrate, poll, request};
 
 #[derive(Clone)]
 struct Source {
@@ -46,15 +45,6 @@ pub(super) struct FileSnapshots {
 impl FileSnapshots {
     pub(super) fn older_change_count(&self) -> usize {
         self.rows.iter().filter(|row| row.covered.is_none()).count()
-    }
-
-    pub(super) fn has_snapshot_section(&self) -> bool {
-        self.loading
-            || self.error.is_some()
-            || self.rows.iter().any(|row| {
-                row.covered
-                    .is_none_or(|boundary| boundary.entry_id.is_none())
-            })
     }
 }
 pub(super) type Catalog = HashMap<u64, FileSnapshots>;
@@ -166,7 +156,10 @@ pub(super) fn cancel_coverage(ctx: &egui::Context, app: &ScratchpadApp) {
     });
 }
 
-pub(super) fn entries(ctx: &egui::Context, app: &mut ScratchpadApp) -> Vec<TextHistoryEntryView> {
+pub(super) fn state_entries(
+    ctx: &egui::Context,
+    app: &mut ScratchpadApp,
+) -> Vec<TextHistoryEntryView> {
     let mut entries = crate::app::app_state::workspace::mutation::cached_text_history_entries(app);
     for buffer in app
         .tab_manager
@@ -177,51 +170,15 @@ pub(super) fn entries(ctx: &egui::Context, app: &mut ScratchpadApp) -> Vec<TextH
     {
         if let Some(visit) = browse(ctx, buffer) {
             entries.retain(|entry| entry.buffer_id != buffer.id);
-            entries.extend(entries_for_buffer(&visit.source.buffer).into_iter().map(
-                |mut entry| {
-                    entry.undone = true;
-                    entry
-                },
-            ));
+            entries.extend(entries_for_buffer(&visit.source.buffer));
         }
     }
     entries
 }
 
-/// Do not add every open buffer: only older changes outside the undo range
-/// justify a group without edit rows. Loading/error/current-state markers do not.
-pub(super) fn add_changed_snapshot_groups(
-    catalog: &Catalog,
-    groups: &mut Vec<TextHistoryFileGroup>,
-) {
-    let mut older: Vec<_> = catalog
-        .iter()
-        .filter(|(id, file)| {
-            file.older_change_count() > 0 && !groups.iter().any(|group| group.buffer_id == **id)
-        })
-        .collect();
-    older.sort_by(|(left_id, left), (right_id, right)| {
-        left.label.cmp(&right.label).then(left_id.cmp(right_id))
-    });
-    groups.extend(
-        older
-            .into_iter()
-            .map(|(&buffer_id, file)| TextHistoryFileGroup {
-                buffer_id,
-                label: file.label.clone(),
-                rows: Vec::new(),
-            }),
-    );
-}
-
-pub(super) fn collect(ui: &egui::Ui, app: &ScratchpadApp) -> Catalog {
+pub(super) fn collect(ui: &egui::Ui, app: &ScratchpadApp, buffers: &[u64]) -> Catalog {
     ui.ctx()
         .data_mut(|data| data.insert_temp(running_key(), true));
-    let active = app
-        .tab_manager
-        .active_tab()
-        .map(|tab| tab.active_buffer().id);
-    let selected = super::navigation::target_buffer(ui.ctx(), app);
     let mut catalog = Catalog::new();
     for buffer in app
         .tab_manager
@@ -230,10 +187,7 @@ pub(super) fn collect(ui: &egui::Ui, app: &ScratchpadApp) -> Catalog {
         .iter()
         .flat_map(|tab| tab.buffers())
     {
-        if Some(buffer.id) != active
-            && Some(buffer.id) != selected
-            && !super::list::file_expanded(ui.ctx(), buffer.id, active)
-        {
+        if !buffers.contains(&buffer.id) {
             continue;
         }
         let source = source(ui.ctx(), buffer);
@@ -305,71 +259,65 @@ fn catalog_key(id: u64) -> egui::Id {
     egui::Id::unique(("history.snapshots.catalog", id))
 }
 
-pub(super) fn step(
+pub(super) fn is_browsing(ctx: &egui::Context, app: &ScratchpadApp, id: u64) -> bool {
+    app.tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .find_map(|tab| tab.buffer_by_id(id))
+        .is_some_and(|buffer| {
+            browse(ctx, buffer).is_some() || buffer.snapshot_navigation().is_some()
+        })
+}
+
+pub(super) fn go_to_state(
     ctx: &egui::Context,
     app: &mut ScratchpadApp,
-    undo: bool,
-) -> Option<HistoryAction> {
-    let id = super::navigation::target_buffer(ctx, app)?;
-    let buffer = app
+    id: u64,
+    after: Option<u64>,
+) -> bool {
+    if !app
         .tab_manager
         .tabs
         .as_slice()
         .iter()
-        .find_map(|tab| tab.buffer_by_id(id))?;
-    let visit = browse(ctx, buffer);
-    let stamp = visit.as_ref().map_or(
-        (
-            buffer.document().revision_key(),
-            buffer.document().history_revision_counter(),
-        ),
-        |visit| (visit.source.revision, visit.source.history_revision),
-    );
-    let selected = visit.map(|visit| visit.version_id);
-    if selected.is_none() {
-        if let Some(action) = super::navigation::step_target(ctx, app, undo) {
-            return Some(HistoryAction::Edit(action));
-        }
-        if !undo {
-            return None;
-        }
+        .any(|tab| tab.buffer_by_id(id).is_some())
+    {
+        return false;
     }
-    let file = ctx
-        .data(|data| data.get_temp::<FileSnapshots>(catalog_key(id)))
-        .unwrap_or_default();
-    if file.source_revision != Some(stamp) {
-        return (selected.is_some() && !undo).then_some(HistoryAction::Return { buffer_id: id });
+    cancel_pending(ctx);
+    if let Some(result) = visit::return_to_state(ctx, app, id, after) {
+        return result;
     }
-    let rows: Vec<_> = file
-        .rows
-        .iter()
-        .filter(|row| row.covered.is_none())
-        .collect();
-    let index = selected.and_then(|id| rows.iter().position(|row| row.point.id == id));
-    let next = match (selected, index, undo) {
-        (None, _, true) => rows.first(),
-        (Some(_), Some(index), true) => rows.get(index + 1),
-        (Some(_), Some(index), false) if index > 0 => rows.get(index - 1),
-        (Some(_), _, false) => return Some(HistoryAction::Return { buffer_id: id }),
-        _ => None,
-    }?;
-    Some(HistoryAction::Snapshot {
-        buffer_id: id,
-        version_id: next.point.id,
-    })
+    // Hydration must finish before a parked snapshot can target the native branch.
+    if is_browsing(ctx, app, id) {
+        return false;
+    }
+    let entries = state_entries(ctx, app);
+    let states = super::states::States::new(&entries, id);
+    let Some(position) = states.index(after) else {
+        return false;
+    };
+    if !states.reachable(position) {
+        return false;
+    }
+    match states.target(position) {
+        Some(action) => super::navigation::apply(ctx, app, action),
+        None => true,
+    }
 }
 
 pub(super) fn execute(ctx: &egui::Context, app: &mut ScratchpadApp, action: HistoryAction) {
     match action {
-        HistoryAction::Edit(action) => {
-            super::navigation::apply(ctx, app, action);
+        HistoryAction::State { buffer_id, after } => {
+            go_to_state(ctx, app, buffer_id, after);
+        }
+        HistoryAction::Latest { buffer_id } => {
+            visit::return_latest(ctx, app, buffer_id);
         }
         HistoryAction::Snapshot {
             buffer_id,
             version_id,
         } => request(ctx, app, buffer_id, version_id),
-        HistoryAction::Return { buffer_id } => {
-            return_to_undo(ctx, app, buffer_id);
-        }
     }
 }

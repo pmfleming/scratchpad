@@ -160,12 +160,14 @@ workspace; save new edits to files before closing. A protected/unavailable sessi
 store does not prevent exit. Retryable save errors still keep the window open,
 without retrying automatic last-tab shutdown every frame.
 
-**History…** navigates detailed edits directly in the editor: click a change or use
-Up/Down to undo/redo in the selected file. A brief, subtle tint marks the affected
-line; browsing does not save files. Snapshots are integrated into file history:
-dotted markers indicate states already covered by undo, while states beyond undo
-are selectable in the same editor. Navigation preserves the newer undo branch
-without creating replacement edits or opening a preview window. **Recently Closed** combines archived
+**Scrubber** (`Ctrl+Alt+Z`) steps through the active file's retained edits. Drag to
+preview a destination and release to apply; Left/Right and Home/End work while
+its track has focus. **History…** (`Ctrl+Shift+H`) shows the current file, all files,
+or a chosen file. Click a row to restore the state **after** that change; Up/Down
+follow the on-screen order only while the list has focus. A subtle tint marks the
+affected line; neither tool saves files. Diamonds mark reachable snapshots;
+older snapshots remain selectable, with **Return to latest** restoring the preserved
+live position. Clearing undo history requires confirmation and keeps saved snapshots. **Recently Closed** combines archived
 tabs and disk-only file entries; normal reopening restores archives automatically
 and separates externally changed files from recovered unsaved text.
 Configure undo/snapshot/archive budgets, expiry and reopening in **Settings >
