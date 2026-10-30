@@ -114,6 +114,75 @@ fn both_pies_and_exact_values_are_visible_without_nested_disclosures() {
     }
 }
 #[test]
+fn storage_summary_and_legend_columns_keep_their_hierarchy_when_resized() {
+    use crate::app::ui::settings::widgets::{
+        reset_settings_layout_measurements, settings_control_measurements,
+    };
+    for dark in [true, false] {
+        for width in [300.0, 634.0, 900.0] {
+            reset_settings_layout_measurements();
+            let ctx = egui::Context::default();
+            ctx.set_visuals(if dark {
+                egui::Visuals::dark()
+            } else {
+                egui::Visuals::light()
+            });
+            crate::app::fonts::apply_editor_fonts(
+                &ctx,
+                &crate::app::fonts::EditorFontSelection::scratchpad(
+                    crate::app::fonts::EditorFontPreset::Mono,
+                ),
+                4.0,
+            )
+            .unwrap();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.set_width(width);
+                ui.set_min_height(2400.0);
+                SettingsUi::apply_typography(ui);
+                summary(ui, &sample_usage());
+                details(ui, &sample_usage());
+            });
+            output.textures_delta.clear();
+            let measurements = settings_control_measurements();
+            let find = |name: &str| measurements.iter().find(|m| m.label == name).unwrap().rect;
+            let total = find("storage.total");
+            assert!(total.height() > 1.8 * find("usage.value.Session database").height());
+            for labels in [
+                vec![
+                    "Other data files",
+                    "Session database",
+                    "Write-ahead log & shared memory",
+                    "Settings files",
+                ],
+                payload_rows(&sample_usage())
+                    .iter()
+                    .map(|row| row.0)
+                    .collect(),
+            ] {
+                let reference = find(&format!("usage.value.{}", labels[0]));
+                let mut previous_bottom = 0.0_f32;
+                for label in labels {
+                    let marker = find(&format!("legend.marker.{label}"));
+                    let name = find(&format!("usage.label.{label}"));
+                    let value = find(&format!("usage.value.{label}"));
+                    assert!((name.left() - marker.right() - 9.0).abs() < 1.0, "{label}");
+                    assert!((value.right() - reference.right()).abs() < 1.0);
+                    assert!((name.center().y - value.center().y).abs() < 1.0);
+                    assert!(
+                        name.right() + 11.0 <= value.left(),
+                        "{label} overlaps at {width}"
+                    );
+                    assert!(name.top() >= previous_bottom);
+                    assert!(value.right() <= width + 1.0);
+                    previous_bottom = name.bottom();
+                }
+            }
+            assert!((find("usage.label.Archive references").left() - total.left()).abs() < 1.0);
+        }
+    }
+}
+
+#[test]
 fn unavailable_recovery_is_not_an_empty_chart() {
     let mut usage = sample_usage();
     usage.stored_error = Some("database unavailable".into());

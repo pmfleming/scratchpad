@@ -148,18 +148,13 @@ fn part_label(part: &Part, total: f64) -> String {
 fn legend(ui: &mut egui::Ui, parts: &[Part]) {
     let total = parts.iter().map(|part| part.bytes as f64).sum();
     for part in parts {
-        ui.horizontal(|ui| {
-            let response = widget_ids::surface_response(
-                ui,
-                ("settings.storage.legend", part.label),
-                widget_ids::WidgetRole::Label,
-                |ui| ui.allocate_response(egui::vec2(10.0, 10.0), egui::Sense::hover()),
-            );
-            ui.painter()
-                .circle_filled(response.rect.center(), 5.0, part.color);
-            response.on_hover_text(part_label(part, total));
-            super::usage_row(ui, part.label, part.bytes, part.help);
-        });
+        super::row::usage_row_with_marker(
+            ui,
+            part.label,
+            part.bytes,
+            &format!("{}\n{}", part_label(part, total), part.help),
+            Some(part.color),
+        );
     }
 }
 

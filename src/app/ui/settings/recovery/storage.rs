@@ -3,16 +3,27 @@ use crate::app::{services::session_store::StorageUsage, ui::widget_ids};
 use eframe::egui;
 
 mod chart;
+mod row;
+use row::usage_row;
 #[cfg(test)]
 mod tests;
 
 pub(super) fn summary(ui: &mut egui::Ui, usage: &StorageUsage) {
-    usage_row(
-        ui,
-        "Files on disk",
-        usage.total_file_bytes,
-        "Actual file sizes, not a retention budget.",
+    ui.label(
+        egui::RichText::new("Files on disk")
+            .size(15.0)
+            .strong()
+            .color(text_primary(ui)),
     );
+    let total = ui.label(
+        egui::RichText::new(format_bytes(usage.total_file_bytes))
+            .size(30.0)
+            .color(text_primary(ui)),
+    );
+    super::super::widgets::record_settings_control_box("storage.total", total.rect);
+    total.on_hover_text(format!("{} bytes", usage.total_file_bytes));
+    description(ui, "Actual file sizes, not a retention budget.");
+    ui.add_space(8.0);
     chart::render(ui, usage);
     if usage.stored_error.is_none() {
         description(
@@ -141,32 +152,6 @@ fn payload_total(usage: &StorageUsage) -> u64 {
     payload_rows(usage)
         .iter()
         .fold(0u64, |total, (_, bytes, _)| total.saturating_add(*bytes))
-}
-
-fn usage_row(ui: &mut egui::Ui, label: &str, bytes: u64, help: &str) {
-    let width = ui.available_width();
-    ui.horizontal(|ui| {
-        ui.set_min_height(24.0);
-        let value_width = 104.0_f32.min(width * 0.4);
-        ui.add_sized(
-            egui::vec2(
-                (width - value_width - ui.spacing().item_spacing.x).max(0.0),
-                0.0,
-            ),
-            egui::Label::new(egui::RichText::new(label).size(12.5).color(text_muted(ui)))
-                .wrap()
-                .halign(egui::Align::LEFT),
-        )
-        .on_hover_text(help);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                egui::RichText::new(format_bytes(bytes))
-                    .size(13.0)
-                    .color(text_primary(ui)),
-            )
-            .on_hover_text(format!("{bytes} bytes\n{help}"));
-        });
-    });
 }
 
 pub(super) fn notice(ui: &mut egui::Ui, glyph: &str, title: &str, detail: &str) {
