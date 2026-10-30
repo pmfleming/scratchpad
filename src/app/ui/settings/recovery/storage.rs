@@ -22,7 +22,6 @@ pub(super) fn summary(ui: &mut egui::Ui, usage: &StorageUsage) {
     );
     super::super::widgets::record_settings_control_box("storage.total", total.rect);
     total.on_hover_text(format!("{} bytes", usage.total_file_bytes));
-    description(ui, "Actual file sizes, not a retention budget.");
     ui.add_space(8.0);
     chart::render(ui, usage);
     if usage.stored_error.is_none() {
