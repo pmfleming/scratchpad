@@ -78,8 +78,6 @@ fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         1,
         16384,
     );
-    ui.label(egui::RichText::new("Age and size limits both apply. No expiry removes only the age limit.").size(12.5).color(super::text_muted(ui)))
-        .on_hover_text("Lower limits can expire older recovery data. Budgets limit retained data, not the size of the database file.");
     if policy != app.state.app_settings.history.recovery {
         crate::app::app_state::settings_controller::set_recovery_settings(app, policy);
     }
