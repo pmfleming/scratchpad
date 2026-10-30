@@ -1,0 +1,824 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>History Callout Proposals</title>
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+/* Tokens mirror src/app/theme.rs (dark + *_LIGHT). diff-add / diff-del are new. */
+:root {
+  --page: #181b21;
+  --callout: #1f2329;
+  --action: #262b32;
+  --action-hover: #343a44;
+  --border: #3b424c;
+  --text: #ffffff;
+  --muted: #a0adb5;
+  --accent: #689ae8;
+  --selected: #222b3b;
+  --danger: #a43a3a;
+  --diff-add: #8cc896;
+  --diff-del: #e59393;
+  --shadow: 0 12px 32px rgba(0,0,0,.45);
+  --prose: #d4dbe1;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --page: #f0f3f8;
+  --callout: #ffffff;
+  --action: #e6ecf4;
+  --action-hover: #d5deea;
+  --border: #b8c2d0;
+  --text: #1c232d;
+  --muted: #59636f;
+  --accent: #4376cd;
+  --selected: #dbe7f8;
+  --danger: #b44a4a;
+  --diff-add: #2f7a3e;
+  --diff-del: #b0413e;
+  --shadow: 0 12px 28px rgba(30,40,60,.18);
+  --prose: #2c3540;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --page: #f0f3f8; --callout: #ffffff; --action: #e6ecf4; --action-hover: #d5deea;
+    --border: #b8c2d0; --text: #1c232d; --muted: #59636f; --accent: #4376cd;
+    --selected: #dbe7f8; --danger: #b44a4a; --diff-add: #2f7a3e; --diff-del: #b0413e;
+    --shadow: 0 12px 28px rgba(30,40,60,.18); --prose: #2c3540; color-scheme: light;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--text);
+  font: 15px/1.5 "Noto Sans", system-ui, sans-serif;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 32px 16px 80px; }
+header.top { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; }
+h1 { font-size: 30px; font-weight: 600; margin: 0 0 6px; }
+h2 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+h3 { font-size: 15px; font-weight: 600; margin: 18px 0 6px; }
+p, li { color: var(--prose); }
+.lede { color: var(--muted); max-width: 70ch; margin: 0; }
+code { font-family: "Noto Sans Mono", ui-monospace, monospace; font-size: 12.5px;
+  background: var(--action); border: 1px solid var(--border); border-radius: 5px; padding: 0 4px; }
+.theme-btn { flex: none; background: var(--action); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; font-size: 13px; }
+.theme-btn:hover { background: var(--action-hover); }
+
+section { margin-top: 56px; }
+.tag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 8px; margin-left: 8px; vertical-align: 3px; }
+.split { display: grid; grid-template-columns: minmax(0, 600px) minmax(0, 1fr); gap: 32px; margin-top: 20px; align-items: start; }
+.split.narrow { grid-template-columns: minmax(0, 380px) minmax(0, 1fr); }
+@media (max-width: 900px) { .split, .split.narrow { grid-template-columns: minmax(0,1fr); } }
+.notes ul { padding-left: 18px; margin: 6px 0; }
+.notes li { margin: 4px 0; }
+
+/* ---------- Callout chrome (callout.rs: radius 14, margin 12/8) ---------- */
+.callout { background: var(--callout); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: var(--shadow); padding: 8px 12px 12px; width: 100%; max-width: 600px; }
+.c-head { display: flex; align-items: center; height: 30px; }
+.c-title { font-size: 24px; flex: 1; }
+.c-title.sm { font-size: 17px; font-weight: 600; }
+.x { width: 36px; height: 30px; display: grid; place-items: center; border-radius: 6px; color: var(--text); cursor: default; }
+.x:hover { background: var(--danger); color: #fff; }
+.card { background: var(--action-hover); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; margin-top: 6px; }
+.bar { display: flex; align-items: center; gap: 8px; }
+.bar .grow { flex: 1; }
+.ib { height: 30px; min-width: 36px; display: inline-grid; place-items: center; border-radius: 8px;
+  background: var(--action); border: 1px solid var(--border); color: var(--muted); font-size: 16px; padding: 0 8px; }
+.ib.on { background: var(--selected); border-color: var(--accent); color: var(--text); }
+.ib.off { opacity: .55; }
+button.ib { cursor: pointer; font: inherit; }
+button.ib:hover:not(:disabled) { background: var(--action-hover); color: var(--text); }
+button.ib:disabled { opacity: .45; cursor: default; }
+.ib .lbl { font-size: 13px; margin-left: 6px; }
+.ib.labeled { display: inline-flex; gap: 0; }
+
+/* segmented control */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; background: var(--action); }
+.seg > button, .seg > .menu-wrap > button { font: inherit; font-size: 13px; color: var(--muted); background: none; border: 0; padding: 0 12px; height: 28px;
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.seg > :not(:first-child) { border-left: 1px solid var(--border); }
+.seg > :first-child, .seg > :first-child > button { border-radius: 7px 0 0 7px; }
+.seg > :last-child, .seg > :last-child > button { border-radius: 0 7px 7px 0; }
+.seg > button[aria-pressed="true"], .seg > .menu-wrap > button[aria-pressed="true"] { background: var(--selected); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+
+.list { margin-top: 12px; max-height: 420px; overflow: auto; padding-right: 4px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+/* ---------- Today's pills ---------- */
+.pill { display: flex; gap: 10px; align-items: center; background: var(--action); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
+.pill i { color: var(--muted); font-size: 16px; }
+.pill .t { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pill .d { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pill .tx { min-width: 0; flex: 1; }
+.pill.dim { opacity: .55; }
+.pill.group { justify-content: space-between; }
+.indent { margin-left: 18px; }
+.nowline { display: flex; align-items: center; gap: 8px; color: var(--accent); font-size: 11px; height: 22px; margin-bottom: 6px; padding-left: 4px; }
+.nowline::after { content: ""; flex: 1; border-top: 1.5px solid var(--accent); }
+.dash { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--muted); margin: 4px 0 8px; }
+.dash::after { content: ""; flex: 1; border-top: 1px dashed var(--border); }
+.selrow { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 2px 4px; }
+
+/* ---------- Diff chips (new) ---------- */
+.del { color: var(--diff-del); text-decoration: line-through; text-decoration-thickness: 1px; }
+.ins { color: var(--diff-add); }
+.q { font-family: "Noto Sans Mono", ui-monospace, monospace; font-size: 12.5px; }
+.verb { color: var(--muted); }
+.chip { display: inline-block; font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px;
+  padding: 0 7px; line-height: 17px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: 1px; }
+.chip.k1 { border-color: #689ae8aa; } .chip.k2 { border-color: #c48be0aa; } .chip.k3 { border-color: #d9a85aaa; }
+
+/* ---------- Proposal B: rail ---------- */
+.rail { list-style: none; margin: 0; padding: 0; outline: none; }
+.rail:focus-visible { box-shadow: 0 0 0 2px var(--accent); border-radius: 8px; }
+.r { position: relative; display: grid; grid-template-columns: 28px minmax(0,1fr) auto; align-items: center;
+  min-height: 38px; padding: 3px 8px 3px 0; border-radius: 8px; cursor: pointer; }
+.r::before { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; border-left: 2px solid var(--border); }
+.r.u::before { border-left-style: dashed; }
+.r.first::before { top: 50%; }
+.r.last::before { bottom: 50%; }
+.r:hover { background: var(--action); }
+.r.aff { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.node { position: relative; z-index: 1; justify-self: center; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--muted); border: 2px solid var(--callout); box-shadow: 0 0 0 1px var(--muted); }
+.r.u .node { background: var(--callout); box-shadow: 0 0 0 1.5px var(--muted); }
+.r.cur .node { background: var(--accent); box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent); }
+.node.sq { border-radius: 3px; }
+.node.dia { border-radius: 2px; transform: rotate(45deg); width: 10px; height: 10px; background: var(--callout); box-shadow: 0 0 0 1.5px var(--accent); }
+.r .body { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.r .body > i { font-size: 15px; color: var(--muted); flex: none; }
+.r .label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+.r.u .label { color: var(--muted); }
+.r.u .label .ins, .r.u .label .del { opacity: .7; }
+.r .hint { font-size: 12px; color: var(--accent); opacity: 0; white-space: nowrap; padding-left: 8px; }
+.r:hover .hint { opacity: 1; }
+.r .badge { font-size: 11px; color: var(--accent); white-space: nowrap; padding-left: 8px; }
+.r.snap { min-height: 26px; }
+.r.snap .label { font-size: 12px; color: var(--muted); }
+.r.nr { cursor: not-allowed; }
+.r.nr .label { color: var(--muted); }
+.nowB { position: relative; display: grid; grid-template-columns: 28px 1fr; align-items: center; height: 20px; }
+.nowB::before { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; border-left: 2px solid var(--border); }
+.nowB span { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; color: var(--accent); letter-spacing: .03em; }
+.nowB span::after { content: ""; flex: 1; border-top: 1.5px solid var(--accent); }
+.nowB b { position: relative; z-index: 1; justify-self: center; width: 8px; height: 8px; background: var(--accent); border-radius: 50%; }
+.sect { display: grid; grid-template-columns: 28px 1fr; align-items: center; margin-top: 10px; height: 24px;
+  font-size: 11.5px; color: var(--muted); }
+.sect span { display: flex; gap: 8px; align-items: center; }
+.sect span::after { content: ""; flex: 1; border-top: 1px dashed var(--border); }
+.banner { display: flex; gap: 10px; align-items: center; background: var(--selected); border: 1px solid var(--accent);
+  border-radius: 10px; padding: 8px 10px; margin-top: 10px; font-size: 13px; }
+.banner .grow { flex: 1; min-width: 0; }
+.banner button, .confirm button { font: inherit; font-size: 13px; border-radius: 8px; padding: 4px 10px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--action); color: var(--text); white-space: nowrap; }
+.banner button:hover, .confirm button:hover { background: var(--action-hover); }
+.confirm { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.confirm .grow { flex: 1; }
+.confirm .danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border);
+  font-size: 11.5px; color: var(--muted); }
+kbd { font-family: inherit; font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--text); background: var(--action); }
+.menu-wrap { position: relative; }
+.menu { position: absolute; right: 0; top: 34px; z-index: 5; width: 250px; background: var(--callout); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow); padding: 4px; display: none; }
+.menu.open { display: block; }
+.menu button { width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; background: none; border: 0;
+  color: var(--text); font: inherit; font-size: 13px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+.menu button:hover { background: var(--action-hover); }
+.menu .sep { border-top: 1px solid var(--border); margin: 4px 0; }
+.menu .danger-text { color: var(--diff-del); }
+.scope-sub { font-size: 12px; color: var(--muted); margin: 8px 2px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.scope-sub b { color: var(--text); font-weight: 600; }
+
+/* ---------- Proposal C: scrubber ---------- */
+.scrub { margin-top: 10px; }
+.ticks { position: relative; height: 22px; margin: 0 8px; }
+.ticks i { position: absolute; top: 7px; width: 8px; height: 8px; border-radius: 50%; transform: translateX(-50%); background: var(--muted); }
+.ticks i.u { background: var(--callout); box-shadow: inset 0 0 0 1.5px var(--muted); }
+.ticks i.s { border-radius: 1px; transform: translateX(-50%) rotate(45deg); background: var(--callout); box-shadow: inset 0 0 0 1.5px var(--accent); }
+input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
+.stepcard { display: flex; gap: 10px; align-items: center; background: var(--action); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; margin-top: 10px; font-size: 14px; }
+.stepcard .grow { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Two tools ---------- */
+.statusbar { display: flex; align-items: center; gap: 10px; margin-top: 20px; height: 32px; padding: 0 10px; font-size: 12.5px; color: var(--muted);
+  background: var(--action); border: 1px solid var(--border); border-radius: 8px; max-width: 600px; }
+.statusbar .grow { flex: 1; }
+.sbsep { width: 1px; height: 16px; background: var(--border); }
+.sbbtn { position: relative; display: inline-grid; place-items: center; width: 28px; height: 24px; border-radius: 6px; font-size: 16px; color: var(--muted); }
+.sbbtn.hl { color: var(--text); background: var(--selected); box-shadow: 0 0 0 1px var(--accent); }
+.sbbtn em, .toolhead em { font-style: normal; font-size: 10px; font-weight: 700; color: #fff; background: var(--accent); border-radius: 999px;
+  width: 15px; height: 15px; display: grid; place-items: center; }
+.sbbtn em { position: absolute; top: -7px; right: -7px; }
+.tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
+.tool { background: var(--callout); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+.tool p { margin: 8px 0 10px; }
+.toolhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.toolhead i { font-size: 18px; color: var(--accent); }
+.tool dl { display: grid; grid-template-columns: 92px 1fr; gap: 6px 12px; margin: 0; font-size: 13.5px; }
+.tool dt { color: var(--muted); }
+.tool dd { margin: 0; color: var(--prose); }
+.tabsim { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.tabsim > span:last-child { display: contents; }
+.tabchip { font: inherit; font-size: 12px; color: var(--muted); background: var(--action); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+.tabchip.on { color: var(--text); background: var(--selected); border-color: var(--accent); }
+.trackwrap { position: relative; }
+.lockzone { position: absolute; left: 0; top: 50%; height: 8px; transform: translateY(-50%); border-radius: 4px; pointer-events: none;
+  background: repeating-linear-gradient(135deg, var(--border) 0 3px, transparent 3px 6px); }
+.ticks i.lk { background: none; top: 2px; width: auto; height: auto; color: var(--muted); font-size: 12px; }
+.menu.left { left: 0; right: auto; width: 240px; }
+.menu .mhead { font-size: 11px; color: var(--muted); padding: 6px 8px 2px; }
+.menu .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pickname { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Findings / tables ---------- */
+.findings { counter-reset: f; list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.findings li { counter-increment: f; background: var(--callout); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px 12px 44px; position: relative; margin: 0; }
+.findings li::before { content: counter(f); position: absolute; left: 14px; top: 12px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--selected); color: var(--accent); font-size: 12px; font-weight: 600; display: grid; place-items: center; }
+.findings b { color: var(--text); display: block; margin-bottom: 2px; }
+.findings .src { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.findings .sev { float: right; font-size: 11px; color: var(--muted); }
+.findings .sev.hi { color: var(--diff-del); }
+.tablewrap { overflow-x: auto; margin-top: 16px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 640px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+td { color: var(--prose); }
+.yes { color: var(--diff-add); } .no { color: var(--diff-del); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div>
+    <h1>History redesign: Scrubber and History</h1>
+    <p class="lede">Built from the code in <code>src/app/ui/dialogs/text_history/</code>, <code>text_history.rs</code>,
+      <code>callout.rs</code> and <code>theme.rs</code>. Today's single callout becomes two separate tools: a <b>Scrubber</b> for the current file
+      and a complete <b>History</b> for any file. The colors are the app's real theme tokens, and both mocks are interactive and share the same sample state.</p>
+  </div>
+  <button class="theme-btn" id="themeBtn" type="button"><i class="ph ph-circle-half"></i> Theme</button>
+</header>
+
+<!-- ===================================================== TODAY -->
+<section id="today">
+  <h2>What the code renders today</h2>
+  <p class="lede">A 600 × 520 floating callout in the top-right corner (<code>TEXT_HISTORY_SIZE</code>). It opens on the By file tab, and only the active file is expanded.</p>
+  <div class="split">
+    <div class="callout" aria-label="Current history callout mock">
+      <div class="c-head"><div class="c-title">History</div><div class="x"><i class="ph ph-x"></i></div></div>
+      <div class="card"><div class="bar">
+        <span class="ib"><i class="ph ph-clock-counter-clockwise"></i></span>
+        <span class="ib on"><i class="ph ph-files"></i></span>
+        <span class="ib on"><i class="ph ph-crosshair"></i></span>
+        <span class="grow"></span>
+        <span class="ib"><i class="ph ph-arrow-up"></i></span>
+        <span class="ib"><i class="ph ph-arrow-down"></i></span>
+        <span class="ib"><i class="ph ph-trash"></i></span>
+      </div></div>
+      <div class="list">
+        <div class="pill group"><span><i class="ph ph-caret-down"></i>&nbsp; /home/user/notes/meeting-notes.md</span><span class="small muted">11 changes</span></div>
+        <div class="indent">
+          <div class="pill dim"><i class="ph ph-pencil-simple"></i><div class="tx"><div class="t">Insert "Next steps"</div><div class="d">/home/user/notes/meeting-notes.md · Editor</div></div></div>
+          <div class="pill dim"><i class="ph ph-stack"></i><div class="tx"><div class="t">Edit 2 ranges</div><div class="d">/home/user/notes/meeting-notes.md · Editor</div></div></div>
+          <div class="nowline">Now</div>
+          <div class="pill"><i class="ph ph-pencil-simple"></i><div class="tx"><div class="t">Insert "Owner: TBD"</div><div class="d">/home/user/notes/meeting-notes.md · Editor</div></div></div>
+          <div class="pill"><i class="ph ph-scissors"></i><div class="tx"><div class="t">Cut "old action items"</div><div class="d">/home/user/notes/meeting-notes.md · Cut</div></div></div>
+          <div class="dash">Snapshot · 2026-10-30 09:12 UTC</div>
+          <div class="pill"><i class="ph ph-magnifying-glass"></i><div class="tx"><div class="t">Replace 6 matches</div><div class="d">/home/user/notes/meeting-notes.md · Search/replace</div></div></div>
+          <div class="pill"><i class="ph ph-arrows-left-right"></i><div class="tx"><div class="t">Replace with "Q4"</div><div class="d">/home/user/notes/meeting-notes.md · Editor</div></div></div>
+          <div class="dash">Snapshots beyond undo</div>
+          <div class="selrow"><i class="ph ph-clock-counter-clockwise muted"></i> Saved branch · 2026-10-29 18:04 UTC</div>
+          <div class="selrow"><i class="ph ph-clock-counter-clockwise muted"></i> 2026-10-28 11:40 UTC</div>
+        </div>
+        <div class="pill group"><span><i class="ph ph-caret-right"></i>&nbsp; Scratch 2</span><span class="small muted">2 changes</span></div>
+      </div>
+    </div>
+    <div class="notes">
+      <h3>How it behaves</h3>
+      <ul>
+        <li>Each row is one change: its summary (<code>operation_summary</code>), then the full path · source.</li>
+        <li>Undone changes sit above a blue <b>Now</b> line at 55% opacity. Applied changes sit below it, newest first.</li>
+        <li>Clicking an applied row undoes through it. Clicking an undone row redoes through it.</li>
+        <li>Saved snapshots show in two ways. A snapshot that undo/redo can reach is a dashed marker. One it can't reach is a plain selectable label under "Snapshots beyond undo".</li>
+        <li>All seven controls are icon-only, and only their tooltips explain them.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 style="margin-top:28px">Problems found in the code</h3>
+  <ol class="findings">
+    <li><span class="sev hi">high</span><b>Arrow keys are taken from the editor</b>While the callout is open, plain <kbd>↑</kbd>/<kbd>↓</kbd> are consumed before the editor sees them, even when the editor has focus. So the caret can't move up or down while the history is open.
+      <span class="src">text_history.rs:63 <code>handle_text_history_navigation</code></span></li>
+    <li><span class="sev hi">high</span><b>The arrow keys move the opposite way on screen</b><kbd>↑</kbd> means "older" (undo). But older rows are lower in the list, so pressing <kbd>↑</kbd> moves the Now line down.
+      <span class="src">navigation.rs:84, model.rs:104 newest-first sort</span></li>
+    <li><span class="sev hi">high</span><b>Clear history runs at once, with no confirmation</b>The trash button and <kbd>Ctrl+Shift+Del</kbd> wipe undo history for every open buffer straight away. Nothing asks first and there is no undo.
+      <span class="src">text_history.rs:270, :296</span></li>
+    <li><span class="sev">med</span><b>The Timeline tab has one Now line, but each file has its own</b>The sort puts every file's undone rows on top and draws a single boundary, so the merged list misplaces each file's real position. The Up/Down buttons also act on one file only ("Older state in this file") while the list shows all files.
+      <span class="src">model.rs:104 <code>sort_now_line_rows</code>, list.rs:111</span></li>
+    <li><span class="sev">med</span><b>"Undo through this change" leaves you at the state before that change</b>Clicking a row removes that change too, so the click and its result point at different rows. Most history panels treat a row as "the state after this step".
+      <span class="src">list.rs:263, mutation.rs:164</span></li>
+    <li><span class="sev">med</span><b>The second line repeats the same text on every row</b>Every row repeats the full path, even inside its own file group. The source label "Editor" carries almost no information, and Paste, Cut and Search already have their own icons.
+      <span class="src">model.rs:49</span></li>
+    <li><span class="sev">med</span><b>Snapshots use a different look from edits</b>Edits are pills and snapshots are <code>selectable_label</code> text. The "Now" for a snapshot is a weak word, and the Now line is hidden while you browse a snapshot.
+      <span class="src">render.rs:56–76, list.rs:111</span></li>
+    <li><span class="sev">low</span><b>Loading text pushes the layout around</b><code>poll</code> and <code>hydrate</code> write "Loading snapshot…" or "Loading newer history…" at the top of the callout, which pushes the toolbar down.
+      <span class="src">visit.rs:216, :230</span></li>
+    <li><span class="sev">low</span><b>Rows that can't be replayed look normal</b>Clicking one only reports "not replayable in that direction" in the status bar afterwards.
+      <span class="src">mutation.rs:188</span></li>
+    <li><span class="sev">low</span><b>Unclear controls</b>A crosshair icon stands for "follow restored buffer". Timeline and By file are two separate icon toggles. Undo and Redo look the same as the destructive trash button.
+      <span class="src">text_history.rs:226–275</span></li>
+    <li><span class="sev">low</span><b>Timestamps are UTC and exact to the minute</b>Snapshot times read "2026-10-29 18:04 UTC", which is hard to scan at a glance. Edits have no time at all, because <code>PieceHistoryEntry</code> has no timestamp field.
+      <span class="src">recovery.rs:93, history.rs:58</span></li>
+  </ol>
+</section>
+
+<!-- ===================================================== TWO TOOLS -->
+<section id="tools">
+  <h2>Two tools, two buttons</h2>
+  <p class="lede">The callout splits into two separate tools. Each has its own button, shortcut and job, and neither opens the other.
+    They show the same document state, because both act on the buffer's real undo history.</p>
+
+  <div class="statusbar" aria-label="Status bar mock">
+    <span>Ln 12, Col 4</span><span class="sbsep"></span><span>UTF-8</span><span class="sbsep"></span><span>LF</span><span class="sbsep"></span><span>100%</span>
+    <span class="grow"></span>
+    <span class="sbbtn hl" title="Scrubber · Ctrl+Alt+Z"><i class="ph ph-sliders-horizontal"></i><em>1</em></span>
+    <span class="sbsep"></span>
+    <span class="sbbtn hl" title="History · Ctrl+Shift+H"><i class="ph ph-clock-counter-clockwise"></i><em>2</em></span>
+    <span class="sbsep"></span>
+    <span class="sbbtn"><i class="ph ph-gear-six"></i></span>
+  </div>
+
+  <div class="tools">
+    <div class="tool">
+      <div class="toolhead"><em>1</em><i class="ph ph-sliders-horizontal"></i><b>Scrubber</b><span class="muted small">Current file only</span></div>
+      <p>For quickly stepping back and forth through recent edits in the file you're working in, without leaving it.</p>
+      <dl>
+        <dt>Opens with</dt><dd>A new status bar button, and <kbd>Ctrl+Alt+Z</kbd> (proposed; nothing in <code>shortcut_keymap.rs</code> uses <kbd>Z</kbd> yet)</dd>
+        <dt>Scope</dt><dd>Always the active buffer. It retargets when you switch tabs and never offers a file picker.</dd>
+        <dt>Shows</dt><dd>Applied and undone states, plus snapshots that undo can reach</dd>
+        <dt>Leaves out</dt><dd>Other files, older snapshots, clearing history</dd>
+        <dt>Size</dt><dd>360 px, anchored above its status bar button so it covers little text</dd>
+      </dl>
+    </div>
+    <div class="tool">
+      <div class="toolhead"><em>2</em><i class="ph ph-clock-counter-clockwise"></i><b>History</b><span class="muted small">Any file, or all of them</span></div>
+      <p>For looking through everything that changed: in this file, across all open files, or in one other file you pick.</p>
+      <dl>
+        <dt>Opens with</dt><dd>The existing status bar button and <kbd>Ctrl+Shift+H</kbd> (<code>open_text_history</code>)</dd>
+        <dt>Scope</dt><dd>Current file, All files, or any other open file chosen from a list</dd>
+        <dt>Shows</dt><dd>Every state with diff text, all snapshots including those beyond undo, and the original text</dd>
+        <dt>Also has</dt><dd>Snapshot browsing with "Return to latest", the "switch to the file being changed" option and Clear history</dd>
+        <dt>Size</dt><dd>600 px floating callout, as today</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== SCRUBBER -->
+<section id="c">
+  <h2>1 · Scrubber <span class="tag">Current file</span></h2>
+  <p class="lede">A small slider for the file in the active tab. Drag it, or focus it and use the arrow keys. It follows tab switches,
+    and it never shows other files or older snapshots, because those belong to History.</p>
+  <div class="split narrow">
+    <div>
+      <div class="callout" id="C" style="max-width:380px">
+        <div class="c-head"><div class="c-title sm" style="display:flex;gap:8px;align-items:center;min-width:0">
+          <i class="ph ph-file-text muted"></i><span id="Cname" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span></div>
+          <div class="x"><i class="ph ph-x"></i></div></div>
+        <div class="scrub">
+          <div class="ticks" id="Cticks"></div>
+          <div class="trackwrap"><div class="lockzone" id="Clock"></div>
+            <input type="range" id="Crange" min="0" max="9" value="7" aria-label="Position in this file's history"></div>
+          <div class="bar small muted" style="justify-content:space-between;margin-top:2px"><span>Original</span><span>Latest</span></div>
+        </div>
+        <div class="stepcard">
+          <button class="ib" id="Cprev" aria-label="Undo one step"><i class="ph ph-caret-left"></i></button>
+          <div class="grow" id="Clabel"></div>
+          <button class="ib" id="Cnext" aria-label="Redo one step"><i class="ph ph-caret-right"></i></button>
+        </div>
+        <div class="foot"><span id="Cpos"></span><span><kbd>←</kbd><kbd>→</kbd> step · <kbd>Esc</kbd> close</span></div>
+      </div>
+      <div class="tabsim"><span class="muted small">Active tab:</span><span id="Ctabs"></span></div>
+      <p class="small muted" style="margin-top:6px">Try it: drag the slider or use the arrow buttons, then switch the active tab. The shaded part of the track is behind a change that can't be replayed.</p>
+    </div>
+    <div class="notes">
+      <h3>Behavior</h3>
+      <ul>
+        <li><b>The target is always the active buffer</b> (<code>tab_manager.active_tab().active_buffer()</code>). It ignores the temporary buffer selection that <code>navigation::target_buffer</code> keeps today, so the scrubber never acts on a file you aren't looking at.</li>
+        <li><b>Hollow ticks are undone states, filled ticks are applied states, and diamonds are snapshots that undo can reach</b> (<code>covered_markers</code>). Snapshots beyond undo aren't shown here; the History tool handles them.</li>
+        <li><b>Dragging previews and releasing applies.</b> While you drag, the footer reads "Undo 3 on release". On release the scrubber makes one <code>apply_text_history_to_entry</code> call, and <code>history_feedback::mark</code> flashes the changed line.</li>
+        <li><b>A change that can't be replayed is a wall.</b> The track behind it is shaded and the thumb stops there, instead of an error appearing in the status bar afterwards.</li>
+        <li><b>Keys work only while the scrubber has focus</b>: <kbd>←</kbd>/<kbd>→</kbd> step, and <kbd>Home</kbd>/<kbd>End</kbd> jump to the original or the latest state. This fixes finding 1, and left/right has no direction mismatch.</li>
+        <li><b>No file picker and no button to open History</b>, so the two tools stay independent.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== HISTORY -->
+<section id="b">
+  <h2>2 · History <span class="tag">Any file</span></h2>
+  <p class="lede">The complete history. Each row is the <em>state after</em> a change, drawn as a node on one vertical line, and clicking a node goes to that state.
+    Choose <b>Current file</b>, <b>All files</b>, or any other open file from <b>Other file ▾</b>.</p>
+  <div class="split">
+    <div>
+      <div class="callout" id="B">
+        <div class="c-head"><div class="c-title sm">History</div><div class="x"><i class="ph ph-x"></i></div></div>
+        <div class="card" id="Bbar"></div>
+        <div id="Bsub" class="scope-sub"></div>
+        <div id="Bbanner"></div>
+        <div class="list" style="max-height:440px">
+          <ul class="rail" id="Brail" tabindex="0" aria-label="History states"></ul>
+        </div>
+        <div class="foot">
+          <span id="Bkeys"></span>
+          <span id="Bstatus"><i class="ph ph-check-circle"></i> Snapshots up to date</span>
+        </div>
+      </div>
+      <p class="small muted" style="margin-top:8px">Try it: switch between Current file, All files and Other file. Hover a row to see which changes it affects, click it to move there, or click an older snapshot to browse it. The ⋯ menu holds Clear history.</p>
+    </div>
+    <div class="notes">
+      <h3>Three views</h3>
+      <ul>
+        <li><b>Current file</b> follows the active tab and is the default.</li>
+        <li><b>All files</b> lists every change newest-first, in true order, with a file chip on each row. Each file's current state gets its own <span style="color:var(--accent)">now</span> badge, instead of one shared line.</li>
+        <li><b>Other file ▾</b> lists every open buffer with its change count, so you can read a file's history without switching tabs. When "switch to the file being changed" is on, clicking a state opens that file's tab.</li>
+      </ul>
+      <h3>Rows</h3>
+      <ul>
+        <li><b>Undone states have hollow nodes on a dashed line</b>, still in time order instead of moved to the top.</li>
+        <li><b>Hovering previews the jump.</b> The rows that would change are tinted, and the hovered row says "Undo 3" or "Redo 2".</li>
+        <li><b>"Original text"</b> sits at the bottom as the state with nothing applied.</li>
+        <li>Snapshots appear as <b>diamonds</b> on the line. Reachable ones sit beside the matching state, and older ones continue below a dotted line.
+          Browsing one opens a banner with <b>Return to latest</b> (<code>HistoryAction::Return</code>).</li>
+        <li>History has <b>no Undo/Redo buttons</b>, because stepping is the scrubber's job. <kbd>↑</kbd>/<kbd>↓</kbd> still move through a single-file view while the list has focus, in the direction shown on screen.</li>
+        <li>Loading and error text gets a <b>fixed slot in the footer</b>.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="a">
+  <h2>Alternative · Keep one callout, fix the details</h2>
+  <p class="lede">Kept for reference if the split doesn't go ahead: today's pill list, with the problems fixed in place. It's the cheapest change and needs no new data.</p>
+  <div class="split">
+    <div class="callout">
+      <div class="c-head"><div class="c-title">History</div><div class="x"><i class="ph ph-x"></i></div></div>
+      <div class="card"><div class="bar">
+        <div class="seg"><button aria-pressed="false"><i class="ph ph-clock-counter-clockwise"></i>Timeline</button><button aria-pressed="true"><i class="ph ph-files"></i>By file</button></div>
+        <span class="grow"></span>
+        <span class="ib labeled"><i class="ph ph-arrow-u-up-left"></i><span class="lbl">Undo</span></span>
+        <span class="ib labeled"><i class="ph ph-arrow-u-up-right"></i><span class="lbl">Redo</span></span>
+        <span class="ib"><i class="ph ph-dots-three"></i></span>
+      </div></div>
+      <div class="list">
+        <div class="pill group"><span><i class="ph ph-caret-down"></i>&nbsp; meeting-notes.md <span class="small muted">~/notes</span></span><span class="small muted">9 changes · 2 undone</span></div>
+        <div class="indent">
+          <div class="pill dim"><i class="ph ph-pencil-simple"></i><div class="tx"><div class="t"><span class="verb">Insert</span> <span class="q ins">"Next steps"</span></div></div></div>
+          <div class="pill dim"><i class="ph ph-stack"></i><div class="tx"><div class="t">Edit 2 ranges</div></div></div>
+          <div class="nowline">Now</div>
+          <div class="pill"><i class="ph ph-pencil-simple"></i><div class="tx"><div class="t"><span class="verb">Insert</span> <span class="q ins">"Owner: TBD"</span></div></div></div>
+          <div class="pill"><i class="ph ph-scissors"></i><div class="tx"><div class="t"><span class="verb">Cut</span> <span class="q del">"old action items"</span></div></div></div>
+          <div class="pill"><i class="ph ph-floppy-disk"></i><div class="tx"><div class="t muted">Snapshot · today 09:12</div></div></div>
+          <div class="pill"><i class="ph ph-magnifying-glass"></i><div class="tx"><div class="t"><span class="verb">Replace</span> <span class="q del">teh</span> → <span class="q ins">the</span> <span class="muted small">× 6</span></div></div></div>
+          <div class="pill"><i class="ph ph-arrows-left-right"></i><div class="tx"><div class="t"><span class="q del">Q3</span> → <span class="q ins">Q4</span></div></div></div>
+          <div class="pill" style="opacity:.7"><i class="ph ph-lock-simple"></i><div class="tx"><div class="t muted">Paste "- budget review - hiring…"</div><div class="d">Can't be replayed</div></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="notes">
+      <h3>Changes</h3>
+      <ul>
+        <li><b>Labeled segmented control</b> for Timeline / By file, and labeled <b>Undo / Redo</b> buttons with standard undo icons.</li>
+        <li>Follow-focus and Clear move into a <b>⋯ menu</b>. Clear asks for confirmation inline.</li>
+        <li><b>Group headers show the file name with its folder in muted text</b>, and rows drop the repeated path line. The source shows only through the icon.</li>
+        <li><b>Diff colors</b> use the <code>first_deleted_text</code> / <code>first_inserted_text</code> that <code>TextHistoryEntryView</code> already has. A replace shows as <span class="q del">old</span> → <span class="q ins">new</span>.</li>
+        <li>Snapshots become <b>pills with a disk icon</b> instead of dashed text. Beyond-undo snapshots use the same pill.</li>
+        <li>Rows where <code>replayable == false</code> get a lock icon and can't be clicked.</li>
+        <li>Arrow keys work only while the callout has keyboard focus, and <kbd>↑</kbd> moves the Now line up.</li>
+      </ul>
+      <h3>Doesn't fix</h3>
+      <ul><li>The single Timeline Now line across files (finding 4) or the click meaning (finding 5).</li></ul>
+    </div>
+  </div>
+</section>
+
+
+<!-- ===================================================== Coverage + code -->
+<section id="compare">
+  <h2>Findings covered</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Finding</th><th>Alternative · one callout, fixed</th><th>Scrubber</th><th>History</th></tr></thead>
+    <tbody>
+      <tr><td>1 · Arrow keys taken from the editor</td><td class="yes">Fixed</td><td class="yes">Focus only</td><td class="yes">Focus only</td></tr>
+      <tr><td>2 · Arrow direction reversed</td><td class="yes">Fixed</td><td class="yes">Left/right</td><td class="yes">Matches the screen</td></tr>
+      <tr><td>3 · Clear has no confirmation</td><td class="yes">Inline confirm</td><td>Not offered</td><td class="yes">Inline confirm</td></tr>
+      <tr><td>4 · One Now line across files</td><td class="no">Remains</td><td>Single file only</td><td class="yes">A badge per file</td></tr>
+      <tr><td>5 · Click meaning</td><td class="no">Remains</td><td class="yes">Position on a slider</td><td class="yes">State semantics + hover preview</td></tr>
+      <tr><td>6 · Repeated detail line</td><td class="yes">Removed</td><td>n/a</td><td class="yes">Removed</td></tr>
+      <tr><td>7 · Snapshots styled differently</td><td class="yes">Pills</td><td class="yes">Diamond ticks</td><td class="yes">Diamonds on the line</td></tr>
+      <tr><td>8 · Loading text shifts layout</td><td class="yes">Footer slot</td><td>n/a</td><td class="yes">Footer slot</td></tr>
+      <tr><td>9 · Rows that can't be replayed look normal</td><td class="yes">Lock icon</td><td class="yes">Wall on the track</td><td class="yes">Lock on hover</td></tr>
+      <tr><td>10 · Unclear controls</td><td class="yes">Labeled</td><td class="yes">Two buttons</td><td class="yes">Labeled views</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3 style="margin-top:28px">Mapping to code</h3>
+  <div class="notes"><ul>
+    <li><b>Separate entry points:</b> add <code>dialogs.history_scrubber</code> beside <code>dialogs.text_history</code>, plus a <code>ShortcutAction::OpenHistoryScrubber</code> and a <code>StatusBarItemKind::HistoryScrubber</code>. The two dialogs share no open/close state.</li>
+    <li><b>Scrubber:</b> a new <code>ui/dialogs/history_scrubber.rs</code> that reuses <code>choose_target</code> (from <code>navigation.rs</code>) and <code>covered_markers</code> data for the active buffer only. The arrow-key handling now in <code>handle_text_history_navigation</code> moves here, limited to when the slider has focus.</li>
+    <li><b>History scope:</b> <code>HistoryTab</code> becomes <code>{ CurrentFile, AllFiles, File(BufferId) }</code>. Only the first two are persisted, because buffer ids are per session. Persisted 0 → AllFiles and 1|2 → CurrentFile keep today's settings working.</li>
+    <li><b>History rows:</b> clicking state <i>k</i> while at <i>n</i> undoes through entry <i>k+1</i> when <i>k &lt; n</i>, and redoes through entry <i>k</i> when <i>k &gt; n</i>, using the existing <code>apply_text_history_to_entry</code>. The line and nodes would be painted in <code>list.rs</code>, replacing <code>history_pill</code> and <code>render_now_line</code>.</li>
+    <li><b>Removed from History:</b> the Up/Down buttons in <code>navigation::controls</code> and the crosshair toggle. The toggle moves into the ⋯ menu as a checkbox.</li>
+    <li><b>Theme:</b> two new tokens, <code>diff_add</code> and <code>diff_del</code>, go in <code>theme.rs</code>.</li>
+    <li><b>Later, and optional:</b> per-edit times ("2 min ago") would need a timestamp on <code>PieceHistoryEntry</code> and a change to the persisted history format. Neither tool depends on it.</li>
+  </ul></div>
+</section>
+
+</div>
+
+<script>
+/* ---------- theme toggle ---------- */
+(function () {
+  const root = document.documentElement;
+  let saved = null;
+  try { saved = localStorage.getItem('hc-theme'); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  document.getElementById('themeBtn').onclick = () => {
+    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : !matchMedia('(prefers-color-scheme: light)').matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('hc-theme', root.dataset.theme); } catch (e) {}
+  };
+})();
+
+/* ---------- shared sample data (summary shapes from text_history.rs::operation_summary) ----------
+   Both tools read and write the same FILES, as both act on the buffer's real undo state. */
+const ICON = { insert: 'pencil-simple', delete: 'backspace', replace: 'arrows-left-right', paste: 'clipboard',
+  cut: 'scissors', search: 'magnifying-glass', multi: 'stack' };
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function labelHTML(e) {
+  const q = (cls, t) => `<span class="q ${cls}">"${esc(t)}"</span>`;
+  switch (e.kind) {
+    case 'insert': return `<span class="verb">Insert</span> ${q('ins', e.ins)}`;
+    case 'delete': return `<span class="verb">Delete</span> ${q('del', e.del)}`;
+    case 'replace': return `${q('del', e.del)} → ${q('ins', e.ins)}`;
+    case 'paste': return `<span class="verb">Paste</span> ${q('ins', e.ins)}`;
+    case 'cut': return `<span class="verb">Cut</span> ${q('del', e.del)}`;
+    case 'search': return `<span class="verb">Replace</span> ${q('del', e.del)} → ${q('ins', e.ins)} <span class="muted small">× ${e.n}</span>`;
+    case 'multi': return `Edit ${e.n} ranges`;
+  }
+}
+function plainLabel(e) {
+  return { insert: `Insert "${e.ins}"`, delete: `Delete "${e.del}"`, replace: `Replace with "${e.ins}"`,
+    paste: `Paste "${e.ins}"`, cut: `Cut "${e.del}"`, search: `Replace ${e.n} matches`, multi: `Edit ${e.n} ranges` }[e.kind];
+}
+
+const FILES = [
+  { id: 1, name: 'meeting-notes.md', dir: '~/notes', k: 'k1', pos: 7,
+    entries: [
+      { seq: 2, kind: 'insert', ins: 'Agenda for Thursday' },
+      { seq: 4, kind: 'paste', ins: '- budget review - hiring plan', nr: true },
+      { seq: 5, kind: 'delete', del: 'draft' },
+      { seq: 7, kind: 'replace', del: 'Q3', ins: 'Q4' },
+      { seq: 9, kind: 'search', del: 'teh', ins: 'the', n: 6 },
+      { seq: 10, kind: 'cut', del: 'old action items' },
+      { seq: 12, kind: 'insert', ins: 'Owner: TBD' },
+      { seq: 14, kind: 'multi', n: 2 },
+      { seq: 15, kind: 'insert', ins: 'Next steps' },
+    ],
+    covered: [{ state: 5, time: 'today 09:12' }],
+    older: [{ id: 'v41', time: 'yesterday 18:04', bytes: 4211, branch: true }, { id: 'v37', time: '28 Oct, 11:40', bytes: 3980 }] },
+  { id: 2, name: 'Scratch 2', dir: 'unsaved', k: 'k2', pos: 2,
+    entries: [{ seq: 3, kind: 'insert', ins: 'TODO' }, { seq: 11, kind: 'paste', ins: 'https://example.com/spec' }],
+    covered: [], older: [] },
+  { id: 3, name: 'main.rs', dir: '~/code/tool/src', k: 'k3', pos: 1,
+    entries: [
+      { seq: 1, kind: 'insert', ins: 'use bytes::Bytes;' },
+      { seq: 6, kind: 'search', del: 'Vec<u8>', ins: 'Bytes', n: 3 },
+      { seq: 13, kind: 'delete', del: '.unwrap()' },
+    ],
+    covered: [{ state: 1, time: 'today 08:30' }], older: [{ id: 'v12', time: '27 Oct, 16:22', bytes: 18044 }] },
+];
+const $ = id => document.getElementById(id);
+const byId = id => FILES.find(f => f.id === id);
+let ACTIVE = 1; // the active tab's buffer
+const lowestReachable = f => { let m = 0; f.entries.forEach((e, i) => { if (e.nr && i < f.pos) m = i + 1; }); return m; };
+function setPos(f, k) { f.pos = Math.max(lowestReachable(f), Math.min(f.entries.length, k)); renderAll(); }
+
+/* ---------- History ---------- */
+const B = { scope: 'current', pick: 2, hover: null, menu: null, confirm: false, browsing: null };
+const viewed = () => B.scope === 'pick' ? byId(B.pick) : byId(ACTIVE);
+
+function renderBar() {
+  if (B.confirm) {
+    const total = FILES.reduce((n, x) => n + x.entries.length, 0);
+    $('Bbar').innerHTML = `<div class="confirm"><i class="ph ph-warning" style="color:var(--diff-del)"></i>
+      <span class="grow">Clear ${total} changes in ${FILES.length} open files? This can't be undone.</span>
+      <button id="Bcancel">Cancel</button><button class="danger" id="Bclear">Clear history</button></div>`;
+    $('Bcancel').onclick = () => { B.confirm = false; renderAll(); };
+    $('Bclear').onclick = () => { FILES.forEach(x => { x.entries = []; x.pos = 0; x.covered = []; }); B.confirm = false; B.browsing = null; renderAll(); };
+    return;
+  }
+  const picked = byId(B.pick);
+  const files = FILES.map(f => `<button data-pick="${f.id}" role="menuitemradio" aria-checked="${B.scope === 'pick' && B.pick === f.id}">
+      <i class="ph ph-file-text"></i><span class="grow">${esc(f.name)}${f.id === ACTIVE ? ' <span class="muted small">· current</span>' : ''}</span>
+      <span class="muted small">${f.entries.length}</span></button>`).join('');
+  $('Bbar').innerHTML = `<div class="bar">
+    <div class="seg" role="group" aria-label="Show history for">
+      <button aria-pressed="${B.scope === 'current'}" data-scope="current"><i class="ph ph-file-text"></i>Current file</button>
+      <button aria-pressed="${B.scope === 'all'}" data-scope="all"><i class="ph ph-files"></i>All files</button>
+      <span class="menu-wrap"><button aria-pressed="${B.scope === 'pick'}" id="Bpick" aria-haspopup="menu" aria-expanded="${B.menu === 'pick'}">
+        <i class="ph ph-folder-open"></i><span class="pickname">${B.scope === 'pick' ? esc(picked.name) : 'Other file'}</span><i class="ph ph-caret-down"></i></button>
+        <div class="menu left ${B.menu === 'pick' ? 'open' : ''}" role="menu"><div class="mhead">Open files</div>${files}</div></span>
+    </div>
+    <span class="grow"></span>
+    <div class="menu-wrap">
+      <button class="ib" id="Bmore" aria-haspopup="menu" aria-expanded="${B.menu === 'more'}" title="More"><i class="ph ph-dots-three"></i></button>
+      <div class="menu ${B.menu === 'more' ? 'open' : ''}" role="menu">
+        <button role="menuitemcheckbox" aria-checked="true"><i class="ph ph-check-square"></i>Switch to the file being changed</button>
+        <button><i class="ph ph-gear-six"></i>History limits…</button>
+        <div class="sep"></div>
+        <button id="Bclearopen" class="danger-text"><i class="ph ph-trash"></i>Clear history…</button>
+      </div>
+    </div></div>`;
+  $('Bbar').querySelectorAll('[data-scope]').forEach(b => b.onclick = () => { B.scope = b.dataset.scope; B.hover = null; B.browsing = null; renderAll(); });
+  $('Bpick').onclick = e => { e.stopPropagation(); B.menu = B.menu === 'pick' ? null : 'pick'; renderBar(); };
+  $('Bbar').querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { B.pick = +b.dataset.pick; B.scope = 'pick'; B.menu = null; B.browsing = null; renderAll(); });
+  $('Bmore').onclick = e => { e.stopPropagation(); B.menu = B.menu === 'more' ? null : 'more'; renderBar(); };
+  $('Bclearopen').onclick = () => { B.menu = null; B.confirm = true; renderAll(); };
+}
+
+function renderSub() {
+  if (B.scope === 'all') {
+    $('Bsub').innerHTML = FILES.map(x => `<span class="chip ${x.k}">${esc(x.name)}</span>`).join('') +
+      `<span>· newest first · <span style="color:var(--accent)">now</span> marks each file's current state</span>`;
+    $('Bkeys').innerHTML = `Click a row to move that file to it`;
+    return;
+  }
+  const f = viewed();
+  const undone = f.entries.length - f.pos;
+  const note = B.scope === 'pick' && f.id !== ACTIVE ? ' · <span style="color:var(--accent)">not the active tab</span>' : '';
+  $('Bsub').innerHTML = `<i class="ph ph-file-text"></i><b>${esc(f.name)}</b><span>${esc(f.dir)}</span>
+    <span>· ${f.entries.length} changes${undone ? ` · ${undone} undone` : ''}${note}</span>`;
+  $('Bkeys').innerHTML = `<kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Home</kbd><kbd>End</kbd> ends · <kbd>Esc</kbd> close`;
+}
+
+function renderBanner() {
+  if (!B.browsing || B.scope === 'all') { $('Bbanner').innerHTML = ''; return; }
+  const s = viewed().older.find(o => o.id === B.browsing);
+  if (!s) { B.browsing = null; $('Bbanner').innerHTML = ''; return; }
+  $('Bbanner').innerHTML = `<div class="banner"><i class="ph ph-eye" style="color:var(--accent)"></i>
+    <div class="grow"><b>Viewing snapshot · ${esc(s.time)}</b><br><span class="muted small">Editing here starts a new branch. Your latest text is kept.</span></div>
+    <button id="Breturn"><i class="ph ph-arrow-line-up"></i> Return to latest</button></div>`;
+  $('Breturn').onclick = () => { B.browsing = null; renderAll(); };
+}
+
+function stateRow(f, k, opts) {
+  // State k = after entries[0..k). k == 0 is the original text.
+  const n = f.pos, browsing = !!B.browsing && !opts.chip, cur = !browsing && k === n;
+  const e = k > 0 ? f.entries[k - 1] : null;
+  const undone = browsing ? k > 0 : k > n;
+  let hint = '';
+  if (!browsing && k !== n) hint = k < n ? `Undo ${n - k}` : `Redo ${k - n}`;
+  if (browsing) hint = 'Return here';
+  const blocked = !browsing && k < lowestReachable(f);
+  const aff = B.hover && B.hover.f === f.id && !browsing &&
+    ((B.hover.k < n && k > B.hover.k && k <= n) || (B.hover.k > n && k > n && k <= B.hover.k));
+  const cls = ['r', undone ? 'u' : '', cur ? 'cur' : '', aff ? 'aff' : '', blocked ? 'nr' : '', opts.first ? 'first' : '', opts.last ? 'last' : ''].join(' ');
+  const body = e
+    ? `<i class="ph ph-${ICON[e.kind]}"></i>${opts.chip ? `<span class="chip ${f.k}">${esc(f.name)}</span>` : ''}<span class="label">${labelHTML(e)}</span>`
+    : `<i class="ph ph-file-dashed"></i>${opts.chip ? `<span class="chip ${f.k}">${esc(f.name)}</span>` : ''}<span class="label">Original text <span class="muted small">· as opened</span></span>`;
+  const right = cur ? `<span class="badge">${opts.chip ? 'now' : ''}</span>`
+    : blocked ? `<span class="hint" style="color:var(--muted)"><i class="ph ph-lock-simple"></i> Can't replay</span>`
+    : `<span class="hint">${hint}</span>`;
+  return `<li class="${cls}" data-f="${f.id}" data-k="${k}" role="option" aria-selected="${cur}"
+    aria-label="${e ? esc(plainLabel(e)) : 'Original text'}${undone ? ', undone' : ''}">
+    <span class="node ${e ? '' : 'sq'}"></span><span class="body">${body}</span>${right}</li>`;
+}
+
+function renderRail() {
+  const rail = $('Brail');
+  let html = '';
+  if (B.scope !== 'all') {
+    const f = viewed();
+    if (!f.entries.length && !f.older.length) {
+      rail.innerHTML = `<li class="muted small" style="padding:12px 4px">No history yet. Changes to ${esc(f.name)} will appear here.</li>`;
+      return;
+    }
+    for (let k = f.entries.length; k >= 0; k--) {
+      if (!B.browsing && k === f.pos && k < f.entries.length) html += `<li class="nowB" aria-hidden="true"><b></b><span>NOW</span></li>`;
+      html += stateRow(f, k, { first: k === f.entries.length, last: k === 0 && !f.older.length });
+      f.covered.filter(c => c.state === k).forEach(c =>
+        html += `<li class="r snap" data-f="${f.id}" data-k="${k}"><span class="node dia"></span>
+          <span class="body"><span class="label">Snapshot · ${esc(c.time)} <span class="small">· same as the state above</span></span></span><span></span></li>`);
+    }
+    if (f.older.length) {
+      html += `<li class="sect"><span></span><span>Older saved snapshots · beyond undo</span></li>`;
+      f.older.forEach((o, i) => {
+        const sel = B.browsing === o.id;
+        html += `<li class="r snap ${sel ? 'cur' : ''} ${i === f.older.length - 1 ? 'last' : ''}" data-snap="${o.id}" style="min-height:34px">
+          <span class="node dia" ${sel ? 'style="background:var(--accent)"' : ''}></span>
+          <span class="body"><i class="ph ph-${o.branch ? 'git-branch' : 'floppy-disk'}"></i>
+          <span class="label" style="font-size:13px;color:var(--text)">${esc(o.time)} <span class="muted small">· ${(o.bytes / 1024).toFixed(1)} KB${o.branch ? ' · has its own undo' : ''}</span></span></span>
+          <span class="${sel ? 'badge' : 'hint'}">${sel ? 'viewing' : 'View'}</span></li>`;
+      });
+    }
+  } else {
+    const rows = [];
+    FILES.forEach(f => f.entries.forEach((e, i) => rows.push({ f, k: i + 1, seq: e.seq })));
+    rows.sort((a, b) => b.seq - a.seq);
+    if (!rows.length) { rail.innerHTML = `<li class="muted small" style="padding:12px 4px">No history in any open file.</li>`; return; }
+    rows.forEach((r, i) => html += stateRow(r.f, r.k, { chip: true, first: i === 0, last: i === rows.length - 1 }));
+  }
+  rail.innerHTML = html;
+}
+
+function goTo(fid, k) {
+  const f = byId(fid);
+  if (B.browsing && B.scope !== 'all') B.browsing = null;
+  if (k < lowestReachable(f)) return;
+  setPos(f, k);
+}
+
+const rail = $('Brail');
+rail.addEventListener('mouseover', e => {
+  const li = e.target.closest('li[data-k]');
+  const next = li ? { f: +li.dataset.f, k: +li.dataset.k } : null;
+  if (JSON.stringify(next) !== JSON.stringify(B.hover)) { B.hover = next; renderRail(); }
+});
+rail.addEventListener('mouseleave', () => { B.hover = null; renderRail(); });
+rail.addEventListener('click', e => {
+  const snap = e.target.closest('li[data-snap]');
+  if (snap) { B.browsing = snap.dataset.snap; B.hover = null; return renderAll(); }
+  const li = e.target.closest('li[data-k]');
+  if (li) goTo(+li.dataset.f, +li.dataset.k);
+});
+rail.addEventListener('keydown', e => {
+  // Keys act only while the list has focus, and follow the on-screen direction.
+  if (B.scope === 'all' || B.browsing) { if (e.key === 'Escape') { B.browsing = null; renderAll(); } return; }
+  const f = viewed();
+  const map = { ArrowUp: 1, ArrowDown: -1 };
+  if (e.key in map) { e.preventDefault(); setPos(f, f.pos + map[e.key]); }
+  else if (e.key === 'Home') { e.preventDefault(); setPos(f, f.entries.length); }
+  else if (e.key === 'End') { e.preventDefault(); setPos(f, 0); }
+});
+document.addEventListener('click', () => { if (B.menu) { B.menu = null; renderBar(); } });
+
+/* ---------- Scrubber: active buffer only ---------- */
+const range = $('Crange');
+function renderScrubber() {
+  const f = byId(ACTIVE);
+  const max = f.entries.length;
+  const floor = lowestReachable(f);
+  $('Cname').textContent = f.name;
+  range.max = Math.max(max, 1);
+  range.disabled = max === 0;
+  if (document.activeElement !== range || +range.value < floor) range.value = f.pos;
+  const pct = k => max ? (k / max) * 100 : 0;
+  let t = '';
+  for (let k = 0; k <= max; k++) t += `<i class="${k > f.pos ? 'u' : ''}" style="left:${pct(k)}%"></i>`;
+  f.covered.forEach(c => t += `<i class="s" style="left:${pct(c.state)}%;top:-2px"></i>`);
+  if (floor) t += `<i class="lk" style="left:${pct(floor - 0.5)}%"><span class="ph ph-lock-simple"></span></i>`;
+  $('Cticks').innerHTML = t;
+  $('Clock').style.width = floor ? `calc(${pct(floor)}% - 4px)` : '0';
+  const v = +range.value;
+  const e = v ? f.entries[v - 1] : null;
+  $('Clabel').innerHTML = !max ? `<span class="muted">No changes in this file yet</span>`
+    : e ? `<i class="ph ph-${ICON[e.kind]} muted"></i> ${labelHTML(e)}` : `<i class="ph ph-file-dashed muted"></i> Original text`;
+  const delta = v - f.pos;
+  $('Cpos').textContent = `State ${v} of ${max}` + (delta ? ` · ${delta < 0 ? 'Undo ' + -delta : 'Redo ' + delta} on release` : '');
+  $('Cprev').disabled = v <= floor; $('Cnext').disabled = v >= max;
+  $('Ctabs').innerHTML = FILES.map(x => `<button class="tabchip ${x.id === ACTIVE ? 'on' : ''}" data-tab="${x.id}">${esc(x.name)}</button>`).join('');
+  $('Ctabs').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { ACTIVE = +b.dataset.tab; renderAll(); });
+}
+range.oninput = () => {
+  const floor = lowestReachable(byId(ACTIVE));
+  if (+range.value < floor) range.value = floor;
+  renderScrubber();
+};
+range.onchange = () => setPos(byId(ACTIVE), +range.value);
+range.onkeydown = e => {
+  const f = byId(ACTIVE);
+  if (e.key === 'Home') { e.preventDefault(); setPos(f, 0); }
+  else if (e.key === 'End') { e.preventDefault(); setPos(f, f.entries.length); }
+};
+$('Cprev').onclick = () => { const f = byId(ACTIVE); setPos(f, f.pos - 1); };
+$('Cnext').onclick = () => { const f = byId(ACTIVE); setPos(f, f.pos + 1); };
+
+function renderAll() { renderBar(); renderSub(); renderBanner(); renderRail(); renderScrubber(); }
+renderAll();
+</script>
+</body>
+</html>
