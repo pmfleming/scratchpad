@@ -7,7 +7,8 @@ pub(super) fn toggle_switch(
     surface_key: impl Hash,
     value: &mut bool,
 ) -> egui::Response {
-    let desired_size = egui::vec2(42.0, 22.0);
+    // Keep the compact track, with a full-height keyboard/pointer target.
+    let desired_size = egui::vec2(42.0, SettingsUi::CONTROLS.height);
     let available_rect = ui.available_rect_before_wrap();
     let top = available_rect.center().y - desired_size.y * 0.5;
     let min = if ui.layout().main_dir() == egui::Direction::RightToLeft {
@@ -33,6 +34,7 @@ pub(super) fn toggle_switch(
         egui::WidgetInfo::selected(egui::Role::Switch, ui.is_enabled(), *value, "")
     });
     let how_on = ui.ctx().animate_bool(response.id, *value);
+    let rect = egui::Rect::from_center_size(response.rect.center(), egui::vec2(42.0, 22.0));
     let radius = rect.height() * 0.5;
     let track_fill = if *value {
         SettingsUi::accent()
@@ -55,5 +57,17 @@ pub(super) fn toggle_switch(
         egui::Color32::WHITE,
     );
 
+    if response.has_focus() && ui.is_enabled() {
+        ui.painter().rect_stroke(
+            rect.expand(3.0),
+            radius + 3.0,
+            egui::Stroke::new(2.0, ui.visuals().selection.stroke.color),
+            egui::StrokeKind::Inside,
+        );
+    }
+
     response
 }
+
+#[cfg(test)]
+mod tests;
