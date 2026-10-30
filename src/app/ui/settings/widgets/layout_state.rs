@@ -9,6 +9,7 @@ thread_local! {
 #[derive(Clone, Debug)]
 pub(in crate::app::ui::settings) struct SettingsControlMeasurement {
     pub label: String,
+    pub rect: egui::Rect,
     pub width: f32,
     pub center_x: f32,
     pub center_y: f32,
@@ -68,6 +69,7 @@ fn record_measurement(
     measurements.with(|measurements| {
         measurements.borrow_mut().push(SettingsControlMeasurement {
             label: label.into(),
+            rect,
             width: rect.width(),
             center_x: rect.center().x,
             center_y: rect.center().y,

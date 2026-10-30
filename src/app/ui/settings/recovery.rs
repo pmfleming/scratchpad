@@ -1,6 +1,6 @@
 use super::{
     ScratchpadApp, egui,
-    widgets::{dropdown, group_heading, inner_select_row, toggle_select_row},
+    widgets::{DropdownPlacement, dropdown, group_heading, inner_select_row, toggle_select_row},
 };
 use crate::app::{services::session_store::StorageUsage, ui::widget_ids};
 use std::time::Duration;
@@ -104,7 +104,7 @@ fn retention_row(ui: &mut egui::Ui, days: &mut u32) {
                 Some(days) => format!("{days} days"),
                 None => "Custom…".into(),
             },
-            180.0,
+            DropdownPlacement::Trailing(180.0),
             "",
         ) {
             ui.data_mut(|data| data.insert_temp(id, selection.is_none()));

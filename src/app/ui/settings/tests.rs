@@ -183,6 +183,113 @@ fn font_dropdowns_share_left_edge_and_all_sliders_share_columns() {
 }
 
 #[test]
+fn styled_controls_fit_and_align_with_production_fonts_in_both_themes() {
+    for dark in [true, false] {
+        for width in [360.0, 600.0, 1100.0] {
+            for preset in [
+                EditorFontPreset::Standard,
+                EditorFontPreset::Mono,
+                EditorFontPreset::Serif,
+            ] {
+                reset_settings_layout_measurements();
+                let ctx = egui::Context::default();
+                ctx.set_visuals(if dark {
+                    egui::Visuals::dark()
+                } else {
+                    egui::Visuals::light()
+                });
+                crate::app::fonts::apply_editor_fonts(
+                    &ctx,
+                    &crate::app::fonts::EditorFontSelection::scratchpad(preset),
+                    4.0,
+                )
+                .unwrap();
+                let mut app = app();
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    ui.set_width(width);
+                    ui.set_min_height(9000.0);
+                    render_page_body(ui, &mut app, width);
+                });
+                output.textures_delta.clear();
+                let measurements = settings_control_measurements();
+                let find = |name: &str| measurements.iter().find(|m| m.label == name).unwrap();
+                for (control, row) in [
+                    ("segments.Use appearance from", "Use appearance from"),
+                    ("segments.Colors", "Colors"),
+                    ("combo.Place new tabs", "Place new tabs"),
+                    ("combo.Retention", "Keep closed tabs for"),
+                    ("button.Open file", "Settings file"),
+                ] {
+                    let control = find(control);
+                    let lane = find(&format!("inner_select_row.{row}"));
+                    assert!(
+                        (control.right_x - lane.right_x).abs() < 1.0,
+                        "{} {:?} at {width}",
+                        control.label,
+                        preset
+                    );
+                }
+                assert!(
+                    (find("combo.Font").rect.left() - find("combo.Size").rect.left()).abs() < 1.0
+                );
+                for control in &measurements {
+                    if ["combo.", "button.", "segment.", "number."]
+                        .iter()
+                        .any(|prefix| control.label.starts_with(prefix))
+                    {
+                        assert!(
+                            control.rect.height() >= 35.5,
+                            "{}: {:?}",
+                            control.label,
+                            control.rect
+                        );
+                        assert!(
+                            control.right_x <= width,
+                            "{} overflows at {width}",
+                            control.label
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn long_segment_labels_stack_without_overlapping_the_next_row() {
+    reset_settings_layout_measurements();
+    let ctx = egui::Context::default();
+    let mut selected = 0;
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        ui.set_width(300.0);
+        SettingsUi::apply_typography(ui);
+        SettingsUi::apply_controls(ui);
+        widgets::segmented_row(
+            ui,
+            "Long choices",
+            &mut selected,
+            &[
+                (0, "Follow the operating system"),
+                (1, "Use application preferences"),
+            ],
+        );
+        widgets::action_row(ui, "Next row", "Action", None);
+    });
+    output.textures_delta.clear();
+    let measurements = settings_control_measurements();
+    let find = |name: &str| measurements.iter().find(|m| m.label == name).unwrap();
+    let group = find("segments.Long choices").rect;
+    assert!(group.height() > 72.0);
+    assert!(find("label.Next row").rect.top() >= group.bottom());
+    for row in measurements
+        .iter()
+        .filter(|m| m.label.starts_with("segment."))
+    {
+        assert!(group.contains_rect(row.rect));
+    }
+}
+
+#[test]
 fn appearance_controls_stay_visible_for_system_source_and_editing_switches_source() {
     let mut app = app();
     crate::app::app_state::settings_controller::set_editor_appearance_source(

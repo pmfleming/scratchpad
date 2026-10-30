@@ -10,6 +10,7 @@ pub(super) struct SettingsLayout {
 pub(super) struct ControlMetrics {
     pub column_width: f32,
     pub gap: f32,
+    pub height: f32,
 }
 pub(super) struct SettingsUi;
 
@@ -22,6 +23,7 @@ impl SettingsUi {
     pub(super) const CONTROLS: ControlMetrics = ControlMetrics {
         column_width: 300.0,
         gap: 24.0,
+        height: 36.0,
     };
 
     pub(super) fn apply_typography(ui: &mut egui::Ui) {
@@ -34,6 +36,54 @@ impl SettingsUi {
             egui::TextStyle::Small,
         ] {
             style.text_styles.insert(text, font.clone());
+        }
+    }
+    /// Settings-only control skin. Dialogs retain their established styling and
+    /// the selected editor font remains the UI font.
+    pub(super) fn apply_controls(ui: &mut egui::Ui) {
+        let field = Self::field_bg(ui);
+        let hover = Self::control_bg(ui);
+        let border = Self::card_border(ui);
+        let text = crate::app::theme::text_primary(ui);
+        let (selected, accent) = if ui.visuals().dark_mode {
+            (
+                egui::Color32::from_rgb(41, 63, 54),
+                egui::Color32::from_rgb(168, 214, 194),
+            )
+        } else {
+            (
+                egui::Color32::from_rgb(217, 237, 226),
+                egui::Color32::from_rgb(37, 91, 67),
+            )
+        };
+        let style = ui.style_mut();
+        style.spacing.interact_size.y = Self::CONTROLS.height;
+        style.spacing.button_padding = egui::vec2(10.0, 7.0);
+        style.visuals.extreme_bg_color = field;
+        style.visuals.selection.bg_fill = selected;
+        style.visuals.selection.stroke = egui::Stroke::new(1.0, accent);
+        for widget in [
+            &mut style.visuals.widgets.inactive,
+            &mut style.visuals.widgets.hovered,
+            &mut style.visuals.widgets.active,
+            &mut style.visuals.widgets.open,
+        ] {
+            widget.bg_fill = hover;
+            widget.weak_bg_fill = hover;
+            widget.bg_stroke = egui::Stroke::new(1.0, border);
+            widget.fg_stroke = egui::Stroke::new(1.0, text);
+            widget.corner_radius = egui::CornerRadius::same(7);
+        }
+        style.visuals.widgets.inactive.bg_fill = field;
+        style.visuals.widgets.inactive.weak_bg_fill = field;
+        style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, accent);
+        style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, accent);
+    }
+    pub(super) fn field_bg(ui: &egui::Ui) -> egui::Color32 {
+        if ui.visuals().dark_mode {
+            egui::Color32::from_rgb(23, 27, 30)
+        } else {
+            egui::Color32::from_rgb(241, 244, 246)
         }
     }
     pub(super) fn card_bg(ui: &egui::Ui) -> egui::Color32 {

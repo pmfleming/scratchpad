@@ -5,6 +5,7 @@ use std::{hash::Hash, ops::RangeInclusive};
 mod card;
 mod layout_state;
 mod primitives;
+mod segmented;
 pub(super) use card::{render_preview_panel, settings_card_frame};
 #[cfg(test)]
 pub(super) use layout_state::{
@@ -12,6 +13,7 @@ pub(super) use layout_state::{
     settings_control_measurements,
 };
 use layout_state::{active_settings_control_lane, with_settings_control_lane};
+pub(super) use segmented::segmented_row;
 
 pub(super) fn record_settings_control_box(label: impl Into<String>, rect: egui::Rect) {
     layout_state::record_settings_control_box(label, rect);
@@ -104,6 +106,16 @@ pub(super) fn inner_select_row(
     description: Option<&str>,
     control: impl FnOnce(&mut egui::Ui),
 ) {
+    inner_select_row_with_height(ui, label, description, 56.0, control);
+}
+
+fn inner_select_row_with_height(
+    ui: &mut egui::Ui,
+    label: &str,
+    description: Option<&str>,
+    control_height: f32,
+    control: impl FnOnce(&mut egui::Ui),
+) {
     let width = ui.available_width();
     let stacked = width < 540.0;
     let control_width = width.min(SettingsUi::CONTROLS.column_width);
@@ -139,7 +151,7 @@ pub(super) fn inner_select_row(
         let height = if stacked {
             galley.size().y
         } else {
-            galley.size().y.max(56.0)
+            galley.size().y.max(control_height)
         };
         let response = widget_ids::allocate_exact_rect_interact(
             ui,
@@ -164,7 +176,7 @@ pub(super) fn inner_select_row(
         }
     };
     let add_control = |ui: &mut egui::Ui| {
-        let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(control_width, 56.0));
+        let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(control_width, control_height));
         record_settings_control_box(format!("inner_select_row.{label}"), rect);
         widget_ids::rect_scope_with_layout(
             ui,
@@ -224,71 +236,72 @@ pub(super) fn toggle_select_row(
     }
 }
 
-/// A small finite set, always visible and keyboard accessible.
-pub(super) fn segmented_row<T: Copy + PartialEq>(
-    ui: &mut egui::Ui,
-    label: &str,
-    value: &mut T,
-    options: &[(T, &str)],
-) -> bool {
-    let original = *value;
-    inner_select_row(ui, label, None, |ui| {
-        available_width_control(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 3.0;
-                for &(option, text) in options {
-                    let response = widget_ids::surface_response(
-                        ui,
-                        (label, text),
-                        widget_ids::WidgetRole::RadioOption,
-                        |ui| ui.selectable_label(*value == option, text),
-                    );
-                    response.widget_info(|| {
-                        egui::WidgetInfo::selected(
-                            egui::Role::RadioButton,
-                            true,
-                            *value == option,
-                            text,
-                        )
-                    });
-                    if response.clicked() {
-                        *value = option;
-                    }
-                }
-            });
-        });
-    });
-    *value != original
+pub(super) enum DropdownPlacement {
+    Leading(f32),
+    Trailing(f32),
 }
 
-/// All dropdowns begin at the control lane's left edge, including font and size.
+/// Font/Size explicitly share a leading edge; other selects align with actions.
 pub(super) fn dropdown<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
     key: &str,
     value: &mut T,
     options: &[T],
     label: impl Fn(T) -> String,
-    width: f32,
+    placement: DropdownPlacement,
     unit: &str,
 ) -> bool {
     let original = *value;
+    let (width, leading) = match placement {
+        DropdownPlacement::Leading(width) => (width, true),
+        DropdownPlacement::Trailing(width) => (width, false),
+    };
     available_width_control(ui, |ui| {
-        let response = widget_ids::combo_box(ui, key)
-            .selected_text(label(*value))
-            .width(width.min(ui.available_width()))
-            .truncate()
-            .show_ui(ui, |ui| {
-                for &option in options {
-                    if ui.selectable_value(value, option, label(option)).clicked() {
-                        ui.close();
-                    }
-                }
+        let lane = ui.max_rect();
+        let unit_width = if unit.is_empty() {
+            0.0
+        } else {
+            ui.fonts_mut(|fonts| {
+                fonts.layout_no_wrap(
+                    unit.to_owned(),
+                    egui::FontId::proportional(12.5),
+                    text_muted(ui),
+                )
             })
-            .response;
-        record_settings_control_box(format!("combo.{key}"), response.rect);
-        if !unit.is_empty() {
-            ui.label(egui::RichText::new(unit).size(12.5).color(text_muted(ui)));
-        }
+            .size()
+            .x + ui.spacing().item_spacing.x
+        };
+        let width = width.min((lane.width() - unit_width).max(0.0));
+        let left = if leading {
+            lane.left()
+        } else {
+            lane.right() - width - unit_width
+        };
+        let rect = egui::Rect::from_min_max(egui::pos2(left, lane.top()), lane.max);
+        widget_ids::rect_scope_with_layout(
+            ui,
+            rect,
+            (key, "dropdown"),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                let response = widget_ids::combo_box(ui, key)
+                    .selected_text(label(*value))
+                    .width(width.min(ui.available_width()))
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        for &option in options {
+                            if ui.selectable_value(value, option, label(option)).clicked() {
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response;
+                record_settings_control_box(format!("combo.{key}"), response.rect);
+                if !unit.is_empty() {
+                    ui.label(egui::RichText::new(unit).size(12.5).color(text_muted(ui)));
+                }
+            },
+        );
     });
     *value != original
 }
@@ -344,7 +357,7 @@ pub(super) fn numeric_slider(
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                     let response = ui.add_sized(
-                        egui::vec2(number_width, 30.0),
+                        egui::vec2(number_width, SettingsUi::CONTROLS.height),
                         egui::DragValue::new(value)
                             .range(range)
                             .clamp_existing_to_range(false)

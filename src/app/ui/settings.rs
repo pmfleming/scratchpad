@@ -54,10 +54,7 @@ pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
 fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp, viewport_width: f32) {
     SettingsUi::apply_typography(ui);
-    ui.spacing_mut().interact_size.y = 30.0;
-    ui.visuals_mut().selection.bg_fill = egui::Color32::from_rgb(41, 63, 54);
-    ui.visuals_mut().selection.stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(168, 214, 194));
+    SettingsUi::apply_controls(ui);
     let available = ui.available_width().min(viewport_width);
     let width = (available - 20.0).clamp(0.0, SettingsUi::LAYOUT.card_max_width);
     let margin = ((available - width) * 0.5).max(0.0);
