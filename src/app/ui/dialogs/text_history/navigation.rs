@@ -6,6 +6,32 @@ use crate::app::{
 };
 use eframe::egui;
 
+pub(super) fn activate_file(app: &mut ScratchpadApp, buffer_id: u64) -> bool {
+    let target = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .enumerate()
+        .find_map(|(index, tab)| {
+            tab.layout
+                .active_view()
+                .filter(|view| view.buffer_id == buffer_id)
+                .or_else(|| {
+                    tab.layout
+                        .views
+                        .iter()
+                        .find(|view| view.buffer_id == buffer_id)
+                })
+                .map(|view| (index, view.id))
+        });
+    let Some((index, view_id)) = target else {
+        return false;
+    };
+    crate::app::app_state::settings_controller::activate_workspace_surface(app);
+    crate::app::commands::activate_pending_view_command(app, index, view_id)
+}
+
 pub(super) fn apply(
     ctx: &egui::Context,
     app: &mut ScratchpadApp,

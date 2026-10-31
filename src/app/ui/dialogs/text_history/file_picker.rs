@@ -16,7 +16,8 @@ pub(super) fn show(
     app: &ScratchpadApp,
     entries: &[TextHistoryEntryView],
     selected: &mut HistoryTab,
-) {
+) -> Option<u64> {
+    let mut picked = None;
     egui::Popup::menu(picker)
         .frame(callout::frame(ui).corner_radius(0))
         .show(|ui| {
@@ -58,6 +59,7 @@ pub(super) fn show(
                     for (buffer, count) in files {
                         if row(ui, buffer, count, selected_id == Some(buffer.id), &font).clicked() {
                             *selected = HistoryTab::File(buffer.id);
+                            picked = Some(buffer.id);
                             ui.ctx()
                                 .data_mut(|data| data.insert_temp(scope_key(), buffer.id));
                             ui.close();
@@ -65,6 +67,7 @@ pub(super) fn show(
                     }
                 });
         });
+    picked
 }
 
 fn row(

@@ -16,7 +16,7 @@ use crate::app::platform::{PlatformProfile, resolved_profile};
 use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg};
 use crate::app::ui::{callout, widget_ids};
 use eframe::egui;
-use egui_phosphor::regular::{ARROW_U_UP_LEFT, FILE_TEXT, FILES, FOLDER_OPEN, X};
+use egui_phosphor::regular::{ARROW_U_UP_LEFT, FILE_TEXT, FILES, FOLDER_OPEN, TRASH};
 
 const UNDONE_OPACITY: f32 = 0.65;
 
@@ -177,7 +177,11 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
         snapshots::poll(ui, app);
         snapshots::hydrate(ui, app);
         let entries = snapshots::state_entries(ctx, app);
-        controls(ui, app, &entries, &mut selected);
+        if let Some(id) = controls(ui, app, &entries, &mut selected)
+            && navigation::activate_file(app, id)
+        {
+            ctx.request_repaint();
+        }
         let target = scope_buffer(selected, app);
         let ids: Vec<_> = app
             .tab_manager
@@ -252,22 +256,26 @@ fn file_caption(
         return;
     };
     ui.horizontal(|ui| {
-        truncated_label(
-            ui,
-            &buffer.name,
-            ui.available_width() - 80.0,
-            13.0,
-            callout::muted_text(ui),
-            egui::Sense::hover(),
-        )
-        .on_hover_text(
-            buffer
-                .path
-                .as_ref()
-                .map_or_else(|| buffer.name.clone(), |p| p.display().to_string()),
-        );
-        let states = states::States::new(entries, id);
-        ui.weak(format!("{} / {}", states.position, states.entries.len()));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let states = states::States::new(entries, id);
+            // Allocate the actual count width before giving the filename the
+            // remainder. A fixed allowance makes large counts grow the window.
+            ui.weak(format!("{} / {}", states.position, states.entries.len()));
+            truncated_label(
+                ui,
+                &buffer.name,
+                ui.available_width(),
+                13.0,
+                callout::muted_text(ui),
+                egui::Sense::hover(),
+            )
+            .on_hover_text(
+                buffer
+                    .path
+                    .as_ref()
+                    .map_or_else(|| buffer.name.clone(), |p| p.display().to_string()),
+            );
+        });
     });
 }
 
@@ -310,7 +318,8 @@ fn controls(
     app: &ScratchpadApp,
     entries: &[crate::app::text_history::TextHistoryEntryView],
     selected: &mut HistoryTab,
-) {
+) -> Option<u64> {
+    let mut picked = None;
     ui.horizontal(|ui| {
         for (id, icon, tip, tab) in [
             (
@@ -335,9 +344,10 @@ fn controls(
             matches!(selected, HistoryTab::File(_)),
             true,
         );
-        file_picker::show(ui, &picker, app, entries, selected);
+        picked = file_picker::show(ui, &picker, app, entries, selected);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if control_icon_button(ui, "clear", X, "Clear undo/redo history", false, true).clicked()
+            if control_icon_button(ui, "clear", TRASH, "Clear undo/redo history", false, true)
+                .clicked()
             {
                 ui.ctx()
                     .data_mut(|data| data.insert_temp(confirm_key(), true));
@@ -348,6 +358,7 @@ fn controls(
     if ui.checkbox(&mut follow, "Switch to changed file").changed() {
         write_follow_focus(ui.ctx(), follow);
     }
+    picked
 }
 
 fn lock_navigation_focus(ctx: &egui::Context, id: egui::Id) {

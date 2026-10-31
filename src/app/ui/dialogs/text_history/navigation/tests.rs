@@ -132,6 +132,35 @@ fn other_file_jumps_can_leave_the_active_file_untouched() {
         h.state().tab_manager.tabs.as_slice()[0].active_buffer().id,
         id
     );
+    assert_eq!(h.state().tab_manager.active_tab_index, 0);
+    assert_eq!(
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .id,
+        id
+    );
+    let latest = h.state().tab_manager.tabs.as_slice()[0]
+        .active_buffer()
+        .document()
+        .history_entries()[1]
+        .summary
+        .clone();
+    h.get_all_by_role_and_label(egui::Role::Button, &format!("State: {latest}"))
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "current");
+    assert_eq!(
+        crate::app::ui::editor_content::native_editor::history_feedback::active_offset(
+            &h.ctx,
+            h.state().tab_manager.active_tab().unwrap().active_buffer(),
+        ),
+        Some(0)
+    );
 }
 
 #[test]
@@ -171,6 +200,96 @@ fn file_picker_keeps_redo_history_and_distinguishes_duplicate_names() {
     );
     assert!(h.state().state.dialogs.text_history.is_open());
     assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert_eq!(
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .id,
+        second_id
+    );
+    // Re-selecting the same History scope must still return from another editor tab.
+    h.state_mut().tab_manager.set_active_tab_index_clamped(0);
+    h.run_steps(3);
+    h.get_by_label("Choose file").click();
+    h.run_steps(3);
+    h.get_by_label("note.txt  ·  1").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .id,
+        second_id
+    );
+}
+
+#[test]
+fn choosing_a_history_file_activates_its_split_view() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    let mut tab = app.tab_manager.tabs.as_slice()[0].clone();
+    let id = tab.active_buffer().id;
+    let original_view = tab.layout.active_view_id();
+    tab.open_buffer_as_split(
+        BufferState::new("other.txt".into(), "other".into(), None),
+        crate::app::domain::SplitAxis::Vertical,
+        false,
+        0.5,
+    )
+    .unwrap();
+    app.tab_manager.set_tabs(vec![tab], 0);
+    app.state.dialogs.text_history.open();
+    let mut h = harness(app);
+    h.run_steps(3);
+    h.get_by_label("Choose file").click();
+    h.run_steps(3);
+    h.get_by_label("note.txt  ·  2").click();
+    h.run_steps(3);
+    let tab = h.state().tab_manager.active_tab().unwrap();
+    assert_eq!(tab.layout.active_view_id(), original_view);
+    assert_eq!(tab.active_buffer().id, id);
+}
+
+#[test]
+fn large_history_counts_and_long_names_do_not_expand_the_panel() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    let buffer = app.tab_manager.tabs.as_mut_slice()[0].active_buffer_mut();
+    buffer.name = "a-very-long-filename-".repeat(40);
+    for index in 0..130 {
+        let end = buffer.current_file_length().chars;
+        buffer
+            .replace_char_ranges_with_undo(
+                &[(0..end, format!("change {index}"))],
+                CursorRange::default(),
+                CursorRange::default(),
+            )
+            .unwrap();
+    }
+    assert!(buffer.document().history_entries().len() >= 130);
+    app.state.dialogs.text_history.open();
+    let mut h = harness(app);
+    h.run_steps(3);
+    let width = |h: &Harness<'_, ScratchpadApp>| {
+        h.ctx.memory(|memory| {
+            memory
+                .area_rect(crate::app::ui::widget_ids::area_id("text_history_window"))
+                .unwrap()
+                .width()
+        })
+    };
+    let initial = width(&h);
+    h.run_steps(35);
+    assert!(
+        (width(&h) - initial).abs() < 1.0,
+        "{initial} -> {}",
+        width(&h)
+    );
+    assert!(width(&h) <= super::super::super::common::HISTORY_DIALOG_SIZE.x + 2.0);
 }
 
 #[test]
