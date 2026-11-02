@@ -17,6 +17,14 @@ fn hover_id() -> egui::Id {
     egui::Id::unique("history.rail.hover")
 }
 
+fn selected_buffer_key() -> egui::Id {
+    egui::Id::unique("history.rail.selected_buffer")
+}
+
+pub(super) fn selected_buffer(ctx: &egui::Context) -> Option<u64> {
+    ctx.data(|d| d.get_temp(selected_buffer_key()))
+}
+
 pub(super) fn render(
     ui: &mut egui::Ui,
     entries: &[TextHistoryEntryView],
@@ -238,6 +246,10 @@ impl<'a> FileStates<'a> {
             callout::muted_text(ui),
         );
         paint_label(ui, rect, row, name);
+        if response.clicked() {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(selected_buffer_key(), id));
+        }
         if response.clicked() && reachable && (!current || visiting) {
             *action = Some(HistoryAction::State {
                 buffer_id: id,

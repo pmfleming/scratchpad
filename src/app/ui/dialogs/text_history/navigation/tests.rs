@@ -106,6 +106,17 @@ fn other_file_jumps_can_leave_the_active_file_untouched() {
     h.run_steps(3);
     assert_eq!(text(h.state()), "old");
     assert_eq!(h.state().tab_manager.active_tab_index, 1);
+    for (key, expected) in [
+        (egui::Key::ArrowUp, "middle"),
+        (egui::Key::ArrowDown, "old"),
+        (egui::Key::Home, "current"),
+        (egui::Key::End, "old"),
+    ] {
+        h.key_press(key);
+        h.run_steps(3);
+        assert_eq!(text(h.state()), expected);
+        assert_eq!(h.state().tab_manager.active_tab_index, 1);
+    }
     assert_eq!(
         h.state()
             .tab_manager

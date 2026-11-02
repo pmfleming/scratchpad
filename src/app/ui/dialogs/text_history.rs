@@ -117,7 +117,7 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
     let id = if scrub {
         active_buffer(app)
     } else {
-        scope_buffer(scope(ctx, app), app)
+        scope_buffer(scope(ctx, app), app).or_else(|| list::selected_buffer(ctx))
     };
     let Some(id) = id else {
         return;

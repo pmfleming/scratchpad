@@ -34,6 +34,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Made All files history keyboard navigation follow the clicked file independently of the active editor and follow-file preference.
 - Refreshed cached History filenames immediately after rename or Save As.
 
 - Let search, tab renaming, settings, and popups handle Escape before dismissing an unfocused History panel.
