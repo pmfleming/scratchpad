@@ -42,8 +42,8 @@ fn timeline_and_picker_keep_file_identity_with_ties_undo_and_colliding_entry_ids
             undone: buffer_id == 2,
             replayable: true,
             edit_count: 1,
-            first_deleted_text: String::new(),
-            first_inserted_text: "é".into(),
+            deleted_preview: String::new(),
+            inserted_preview: "é".into(),
         })
         .collect();
     let rows = timeline_rows_from_entries(entries.iter());

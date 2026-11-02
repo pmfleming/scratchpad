@@ -184,7 +184,7 @@ impl<'a> FileStates<'a> {
         )
         .on_hover_text(format!(
             "{label}\n{hint}{}",
-            row.map_or(String::new(), |r| format!("\n{}", r.detail))
+            row.map_or(String::new(), |r| format!("\n{} · {}", r.label, r.source))
         ));
         response.widget_info(|| {
             egui::WidgetInfo::selected(
@@ -381,7 +381,7 @@ pub(super) fn append_diff(
     }
     append(
         job,
-        &row.deleted,
+        row.deleted,
         super::dim_if(row.undone, theme::diff_del(ui)),
         true,
     );
@@ -390,7 +390,7 @@ pub(super) fn append_diff(
     }
     append(
         job,
-        &row.inserted,
+        row.inserted,
         super::dim_if(row.undone, theme::diff_add(ui)),
         false,
     );

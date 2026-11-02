@@ -159,8 +159,9 @@ pub(super) fn cancel_coverage(ctx: &egui::Context, app: &ScratchpadApp) {
 pub(super) fn state_entries(
     ctx: &egui::Context,
     app: &mut ScratchpadApp,
-) -> Vec<TextHistoryEntryView> {
-    let mut entries = crate::app::app_state::workspace::mutation::cached_text_history_entries(app);
+) -> Arc<[TextHistoryEntryView]> {
+    let entries = crate::app::app_state::workspace::mutation::cached_text_history_entries(app);
+    let mut replaced = None;
     for buffer in app
         .tab_manager
         .tabs
@@ -169,6 +170,7 @@ pub(super) fn state_entries(
         .flat_map(|tab| tab.buffers())
     {
         if let Some(visit) = browse(ctx, buffer) {
+            let entries = replaced.get_or_insert_with(|| entries.to_vec());
             entries.retain(|entry| entry.buffer_id != buffer.id);
             let label = crate::app::text_history::buffer_label(buffer);
             entries.extend(entries_for_buffer(&visit.source.buffer).into_iter().map(
@@ -179,7 +181,7 @@ pub(super) fn state_entries(
             ));
         }
     }
-    entries
+    replaced.map_or(entries, Arc::from)
 }
 
 pub(super) fn collect(ui: &egui::Ui, app: &ScratchpadApp, buffers: &[u64]) -> Catalog {

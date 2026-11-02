@@ -10,11 +10,12 @@ pub(super) struct TextHistoryRow<'a> {
     pub(super) entry_id: u64,
     pub(super) global_seq: u64,
     pub(super) title: &'a str,
-    pub(super) detail: String,
+    pub(super) label: &'a str,
+    pub(super) source: &'static str,
     pub(super) icon: &'static str,
     pub(super) undone: bool,
-    pub(super) deleted: String,
-    pub(super) inserted: String,
+    pub(super) deleted: &'a str,
+    pub(super) inserted: &'a str,
     pub(super) edit_count: usize,
 }
 
@@ -45,11 +46,12 @@ pub(super) fn row_from_entry(entry: &TextHistoryEntryView) -> TextHistoryRow<'_>
         entry_id: entry.id,
         global_seq: entry.global_seq,
         title: &entry.summary,
-        detail: format!("{} · {}", entry.label, source_label(entry.source)),
+        label: &entry.label,
+        source: source_label(entry.source),
         icon: entry_icon(entry),
         undone: entry.undone,
-        deleted: crate::app::domain::buffer::preview_text(&entry.first_deleted_text),
-        inserted: crate::app::domain::buffer::preview_text(&entry.first_inserted_text),
+        deleted: &entry.deleted_preview,
+        inserted: &entry.inserted_preview,
         edit_count: entry.edit_count,
     }
 }
@@ -83,8 +85,8 @@ fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
         PieceSource::Cut => SCISSORS,
         _ if entry.edit_count != 1 => STACK,
         _ => match (
-            entry.first_deleted_text.is_empty(),
-            entry.first_inserted_text.is_empty(),
+            entry.deleted_preview.is_empty(),
+            entry.inserted_preview.is_empty(),
         ) {
             (false, true) => BACKSPACE,
             (false, false) => ARROWS_LEFT_RIGHT,

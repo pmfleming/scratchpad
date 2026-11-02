@@ -19,10 +19,12 @@ pub(crate) fn text_history_entries(app: &ScratchpadApp) -> Vec<TextHistoryEntryV
     entries
 }
 
-pub(crate) fn cached_text_history_entries(app: &mut ScratchpadApp) -> Vec<TextHistoryEntryView> {
+pub(crate) fn cached_text_history_entries(
+    app: &mut ScratchpadApp,
+) -> std::sync::Arc<[TextHistoryEntryView]> {
     let revisions = text_history_revisions(app);
     if app.state.text_history_cache.revisions != revisions {
-        app.state.text_history_cache.entries = text_history_entries(app);
+        app.state.text_history_cache.entries = text_history_entries(app).into();
         app.state.text_history_cache.revisions = revisions;
     }
     app.state.text_history_cache.entries.clone()
@@ -324,6 +326,9 @@ mod tests {
                 CursorRange::default(),
             )
             .unwrap();
+        let first = super::cached_text_history_entries(&mut app);
+        let second = super::cached_text_history_entries(&mut app);
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
         assert_eq!(
             super::cached_text_history_entries(&mut app)[0].label,
             "before.txt"
@@ -371,8 +376,8 @@ mod tests {
             undone: false,
             replayable: true,
             edit_count: 1,
-            first_deleted_text: String::new(),
-            first_inserted_text: String::new(),
+            deleted_preview: String::new(),
+            inserted_preview: String::new(),
         }
     }
 

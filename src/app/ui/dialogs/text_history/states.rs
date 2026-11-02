@@ -86,8 +86,8 @@ mod tests {
                 undone: i >= 3,
                 replayable: true,
                 edit_count: 1,
-                first_deleted_text: String::new(),
-                first_inserted_text: String::new(),
+                deleted_preview: String::new(),
+                inserted_preview: String::new(),
             })
             .collect()
     }

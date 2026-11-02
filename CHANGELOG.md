@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Bounded history previews and shared cached entries across panel, scrubber, and keyboard rendering instead of cloning full edit text.
+
 - Made History resizable with square corners and the workspace background; Linux and Hyprland dismiss it with Escape or an outside click instead of a close button.
 - Replaced History's overflow menu with a direct trash-can button to clear history and a visible follow-file checkbox.
 - Kept the History panel width stable with large change counts and switched the editor immediately when choosing a file in History.

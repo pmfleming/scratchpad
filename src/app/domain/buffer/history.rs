@@ -166,13 +166,22 @@ pub fn source_label(source: PieceSource) -> &'static str {
 }
 
 pub(crate) fn preview_text(text: &str) -> String {
-    let flattened = text.replace(['\r', '\n'], " ");
-    let mut preview = flattened
-        .chars()
-        .take(TEXT_HISTORY_PREVIEW_MAX_CHARS)
-        .collect::<String>();
-    if flattened.chars().count() > TEXT_HISTORY_PREVIEW_MAX_CHARS {
-        preview.push_str("...");
+    preview_text_parts([text])
+}
+
+/// Flatten and truncate without allocating or scanning the remainder of an edit.
+pub(crate) fn preview_text_parts(parts: impl IntoIterator<Item = impl AsRef<str>>) -> String {
+    let mut preview = String::new();
+    let mut count = 0;
+    for part in parts {
+        for ch in part.as_ref().chars() {
+            if count == TEXT_HISTORY_PREVIEW_MAX_CHARS {
+                preview.push_str("...");
+                return preview;
+            }
+            preview.push(if matches!(ch, '\r' | '\n') { ' ' } else { ch });
+            count += 1;
+        }
     }
     preview
 }
