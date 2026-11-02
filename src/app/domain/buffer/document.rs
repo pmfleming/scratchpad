@@ -1,4 +1,5 @@
 mod history_ops;
+mod preview;
 mod recovery;
 
 use super::history::{
