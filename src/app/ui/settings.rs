@@ -80,7 +80,16 @@ fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp, viewport_width: 
 }
 
 pub(crate) fn apply_dialog_typography(ui: &mut egui::Ui) {
-    SettingsUi::apply_typography(ui);
+    let style = ui.style_mut();
+    let font = egui::FontId::proportional(15.0);
+    style.override_font_id = Some(font.clone());
+    for text in [
+        egui::TextStyle::Body,
+        egui::TextStyle::Button,
+        egui::TextStyle::Small,
+    ] {
+        style.text_styles.insert(text, font.clone());
+    }
 }
 // Dialogs also use these helpers; keep their established geometry and palette
 // independent of the settings-page redesign.

@@ -1,8 +1,10 @@
+use crate::app::theme;
 use eframe::egui;
 
 pub(super) struct SettingsTypography {
     pub description: f32,
 }
+
 pub(super) struct SettingsLayout {
     pub card_max_width: f32,
     pub section_gap: f32,
@@ -27,39 +29,41 @@ impl SettingsUi {
     };
 
     pub(super) fn apply_typography(ui: &mut egui::Ui) {
+        let font = ui
+            .style()
+            .override_font_id
+            .clone()
+            .unwrap_or_else(|| egui::TextStyle::Body.resolve(ui.style()));
         let style = ui.style_mut();
-        let font = egui::FontId::proportional(15.0);
         style.override_font_id = Some(font.clone());
-        for text in [
-            egui::TextStyle::Body,
-            egui::TextStyle::Button,
-            egui::TextStyle::Small,
-        ] {
+        for text in [egui::TextStyle::Body, egui::TextStyle::Button] {
             style.text_styles.insert(text, font.clone());
         }
     }
-    /// Settings-only control skin. Dialogs retain their established styling and
-    /// the selected editor font remains the UI font.
+
+    pub(super) fn font(ui: &egui::Ui, size: f32) -> egui::FontId {
+        let mut font = ui
+            .style()
+            .override_font_id
+            .clone()
+            .unwrap_or_else(|| egui::TextStyle::Body.resolve(ui.style()));
+        font.size = size;
+        font
+    }
+
+    /// Keep settings geometry while sharing the application's palette.
     pub(super) fn apply_controls(ui: &mut egui::Ui) {
         let field = Self::field_bg(ui);
         let hover = Self::control_bg(ui);
         let border = Self::card_border(ui);
-        let text = crate::app::theme::text_primary(ui);
-        let (selected, accent) = if ui.visuals().dark_mode {
-            (
-                egui::Color32::from_rgb(41, 63, 54),
-                egui::Color32::from_rgb(168, 214, 194),
-            )
-        } else {
-            (
-                egui::Color32::from_rgb(217, 237, 226),
-                egui::Color32::from_rgb(37, 91, 67),
-            )
-        };
+        let text = theme::text_primary(ui);
+        let selected = theme::tab_selected_bg(ui);
+        let accent = Self::accent(ui);
         let style = ui.style_mut();
         style.spacing.interact_size.y = Self::CONTROLS.height;
         style.spacing.button_padding = egui::vec2(10.0, 7.0);
         style.visuals.extreme_bg_color = field;
+        style.visuals.widgets.noninteractive.fg_stroke.color = text;
         style.visuals.selection.bg_fill = selected;
         style.visuals.selection.stroke = egui::Stroke::new(1.0, accent);
         for widget in [
@@ -81,11 +85,7 @@ impl SettingsUi {
     }
     /// Scoped to sliders so their rail and handle don't inherit dark field fills.
     pub(super) fn apply_slider_style(ui: &mut egui::Ui) {
-        let rail = if ui.visuals().dark_mode {
-            egui::Color32::from_rgb(110, 128, 137)
-        } else {
-            egui::Color32::from_rgb(105, 122, 132)
-        };
+        let rail = theme::text_muted(ui);
         let accent = ui.visuals().selection.stroke.color;
         let style = ui.style_mut();
         style.spacing.slider_rail_height = 6.0;
@@ -96,32 +96,16 @@ impl SettingsUi {
     }
 
     pub(super) fn field_bg(ui: &egui::Ui) -> egui::Color32 {
-        if ui.visuals().dark_mode {
-            egui::Color32::from_rgb(23, 27, 30)
-        } else {
-            egui::Color32::from_rgb(241, 244, 246)
-        }
+        theme::action_bg(ui)
     }
     pub(super) fn card_bg(ui: &egui::Ui) -> egui::Color32 {
-        if ui.visuals().dark_mode {
-            egui::Color32::from_rgb(25, 29, 32)
-        } else {
-            egui::Color32::from_rgb(250, 251, 252)
-        }
+        ui.visuals().window_fill()
     }
     pub(super) fn card_border(ui: &egui::Ui) -> egui::Color32 {
-        if ui.visuals().dark_mode {
-            egui::Color32::from_rgb(50, 58, 64)
-        } else {
-            egui::Color32::from_rgb(204, 213, 226)
-        }
+        theme::border(ui)
     }
     pub(super) fn control_bg(ui: &egui::Ui) -> egui::Color32 {
-        if ui.visuals().dark_mode {
-            egui::Color32::from_rgb(41, 48, 54)
-        } else {
-            egui::Color32::from_rgb(230, 236, 240)
-        }
+        theme::action_hover_bg(ui)
     }
     pub(super) fn icon_color(ui: &egui::Ui) -> egui::Color32 {
         crate::app::theme::text_muted(ui)
@@ -135,8 +119,8 @@ impl SettingsUi {
         };
         colors.map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
     }
-    pub(super) fn accent() -> egui::Color32 {
-        egui::Color32::from_rgb(111, 177, 149)
+    pub(super) fn accent(ui: &egui::Ui) -> egui::Color32 {
+        theme::tab_selected_accent(ui)
     }
     pub(super) fn card_frame(ui: &egui::Ui) -> egui::Frame {
         egui::Frame::new()
@@ -149,5 +133,52 @@ impl SettingsUi {
                 top: 10,
                 bottom: 12,
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_inherit_ui_fonts_and_share_the_app_palette_in_both_themes() {
+        for dark in [true, false] {
+            let ctx = egui::Context::default();
+            ctx.set_visuals(if dark {
+                egui::Visuals::dark()
+            } else {
+                egui::Visuals::light()
+            });
+            let font = egui::FontId::monospace(17.0);
+            ctx.global_style_mut(|style| style.override_font_id = Some(font.clone()));
+            let original = ctx.global_style();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let background = ui.visuals().window_fill();
+                SettingsUi::apply_typography(ui);
+                SettingsUi::apply_controls(ui);
+                assert_eq!(ui.style().override_font_id.as_ref(), Some(&font));
+                assert_eq!(egui::TextStyle::Body.resolve(ui.style()), font);
+                assert_eq!(SettingsUi::font(ui, 12.5).family, font.family);
+                assert_eq!(SettingsUi::card_frame(ui).fill, background);
+                assert_eq!(SettingsUi::field_bg(ui), theme::action_bg(ui));
+                assert_eq!(SettingsUi::control_bg(ui), theme::action_hover_bg(ui));
+                assert_eq!(SettingsUi::card_border(ui), theme::border(ui));
+                assert_eq!(ui.visuals().text_color(), theme::text_primary(ui));
+                assert_eq!(
+                    ui.visuals().widgets.inactive.fg_stroke.color,
+                    theme::text_primary(ui)
+                );
+                assert_eq!(
+                    ui.visuals().selection.stroke.color,
+                    theme::tab_selected_accent(ui)
+                );
+            });
+            output.textures_delta.clear();
+            assert_eq!(
+                ctx.global_style(),
+                original,
+                "Settings styling must remain scoped"
+            );
+        }
     }
 }

@@ -183,7 +183,7 @@ fn pie(ui: &mut egui::Ui, key: &str, parts: &[Part], diameter: f32) {
             center,
             egui::Align2::CENTER_CENTER,
             "No data",
-            egui::FontId::proportional(SettingsUi::TYPOGRAPHY.description),
+            SettingsUi::font(ui, SettingsUi::TYPOGRAPHY.description),
             super::text_muted(ui),
         );
         response.on_hover_text(label);

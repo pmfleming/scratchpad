@@ -1,4 +1,4 @@
-use super::{egui, format_bytes, text_muted, text_primary, widget_ids};
+use super::{SettingsUi, egui, format_bytes, text_muted, text_primary, widget_ids};
 use crate::app::ui::settings::widgets::record_settings_control_box;
 use std::sync::Arc;
 
@@ -17,18 +17,14 @@ pub(super) fn usage_row_with_marker(
 ) {
     let value = format_bytes(bytes);
     let value_galley = ui.fonts_mut(|fonts| {
-        fonts.layout_no_wrap(
-            value.clone(),
-            egui::FontId::proportional(13.0),
-            text_primary(ui),
-        )
+        fonts.layout_no_wrap(value.clone(), SettingsUi::font(ui, 13.0), text_primary(ui))
     });
     let marker_width = if marker.is_some() { 19.0 } else { 0.0 };
     let label_width = (ui.available_width() - marker_width - value_galley.size().x - 12.0).max(0.0);
     let label_galley = ui.fonts_mut(|fonts| {
         fonts.layout(
             label.to_owned(),
-            egui::FontId::proportional(12.5),
+            SettingsUi::font(ui, 12.5),
             text_muted(ui),
             label_width,
         )

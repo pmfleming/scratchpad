@@ -61,13 +61,13 @@ pub(super) fn category(
                 egui_phosphor::regular::CARET_RIGHT
             },
             egui_phosphor::font_id(16.0),
-            SettingsUi::accent(),
+            SettingsUi::accent(ui),
         );
         ui.painter().text(
             rect.left_center() + egui::vec2(28.0, 0.0),
             egui::Align2::LEFT_CENTER,
             title,
-            egui::FontId::proportional(20.0),
+            SettingsUi::font(ui, 20.0),
             text_primary(ui),
         );
         if rect.width() > 560.0 {
@@ -75,7 +75,7 @@ pub(super) fn category(
                 rect.right_center(),
                 egui::Align2::RIGHT_CENTER,
                 subtitle,
-                egui::FontId::proportional(12.5),
+                SettingsUi::font(ui, 12.5),
                 text_muted(ui),
             );
         }
@@ -131,7 +131,7 @@ fn inner_select_row_with_height(
             label,
             0.0,
             egui::TextFormat {
-                font_id: egui::FontId::proportional(15.0),
+                font_id: egui::TextStyle::Body.resolve(ui.style()),
                 color: text_primary(ui),
                 ..Default::default()
             },
@@ -141,7 +141,7 @@ fn inner_select_row_with_height(
                 &format!("\n{description}"),
                 0.0,
                 egui::TextFormat {
-                    font_id: egui::FontId::proportional(12.5),
+                    font_id: SettingsUi::font(ui, 12.5),
                     color: text_muted(ui),
                     ..Default::default()
                 },
@@ -254,11 +254,7 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
             0.0
         } else {
             ui.fonts_mut(|fonts| {
-                fonts.layout_no_wrap(
-                    unit.to_owned(),
-                    egui::FontId::proportional(12.5),
-                    text_muted(ui),
-                )
+                fonts.layout_no_wrap(unit.to_owned(), SettingsUi::font(ui, 12.5), text_muted(ui))
             })
             .size()
             .x + ui.spacing().item_spacing.x
@@ -387,7 +383,7 @@ pub(super) fn numeric_slider(
                 unit_rect.left_center(),
                 egui::Align2::LEFT_CENTER,
                 unit,
-                egui::FontId::proportional(12.5),
+                SettingsUi::font(ui, 12.5),
                 text_muted(ui),
             );
         });

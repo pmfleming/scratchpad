@@ -1,5 +1,5 @@
 use super::{
-    ScratchpadApp, TabListPosition, egui,
+    ScratchpadApp, SettingsUi, TabListPosition, egui,
     widgets::{dropdown, group_heading, inner_select_row, toggle_select_row},
 };
 use crate::app::{
@@ -152,7 +152,7 @@ fn tab_position_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                         response.rect.center_bottom() - egui::vec2(0.0, 5.0),
                         egui::Align2::CENTER_BOTTOM,
                         position.label(),
-                        egui::FontId::proportional(12.0),
+                        SettingsUi::font(ui, 12.0),
                         super::text_primary(ui),
                     );
                     if response.clicked() {

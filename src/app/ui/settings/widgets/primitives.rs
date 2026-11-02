@@ -37,7 +37,7 @@ pub(super) fn toggle_switch(
     let rect = egui::Rect::from_center_size(response.rect.center(), egui::vec2(42.0, 22.0));
     let radius = rect.height() * 0.5;
     let track_fill = if *value {
-        SettingsUi::accent()
+        SettingsUi::accent(ui)
     } else {
         SettingsUi::control_bg(ui)
     };

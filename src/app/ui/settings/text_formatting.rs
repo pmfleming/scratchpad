@@ -116,7 +116,7 @@ fn font_size_slider(ui: &mut egui::Ui, size: &mut f32) -> bool {
         fonts
             .layout_no_wrap(
                 "pt".into(),
-                egui::FontId::proportional(12.5),
+                SettingsUi::font(ui, 12.5),
                 super::text_muted(ui),
             )
             .size()
