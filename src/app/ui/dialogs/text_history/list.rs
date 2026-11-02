@@ -75,7 +75,7 @@ pub(super) fn render(
                         continue;
                     };
                     let k = positions[&(row.buffer_id, row.entry_id)];
-                    let name = file.states.entries.first().map(|e| short_name(&e.label));
+                    let name = catalog.get(&row.buffer_id).map(|f| f.label.as_str());
                     focus_requested |=
                         file.render_state(ui, k, Some(&row), name, previous_hover, action);
                 }
