@@ -262,9 +262,14 @@ fn restore_text_history_selection(
         .get(tab_index)
         .and_then(|tab| {
             tab.layout
-                .views
-                .iter()
-                .find(|view| view.buffer_id == buffer_id)
+                .active_view()
+                .filter(|view| view.buffer_id == buffer_id)
+                .or_else(|| {
+                    tab.layout
+                        .views
+                        .iter()
+                        .find(|view| view.buffer_id == buffer_id)
+                })
                 .map(|view| view.id)
         })
     else {
@@ -438,19 +443,19 @@ mod tests {
         let original_view = tab.layout.view(original_view_id).expect("original view");
         let split_view = tab.layout.view(split_view_id).expect("split view");
         assert_eq!(app.tab_manager.active_tab_index, target_tab_index);
-        assert_eq!(tab.layout.active_view_id, original_view_id);
-        assert_eq!(original_view.cursor_range, Some(previous_selection));
-        assert_eq!(original_view.pending_cursor_range, Some(previous_selection));
+        assert_eq!(tab.layout.active_view_id, split_view_id);
+        assert_eq!(split_view.cursor_range, Some(previous_selection));
+        assert_eq!(split_view.pending_cursor_range, Some(previous_selection));
         assert_eq!(
-            original_view.cursor_reveal_mode(),
+            split_view.cursor_reveal_mode(),
             Some(crate::app::domain::CursorRevealMode::Center)
         );
         assert_eq!(
-            split_view.cursor_range,
-            Some(CursorRange::one(CharCursor::new(2)))
+            original_view.cursor_range,
+            Some(CursorRange::one(CharCursor::new(1)))
         );
-        assert_eq!(split_view.pending_cursor_range, None);
-        assert_eq!(split_view.cursor_reveal_mode(), None);
+        assert_eq!(original_view.pending_cursor_range, None);
+        assert_eq!(original_view.cursor_reveal_mode(), None);
     }
 
     fn test_app_with_tabs<const N: usize>(names: [&str; N]) -> ScratchpadApp {
