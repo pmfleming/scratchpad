@@ -9,16 +9,16 @@ use eframe::egui;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 
-// Compatibility oracle captured from the pre-refactor keymap. Columns are the
+// Compatibility oracle for the current default keymap. Columns are the
 // persisted key, Windows/Linux default, and Hyprland default ("=" means shared).
 const DEFAULTS: &str = "open_user_manual f1 =
 open_search ctrl+f =
-open_replace ctrl+h =
+open_replace ctrl+shift+f =
 open_settings ctrl+comma =
 close_settings escape =
 close_search escape =
 rename_tab f2 =
-open_text_history ctrl+shift+h =
+open_text_history ctrl+h =
 open_encoding_dialog ctrl+shift+e =
 open_status_history ctrl+shift+m =
 copy_active_path ctrl+shift+c =
@@ -188,7 +188,7 @@ fn shortcut_consumption_leaves_nonmatches_and_consumes_matches_once() {
     let mut output = ctx.run_ui(
         egui::RawInput {
             events: vec![egui::Event::Key {
-                key: Key::H,
+                key: Key::F,
                 physical_key: None,
                 pressed: true,
                 repeat: false,
@@ -202,19 +202,19 @@ fn shortcut_consumption_leaves_nonmatches_and_consumes_matches_once() {
                 ctx,
                 PlatformProfile::Windows,
                 &settings,
-                ShortcutAction::OpenReplace
+                ShortcutAction::OpenSearch
             ));
             assert!(consume_shortcut(
                 ctx,
                 PlatformProfile::Windows,
                 &settings,
-                ShortcutAction::OpenTextHistory
+                ShortcutAction::OpenReplace
             ));
             assert!(!consume_shortcut(
                 ctx,
                 PlatformProfile::Windows,
                 &settings,
-                ShortcutAction::OpenTextHistory
+                ShortcutAction::OpenReplace
             ));
         },
     );

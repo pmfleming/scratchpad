@@ -164,7 +164,7 @@ without retrying automatic last-tab shutdown every frame.
 position through the active file's retained edits. It stays visible until you
 resume editing or press Escape. Switch freely between the shortcuts and dragging
 the timeline to update the file live, with a subtle highlight on each change;
-Left/Right and Home/End work while its track has focus. **History…** (`Ctrl+Shift+H`) shows the current file, all files,
+Left/Right and Home/End work while its track has focus. **History…** (`Ctrl+H`) shows the current file, all files,
 or a chosen file. Click a row to restore the state **after** that change; Up/Down
 follow the on-screen order only while the list has focus. A subtle tint marks the
 affected line; neither tool saves files. Diamonds mark reachable snapshots;

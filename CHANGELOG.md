@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Kept `Ctrl+F` for Find, moved Replace to `Ctrl+Shift+F`, and assigned `Ctrl+H` to History.
+
 - Removed the transient “Loading snapshots…” message from history surfaces.
 
 - Removed the scrubber's close button; Escape and resumed editing dismiss it.

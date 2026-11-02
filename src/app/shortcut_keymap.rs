@@ -224,7 +224,7 @@ const OPEN_USER_MANUAL: ShortcutDefinition = ShortcutDefinition::new(
 const OPEN_SEARCH: ShortcutDefinition =
     ShortcutDefinition::new("open_search", &[KeyBinding::new(Modifiers::CTRL, Key::F)]);
 const OPEN_REPLACE: ShortcutDefinition =
-    ShortcutDefinition::new("open_replace", &[KeyBinding::new(Modifiers::CTRL, Key::H)]);
+    ShortcutDefinition::new("open_replace", &[KeyBinding::new(CTRL_SHIFT, Key::F)]);
 const OPEN_SETTINGS: ShortcutDefinition = ShortcutDefinition::new(
     "open_settings",
     &[KeyBinding::new(Modifiers::CTRL, Key::Comma)],
@@ -239,8 +239,10 @@ const CLOSE_SEARCH: ShortcutDefinition = ShortcutDefinition::new(
 );
 const RENAME_TAB: ShortcutDefinition =
     ShortcutDefinition::new("rename_tab", &[KeyBinding::new(Modifiers::NONE, Key::F2)]);
-const OPEN_TEXT_HISTORY: ShortcutDefinition =
-    ShortcutDefinition::new("open_text_history", &[KeyBinding::new(CTRL_SHIFT, Key::H)]);
+const OPEN_TEXT_HISTORY: ShortcutDefinition = ShortcutDefinition::new(
+    "open_text_history",
+    &[KeyBinding::new(Modifiers::CTRL, Key::H)],
+);
 const OPEN_ENCODING_DIALOG: ShortcutDefinition = ShortcutDefinition::new(
     "open_encoding_dialog",
     &[KeyBinding::new(CTRL_SHIFT, Key::E)],
@@ -400,7 +402,7 @@ fn consume_binding(ctx: &egui::Context, binding: KeyBinding) -> bool {
 }
 
 /// Match exact modifiers, except plus/equals where producing the character can
-/// require Shift. This keeps Ctrl+Shift+H distinct from Ctrl+H.
+/// require Shift. This keeps Ctrl+Shift+F distinct from Ctrl+F.
 #[must_use]
 pub(crate) fn key_event_matches_binding(pressed: Modifiers, binding: KeyBinding) -> bool {
     if matches!(binding.key, Key::Plus | Key::Equals) {
