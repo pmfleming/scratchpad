@@ -3,7 +3,7 @@ use crate::app::domain::{BufferId, BufferState, PieceSource};
 
 #[derive(Default)]
 pub(crate) struct TextHistoryCache {
-    pub(crate) revisions: Vec<(BufferId, u64)>,
+    pub(crate) revisions: Vec<(BufferId, u64, String)>,
     pub(crate) entries: Vec<TextHistoryEntryView>,
 }
 
@@ -23,16 +23,20 @@ pub(crate) struct TextHistoryEntryView {
 }
 
 pub(crate) fn entries_for_buffer(buffer: &BufferState) -> Vec<TextHistoryEntryView> {
-    let label = buffer
-        .path
-        .as_ref()
-        .map_or_else(|| buffer.name.clone(), |path| path.display().to_string());
+    let label = buffer_label(buffer);
     buffer
         .document()
         .history_entries()
         .iter()
         .map(|entry| entry_view(buffer.id, &label, buffer, entry))
         .collect()
+}
+
+pub(crate) fn buffer_label(buffer: &BufferState) -> String {
+    buffer
+        .path
+        .as_ref()
+        .map_or_else(|| buffer.name.clone(), |path| path.display().to_string())
 }
 
 fn entry_view(

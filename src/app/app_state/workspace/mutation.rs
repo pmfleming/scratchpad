@@ -28,14 +28,19 @@ pub(crate) fn cached_text_history_entries(app: &mut ScratchpadApp) -> Vec<TextHi
     app.state.text_history_cache.entries.clone()
 }
 
-fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, u64)> {
+fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, u64, String)> {
     app.tab_manager
         .tabs
         .as_slice()
         .iter()
         .flat_map(|tab| {
-            tab.buffers()
-                .map(|buffer| (buffer.id, buffer.document().history_revision_counter()))
+            tab.buffers().map(|buffer| {
+                (
+                    buffer.id,
+                    buffer.document().history_revision_counter(),
+                    crate::app::text_history::buffer_label(buffer),
+                )
+            })
         })
         .collect()
 }
@@ -307,6 +312,37 @@ mod tests {
     use crate::app::text_history::TextHistoryEntryView;
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
     use crate::app::{domain::TabManager, startup::StartupOptions};
+
+    #[test]
+    fn cached_history_labels_follow_rename_and_save_as_without_edits() {
+        let mut app = test_app_with_tabs(["before.txt"]);
+        app.tab_manager.tabs.as_mut_slice()[0]
+            .active_buffer_mut()
+            .replace_char_ranges_with_undo(
+                &[(0..0, "hello".into())],
+                CursorRange::default(),
+                CursorRange::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            super::cached_text_history_entries(&mut app)[0].label,
+            "before.txt"
+        );
+        app.tab_manager.tabs.as_mut_slice()[0]
+            .active_buffer_mut()
+            .name = "renamed.txt".into();
+        assert_eq!(
+            super::cached_text_history_entries(&mut app)[0].label,
+            "renamed.txt"
+        );
+        app.tab_manager.tabs.as_mut_slice()[0]
+            .active_buffer_mut()
+            .path = Some(std::path::PathBuf::from("saved.txt"));
+        assert_eq!(
+            super::cached_text_history_entries(&mut app)[0].label,
+            "saved.txt"
+        );
+    }
 
     #[test]
     fn text_history_sort_uses_global_sequence_before_entry_id() {

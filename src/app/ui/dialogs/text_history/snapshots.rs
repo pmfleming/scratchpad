@@ -170,7 +170,13 @@ pub(super) fn state_entries(
     {
         if let Some(visit) = browse(ctx, buffer) {
             entries.retain(|entry| entry.buffer_id != buffer.id);
-            entries.extend(entries_for_buffer(&visit.source.buffer));
+            let label = crate::app::text_history::buffer_label(buffer);
+            entries.extend(entries_for_buffer(&visit.source.buffer).into_iter().map(
+                |mut entry| {
+                    entry.label.clone_from(&label);
+                    entry
+                },
+            ));
         }
     }
     entries
