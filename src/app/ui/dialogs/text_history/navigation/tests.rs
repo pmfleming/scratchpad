@@ -35,6 +35,7 @@ fn jump(ctx: &egui::Context, app: &mut ScratchpadApp, id: u64, k: usize) -> bool
 }
 fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
     Harness::builder()
+        .allow_missing_glyphs()
         .with_size(egui::vec2(1200.0, 850.0))
         .with_context_setup(|ctx| {
             apply_editor_fonts(
@@ -366,6 +367,48 @@ fn scrubber_steps_only_active_file_and_closes_independently() {
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
     assert!(!h.state().state.dialogs.history_scrubber.is_open());
+}
+
+#[test]
+fn history_escape_yields_to_search_rename_and_settings() {
+    use crate::app::app_state::{settings_state, workspace::accessors};
+    for owner in ["search", "rename", "settings"] {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = app_with_history(root.path());
+        app.state.app_settings.platform.profile = crate::app::platform::PlatformProfile::Hyprland;
+        let mut h = harness(app);
+        h.run_steps(3);
+        let app = h.state_mut();
+        match owner {
+            "search" => crate::app::commands::handle_command(
+                app,
+                crate::app::commands::AppCommand::Search(crate::app::commands::SearchCommand::Open),
+            ),
+            "rename" => {
+                accessors::begin_tab_rename(app, 0);
+                false
+            }
+            _ => crate::app::commands::handle_command(
+                app,
+                crate::app::commands::AppCommand::Settings(
+                    crate::app::commands::SettingsCommand::OpenSettings,
+                ),
+            ),
+        };
+        app.state.dialogs.text_history.open();
+        h.run_steps(3);
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        assert!(
+            h.state().state.dialogs.text_history.is_open(),
+            "{owner} should own Escape"
+        );
+        match owner {
+            "search" => assert!(!h.state().state.search_state.open()),
+            "rename" => assert!(!accessors::tab_rename_matches_slot(h.state(), 0)),
+            _ => assert!(!settings_state::showing_settings(h.state())),
+        }
+    }
 }
 
 #[test]

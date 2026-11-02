@@ -7,4 +7,6 @@ mod text_history;
 pub(crate) use encoding::show_encoding_window;
 pub(crate) use pending::show_pending_action_modal;
 pub(crate) use status_history::show_status_history_window;
-pub(crate) use text_history::{handle_text_history_navigation, show_text_history_window};
+pub(crate) use text_history::{
+    dismiss_text_history, handle_text_history_navigation, show_text_history_window,
+};

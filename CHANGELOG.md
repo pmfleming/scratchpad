@@ -29,6 +29,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Let search, tab renaming, settings, and popups handle Escape before dismissing an unfocused History panel.
 - Preserved Return to latest when clearing history while viewing a saved branch with its own undo history.
 - Kept reload and preview revision guards stable across view-only anchor updates while rejecting independently replaced documents.
 - Kept history-preview replay tied to the original document identity, and preserved the selected view when restoring text with follow-focus disabled.

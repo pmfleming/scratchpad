@@ -131,6 +131,7 @@ pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egu
     record_frame_phase(FramePhase::Dialogs, dialogs_started_at.elapsed());
     let shortcuts_started_at = Instant::now();
     shortcuts::handle_shortcuts(app, ctx);
+    dialogs::dismiss_text_history(ctx, app);
     record_frame_phase(FramePhase::Shortcuts, shortcuts_started_at.elapsed());
     let finish_started_at = Instant::now();
     finish_frame_transitions(app, ctx);

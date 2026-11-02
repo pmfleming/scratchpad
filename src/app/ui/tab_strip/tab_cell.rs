@@ -165,7 +165,8 @@ fn render_tab_rename_cell(
         response.scroll_to_me(Some(egui::Align::Center));
     }
 
-    let pressed_escape = response.has_focus()
+    // TextEdit can surrender focus on Escape before returning its response.
+    let pressed_escape = (response.has_focus() || response.lost_focus())
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     let pressed_enter = response.has_focus()
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));

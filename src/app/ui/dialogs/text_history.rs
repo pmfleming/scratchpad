@@ -75,6 +75,8 @@ fn scope_buffer(scope: HistoryTab, app: &ScratchpadApp) -> Option<u64> {
 /// Only the focused rail or scrubber owns navigation; opening a callout never
 /// steals plain arrow keys from the editor.
 pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    let popup_open = egui::Popup::is_any_open(ctx);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("history.escape.popup"), popup_open));
     if app.state.dialogs.any_modal_open()
         || crate::app::app_state::workspace::accessors::pending_action(app).is_some()
     {
@@ -84,13 +86,11 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
         app.state.dialogs.text_history.is_open() && ctx.memory(|m| m.has_focus(list::focus_id()));
     let scrub = app.state.dialogs.history_scrubber.is_open()
         && ctx.memory(|m| m.has_focus(scrubber::focus_id()));
-    let dismiss_history = dismissible_history(app) && app.state.dialogs.text_history.is_open();
     // Give an open menu the first Escape, even when the timeline retains focus.
     if egui::Popup::is_any_open(ctx) {
         return;
     }
-    if (rail || scrub || dismiss_history)
-        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    if (rail || scrub) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         if scrub {
             app.state.dialogs.history_scrubber.close();
@@ -150,6 +150,24 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
     }
     if let Some(position) = destination {
         snapshots::go_to_state(ctx, app, id, states.after(position));
+    }
+}
+
+/// The unfocused panel only dismisses after widgets and application shortcuts
+/// have had an opportunity to consume Escape.
+pub(crate) fn dismiss_text_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    if dismissible_history(app)
+        && app.state.dialogs.text_history.is_open()
+        && !app.state.dialogs.any_modal_open()
+        && crate::app::app_state::workspace::accessors::pending_action(app).is_none()
+        && !egui::Popup::is_any_open(ctx)
+        && !ctx.data(|d| {
+            d.get_temp::<bool>(egui::Id::unique("history.escape.popup"))
+                .unwrap_or(false)
+        })
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        app.state.dialogs.text_history.close();
     }
 }
 
