@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Removed the History list's inner focus border so the list stays visually integrated with the main panel.
+
 - Shade every History row between the starting document state and the current preview, with distinct endpoint markers.
 
 - Highlight specific matching settings once a search has at least two meaningful characters and matches fewer than half the settings; support setting labels and aliases, including hidden tab-delay controls.

@@ -127,12 +127,6 @@ fn focus_rail(ui: &mut egui::Ui, rect: egui::Rect, focus_requested: bool) {
     }
     if response.has_focus() {
         super::lock_navigation_focus(ui.ctx(), focus_id());
-        ui.painter().rect_stroke(
-            rect,
-            0,
-            egui::Stroke::new(1.0, theme::tab_selected_accent(ui)),
-            egui::StrokeKind::Inside,
-        );
     }
 }
 
