@@ -158,61 +158,47 @@ pub fn apply_text_history_to_entry(
     entry_id: u64,
     follow_focus: bool,
 ) -> bool {
-    let Some(target) = text_history_entries(app)
-        .into_iter()
-        .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
-    else {
-        app.state.status.set_error_status_in_domain(
-            StatusDomain::History,
-            "Text history entry is no longer available.",
-        );
-        return false;
-    };
-    let undo = !target.undone;
-    apply_text_history_entry_with_focus(app, buffer_id, entry_id, undo, follow_focus)
-}
-
-fn apply_text_history_entry_with_focus(
-    app: &mut ScratchpadApp,
-    buffer_id: BufferId,
-    entry_id: u64,
-    undo: bool,
-    follow_focus: bool,
-) -> bool {
-    let Some(action) = text_history_entries(app)
-        .into_iter()
-        .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
-    else {
-        app.state.status.set_error_status_in_domain(
-            StatusDomain::History,
-            "Text history entry is no longer available.",
-        );
-        return false;
-    };
-    if undo && action.undone || !undo && !action.undone || !action.replayable {
-        app.state.status.set_error_status_in_domain(
-            StatusDomain::History,
-            "Text history entry is not replayable in that direction.",
-        );
-        return false;
-    }
-    let Some(tab_index) = tab_index_for_buffer(app, action.buffer_id) else {
+    let Some(tab_index) = tab_index_for_buffer(app, buffer_id) else {
         app.state.status.set_error_status_in_domain(
             StatusDomain::History,
             "Text history entry belongs to a closed file.",
         );
         return false;
     };
+    let target = app.tab_manager.tabs.as_slice()[tab_index]
+        .buffer_by_id(buffer_id)
+        .and_then(|buffer| {
+            buffer
+                .document()
+                .history_entries()
+                .iter()
+                .find(|entry| entry.id == entry_id)
+        })
+        .map(|entry| (!entry.is_undone(), entry.flags.replayable));
+    let Some((undo, replayable)) = target else {
+        app.state.status.set_error_status_in_domain(
+            StatusDomain::History,
+            "Text history entry is no longer available.",
+        );
+        return false;
+    };
+    if !replayable {
+        app.state.status.set_error_status_in_domain(
+            StatusDomain::History,
+            "Text history entry is not replayable in that direction.",
+        );
+        return false;
+    }
 
     let (selection, text_metadata_refresh) = {
         let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
-        let Some(buffer) = tab.buffer_by_id_mut(action.buffer_id) else {
+        let Some(buffer) = tab.buffer_by_id_mut(buffer_id) else {
             return false;
         };
         let result = if undo {
-            buffer.apply_text_history_undo(action.id)
+            buffer.apply_text_history_undo(entry_id)
         } else {
-            buffer.apply_text_history_redo(action.id)
+            buffer.apply_text_history_redo(entry_id)
         };
         if let Ok(selection) = result {
             buffer.mark_dirty_after_local_edit();
@@ -239,7 +225,7 @@ fn apply_text_history_entry_with_focus(
     }
 
     if follow_focus {
-        restore_text_history_selection(app, tab_index, action.buffer_id, selection);
+        restore_text_history_selection(app, tab_index, buffer_id, selection);
     }
     crate::app::app_state::search_runtime::mark_search_dirty(app);
     app.tab_manager.mark_session_dirty();

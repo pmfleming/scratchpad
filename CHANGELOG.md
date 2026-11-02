@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Replayed history entries directly in their owning file instead of rebuilding the workspace history twice per scrubber step.
+
 - Bounded history previews and shared cached entries across panel, scrubber, and keyboard rendering instead of cloning full edit text.
 
 - Made History resizable with square corners and the workspace background; Linux and Hyprland dismiss it with Escape or an outside click instead of a close button.
