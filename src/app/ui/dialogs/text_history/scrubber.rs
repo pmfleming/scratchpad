@@ -1,4 +1,5 @@
 //! Active-buffer-only, live history navigation.
+mod input;
 use super::{
     active_buffer, control_icon_button,
     model::{HistoryAction, row_from_entry},
@@ -13,6 +14,8 @@ use crate::app::{
 };
 use eframe::egui;
 use egui_phosphor::regular::{CARET_LEFT, CARET_RIGHT};
+pub(crate) use input::note_editor_history_activity;
+pub(super) use input::{close, resume_editor_input};
 
 const SCRUBBER_SCALE: f32 = 1.5;
 const SCRUBBER_WIDTH: f32 = 360.0 * SCRUBBER_SCALE;
@@ -81,6 +84,7 @@ impl Track<'_> {
 }
 
 pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    input::sync_editor_activity(ctx, app);
     if !app.state.dialogs.history_scrubber.is_open() {
         ctx.data_mut(|d| d.remove::<Drag>(drag_id()));
         return;
@@ -89,15 +93,9 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
         return;
     };
     let screen = ctx.content_rect();
-    let anchor = ctx
-        .data(|d| d.get_temp::<egui::Rect>(egui::Id::unique("history.scrubber.anchor")))
-        .unwrap_or(egui::Rect::from_min_size(
-            screen.right_bottom(),
-            egui::Vec2::ZERO,
-        ));
     let position = egui::pos2(
-        (anchor.right() - SCRUBBER_WIDTH).max(screen.left()),
-        (anchor.top() - SCRUBBER_DEFAULT_HEIGHT).max(screen.top()),
+        (screen.right() - SCRUBBER_WIDTH - 24.0).max(screen.left()),
+        (screen.bottom() - SCRUBBER_DEFAULT_HEIGHT - 24.0).max(screen.top()),
     );
     let mut action = None;
     let mut close = false;
@@ -114,7 +112,7 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
         },
     );
     if close {
-        app.state.dialogs.history_scrubber.close();
+        input::close(ctx, app);
     }
     if let Some(HistoryAction::State { buffer_id, after }) = action {
         let applied = snapshots::go_to_state(ctx, app, buffer_id, after);

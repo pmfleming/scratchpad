@@ -8,7 +8,7 @@ mod persistence;
 mod scrubber;
 mod snapshots;
 mod states;
-pub(crate) use scrubber::history_scrubbing;
+pub(crate) use scrubber::{history_scrubbing, note_editor_history_activity};
 
 use self::model::HistoryAction;
 use self::persistence::{read_active_tab, read_follow_focus, write_active_tab, write_follow_focus};
@@ -128,10 +128,13 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
     if (rail || scrub) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         if scrub {
-            app.state.dialogs.history_scrubber.close();
+            scrubber::close(ctx, app);
         } else {
             app.state.dialogs.text_history.close();
         }
+        return;
+    }
+    if scrub && scrubber::resume_editor_input(ctx, app) {
         return;
     }
     if !rail && !scrub {
@@ -188,11 +191,12 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
     }
 }
 
-/// The unfocused panel only dismisses after widgets and application shortcuts
+/// Unfocused history surfaces only dismiss after widgets and application shortcuts
 /// have had an opportunity to consume Escape.
 pub(crate) fn dismiss_text_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    if dismissible_history(app)
-        && app.state.dialogs.text_history.is_open()
+    let scrub = app.state.dialogs.history_scrubber.is_open();
+    let history = dismissible_history(app) && app.state.dialogs.text_history.is_open();
+    if (scrub || history)
         && !app.state.dialogs.any_modal_open()
         && crate::app::app_state::workspace::accessors::pending_action(app).is_none()
         && !egui::Popup::is_any_open(ctx)
@@ -202,7 +206,11 @@ pub(crate) fn dismiss_text_history(ctx: &egui::Context, app: &mut ScratchpadApp)
         })
         && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
-        app.state.dialogs.text_history.close();
+        if scrub {
+            scrubber::close(ctx, app);
+        } else {
+            app.state.dialogs.text_history.close();
+        }
     }
 }
 

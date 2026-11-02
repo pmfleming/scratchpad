@@ -134,9 +134,6 @@ fn configured_utility_keys_reach_their_application_actions() {
         (ShortcutAction::OpenTextHistory, |app| {
             app.state.dialogs.text_history.is_open()
         }),
-        (ShortcutAction::OpenHistoryScrubber, |app| {
-            app.state.dialogs.history_scrubber.is_open()
-        }),
         (ShortcutAction::OpenEncodingDialog, |app| {
             app.state.dialogs.encoding.is_open()
         }),

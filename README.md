@@ -160,9 +160,11 @@ workspace; save new edits to files before closing. A protected/unavailable sessi
 store does not prevent exit. Retryable save errors still keep the window open,
 without retrying automatic last-tab shutdown every frame.
 
-**Scrubber** (`Ctrl+Alt+Z`) steps through the active file's retained edits. Drag to
-update the file live, with a subtle highlight on each change; Left/Right and Home/End work while
-its track has focus. **History…** (`Ctrl+Shift+H`) shows the current file, all files,
+**Scrubber** appears when you undo or redo (`Ctrl+Z` / `Ctrl+Y`) and follows your
+position through the active file's retained edits. It stays visible until you
+resume editing or press Escape. Switch freely between the shortcuts and dragging
+the timeline to update the file live, with a subtle highlight on each change;
+Left/Right and Home/End work while its track has focus. **History…** (`Ctrl+Shift+H`) shows the current file, all files,
 or a chosen file. Click a row to restore the state **after** that change; Up/Down
 follow the on-screen order only while the list has focus. A subtle tint marks the
 affected line; neither tool saves files. Diamonds mark reachable snapshots;

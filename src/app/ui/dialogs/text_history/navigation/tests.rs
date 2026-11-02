@@ -775,3 +775,5 @@ fn clearing_history_respects_scope_and_keeps_the_confirmed_target() {
         assert_eq!(tabs[1].active_buffer().text(), "after");
     }
 }
+
+mod scrubber;

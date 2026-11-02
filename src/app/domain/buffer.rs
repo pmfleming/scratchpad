@@ -36,6 +36,7 @@ pub use piece_tree::{
 };
 pub(crate) use snapshot::SnapshotRevision;
 pub use snapshot::{DocumentChunk, DocumentSnapshot};
+pub(crate) use state::TextHistoryEvent;
 pub use state::{
     BufferFreshness, BufferId, BufferState, BufferViewStatus, DiskFileState, RestoredBufferState,
 };

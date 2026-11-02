@@ -88,6 +88,7 @@ fn handle_keyboard_events_with(
     let mut changed = false;
 
     for event in events {
+        let scrubber_visibility = scrubber_visibility_for_event(&event);
         changed |= handle_relevant_input_event(
             ui,
             event,
@@ -96,9 +97,31 @@ fn handle_keyboard_events_with(
             context,
             &mut handle_movement_event,
         );
+        if let Some(show) = scrubber_visibility {
+            crate::app::ui::dialogs::note_editor_history_activity(ui.ctx(), buffer, show);
+        }
     }
 
     changed
+}
+
+fn scrubber_visibility_for_event(event: &RelevantInputEvent) -> Option<bool> {
+    match event {
+        RelevantInputEvent::Key(key) if history_direction(*key).is_some() => Some(true),
+        RelevantInputEvent::Text(_) | RelevantInputEvent::Paste(_) | RelevantInputEvent::Cut => {
+            Some(false)
+        }
+        RelevantInputEvent::ImePreedit { text, .. } if !text.is_empty() => Some(false),
+        RelevantInputEvent::Key(key)
+            if matches!(
+                key.key,
+                egui::Key::Backspace | egui::Key::Delete | egui::Key::Enter | egui::Key::Tab
+            ) =>
+        {
+            Some(false)
+        }
+        _ => None,
+    }
 }
 
 fn handle_relevant_input_event(
@@ -330,22 +353,27 @@ fn handle_history_key(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
 ) -> Option<bool> {
-    if (key_event.key == egui::Key::Z && is_undo_shortcut(key_event.modifiers))
-        || is_classic_undo_shortcut(key_event)
-    {
-        let selection = buffer.undo_last_text_operation();
-        return Some(apply_history(view, buffer, selection));
-    }
-    if key_event.key == egui::Key::Y && is_redo_shortcut(key_event.modifiers) {
-        let selection = buffer.redo_last_text_operation();
-        return Some(apply_history(view, buffer, selection));
-    }
-
-    None
+    let undo = history_direction(key_event)?;
+    let selection = if undo {
+        buffer.undo_last_text_operation()
+    } else {
+        buffer.redo_last_text_operation()
+    };
+    Some(apply_history(view, buffer, selection))
 }
 
-fn is_undo_shortcut(modifiers: egui::Modifiers) -> bool {
-    modifiers.command && !modifiers.shift
+fn history_direction(key_event: PressedKeyEvent) -> Option<bool> {
+    if is_classic_undo_shortcut(key_event) {
+        return Some(true);
+    }
+    if !key_event.modifiers.command || key_event.modifiers.shift || key_event.modifiers.alt {
+        return None;
+    }
+    match key_event.key {
+        egui::Key::Z => Some(true),
+        egui::Key::Y => Some(false),
+        _ => None,
+    }
 }
 
 fn is_classic_undo_shortcut(key_event: PressedKeyEvent) -> bool {
@@ -375,10 +403,6 @@ fn handle_insert_key(
         return Some(false);
     }
     None
-}
-
-fn is_redo_shortcut(modifiers: egui::Modifiers) -> bool {
-    modifiers.command && !modifiers.shift
 }
 
 fn insert_text(

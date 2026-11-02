@@ -140,7 +140,15 @@ pub(crate) fn record_pending_text_history_event(
         .get_mut(tab_index)
         .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
     {
-        let _ = buffer.take_text_history_event();
+        match buffer.take_text_history_event() {
+            Some(crate::app::domain::buffer::TextHistoryEvent::Replay) => {
+                app.state.dialogs.history_scrubber.open();
+            }
+            Some(crate::app::domain::buffer::TextHistoryEvent::Edit) => {
+                app.state.dialogs.history_scrubber.close();
+            }
+            None => {}
+        }
     }
 }
 

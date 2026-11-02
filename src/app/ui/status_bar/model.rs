@@ -56,7 +56,6 @@ pub(super) enum StatusBarItemKind {
     Zoom,
     ControlChars,
     TextHistory,
-    HistoryScrubber,
     Settings,
     NonCompliant,
 }
@@ -168,10 +167,6 @@ pub(super) fn active_status_items(
         },
         StatusBarItem {
             kind: StatusBarItemKind::ControlChars,
-            width: estimated_icon_item_width(ui),
-        },
-        StatusBarItem {
-            kind: StatusBarItemKind::HistoryScrubber,
             width: estimated_icon_item_width(ui),
         },
         StatusBarItem {

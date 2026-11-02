@@ -18,9 +18,6 @@ const UTILITY_HANDLERS: &[(ShortcutAction, UtilityHandler)] = &[
             AppCommand::Dialog(DialogCommand::OpenTextHistory),
         );
     }),
-    (ShortcutAction::OpenHistoryScrubber, |app, _| {
-        app.state.dialogs.history_scrubber.open();
-    }),
     (ShortcutAction::OpenEncodingDialog, |app, _| {
         crate::app::app_state::frame::open_encoding_dialog(app);
     }),
