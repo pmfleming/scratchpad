@@ -31,7 +31,7 @@ impl TextDocument {
             .take_while(|(a, b)| a == b)
             .count();
         let range = prefix..before_len - suffix;
-        let deleted_text = before.chars().skip(prefix).take(range.len()).collect();
+        let deleted_text: String = before.chars().skip(prefix).take(range.len()).collect();
         let inserted_text: String = after
             .chars()
             .skip(prefix)
@@ -39,8 +39,10 @@ impl TextDocument {
             .collect();
         let deleted_spans = self.byte_spans_for_range(range.clone());
         self.history.latest_update_at = None;
-        self.delete_char_range_direct(range);
-        self.insert_direct_with_source(prefix, &inserted_text, PieceSource::Edit);
+        self.capture_pending_history_generation_before();
+        self.capture_pending_history_checkpoint(deleted_text.len().max(inserted_text.len()));
+        self.delete_char_range_internal(range);
+        self.insert_raw_text_with_source(&inserted_text, prefix, PieceSource::Edit);
         self.push_operation_record(
             TextDocumentOperationRecord {
                 previous_selection,
@@ -65,6 +67,24 @@ impl TextDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_history_restore_checkpoints_the_original_before_deleting_text() {
+        let original = "old\r\n尾";
+        let mut document = TextDocument::new(original.into());
+        let text = "λ".repeat(128 * 1024);
+        let preview = TextDocument::new(text.clone()).snapshot();
+        assert!(document.commit_history_preview(&preview, CursorRange::default()));
+        assert_eq!(document.extract_text(), text);
+        document.undo_last_operation().unwrap();
+        assert_eq!(document.extract_text(), original);
+        document.redo_last_operation().unwrap();
+        assert_eq!(document.extract_text(), text);
+        let mut restored = TextDocument::new(text);
+        restored.restore_exported_history(document.exported_history());
+        restored.undo_last_operation().unwrap();
+        assert_eq!(restored.extract_text(), original);
+    }
 
     #[test]
     fn confirmation_is_one_exact_edit_and_undo_restores_the_original_branch() {
