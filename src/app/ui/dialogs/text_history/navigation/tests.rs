@@ -797,3 +797,4 @@ fn clearing_history_respects_scope_and_keeps_the_confirmed_target() {
 
 mod preview;
 mod scrubber;
+mod shading;

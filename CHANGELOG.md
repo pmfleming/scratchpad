@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Shade every History row between the starting document state and the current preview, with distinct endpoint markers.
+
 - Highlight specific matching settings once a search has at least two meaningful characters and matches fewer than half the settings; support setting labels and aliases, including hidden tab-delay controls.
 
 - Aligned Settings with the shared UI font, background, text, border, and accent colours in both themes.

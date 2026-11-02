@@ -215,25 +215,15 @@ impl<'a> FileStates<'a> {
                 format!("State: {label}"),
             )
         });
-        if current || response.hovered() {
-            ui.painter().rect_filled(
-                rect,
-                0,
-                if current {
-                    theme::tab_selected_bg(ui)
-                } else {
-                    theme::action_bg(ui)
-                },
-            );
-        }
-        if k == states.position && !current && !self.visiting {
-            ui.painter().rect_stroke(
-                rect,
-                0,
-                egui::Stroke::new(1.0, theme::tab_selected_accent(ui)),
-                egui::StrokeKind::Inside,
-            );
-        }
+        let in_range = !visiting
+            && (states.position.min(position)..=states.position.max(position)).contains(&k);
+        paint_state_background(
+            ui,
+            &response,
+            current,
+            in_range,
+            k == states.position && !current && !self.visiting,
+        );
         paint_node(
             ui,
             rect,
@@ -288,6 +278,35 @@ impl<'a> FileStates<'a> {
             });
         }
         response.clicked()
+    }
+}
+
+fn paint_state_background(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    current: bool,
+    in_range: bool,
+    starting: bool,
+) {
+    let fill = if current {
+        Some(theme::tab_selected_bg(ui))
+    } else if in_range {
+        Some(theme::tab_selected_accent(ui).gamma_multiply(0.12))
+    } else if response.hovered() {
+        Some(theme::action_bg(ui))
+    } else {
+        None
+    };
+    if let Some(fill) = fill {
+        ui.painter().rect_filled(response.rect, 0, fill);
+    }
+    if starting {
+        ui.painter().rect_stroke(
+            response.rect,
+            0,
+            egui::Stroke::new(1.0, theme::tab_selected_accent(ui)),
+            egui::StrokeKind::Inside,
+        );
     }
 }
 
