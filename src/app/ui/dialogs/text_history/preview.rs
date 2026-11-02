@@ -8,7 +8,7 @@ use crate::app::{
     },
     domain::{
         BufferState, CursorRange, CursorRevealMode, EditorViewState, ViewId, WorkspaceTab,
-        buffer::DocumentRevision,
+        buffer::HistoryToken,
     },
     text_history::entries_for_buffer,
 };
@@ -28,8 +28,7 @@ enum Target {
 #[derive(Clone)]
 struct Preview {
     buffer_id: u64,
-    revision: DocumentRevision,
-    history_revision: u64,
+    revision: HistoryToken,
     target: Target,
     tab: Arc<Mutex<HistoryPreview>>,
 }
@@ -89,9 +88,7 @@ pub(super) fn rect_key() -> egui::Id {
 
 impl Preview {
     fn valid(&self, buffer: &BufferState) -> bool {
-        self.buffer_id == buffer.id
-            && self.revision == buffer.document().revision_key()
-            && self.history_revision == buffer.document().history_revision_counter()
+        self.buffer_id == buffer.id && self.revision == buffer.document().history_token()
     }
 }
 
@@ -205,8 +202,7 @@ pub(super) fn select(
     }
     let mut preview = existing.unwrap_or_else(|| Preview {
         buffer_id: id,
-        revision: buffer.document().revision_key(),
-        history_revision: buffer.document().history_revision_counter(),
+        revision: buffer.document().history_token(),
         target: Target::State(after),
         tab: Arc::new(Mutex::new(HistoryPreview::new(
             super::snapshots::preview_buffer(ctx, buffer),
@@ -310,7 +306,6 @@ fn commit_snapshot(ctx: &egui::Context, app: &mut ScratchpadApp) {
         if let Some((id, revision, snapshot, format)) = refresh {
             app.queue_background_text_metadata_refresh(id, revision, snapshot, format);
         }
-        app.state.text_history_cache = crate::app::text_history::TextHistoryCache::default();
         app.tab_manager.mark_session_dirty();
         crate::app::app_state::search_runtime::mark_search_dirty(app);
         app.enforce_aggregate_text_history_budget();

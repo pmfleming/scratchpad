@@ -1,7 +1,7 @@
 use super::{Source, source};
 use crate::app::{
     app_state::{ScratchpadApp, StatusDomain, workspace::mutation},
-    domain::{BufferState, TextDocument, buffer::DocumentRevision},
+    domain::{BufferState, TextDocument, buffer::HistoryToken},
     services::session_store::{HistoryCheckpoint, RestoredVersion},
 };
 use eframe::egui;
@@ -15,16 +15,14 @@ pub(super) struct Browse {
     pub source: Source,
     pub version_id: i64,
     pub return_version: i64,
-    revision: DocumentRevision,
-    history_revision: u64,
+    revision: HistoryToken,
 }
 
 #[derive(Clone)]
 struct Pending {
     buffer_id: u64,
     version_id: i64,
-    expected: DocumentRevision,
-    history_revision: u64,
+    expected: HistoryToken,
     source: Source,
     return_version: Option<i64>,
     result: Arc<Mutex<Option<Result<RestoredVersion, String>>>>,
@@ -63,12 +61,12 @@ pub(in super::super) fn clear_history(
             // Clear both documents together: this is not an edit that starts a
             // new branch, so keep the visit's guard aligned with the live history.
             buffer.document_mut().clear_operation_history();
-            visit.revision = buffer.document().revision_key();
-            visit.history_revision = buffer.document().history_revision_counter();
+            visit.revision = buffer.document().history_token();
+
             visit.source.cancelled.store(true, Ordering::Relaxed);
             visit.source.cancelled = Arc::new(AtomicBool::new(false));
-            visit.source.revision = source.document().revision_key();
-            visit.source.history_revision = source.document().history_revision_counter();
+            visit.source.revision = source.document().history_token();
+
             visit.source.buffer = Arc::new(source);
             ctx.data_mut(|data| {
                 data.insert_temp(browse_key(buffer.id), visit);
@@ -81,9 +79,7 @@ pub(in super::super) fn clear_history(
 
 pub(super) fn browse(ctx: &egui::Context, buffer: &BufferState) -> Option<Browse> {
     let mut visit = ctx.data(|data| data.get_temp::<Browse>(browse_key(buffer.id)))?;
-    if visit.revision == buffer.document().revision_key()
-        && visit.history_revision == buffer.document().history_revision_counter()
-    {
+    if visit.revision == buffer.document().history_token() {
         if visit.source.cancelled.load(Ordering::Relaxed) {
             visit.source.cancelled = Arc::new(AtomicBool::new(false));
             ctx.data_mut(|data| data.insert_temp(browse_key(buffer.id), visit.clone()));
@@ -128,8 +124,8 @@ pub(in super::super) fn request(
     let pending = Pending {
         buffer_id: id,
         version_id,
-        expected: buffer.document().revision_key(),
-        history_revision: buffer.document().history_revision_counter(),
+        expected: buffer.document().history_token(),
+
         source: source(ctx, buffer),
         return_version: current.map(|visit| visit.return_version),
         result: Arc::new(Mutex::new(None)),
@@ -196,8 +192,7 @@ pub(in super::super) fn hydrate(ui: &mut egui::Ui, app: &ScratchpadApp) {
                 document.restore_exported_history(restored.history);
                 original.install_history_document(document);
                 Ok(Source {
-                    revision: original.document().revision_key(),
-                    history_revision: original.document().history_revision_counter(),
+                    revision: original.document().history_token(),
                     buffer: Arc::new(original),
                     cancelled: Arc::new(AtomicBool::new(false)),
                 })
@@ -212,8 +207,7 @@ pub(in super::super) fn hydrate(ui: &mut egui::Ui, app: &ScratchpadApp) {
                             source: source.as_ref().clone(),
                             version_id,
                             return_version,
-                            revision: buffer.document().revision_key(),
-                            history_revision: buffer.document().history_revision_counter(),
+                            revision: buffer.document().history_token(),
                         },
                     );
                 });
@@ -247,10 +241,7 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         .as_slice()
         .iter()
         .find_map(|tab| tab.buffer_by_id(pending.buffer_id))
-        .is_some_and(|buffer| {
-            buffer.document().revision_key() == pending.expected
-                && buffer.document().history_revision_counter() == pending.history_revision
-        });
+        .is_some_and(|buffer| buffer.document().history_token() == pending.expected);
     if !unchanged {
         app.state.status.set_warning_status_in_domain(
             StatusDomain::History,
@@ -301,8 +292,7 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                                 return_version: pending
                                     .return_version
                                     .unwrap_or(result.return_version),
-                                revision: buffer.document().revision_key(),
-                                history_revision: buffer.document().history_revision_counter(),
+                                revision: buffer.document().history_token(),
                             },
                         )
                     });

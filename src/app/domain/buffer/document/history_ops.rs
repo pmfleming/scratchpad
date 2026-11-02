@@ -85,7 +85,7 @@ impl TextDocument {
                 self.history.latest_update_at = None;
                 self.history.pending_generation_before = None;
                 self.history.pending_checkpoint_before = None;
-                self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
+                self.advance_history_revision();
                 return Ok(selection);
             }
         }
@@ -107,7 +107,7 @@ impl TextDocument {
             self.history.pending_generation_before = None;
             self.history.pending_checkpoint_before = None;
         }
-        self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
+        self.advance_history_revision();
         applied_selection.ok_or(TextHistoryApplyError::Conflict)
     }
 
@@ -167,7 +167,7 @@ impl TextDocument {
             self.history.latest_update_at = None;
         }
         if self.try_coalesce_history(&record, source) {
-            self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
+            self.advance_history_revision();
             self.history.pending_generation_before = None;
             self.history.pending_checkpoint_before = None;
             return;
@@ -177,7 +177,7 @@ impl TextDocument {
         self.history.byte_usage += entry.byte_cost();
         self.add_history_depth(&entry);
         self.history.entries.push(entry);
-        self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
+        self.advance_history_revision();
         self.enforce_history_budget();
         self.history.pending_generation_before = None;
         self.history.pending_checkpoint_before = None;

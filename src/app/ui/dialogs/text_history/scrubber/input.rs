@@ -1,14 +1,13 @@
 use crate::app::{
     app_state::{ScratchpadApp, workspace::accessors},
-    domain::{BufferState, buffer::DocumentRevision},
+    domain::{BufferState, buffer::HistoryToken},
 };
 use eframe::egui;
 
 #[derive(Clone)]
 struct EditorActivity {
     buffer_id: u64,
-    revision: DocumentRevision,
-    history_revision: u64,
+    revision: HistoryToken,
     show: bool,
 }
 
@@ -20,8 +19,7 @@ fn activity_key() -> egui::Id {
 pub(crate) fn note_editor_history_activity(ctx: &egui::Context, buffer: &BufferState, show: bool) {
     let activity = EditorActivity {
         buffer_id: buffer.id,
-        revision: buffer.document().revision_key(),
-        history_revision: buffer.document().history_revision_counter(),
+        revision: buffer.document().history_token(),
         show,
     };
     ctx.data_mut(|data| data.insert_temp(activity_key(), activity));
@@ -38,9 +36,7 @@ pub(super) fn sync_editor_activity(ctx: &egui::Context, app: &mut ScratchpadApp)
     // A later edit or tab switch in the same frame supersedes this input.
     let current = app.tab_manager.active_tab().is_some_and(|tab| {
         let buffer = tab.active_buffer();
-        buffer.id == activity.buffer_id
-            && buffer.document().revision_key() == activity.revision
-            && buffer.document().history_revision_counter() == activity.history_revision
+        buffer.id == activity.buffer_id && buffer.document().history_token() == activity.revision
     });
     if current {
         if activity.show {

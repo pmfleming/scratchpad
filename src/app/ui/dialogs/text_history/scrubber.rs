@@ -8,7 +8,7 @@ use super::{
 };
 use crate::app::{
     app_state::ScratchpadApp,
-    domain::buffer::DocumentRevision,
+    domain::buffer::HistoryToken,
     theme,
     ui::{callout, settings, widget_ids},
 };
@@ -31,16 +31,13 @@ fn drag_id() -> egui::Id {
 #[derive(Clone)]
 struct Drag {
     buffer: u64,
-    revision: DocumentRevision,
-    history_revision: u64,
+    revision: HistoryToken,
     position: usize,
     cancelled: bool,
 }
 impl Drag {
-    fn validate(&mut self, buffer: u64, revision: DocumentRevision, history_revision: u64) {
-        self.cancelled |= self.buffer != buffer
-            || self.revision != revision
-            || self.history_revision != history_revision;
+    fn validate(&mut self, buffer: u64, revision: HistoryToken) {
+        self.cancelled |= self.buffer != buffer || self.revision != revision
     }
 }
 
@@ -54,18 +51,13 @@ pub(crate) fn history_scrubbing(ctx: &egui::Context, app: &ScratchpadApp) -> boo
     let Some(buffer) = app.tab_manager.active_tab().map(|tab| tab.active_buffer()) else {
         return false;
     };
-    drag.validate(
-        buffer.id,
-        buffer.document().revision_key(),
-        buffer.document().history_revision_counter(),
-    );
+    drag.validate(buffer.id, buffer.document().history_token());
     !drag.cancelled
 }
 
 struct Track<'a> {
     id: u64,
-    revision: DocumentRevision,
-    history_revision: u64,
+    revision: HistoryToken,
     states: &'a States<'a>,
     enabled: bool,
     markers: Vec<(usize, String)>,
@@ -134,8 +126,7 @@ fn refresh_drag_after_replay(
         {
             // Accept only this drag's replay. Subsequent external edits still
             // invalidate the guard on the next frame.
-            drag.revision = buffer.document().revision_key();
-            drag.history_revision = buffer.document().history_revision_counter();
+            drag.revision = buffer.document().history_token();
         } else {
             drag.cancelled = true;
         }
@@ -171,8 +162,7 @@ fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp, id: u64) -> Option<History
     );
     let track = Track {
         id,
-        revision: buffer.document().revision_key(),
-        history_revision: buffer.document().history_revision_counter(),
+        revision: buffer.document().history_token(),
         states: &states,
         enabled: !states.entries.is_empty() && !visiting,
         markers: snapshots::covered_positions(&catalog, id, &states),
@@ -224,13 +214,12 @@ fn interact_track(
         drag
     });
     if let Some(drag) = &mut drag {
-        drag.validate(track.id, track.revision, track.history_revision);
+        drag.validate(track.id, track.revision);
     }
     if track.enabled && response.drag_started() {
         drag = Some(Drag {
             buffer: track.id,
             revision: track.revision,
-            history_revision: track.history_revision,
             position: track.states.position,
             cancelled: false,
         });
@@ -407,20 +396,20 @@ mod tests {
     use crate::app::domain::TextDocument;
     #[test]
     fn drag_cancellation_is_sticky_across_tab_and_revision_changes() {
-        let document = TextDocument::new("text".into());
-        let revision = document.revision_key();
+        let mut document = TextDocument::new("text".into());
+        let revision = document.history_token();
         let mut drag = Drag {
             buffer: 1,
             revision,
-            history_revision: 4,
             position: 0,
             cancelled: false,
         };
-        drag.validate(2, revision, 4);
-        drag.validate(1, revision, 4);
+        drag.validate(2, revision);
+        drag.validate(1, revision);
         assert!(drag.cancelled);
         drag.cancelled = false;
-        drag.validate(1, revision, 5);
+        document.clear_operation_history();
+        drag.validate(1, document.history_token());
         assert!(drag.cancelled);
     }
 }

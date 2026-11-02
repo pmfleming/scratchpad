@@ -7,7 +7,7 @@ mod visit;
 use super::model::HistoryAction;
 use crate::app::{
     app_state::ScratchpadApp,
-    domain::{BufferState, buffer::DocumentRevision},
+    domain::{BufferState, buffer::HistoryToken},
     text_history::{TextHistoryEntryView, entries_for_buffer},
 };
 use coverage::{SnapshotRow, classify_cancellable};
@@ -26,8 +26,7 @@ pub(super) use visit::{cancel_pending, clear_history, hydrate, poll, request};
 
 #[derive(Clone)]
 struct Source {
-    revision: DocumentRevision,
-    history_revision: u64,
+    revision: HistoryToken,
     buffer: Arc<BufferState>,
     cancelled: Arc<AtomicBool>,
 }
@@ -38,7 +37,7 @@ pub(super) struct FileSnapshots {
     rows: Vec<SnapshotRow>,
     pub(super) selected: Option<i64>,
     error: Option<String>,
-    source_revision: Option<(DocumentRevision, u64)>,
+    source_revision: Option<HistoryToken>,
     version_ids: Vec<i64>,
 }
 impl FileSnapshots {
@@ -50,8 +49,7 @@ pub(super) type Catalog = HashMap<u64, FileSnapshots>;
 
 #[derive(Clone)]
 struct CoverageResult {
-    revision: DocumentRevision,
-    history_revision: u64,
+    revision: HistoryToken,
     rows: Vec<SnapshotRow>,
     version_ids: Vec<i64>,
     cancelled: bool,
@@ -106,12 +104,11 @@ fn source(ctx: &egui::Context, buffer: &BufferState) -> Source {
         return visit.source;
     }
     let key = source_key(buffer.id);
-    let revision = buffer.document().revision_key();
-    let history_revision = buffer.document().history_revision_counter();
+    let revision = buffer.document().history_token();
+
     ctx.data_mut(|data| {
         if let Some(source) = data.get_temp::<Source>(key)
             && source.revision == revision
-            && source.history_revision == history_revision
             && !source.cancelled.load(Ordering::Relaxed)
         {
             return source;
@@ -121,7 +118,6 @@ fn source(ctx: &egui::Context, buffer: &BufferState) -> Source {
         }
         let source = Source {
             revision,
-            history_revision,
             buffer: Arc::new(buffer.clone()),
             cancelled: Arc::new(AtomicBool::new(false)),
         };
@@ -220,8 +216,7 @@ pub(super) fn collect(ui: &egui::Ui, app: &ScratchpadApp, buffers: &[u64]) -> Ca
                 let version_ids: Vec<_> = versions.iter().map(|point| point.id).collect();
                 let rows = match previous {
                     Some(previous)
-                        if previous.source_revision
-                            == Some((candidate.revision, candidate.history_revision))
+                        if previous.source_revision == Some(candidate.revision)
                             && previous.version_ids == version_ids =>
                     {
                         previous.rows
@@ -234,7 +229,6 @@ pub(super) fn collect(ui: &egui::Ui, app: &ScratchpadApp, buffers: &[u64]) -> Ca
                 };
                 Ok(CoverageResult {
                     revision: candidate.revision,
-                    history_revision: candidate.history_revision,
                     rows,
                     version_ids,
                     cancelled: candidate.cancelled.load(Ordering::Relaxed),
@@ -247,14 +241,10 @@ pub(super) fn collect(ui: &egui::Ui, app: &ScratchpadApp, buffers: &[u64]) -> Ca
             ..Default::default()
         };
         match result {
-            Some(Ok(result))
-                if result.revision == source.revision
-                    && result.history_revision == source.history_revision
-                    && !result.cancelled =>
-            {
+            Some(Ok(result)) if result.revision == source.revision && !result.cancelled => {
                 file.rows.clone_from(&result.rows);
                 file.version_ids.clone_from(&result.version_ids);
-                file.source_revision = Some((source.revision, source.history_revision));
+                file.source_revision = Some(source.revision);
             }
             Some(Err(error)) => file.error = Some(error),
             _ => {}

@@ -39,10 +39,18 @@ pub struct TextDocument {
 }
 
 /// A live document's identity and text generation, independent of view-anchor COW.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DocumentRevision {
     identity: u64,
     generation: u64,
+}
+
+/// Validity of a history action or cache, including replacement documents and
+/// history-only changes. Text generations alone can repeat during replay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct HistoryToken {
+    document: DocumentRevision,
+    history: u64,
 }
 
 fn next_document_identity() -> u64 {
@@ -227,7 +235,7 @@ impl TextDocument {
         self.history.latest_update_at = None;
         self.history.pending_generation_before = None;
         self.history.pending_checkpoint_before = None;
-        self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
+        self.advance_history_revision();
     }
 
     #[must_use]
@@ -238,6 +246,17 @@ impl TextDocument {
     #[must_use]
     pub fn history_revision_counter(&self) -> u64 {
         self.history.revision_counter
+    }
+
+    pub(crate) fn history_token(&self) -> HistoryToken {
+        HistoryToken {
+            document: self.revision_key(),
+            history: self.history.revision_counter,
+        }
+    }
+
+    fn advance_history_revision(&mut self) {
+        self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
     }
 
     #[must_use]
@@ -255,7 +274,7 @@ impl TextDocument {
             None
         } else {
             self.preserve_undo_boundary();
-            self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
+            self.advance_history_revision();
             let removed = self.history.entries.remove(0);
             self.history.byte_usage = self.history.byte_usage.saturating_sub(removed.byte_cost());
             self.remove_history_depth(&removed);
@@ -306,7 +325,7 @@ impl TextDocument {
         self.normalize_imported_redo_state();
         self.refresh_history_depths();
         self.history.next_id = max_id.saturating_add(1).max(1);
-        self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
+        self.advance_history_revision();
         self.enforce_history_budget();
     }
 

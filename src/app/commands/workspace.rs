@@ -1,7 +1,7 @@
 use super::{AppCommand, WorkspaceCommand};
 use crate::app::app_state::{
     ScratchpadApp, settings_controller,
-    workspace::{accessors as workspace_accessors, display_tabs, mutation as workspace_mutation},
+    workspace::{accessors as workspace_accessors, display_tabs},
     workspace_controller,
 };
 use crate::app::domain::{BufferId, PendingAction, SplitAxis, SplitPath, TileDirection, ViewId};
@@ -169,7 +169,6 @@ pub(crate) fn perform_close_view(app: &mut ScratchpadApp, view_id: ViewId) {
             app,
             closed_file_paths,
         );
-        workspace_mutation::prune_text_history_for_buffers(app, closed_buffer_ids);
         app.tab_manager.rebuild_buffer_tab_index();
         crate::app::app_state::frame::begin_layout_transition(app);
         crate::app::app_state::search_runtime::mark_search_dirty(app);

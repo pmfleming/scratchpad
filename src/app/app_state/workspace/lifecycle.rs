@@ -2,7 +2,6 @@ use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::app_state::RECENTLY_CLOSED_FILE_LIMIT;
 use crate::app::app_state::settings_controller;
 use crate::app::app_state::workspace::accessors as workspace_accessors;
-use crate::app::app_state::workspace::mutation as workspace_mutation;
 use crate::app::diagnostics;
 use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
 use crate::app::services::file_controller::FileController;
@@ -294,18 +293,10 @@ fn selected_workspace_tab_range(app: &ScratchpadApp) -> (usize, usize) {
 
 fn close_tab_internal(app: &mut ScratchpadApp, index: usize) {
     let closed_file_paths = tab_file_paths(app, index);
-    let closed_buffer_ids = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .get(index)
-        .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
-        .unwrap_or_default();
     let settings_refresh = app.settings_toml_refresh_on_tab_close(index);
     crate::app::app_state::frame::begin_layout_transition(app);
     app.tab_manager.close_tab_internal(index);
     record_recently_closed_file_paths(app, closed_file_paths);
-    workspace_mutation::prune_text_history_for_buffers(app, closed_buffer_ids);
     crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(app);
     crate::app::app_state::search_runtime::mark_search_dirty(app);
     workspace_accessors::request_focus_for_active_view(app);

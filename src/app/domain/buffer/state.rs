@@ -28,7 +28,7 @@ pub type BufferId = u64;
 pub struct BufferState {
     pub id: BufferId,
     document: TextDocument,
-    snapshot_navigation: Option<((i64, i64), super::DocumentRevision, u64)>,
+    snapshot_navigation: Option<((i64, i64), super::HistoryToken)>,
     pub name: String,
     pub path: Option<PathBuf>,
     pub path_key: Option<CanonicalPathKey>,
@@ -311,21 +311,12 @@ impl BufferState {
 
     pub(crate) fn snapshot_navigation(&self) -> Option<(i64, i64)> {
         self.snapshot_navigation
-            .filter(|(_, revision, history)| {
-                *revision == self.document.revision_key()
-                    && *history == self.document.history_revision_counter()
-            })
-            .map(|(ids, _, _)| ids)
+            .filter(|(_, token)| *token == self.document.history_token())
+            .map(|(ids, _)| ids)
     }
 
     pub(crate) fn set_snapshot_navigation(&mut self, ids: Option<(i64, i64)>) {
-        self.snapshot_navigation = ids.map(|ids| {
-            (
-                ids,
-                self.document.revision_key(),
-                self.document.history_revision_counter(),
-            )
-        });
+        self.snapshot_navigation = ids.map(|ids| (ids, self.document.history_token()));
     }
 
     /// Install an existing history state without recording a replacement edit.

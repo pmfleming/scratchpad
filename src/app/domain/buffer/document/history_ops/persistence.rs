@@ -94,7 +94,7 @@ impl TextDocument {
                 self.remove_history_depth(&removed);
                 capacity_metrics::record_history_eviction_per_file(cost);
             }
-            self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
+            self.advance_history_revision();
             self.compact_history_storage();
         }
     }

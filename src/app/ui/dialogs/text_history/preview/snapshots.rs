@@ -1,7 +1,7 @@
 use super::{HistoryPreview, Preview, Target};
 use crate::app::{
     app_state::{ScratchpadApp, StatusDomain},
-    domain::{TextDocument, buffer::DocumentRevision},
+    domain::{TextDocument, buffer::HistoryToken},
 };
 use eframe::egui;
 use std::sync::{Arc, Mutex};
@@ -10,8 +10,7 @@ use std::sync::{Arc, Mutex};
 struct Pending {
     buffer_id: u64,
     version_id: i64,
-    revision: DocumentRevision,
-    history_revision: u64,
+    revision: HistoryToken,
     confirm: bool,
 }
 
@@ -63,8 +62,7 @@ pub(super) fn request(
     let pending = Pending {
         buffer_id: id,
         version_id,
-        revision: buffer.document().revision_key(),
-        history_revision: buffer.document().history_revision_counter(),
+        revision: buffer.document().history_token(),
         confirm,
     };
     ctx.data_mut(|d| d.insert_temp(key(), pending));
@@ -85,9 +83,7 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         cancel(ui.ctx());
         return;
     };
-    if buffer.document().revision_key() != pending.revision
-        || buffer.document().history_revision_counter() != pending.history_revision
-    {
+    if buffer.document().history_token() != pending.revision {
         cancel(ui.ctx());
         return;
     }
@@ -123,7 +119,6 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let preview = Preview {
                 buffer_id: buffer.id,
                 revision: pending.revision,
-                history_revision: pending.history_revision,
                 target: Target::Snapshot(version_id),
                 tab: Arc::new(Mutex::new(HistoryPreview::new(projection))),
             };

@@ -4,8 +4,8 @@ pub(crate) use snapshot::install_history_document;
 use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::app_state::settings_controller;
 use crate::app::app_state::workspace::accessors as workspace_accessors;
-use crate::app::domain::{BufferId, CursorRevealMode, buffer::DocumentRevision};
-use crate::app::text_history::{TextHistoryCache, TextHistoryEntryView, entries_for_buffer};
+use crate::app::domain::{BufferId, CursorRevealMode, buffer::HistoryToken};
+use crate::app::text_history::{TextHistoryEntryView, entries_for_buffer};
 
 pub(crate) fn text_history_entries(app: &ScratchpadApp) -> Vec<TextHistoryEntryView> {
     let mut entries = app
@@ -30,7 +30,7 @@ pub(crate) fn cached_text_history_entries(
     app.state.text_history_cache.entries.clone()
 }
 
-fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, DocumentRevision, u64, String)> {
+fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, HistoryToken, String)> {
     app.tab_manager
         .tabs
         .as_slice()
@@ -40,8 +40,7 @@ fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, DocumentRevisio
                 (
                     buffer.id,
                     // Replacement documents can reuse the same history counter.
-                    buffer.document().revision_key(),
-                    buffer.document().history_revision_counter(),
+                    buffer.document().history_token(),
                     crate::app::text_history::buffer_label(buffer),
                 )
             })
@@ -60,7 +59,6 @@ pub(crate) fn clear_text_history(app: &mut ScratchpadApp, buffer_ids: &[BufferId
         }
     }
     if cleared {
-        app.state.text_history_cache = TextHistoryCache::default();
         app.tab_manager.mark_session_dirty();
         app.state
             .status
@@ -119,15 +117,6 @@ pub(crate) fn finalize_active_buffer_text_mutation(
     app.tab_manager.mark_session_dirty();
     app.note_settings_toml_edit(active_tab_index);
     app.apply_current_tab_ordering();
-}
-
-pub(crate) fn prune_text_history_for_buffers(
-    app: &mut ScratchpadApp,
-    buffer_ids: impl IntoIterator<Item = BufferId>,
-) {
-    if buffer_ids.into_iter().next().is_some() {
-        app.state.text_history_cache = TextHistoryCache::default();
-    }
 }
 
 pub(crate) fn record_pending_text_history_event(

@@ -30,7 +30,6 @@ pub(crate) fn install_history_document(
     if follow {
         restore_text_history_selection(app, index, id, CursorRange::default());
     }
-    app.state.text_history_cache = crate::app::text_history::TextHistoryCache::default();
     crate::app::app_state::search_runtime::mark_search_dirty(app);
     app.tab_manager.mark_session_dirty();
     app.apply_current_tab_ordering();
