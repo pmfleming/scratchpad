@@ -187,8 +187,23 @@ fn saved_branches_also_offer_return_to_latest() {
         )
         .is_some()
     );
+    assert!(snapshots::clear_history(&ctx, h.state_mut()));
+    crate::app::app_state::workspace::mutation::clear_text_history(h.state_mut());
+    let buffer = h.state().tab_manager.tabs.as_slice()[0].active_buffer();
+    assert!(buffer.document().history_entries().is_empty());
+    assert!(
+        visit::browse(&ctx, buffer).is_some(),
+        "clearing is not a new branch"
+    );
     assert!(visit::return_latest(&ctx, h.state_mut(), id));
     assert_eq!(text(&h), "new branch");
+    assert!(
+        h.state().tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .document()
+            .history_entries()
+            .is_empty()
+    );
 }
 
 #[test]

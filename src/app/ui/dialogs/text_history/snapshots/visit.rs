@@ -55,6 +55,11 @@ pub(in super::super) fn clear_history(ctx: &egui::Context, app: &mut ScratchpadA
             let mut source = (*visit.source.buffer).clone();
             source.document_mut().clear_operation_history();
             buffer.set_snapshot_navigation(None);
+            // Clear both documents together: this is not an edit that starts a
+            // new branch, so keep the visit's guard aligned with the live history.
+            buffer.document_mut().clear_operation_history();
+            visit.revision = buffer.document().revision_key();
+            visit.history_revision = buffer.document().history_revision_counter();
             visit.source.cancelled.store(true, Ordering::Relaxed);
             visit.source.cancelled = Arc::new(AtomicBool::new(false));
             visit.source.revision = source.document().revision_key();
