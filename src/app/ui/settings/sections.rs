@@ -2,6 +2,7 @@ use super::{
     ScratchpadApp, SettingsUi, egui,
     widgets::{category, numeric_slider},
 };
+use egui_phosphor::regular::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL};
 
 struct Category {
     key: &'static str,
@@ -64,17 +65,38 @@ pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut Scratchpad
     let query = query.trim().to_lowercase();
     let mut visible = 0;
     ui.horizontal(|ui| {
-        for (label, open) in [("Expand all", true), ("Collapse all", false)] {
-            if ui
-                .add_enabled(query.is_empty(), egui::Button::new(label).frame(false))
-                .clicked()
-            {
-                // Resolve IDs in the parent scope, after this horizontal row.
-                ui.ctx().data_mut(|data| {
-                    data.insert_temp(egui::Id::unique("settings.expand_all"), open)
-                });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            for (label, icon, open) in [
+                ("Collapse all", ARROWS_IN_LINE_VERTICAL, false),
+                ("Expand all", ARROWS_OUT_LINE_VERTICAL, true),
+            ] {
+                let response = super::widget_ids::surface_response(
+                    ui,
+                    ("settings.categories", open),
+                    super::widget_ids::WidgetRole::IconButton,
+                    |ui| {
+                        ui.add_enabled(
+                            query.is_empty(),
+                            egui::Button::new(
+                                egui::RichText::new(icon).font(egui_phosphor::font_id(18.0)),
+                            )
+                            .frame(false)
+                            .min_size(egui::Vec2::splat(SettingsUi::CONTROLS.height)),
+                        )
+                    },
+                );
+                if response
+                    .accessible_name(label)
+                    .on_hover_text(label)
+                    .clicked()
+                {
+                    // Resolve IDs in the parent scope, after this horizontal row.
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(egui::Id::unique("settings.expand_all"), open)
+                    });
+                }
             }
-        }
+        });
     });
     if let Some(open) =
         ui.data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("settings.expand_all")))
