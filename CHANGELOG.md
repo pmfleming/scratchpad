@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Highlight specific matching settings once a search has at least two meaningful characters and matches fewer than half the settings; support setting labels and aliases, including hidden tab-delay controls.
+
 - Aligned Settings with the shared UI font, background, text, border, and accent colours in both themes.
 
 - Added a font-size slider beside the preset dropdown, adjustable from 8 to 72 pt.

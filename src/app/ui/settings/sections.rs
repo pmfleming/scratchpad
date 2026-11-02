@@ -63,6 +63,8 @@ pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut Scratchpad
         .widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Search settings"));
     ui.data_mut(|data| data.insert_temp(search_id, query.clone()));
     let query = query.trim().to_lowercase();
+    let search = super::search::Search::new(&query);
+    search.clone().install(ui);
     let mut visible = 0;
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -107,7 +109,7 @@ pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut Scratchpad
         }
     }
     for item in &CATEGORIES {
-        if !matches_category(item, &query) {
+        if !matches_category(item, &search) {
             continue;
         }
         visible += 1;
@@ -124,18 +126,15 @@ pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut Scratchpad
     if visible == 0 {
         ui.label("No matching settings. Try tabs, font or history.");
     }
+    super::search::Search::default().install(ui);
 }
 
-fn matches_category(category: &Category, query: &str) -> bool {
+fn matches_category(category: &Category, search: &super::search::Search) -> bool {
     let haystack = format!(
         "{} {} {}",
         category.title, category.subtitle, category.search
-    )
-    .to_lowercase();
-    query
-        .split(|ch: char| !ch.is_alphanumeric())
-        .filter(|term| !term.is_empty())
-        .all(|term| haystack.contains(term))
+    );
+    search.matches_category(category.key, &haystack)
 }
 
 pub(super) fn text_history_budget(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -188,9 +187,10 @@ mod tests {
             ("font size", "appearance"),
             ("toml", "application"),
         ] {
+            let search = super::super::search::Search::new(query);
             let matches: Vec<_> = CATEGORIES
                 .iter()
-                .filter(|item| matches_category(item, query))
+                .filter(|item| matches_category(item, &search))
                 .map(|item| item.key)
                 .collect();
             assert_eq!(matches, vec![key], "{query}");

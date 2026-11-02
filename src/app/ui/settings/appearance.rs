@@ -20,7 +20,9 @@ pub(super) fn render_workspace(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         app.state.app_settings.auto_hide_tab_list(),
         |value| settings::set_auto_hide_tab_list(app, value),
     );
-    if app.state.app_settings.auto_hide_tab_list() {
+    if app.state.app_settings.auto_hide_tab_list()
+        || super::search::is_highlighted(ui, "Hide after")
+    {
         let mut delay = app.state.app_settings.tab_list_auto_hide_delay_seconds();
         inner_select_row(ui, "Hide after", None, |ui| {
             if dropdown(

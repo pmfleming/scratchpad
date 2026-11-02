@@ -117,6 +117,18 @@ fn inner_select_row_with_height(
     control_height: f32,
     control: impl FnOnce(&mut egui::Ui),
 ) {
+    super::search::highlight_row(ui, label, |ui| {
+        render_select_row(ui, label, description, control_height, control);
+    });
+}
+
+fn render_select_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    description: Option<&str>,
+    control_height: f32,
+    control: impl FnOnce(&mut egui::Ui),
+) {
     let width = ui.available_width();
     let stacked = width < 540.0;
     let control_width = width.min(SettingsUi::CONTROLS.column_width);

@@ -10,6 +10,7 @@ use eframe::egui;
 mod appearance;
 mod opening;
 mod recovery;
+mod search;
 mod sections;
 mod style;
 #[cfg(test)]
