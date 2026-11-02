@@ -161,12 +161,11 @@ fn saved_branches_also_offer_return_to_latest() {
     let ctx = h.ctx.clone();
     snapshots::request(&ctx, h.state_mut(), id, point);
     wait(&mut h, |h| text(h) == "ancient");
-    let saved_branch = visit::browse(
-        &ctx,
-        h.state().tab_manager.tabs.as_slice()[0].active_buffer(),
-    )
-    .unwrap()
-    .return_version;
+    let saved_branch = h.state().tab_manager.tabs.as_slice()[0]
+        .active_buffer()
+        .snapshot_visit()
+        .unwrap()
+        .return_version;
     assert!(visit::return_latest(&ctx, h.state_mut(), id));
     h.state_mut().tab_manager.tabs.as_mut_slice()[0]
         .active_buffer_mut()
@@ -174,18 +173,17 @@ fn saved_branches_also_offer_return_to_latest() {
     snapshots::request(&ctx, h.state_mut(), id, saved_branch);
     wait(&mut h, |h| text(h) == "two");
     assert!(
-        visit::browse(
-            &ctx,
-            h.state().tab_manager.tabs.as_slice()[0].active_buffer()
-        )
-        .is_some()
+        h.state().tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .snapshot_visit()
+            .is_some_and(|visit| visit.source.is_some())
     );
-    assert!(snapshots::clear_history(&ctx, h.state_mut(), &[id]));
+    assert!(snapshots::clear_history(&ctx, h.state_mut(), &[id]).unwrap());
     crate::app::app_state::workspace::mutation::clear_text_history(h.state_mut(), &[id]);
     let buffer = h.state().tab_manager.tabs.as_slice()[0].active_buffer();
     assert!(buffer.document().history_entries().is_empty());
     assert!(
-        visit::browse(&ctx, buffer).is_some(),
+        buffer.snapshot_visit().is_some(),
         "clearing is not a new branch"
     );
     assert!(visit::return_latest(&ctx, h.state_mut(), id));
@@ -271,11 +269,10 @@ fn snapshot_position_and_native_return_history_survive_session_restart() {
     restored.state.dialogs.text_history.open();
     let mut second = harness(restored);
     wait(&mut second, |h| {
-        visit::browse(
-            &h.ctx,
-            h.state().tab_manager.tabs.as_slice()[0].active_buffer(),
-        )
-        .is_some()
+        h.state().tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .snapshot_visit()
+            .is_some_and(|visit| visit.source.is_some())
     });
     second.get_by_label("Return to latest").click();
     second.run_steps(3);
@@ -325,7 +322,7 @@ fn editing_a_snapshot_preserves_the_previous_branch_and_stale_loads_do_not_repla
     snapshots::request(&ctx, harness.state_mut(), id, point);
     wait(&mut harness, |h| text(h) == "ancient");
     let buffer = harness.state().tab_manager.tabs.as_slice()[0].active_buffer();
-    let return_id = visit::browse(&ctx, buffer).unwrap().return_version;
+    let return_id = buffer.snapshot_visit().unwrap().return_version;
     let buffer = harness.state_mut().tab_manager.tabs.as_mut_slice()[0].active_buffer_mut();
     buffer
         .replace_char_ranges_with_undo(
@@ -334,7 +331,7 @@ fn editing_a_snapshot_preserves_the_previous_branch_and_stale_loads_do_not_repla
             CursorRange::default(),
         )
         .unwrap();
-    assert!(visit::browse(&ctx, buffer).is_none());
+    assert!(buffer.snapshot_visit().is_none());
     let checkpoint = HistoryCheckpoint {
         temp_id: buffer.temp_id.clone(),
         snapshot: buffer.document_snapshot(),
@@ -367,4 +364,82 @@ fn editing_a_snapshot_preserves_the_previous_branch_and_stale_loads_do_not_repla
         std::fs::read_to_string(root.path().join("note.txt")).unwrap(),
         "disk contents"
     );
+}
+
+#[test]
+fn clearing_a_snapshot_return_branch_survives_restart_without_resurrecting_undo() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut app, id, point, _) = fixture(root.path());
+    app.tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut()
+        .undo_last_text_operation()
+        .unwrap();
+    let mut h = harness(app);
+    let ctx = h.ctx.clone();
+    snapshots::request(&ctx, h.state_mut(), id, point);
+    wait(&mut h, |h| text(h) == "ancient");
+    assert!(snapshots::clear_history(&ctx, h.state_mut(), &[id]).unwrap());
+    crate::app::services::session_manager::persist_session_now(h.state_mut()).unwrap();
+    drop(h);
+    let mut restored = test_app(root.path());
+    restored.state.dialogs.text_history.open();
+    let mut h = harness(restored);
+    wait(&mut h, |h| {
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .snapshot_visit()
+            .is_some_and(|visit| visit.source.is_some())
+    });
+    let ctx = h.ctx.clone();
+    assert!(visit::return_latest(&ctx, h.state_mut(), id));
+    assert_eq!(text(&h), "one");
+    assert!(
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .document()
+            .history_entries()
+            .is_empty()
+    );
+}
+
+#[test]
+fn large_snapshot_return_preserves_original_checkpoint_and_redo() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut app, id, point, _) = fixture(root.path());
+    let large = "old\r\n尾".repeat(32 * 1024);
+    app.tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut()
+        .replace_char_ranges_with_undo(
+            &[(0..3, large.clone())],
+            CursorRange::default(),
+            CursorRange::default(),
+        )
+        .unwrap();
+    let expected = app.tab_manager.active_tab().unwrap().active_buffer().text();
+    let mut h = harness(app);
+    let ctx = h.ctx.clone();
+    snapshots::request(&ctx, h.state_mut(), id, point);
+    wait(&mut h, |h| text(h) == "ancient");
+    assert!(visit::return_latest(&ctx, h.state_mut(), id));
+    let buffer = h
+        .state_mut()
+        .tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut();
+    assert_eq!(buffer.text(), expected);
+    buffer.undo_last_text_operation().unwrap();
+    assert_eq!(buffer.text(), "two");
+    buffer.redo_last_text_operation().unwrap();
+    assert_eq!(buffer.text(), expected);
 }

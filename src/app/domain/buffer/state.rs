@@ -28,7 +28,7 @@ pub type BufferId = u64;
 pub struct BufferState {
     pub id: BufferId,
     document: TextDocument,
-    snapshot_navigation: Option<((i64, i64), super::HistoryToken)>,
+    snapshot_navigation: Option<SnapshotVisit>,
     pub name: String,
     pub path: Option<PathBuf>,
     pub path_key: Option<CanonicalPathKey>,
@@ -50,6 +50,15 @@ pub struct BufferState {
     pub active_selection: Option<Range<usize>>,
     pub has_non_compliant_characters: bool,
     refresh: BufferRefreshState,
+}
+
+/// Selected snapshot and preserved native branch. Rendering only reads this state.
+#[derive(Clone)]
+pub(crate) struct SnapshotVisit {
+    pub version_id: i64,
+    pub return_version: i64,
+    pub source: Option<std::sync::Arc<BufferState>>,
+    revision: super::HistoryToken,
 }
 
 #[derive(Clone)]
@@ -309,14 +318,38 @@ impl BufferState {
         }
     }
 
-    pub(crate) fn snapshot_navigation(&self) -> Option<(i64, i64)> {
+    pub(crate) fn snapshot_visit(&self) -> Option<&SnapshotVisit> {
         self.snapshot_navigation
-            .filter(|(_, token)| *token == self.document.history_token())
-            .map(|(ids, _)| ids)
+            .as_ref()
+            .filter(|visit| visit.revision == self.document.history_token())
+    }
+
+    pub(crate) fn snapshot_navigation(&self) -> Option<(i64, i64)> {
+        self.snapshot_visit()
+            .map(|visit| (visit.version_id, visit.return_version))
     }
 
     pub(crate) fn set_snapshot_navigation(&mut self, ids: Option<(i64, i64)>) {
-        self.snapshot_navigation = ids.map(|ids| (ids, self.document.history_token()));
+        self.snapshot_navigation = ids.map(|(version_id, return_version)| SnapshotVisit {
+            version_id,
+            return_version,
+            source: None,
+            revision: self.document.history_token(),
+        });
+    }
+
+    pub(crate) fn set_snapshot_return_buffer(&mut self, source: std::sync::Arc<BufferState>) {
+        if let Some(visit) = self.snapshot_navigation.as_mut()
+            && visit.revision == self.document.history_token()
+        {
+            visit.source = Some(source);
+        }
+    }
+
+    pub(crate) fn reconcile_snapshot_navigation(&mut self) {
+        if self.snapshot_visit().is_none() {
+            self.snapshot_navigation = None;
+        }
     }
 
     /// Install an existing history state without recording a replacement edit.

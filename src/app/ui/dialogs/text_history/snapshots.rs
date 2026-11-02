@@ -20,7 +20,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use visit::browse;
 pub(super) use visit::status_key;
 pub(super) use visit::{cancel_pending, clear_history, hydrate, poll, request};
 
@@ -65,7 +64,16 @@ fn running_key() -> egui::Id {
     egui::Id::unique("history.snapshots.running")
 }
 
-pub(super) fn cleanup(ctx: &egui::Context, app: &ScratchpadApp) {
+pub(super) fn cleanup(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    for buffer in app
+        .tab_manager
+        .tabs
+        .as_mut_slice()
+        .iter_mut()
+        .flat_map(|tab| tab.buffers_mut())
+    {
+        buffer.reconcile_snapshot_navigation();
+    }
     ctx.data_mut(|data| {
         let mut removed = Vec::new();
         data.get_temp_mut_or_default::<HashSet<u64>>(tracked_key())
@@ -85,11 +93,7 @@ pub(super) fn cleanup(ctx: &egui::Context, app: &ScratchpadApp) {
             if let Some(source) = data.get_temp::<Source>(source_key(id)) {
                 source.cancelled.store(true, Ordering::Relaxed);
             }
-            if let Some(visit) = data.get_temp::<visit::Browse>(visit::browse_key(id)) {
-                visit.source.cancelled.store(true, Ordering::Relaxed);
-            }
             data.remove::<Source>(source_key(id));
-            data.remove::<visit::Browse>(visit::browse_key(id));
             data.remove::<FileSnapshots>(catalog_key(id));
         }
     });
@@ -100,11 +104,12 @@ fn source(ctx: &egui::Context, buffer: &BufferState) -> Source {
         data.get_temp_mut_or_default::<HashSet<u64>>(tracked_key())
             .insert(buffer.id);
     });
-    if let Some(visit) = browse(ctx, buffer) {
-        return visit.source;
-    }
+    let original = buffer
+        .snapshot_visit()
+        .and_then(|visit| visit.source.as_ref());
+    let source_buffer = original.map_or(buffer, |source| source.as_ref());
     let key = source_key(buffer.id);
-    let revision = buffer.document().history_token();
+    let revision = source_buffer.document().history_token();
 
     ctx.data_mut(|data| {
         if let Some(source) = data.get_temp::<Source>(key)
@@ -118,7 +123,9 @@ fn source(ctx: &egui::Context, buffer: &BufferState) -> Source {
         }
         let source = Source {
             revision,
-            buffer: Arc::new(buffer.clone()),
+            buffer: original
+                .cloned()
+                .unwrap_or_else(|| Arc::new(buffer.clone())),
             cancelled: Arc::new(AtomicBool::new(false)),
         };
         data.insert_temp(key, source.clone());
@@ -144,15 +151,12 @@ pub(super) fn cancel_coverage(ctx: &egui::Context, app: &ScratchpadApp) {
             if let Some(source) = data.get_temp::<Source>(source_key(buffer.id)) {
                 source.cancelled.store(true, Ordering::Relaxed);
             }
-            if let Some(visit) = data.get_temp::<visit::Browse>(visit::browse_key(buffer.id)) {
-                visit.source.cancelled.store(true, Ordering::Relaxed);
-            }
         }
     });
 }
 
 pub(super) fn state_entries(
-    ctx: &egui::Context,
+    _ctx: &egui::Context,
     app: &mut ScratchpadApp,
 ) -> Arc<[TextHistoryEntryView]> {
     let entries = crate::app::app_state::workspace::mutation::cached_text_history_entries(app);
@@ -164,16 +168,17 @@ pub(super) fn state_entries(
         .iter()
         .flat_map(|tab| tab.buffers())
     {
-        if let Some(visit) = browse(ctx, buffer) {
+        if let Some(source) = buffer
+            .snapshot_visit()
+            .and_then(|visit| visit.source.as_ref())
+        {
             let entries = replaced.get_or_insert_with(|| entries.to_vec());
             entries.retain(|entry| entry.buffer_id != buffer.id);
             let label = crate::app::text_history::buffer_label(buffer);
-            entries.extend(entries_for_buffer(&visit.source.buffer).into_iter().map(
-                |mut entry| {
-                    entry.label.clone_from(&label);
-                    entry
-                },
-            ));
+            entries.extend(entries_for_buffer(source).into_iter().map(|mut entry| {
+                entry.label.clone_from(&label);
+                entry
+            }));
         }
     }
     replaced.map_or(entries, Arc::from)
@@ -233,7 +238,7 @@ pub(super) fn collect(ui: &egui::Ui, app: &ScratchpadApp, buffers: &[u64]) -> Ca
         );
         let mut file = FileSnapshots {
             label: buffer.name.clone(),
-            selected: browse(ui.ctx(), buffer).map(|visit| visit.version_id),
+            selected: buffer.snapshot_visit().map(|visit| visit.version_id),
             ..Default::default()
         };
         match result {
@@ -256,15 +261,13 @@ fn catalog_key(id: u64) -> egui::Id {
     egui::Id::unique(("history.snapshots.catalog", id))
 }
 
-pub(super) fn is_browsing(ctx: &egui::Context, app: &ScratchpadApp, id: u64) -> bool {
+pub(super) fn is_browsing(_ctx: &egui::Context, app: &ScratchpadApp, id: u64) -> bool {
     app.tab_manager
         .tabs
         .as_slice()
         .iter()
         .find_map(|tab| tab.buffer_by_id(id))
-        .is_some_and(|buffer| {
-            browse(ctx, buffer).is_some() || buffer.snapshot_navigation().is_some()
-        })
+        .is_some_and(|buffer| buffer.snapshot_visit().is_some())
 }
 
 pub(super) fn go_to_state(

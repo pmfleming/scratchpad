@@ -1,22 +1,14 @@
 use super::{Source, source};
 use crate::app::{
     app_state::{ScratchpadApp, StatusDomain, workspace::mutation},
-    domain::{BufferState, TextDocument, buffer::HistoryToken},
+    domain::{TextDocument, buffer::HistoryToken},
     services::session_store::{HistoryCheckpoint, RestoredVersion},
 };
 use eframe::egui;
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex};
 
-#[derive(Clone)]
-pub(super) struct Browse {
-    pub source: Source,
-    pub version_id: i64,
-    pub return_version: i64,
-    revision: HistoryToken,
-}
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone)]
 struct Pending {
@@ -28,9 +20,6 @@ struct Pending {
     result: Arc<Mutex<Option<Result<RestoredVersion, String>>>>,
 }
 
-pub(super) fn browse_key(id: u64) -> egui::Id {
-    egui::Id::unique(("history.snapshot.visit", id))
-}
 fn pending_key() -> egui::Id {
     egui::Id::unique("history.snapshot.pending")
 }
@@ -39,59 +28,69 @@ pub(in super::super) fn cancel_pending(ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<Pending>(pending_key()));
 }
 
+/// Preserve a cleared return branch durably before changing either live history.
 pub(in super::super) fn clear_history(
     ctx: &egui::Context,
     app: &mut ScratchpadApp,
     buffer_ids: &[u64],
-) -> bool {
+) -> Result<bool, String> {
     cancel_pending(ctx);
-    let mut changed = false;
+    let store = app.state.persistence.session_store.clone();
+    let mut updates = Vec::new();
     for buffer in app
         .tab_manager
         .tabs
-        .as_mut_slice()
-        .iter_mut()
-        .flat_map(|tab| tab.buffers_mut())
+        .as_slice()
+        .iter()
+        .flat_map(|tab| tab.buffers())
         .filter(|buffer| buffer_ids.contains(&buffer.id))
     {
-        if let Some(mut visit) = browse(ctx, buffer) {
-            let mut source = (*visit.source.buffer).clone();
-            source.document_mut().clear_operation_history();
-            buffer.set_snapshot_navigation(None);
-            // Clear both documents together: this is not an edit that starts a
-            // new branch, so keep the visit's guard aligned with the live history.
-            buffer.document_mut().clear_operation_history();
-            visit.revision = buffer.document().history_token();
-
-            visit.source.cancelled.store(true, Ordering::Relaxed);
-            visit.source.cancelled = Arc::new(AtomicBool::new(false));
-            visit.source.revision = source.document().history_token();
-
-            visit.source.buffer = Arc::new(source);
-            ctx.data_mut(|data| {
-                data.insert_temp(browse_key(buffer.id), visit);
-            });
-            changed = true;
-        }
+        let Some(visit) = buffer.snapshot_visit() else {
+            continue;
+        };
+        let mut source = if let Some(source) = &visit.source {
+            source.as_ref().clone()
+        } else {
+            let restored = store
+                .read_history_version(buffer.temp_id.clone(), visit.return_version)
+                .map_err(|e| e.to_string())?;
+            let mut source = buffer.clone();
+            source.install_history_document(TextDocument::with_preferred_line_ending(
+                restored.text,
+                buffer.format.preferred_line_ending_style(),
+            ));
+            source
+        };
+        source.document_mut().clear_operation_history();
+        let checkpoint = HistoryCheckpoint {
+            temp_id: buffer.temp_id.clone(),
+            snapshot: source.document_snapshot(),
+            history: Vec::new(),
+        };
+        let saved = store
+            .navigate_version(checkpoint, visit.version_id)
+            .map_err(|e| e.to_string())?;
+        updates.push((
+            buffer.id,
+            visit.version_id,
+            saved.return_version,
+            Arc::new(source),
+        ));
     }
-    changed
-}
-
-pub(super) fn browse(ctx: &egui::Context, buffer: &BufferState) -> Option<Browse> {
-    let mut visit = ctx.data(|data| data.get_temp::<Browse>(browse_key(buffer.id)))?;
-    if visit.revision == buffer.document().history_token() {
-        if visit.source.cancelled.load(Ordering::Relaxed) {
-            visit.source.cancelled = Arc::new(AtomicBool::new(false));
-            ctx.data_mut(|data| data.insert_temp(browse_key(buffer.id), visit.clone()));
-        }
-        Some(visit)
-    } else {
-        // Editing starts a new branch. The original text and native history were
-        // durably checkpointed before navigation, not discarded here.
-        visit.source.cancelled.store(true, Ordering::Relaxed);
-        ctx.data_mut(|data| data.remove::<Browse>(browse_key(buffer.id)));
-        None
+    let changed = !updates.is_empty();
+    for (id, version, back, source) in updates {
+        let buffer = app
+            .tab_manager
+            .tabs
+            .as_mut_slice()
+            .iter_mut()
+            .find_map(|tab| tab.buffer_by_id_mut(id))
+            .unwrap();
+        buffer.document_mut().clear_operation_history();
+        buffer.set_snapshot_navigation(Some((version, back)));
+        buffer.set_snapshot_return_buffer(source);
     }
+    Ok(changed)
 }
 
 pub(in super::super) fn request(
@@ -119,11 +118,16 @@ pub(in super::super) fn request(
     {
         return;
     }
-    let current = browse(ctx, buffer);
+    let current = buffer.snapshot_visit();
     if current
         .as_ref()
         .is_some_and(|visit| visit.version_id == version_id)
     {
+        cancel_pending(ctx);
+        return;
+    }
+    if current.is_some_and(|visit| visit.source.is_none()) {
+        set_status(ctx, "Loading newer history…".into());
         return;
     }
     let checkpoint = HistoryCheckpoint {
@@ -166,18 +170,21 @@ pub(in super::super) fn request(
 }
 
 /// Reattach the native undo branch after restoring a session parked on a snapshot.
-pub(in super::super) fn hydrate(ui: &mut egui::Ui, app: &ScratchpadApp) {
+pub(in super::super) fn hydrate(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     for buffer in app
         .tab_manager
         .tabs
-        .as_slice()
-        .iter()
-        .flat_map(|tab| tab.buffers())
+        .as_mut_slice()
+        .iter_mut()
+        .flat_map(|tab| tab.buffers_mut())
     {
-        let Some((version_id, return_version)) = buffer.snapshot_navigation() else {
+        let Some((_, return_version)) = buffer.snapshot_navigation() else {
             continue;
         };
-        if browse(ui.ctx(), buffer).is_some() {
+        if buffer
+            .snapshot_visit()
+            .is_some_and(|visit| visit.source.is_some())
+        {
             continue;
         }
         let store = app.state.persistence.session_store.clone();
@@ -201,26 +208,12 @@ pub(in super::super) fn hydrate(ui: &mut egui::Ui, app: &ScratchpadApp) {
                 document.set_history_budget(budget);
                 document.restore_exported_history(restored.history);
                 original.install_history_document(document);
-                Ok(Source {
-                    revision: original.document().history_token(),
-                    buffer: Arc::new(original),
-                    cancelled: Arc::new(AtomicBool::new(false)),
-                })
+                Ok(original)
             },
         );
         match result {
             Some(Ok(source)) => {
-                ui.ctx().data_mut(|data| {
-                    data.insert_temp(
-                        browse_key(buffer.id),
-                        Browse {
-                            source: source.as_ref().clone(),
-                            version_id,
-                            return_version,
-                            revision: buffer.document().history_token(),
-                        },
-                    );
-                });
+                buffer.set_snapshot_return_buffer(source);
             }
             Some(Err(error)) => {
                 set_status(ui.ctx(), format!("Newer history unavailable: {error}"));
@@ -277,8 +270,6 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 document,
                 super::super::read_follow_focus(ui.ctx()),
             ) {
-                ui.ctx()
-                    .data_mut(|data| data.remove::<Browse>(browse_key(pending.buffer_id)));
                 // Every snapshot, including a saved branch with its own undo,
                 // retains a return route until the user edits or replays it.
                 {
@@ -293,19 +284,7 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                         pending.version_id,
                         pending.return_version.unwrap_or(result.return_version),
                     )));
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp(
-                            browse_key(pending.buffer_id),
-                            Browse {
-                                source: pending.source,
-                                version_id: pending.version_id,
-                                return_version: pending
-                                    .return_version
-                                    .unwrap_or(result.return_version),
-                                revision: buffer.document().history_token(),
-                            },
-                        )
-                    });
+                    buffer.set_snapshot_return_buffer(pending.source.buffer);
                 }
                 super::super::navigation::retain_tool_focus(ui.ctx(), app);
                 ui.ctx().request_repaint();
@@ -334,8 +313,8 @@ pub(in super::super) fn return_to_state(
         .as_slice()
         .iter()
         .find_map(|tab| tab.buffer_by_id(id))?;
-    let visit = browse(ctx, buffer)?;
-    let entries = crate::app::text_history::entries_for_buffer(&visit.source.buffer);
+    let source = buffer.snapshot_visit()?.source.as_ref()?;
+    let entries = crate::app::text_history::entries_for_buffer(source);
     let states = super::super::states::States::new(&entries, id);
     let Some(position) = states.index(after) else {
         return Some(false);
@@ -343,7 +322,7 @@ pub(in super::super) fn return_to_state(
     if !states.reachable(position) {
         return Some(false);
     }
-    let mut document = visit.source.buffer.document().clone();
+    let mut document = source.document().clone();
     if let Some(action) = states.target(position) {
         let result = if position < states.position {
             document.apply_text_history_undo(action.entry_id)
@@ -372,11 +351,14 @@ pub(in super::super) fn return_latest(
     else {
         return false;
     };
-    let Some(visit) = browse(ctx, buffer) else {
+    let Some(source) = buffer
+        .snapshot_visit()
+        .and_then(|visit| visit.source.as_ref())
+    else {
         return false;
     };
     // Return to the preserved live position, including any pre-existing redo tail.
-    install_return(ctx, app, id, visit.source.buffer.document().clone())
+    install_return(ctx, app, id, source.document().clone())
 }
 
 fn install_return(
@@ -389,7 +371,6 @@ fn install_return(
     {
         return false;
     }
-    ctx.data_mut(|data| data.remove::<Browse>(browse_key(id)));
     super::super::navigation::retain_tool_focus(ctx, app);
     ctx.request_repaint();
     true

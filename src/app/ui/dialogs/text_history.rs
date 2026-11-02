@@ -203,7 +203,16 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if let Some(ids) = clear {
         rail::clear(ctx);
         ctx.data_mut(|d| d.remove::<ClearRequest>(confirm_key()));
-        let saved = snapshots::clear_history(ctx, app, &ids);
+        let saved = match snapshots::clear_history(ctx, app, &ids) {
+            Ok(saved) => saved,
+            Err(error) => {
+                app.state.status.set_error_status_in_domain(
+                    crate::app::app_state::StatusDomain::History,
+                    format!("Could not clear history: {error}"),
+                );
+                return;
+            }
+        };
         let live = workspace_mutation::clear_text_history(app, &ids);
         if saved && !live {
             app.tab_manager.mark_session_dirty();
