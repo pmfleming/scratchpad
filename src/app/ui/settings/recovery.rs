@@ -67,8 +67,6 @@ pub(super) fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     }
     if retention_limits_heading(ui) {
         crate::app::app_state::settings_controller::reset_retention_and_limits_to_recommended(app);
-        let id = widget_ids::local(ui, "settings.retention.custom");
-        ui.data_mut(|data| data.insert_temp(id, false));
     }
     let mut policy = app.state.app_settings.history.recovery.clone();
     retention_row(ui, &mut policy.archive_retention_days);
@@ -130,72 +128,31 @@ fn retention_limits_heading(ui: &mut egui::Ui) -> bool {
 }
 
 fn retention_row(ui: &mut egui::Ui, days: &mut u32) {
-    let id = widget_ids::local(ui, "settings.retention.custom");
-    let custom = ui
-        .data_mut(|data| data.get_temp::<bool>(id))
-        .unwrap_or(false);
-    let mut selection = if custom || ![0, 7, 30, 90].contains(days) {
-        None
-    } else {
-        Some(*days)
-    };
     inner_select_row(ui, "Keep closed tabs for", None, |ui| {
-        if retention_slider(ui, days) {
-            ui.data_mut(|data| data.insert_temp(id, false));
-            selection = if [0, 7, 30, 90].contains(days) {
-                Some(*days)
-            } else {
-                None
-            };
-        }
-        if dropdown(
+        retention_slider(ui, days);
+        dropdown(
             ui,
             "Retention",
-            &mut selection,
-            &[Some(7), Some(30), Some(90), Some(0), None],
-            |value| match value {
-                Some(0) => "No expiry".into(),
-                Some(days) => format!("{days} days"),
-                None => "Custom…".into(),
+            days,
+            &[7, 30, 90, 365],
+            |days| match days {
+                // Preserve the display of existing policies until explicitly edited.
+                0 => "No expiry".into(),
+                1 => "1 day".into(),
+                days => format!("{days} days"),
             },
             130.0,
             "",
-        ) {
-            ui.data_mut(|data| data.insert_temp(id, selection.is_none()));
-            if let Some(value) = selection {
-                *days = value;
-            } else if *days == 0 {
-                *days = 30;
-            }
-        }
+        );
     });
-    if selection.is_none() {
-        inner_select_row(ui, "Retention period", None, |ui| {
-            let response = ui.add(
-                egui::DragValue::new(days)
-                    .range(1..=36500)
-                    .clamp_existing_to_range(false)
-                    .update_while_editing(false)
-                    .suffix(" days"),
-            );
-            response.accessible_name("Retention period").on_hover_text(
-                "Enter a custom number of days. Choose No expiry to remove the age limit.",
-            );
-        });
-    }
 }
 
-/// A logarithmic day scale leaves useful room for short durations while still
-/// covering custom values up to 100 years. Only the far-right stop is unlimited.
-fn retention_slider(ui: &mut egui::Ui, days: &mut u32) -> bool {
+/// A logarithmic day scale leaves useful room for short durations.
+fn retention_slider(ui: &mut egui::Ui, days: &mut u32) {
     let lane = ui.max_rect();
     let width = (lane.width() - 130.0 - 10.0).max(20.0);
     let rect = egui::Rect::from_min_size(lane.min, egui::vec2(width, lane.height()));
-    let mut value = if *days == 0 {
-        f64::INFINITY
-    } else {
-        f64::from(*days)
-    };
+    let mut value = f64::from(*days);
     let response = widget_ids::rect_scope_with_layout(
         ui,
         rect,
@@ -206,23 +163,14 @@ fn retention_slider(ui: &mut egui::Ui, days: &mut u32) -> bool {
             SettingsUi::apply_slider_style(ui);
             widget_ids::surface_response(ui, "settings.retention", "slider", |ui| {
                 ui.add(
-                    egui::Slider::new(&mut value, 1.0..=f64::INFINITY)
+                    egui::Slider::new(&mut value, 1.0..=365.0)
                         .logarithmic(true)
-                        .largest_finite(36500.0)
-                        // Round to whole days without arithmetic stepping:
-                        // infinity minus a fixed step would stay infinite.
                         .fixed_decimals(0)
                         .clamping(egui::SliderClamping::Edits)
                         .handle_shape(egui::style::HandleShape::Circle)
                         .trailing_fill(true)
                         .show_value(false)
-                        .custom_formatter(|value, _| {
-                            if value.is_infinite() {
-                                "No expiry".into()
-                            } else {
-                                format!("{value:.0} days")
-                            }
-                        }),
+                        .custom_formatter(|value, _| format!("{value:.0} days")),
                 )
             })
         },
@@ -231,16 +179,11 @@ fn retention_slider(ui: &mut egui::Ui, days: &mut u32) -> bool {
     record_settings_control_box("slider.Retention", response.rect);
     let changed = response.changed();
     response
-        .on_hover_text("Keep closed tabs for 1 day to 100 years. Drag fully right for No expiry.")
+        .on_hover_text("Keep closed tabs for 1 to 365 days.")
         .accessible_name("Keep closed tabs for");
     if changed {
-        *days = if value.is_infinite() {
-            0
-        } else {
-            value.round() as u32
-        };
+        *days = value.round() as u32;
     }
-    changed
 }
 
 fn render_content(

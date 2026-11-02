@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Show custom closed-tab retention directly in the dropdown without an extra row, and limit the slider and presets to 365 days.
+
 - Replaced settings' Expand all and Collapse all text buttons with right-aligned icons and tooltips.
 
 - Made History hover previews reversible: clicking records a new undoable state, while Escape or clicking outside discards the preview. The panel opens at the current state and scrolls when hovering near the list edges.

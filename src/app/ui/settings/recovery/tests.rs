@@ -89,7 +89,7 @@ fn recovery_budgets_and_retention_presets_persist_without_render_side_effects() 
 
 #[test]
 fn custom_retention_values_are_preserved_and_no_expiry_is_explicit() {
-    for days in [0, 7, 30, 90, 61, 36500, u32::MAX] {
+    for days in [0, 1, 7, 30, 90, 61, 365, 36500, u32::MAX] {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_app(root.path());
         app.state
@@ -118,21 +118,7 @@ fn custom_retention_values_are_preserved_and_no_expiry_is_explicit() {
                 .archive_retention_days,
             days
         );
-        if days == 0 {
-            assert_eq!(
-                harness
-                    .get_by_role_and_label(egui::Role::ComboBox, "Keep closed tabs for")
-                    .accesskit_node()
-                    .value(),
-                Some("No expiry".to_owned())
-            );
-        }
-        assert_eq!(
-            harness
-                .query_by_role_and_label(egui::Role::Label, "Retention period")
-                .is_some(),
-            ![0, 7, 30, 90].contains(&days)
-        );
+        assert_retention_label(&harness, days);
     }
 }
 
@@ -156,7 +142,7 @@ fn retention_presets_and_custom_days_are_editable_and_persisted() {
             app,
         );
     harness.run();
-    for (label, expected) in [("90 days", 90), ("No expiry", 0), ("Custom…", 30)] {
+    for (label, expected) in [("90 days", 90), ("365 days", 365), ("7 days", 7)] {
         harness
             .get_by_role_and_label(egui::Role::ComboBox, "Keep closed tabs for")
             .click_accesskit();
@@ -175,7 +161,7 @@ fn retention_presets_and_custom_days_are_editable_and_persisted() {
         );
     }
     harness
-        .get_by_role_and_label(egui::Role::SpinButton, "Retention period")
+        .get_by_role_and_label(egui::Role::Slider, "Keep closed tabs for")
         .set_value_accesskit(61.0);
     harness.run_steps(2);
     assert_eq!(
@@ -200,7 +186,7 @@ fn retention_presets_and_custom_days_are_editable_and_persisted() {
 }
 
 #[test]
-fn retention_slider_supports_custom_days_and_unlimited_right_endpoint() {
+fn retention_slider_supports_custom_days_and_365_day_maximum() {
     for width in [360.0, 900.0] {
         for dark in [true, false] {
             let root = tempfile::tempdir().unwrap();
@@ -252,8 +238,8 @@ fn retention_slider_supports_custom_days_and_unlimited_right_endpoint() {
                     .archive_retention_days,
                 61
             );
-            harness.get_by_role_and_label(egui::Role::SpinButton, "Retention period");
-            for (right, expected) in [(true, 0), (false, 1), (true, 0)] {
+            assert_retention_label(&harness, 61);
+            for (right, expected) in [(true, 365), (false, 1), (true, 365)] {
                 click_retention_endpoint(&mut harness, right);
                 assert_eq!(
                     harness
@@ -265,15 +251,7 @@ fn retention_slider_supports_custom_days_and_unlimited_right_endpoint() {
                         .archive_retention_days,
                     expected
                 );
-                if expected == 0 {
-                    assert_eq!(
-                        harness
-                            .get_by_role_and_label(egui::Role::ComboBox, "Keep closed tabs for")
-                            .accesskit_node()
-                            .value(),
-                        Some("No expiry".into())
-                    );
-                }
+                assert_retention_label(&harness, expected);
                 let saved = harness
                     .state()
                     .state
@@ -284,12 +262,71 @@ fn retention_slider_supports_custom_days_and_unlimited_right_endpoint() {
                     .unwrap();
                 assert_eq!(saved.history.recovery.archive_retention_days, expected);
             }
-            assert_keyboard_can_leave_no_expiry(&mut harness);
+            assert_keyboard_respects_retention_maximum(&mut harness);
+            assert_drag_updates_retention_label(&mut harness);
         }
     }
 }
 
-fn assert_keyboard_can_leave_no_expiry(harness: &mut Harness<ScratchpadApp>) {
+fn assert_retention_label(harness: &Harness<ScratchpadApp>, days: u32) {
+    let expected = match days {
+        0 => "No expiry".into(),
+        1 => "1 day".into(),
+        days => format!("{days} days"),
+    };
+    assert_eq!(
+        harness
+            .get_by_role_and_label(egui::Role::ComboBox, "Keep closed tabs for")
+            .accesskit_node()
+            .value(),
+        Some(expected)
+    );
+    assert!(harness.query_by_label("Retention period").is_none());
+    assert!(harness.query_by_label("Custom…").is_none());
+}
+
+fn assert_drag_updates_retention_label(harness: &mut Harness<ScratchpadApp>) {
+    let slider = super::super::widgets::settings_control_measurements()
+        .iter()
+        .find(|m| m.label == "slider.Retention")
+        .unwrap()
+        .rect;
+    let start = egui::pos2(slider.right() - 1.0, slider.center().y);
+    harness.event(egui::Event::PointerMoved(start));
+    harness.event(egui::Event::PointerButton {
+        pos: start,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    let mut previous = 365;
+    let mut pos = start;
+    for fraction in [0.75, 0.5, 0.25] {
+        pos.x = slider.left() + slider.width() * fraction;
+        harness.event(egui::Event::PointerMoved(pos));
+        harness.run_steps(2);
+        let days = harness
+            .state()
+            .state
+            .app_settings
+            .history
+            .recovery
+            .archive_retention_days;
+        assert!((1..previous).contains(&days));
+        assert_retention_label(harness, days);
+        previous = days;
+    }
+    harness.event(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+}
+
+fn assert_keyboard_respects_retention_maximum(harness: &mut Harness<ScratchpadApp>) {
     harness
         .get_by_role_and_label(egui::Role::Slider, "Keep closed tabs for")
         .focus();
@@ -303,7 +340,7 @@ fn assert_keyboard_can_leave_no_expiry(harness: &mut Harness<ScratchpadApp>) {
         .history
         .recovery
         .archive_retention_days;
-    assert!((1..=36500).contains(&days));
+    assert!((1..365).contains(&days));
     for _ in 0..2 {
         harness.key_press(egui::Key::ArrowRight);
         harness.run_steps(2);
@@ -316,7 +353,7 @@ fn assert_keyboard_can_leave_no_expiry(harness: &mut Harness<ScratchpadApp>) {
             .history
             .recovery
             .archive_retention_days,
-        0
+        365
     );
 }
 
@@ -358,13 +395,6 @@ fn recommended_icon_resets_retention_and_all_limits_but_preserves_other_preferen
     for removed in ["Retention", "Undo limits", "Recommended limits"] {
         assert!(harness.query_by_label(removed).is_none());
     }
-    // Explicit Custom mode must also be cleared by the reset.
-    harness
-        .get_by_role_and_label(egui::Role::ComboBox, "Keep closed tabs for")
-        .click_accesskit();
-    harness.run_steps(2);
-    harness.get_by_label("Custom…").click_accesskit();
-    harness.run_steps(2);
     assert!(!harness.output().shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Use recommended")));
     harness
         .get_by_role_and_label(egui::Role::Button, "Use recommended")
