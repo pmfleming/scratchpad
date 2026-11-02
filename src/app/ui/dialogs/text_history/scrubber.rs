@@ -98,7 +98,6 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
         (screen.bottom() - SCRUBBER_DEFAULT_HEIGHT - 24.0).max(screen.top()),
     );
     let mut action = None;
-    let mut close = false;
     callout::show_floating(
         ctx,
         "history_scrubber_window",
@@ -107,13 +106,10 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
         SCRUBBER_WIDTH,
         |ui| {
             widget_ids::feature_scope(ui, "history_scrubber", |ui| {
-                (close, action) = render(ui, app, id);
+                action = render(ui, app, id);
             });
         },
     );
-    if close {
-        input::close(ctx, app);
-    }
     if let Some(HistoryAction::State { buffer_id, after }) = action {
         let applied = snapshots::go_to_state(ctx, app, buffer_id, after);
         refresh_drag_after_replay(ctx, app, buffer_id, applied);
@@ -147,29 +143,27 @@ fn refresh_drag_after_replay(
     });
 }
 
-fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp, id: u64) -> (bool, Option<HistoryAction>) {
+fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp, id: u64) -> Option<HistoryAction> {
     settings::apply_dialog_typography(ui);
     callout::apply_spacing(ui);
     snapshots::poll(ui, app);
     snapshots::hydrate(ui, app);
     // A completed snapshot may switch the active file; retarget next frame.
     if active_buffer(app) != Some(id) {
-        return (false, None);
+        return None;
     }
     let entries = snapshots::state_entries(ui.ctx(), app);
     let states = States::new(&entries, id);
     let catalog = snapshots::collect(ui, app, &[id]);
     let buffer = app.tab_manager.active_tab().unwrap().active_buffer();
-    let close = callout::header_row(ui, "scrubber.header", "Close scrubber", |ui| {
-        super::truncated_label(
-            ui,
-            &buffer.name,
-            ui.available_width(),
-            14.0,
-            callout::text(ui),
-            egui::Sense::hover(),
-        );
-    });
+    super::truncated_label(
+        ui,
+        &buffer.name,
+        ui.available_width(),
+        14.0,
+        callout::text(ui),
+        egui::Sense::hover(),
+    );
     let visiting = snapshots::is_browsing(ui.ctx(), app, id);
     let rect = widget_ids::allocate_exact_rect(
         ui,
@@ -215,7 +209,7 @@ fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp, id: u64) -> (bool, Option<
         format!("{preview} / {}", states.entries.len())
     });
     snapshots::footer(ui, &catalog);
-    (close, action)
+    action
 }
 
 fn interact_track(

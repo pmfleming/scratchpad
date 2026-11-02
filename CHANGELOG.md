@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Removed the scrubber's close button; Escape and resumed editing dismiss it.
+
 - Made the scrubber appear on undo/redo and remain available for keyboard or pointer navigation until editing resumes or Escape dismisses it; removed its status-bar button and dedicated shortcut.
 
 - Deferred search refresh until a scrubber drag ends or is cancelled, and avoided reactivating the same editor on every step while keeping session dirtiness current.
