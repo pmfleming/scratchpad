@@ -48,7 +48,7 @@ fn settings_have_five_independent_categories_without_nested_disclosures() {
     ] {
         harness.get_by_role_and_label(egui::Role::DisclosureTriangle, label);
     }
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 8);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 9);
     for label in [
         "Memory per file",
         "Memory across all files",
@@ -120,7 +120,7 @@ fn search_reveals_matching_groups_without_losing_collapse_state() {
     assert!(harness.query_by_role(egui::Role::Slider).is_none());
     harness.get_by_label("Expand all").click_accesskit();
     harness.run_steps(2);
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 8);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 9);
 }
 
 #[test]
@@ -242,6 +242,11 @@ fn styled_controls_fit_and_align_with_production_fonts_in_both_themes() {
                     );
                 }
                 assert!(find("unit.Size").rect.left() > find("combo.Size").right_x);
+                let slider = find("slider.Size");
+                let combo = find("combo.Size");
+                assert!(slider.right_x + 9.0 <= combo.rect.left());
+                assert!((slider.center_y - combo.center_y).abs() < 1.0);
+                assert!(slider.rect.left() >= find("inner_select_row.Size").rect.left());
                 for control in &measurements {
                     if ["combo.", "button.", "segment.", "number."]
                         .iter()
@@ -338,6 +343,93 @@ fn appearance_controls_stay_visible_for_system_source_and_editing_switches_sourc
         harness.state().state.app_settings.editor_font(),
         EditorFontPreset::Mono
     );
+}
+
+#[test]
+fn font_size_slider_and_presets_stay_in_sync_and_persist() {
+    let mut app = app();
+    app.state.app_settings.editor.appearance_source = EditorAppearanceSource::System;
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1000.0, 1800.0))
+        .with_context_setup(setup)
+        .build_ui_state(
+            |ui, app| {
+                reset_settings_layout_measurements();
+                ui.set_width(880.0);
+                text_formatting::render_appearance(ui, app);
+            },
+            app,
+        );
+    harness.run();
+    harness
+        .get_by_role_and_label(egui::Role::Slider, "Size")
+        .set_value_accesskit(33.0);
+    harness.run_steps(2);
+    assert_eq!(harness.state().state.app_settings.font_size(), 33.0);
+    assert_eq!(
+        harness
+            .state()
+            .state
+            .app_settings
+            .editor_appearance_source(),
+        EditorAppearanceSource::App
+    );
+    assert_eq!(
+        harness
+            .get_by_role_and_label(egui::Role::ComboBox, "Size")
+            .accesskit_node()
+            .value(),
+        Some("33".into())
+    );
+    harness
+        .get_by_role_and_label(egui::Role::ComboBox, "Size")
+        .click_accesskit();
+    harness.run_steps(2);
+    harness.get_by_label("20").click_accesskit();
+    harness.run_steps(2);
+    assert_eq!(harness.state().state.app_settings.font_size(), 20.0);
+    let slider = settings_control_measurements()
+        .iter()
+        .find(|m| m.label == "slider.Size")
+        .unwrap()
+        .rect;
+    let mut pos = egui::pos2(slider.left() + 1.0, slider.center().y);
+    harness.event(egui::Event::PointerMoved(pos));
+    harness.event(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    assert_eq!(harness.state().state.app_settings.font_size(), 8.0);
+    pos.x = slider.right() - 1.0;
+    harness.event(egui::Event::PointerMoved(pos));
+    harness.run_steps(2);
+    assert_eq!(harness.state().state.app_settings.font_size(), 72.0);
+    assert_eq!(
+        harness
+            .get_by_role_and_label(egui::Role::ComboBox, "Size")
+            .accesskit_node()
+            .value(),
+        Some("72".into())
+    );
+    harness.event(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    let saved = harness
+        .state()
+        .state
+        .persistence
+        .settings_store
+        .load()
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.editor.font_size, 72.0);
 }
 
 #[test]

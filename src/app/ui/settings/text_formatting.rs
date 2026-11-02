@@ -1,12 +1,13 @@
 use super::{
     AppThemeMode, EditorAppearanceSource, EditorFontPreset, FONT_SIZE_OPTIONS, IndentationStyle,
-    ScratchpadApp, TabDisplayMode, egui,
+    ScratchpadApp, SettingsUi, TabDisplayMode, egui,
     widgets::{
         dropdown, group_heading, inner_select_row, numeric_slider, record_settings_control_box,
         render_preview_panel, segmented_row, toggle_select_row,
     },
 };
 use crate::app::app_state::settings_controller as settings;
+use crate::app::ui::widget_ids;
 
 pub(super) fn render_appearance(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let mut source = app.state.app_settings.editor_appearance_source();
@@ -36,22 +37,7 @@ pub(super) fn render_appearance(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             settings::set_editor_font(app, font);
         }
     });
-    let mut size = app.state.app_settings.font_size();
-    inner_select_row(ui, "Size", None, |ui| {
-        let options = FONT_SIZE_OPTIONS.map(|size| size as f32);
-        if dropdown(
-            ui,
-            "Size",
-            &mut size,
-            &options,
-            |size| format!("{size:.0}"),
-            96.0,
-            "pt",
-        ) {
-            use_app_appearance(app);
-            settings::set_font_size(app, size);
-        }
-    });
+    font_size_row(ui, app);
     let custom_id = egui::Id::unique("settings.custom_palette");
     let custom = ui
         .data_mut(|data| data.get_temp::<bool>(custom_id))
@@ -101,6 +87,70 @@ pub(super) fn render_appearance(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         app,
     );
     render_preview_panel(ui, app, false);
+}
+
+fn font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    let mut size = app.state.app_settings.font_size();
+    inner_select_row(ui, "Size", None, |ui| {
+        let slider_changed = font_size_slider(ui, &mut size);
+        let options = FONT_SIZE_OPTIONS.map(|size| size as f32);
+        let preset_changed = dropdown(
+            ui,
+            "Size",
+            &mut size,
+            &options,
+            |size| format!("{size:.0}"),
+            96.0,
+            "pt",
+        );
+        if slider_changed || preset_changed {
+            use_app_appearance(app);
+            settings::set_font_size(app, size);
+        }
+    });
+}
+
+fn font_size_slider(ui: &mut egui::Ui, size: &mut f32) -> bool {
+    let lane = ui.max_rect();
+    let unit_width = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                "pt".into(),
+                egui::FontId::proportional(12.5),
+                super::text_muted(ui),
+            )
+            .size()
+            .x
+    });
+    let width = (lane.width() - 96.0 - unit_width - ui.spacing().item_spacing.x - 10.0).max(20.0);
+    let rect = egui::Rect::from_min_size(lane.min, egui::vec2(width, lane.height()));
+    let response = widget_ids::rect_scope_with_layout(
+        ui,
+        rect,
+        "settings.font_size.slider.layout",
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().slider_width = width;
+            SettingsUi::apply_slider_style(ui);
+            widget_ids::surface_response(ui, "settings.font_size", "slider", |ui| {
+                ui.add(
+                    egui::Slider::new(size, 8.0..=72.0)
+                        .step_by(1.0)
+                        .clamping(egui::SliderClamping::Edits)
+                        .handle_shape(egui::style::HandleShape::Circle)
+                        .trailing_fill(true)
+                        .show_value(false),
+                )
+            })
+        },
+    )
+    .inner;
+    record_settings_control_box("slider.Size", response.rect);
+    let changed = response.changed();
+    response
+        .accessible_name("Size")
+        .on_hover_text("Font size in points (8–72).");
+    changed
 }
 
 fn use_app_appearance(app: &mut ScratchpadApp) {

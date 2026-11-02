@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Added a font-size slider beside the preset dropdown, adjustable from 8 to 72 pt.
+
 - Show custom closed-tab retention directly in the dropdown without an extra row, and limit the slider and presets to 365 days.
 
 - Replaced settings' Expand all and Collapse all text buttons with right-aligned icons and tooltips.
