@@ -492,12 +492,16 @@ impl TextDocument {
     }
 
     fn fingerprint_for_history_edits(&self, edits: &[PieceHistoryEdit]) -> u64 {
-        fingerprint_parts(
-            edits
-                .iter()
-                .flat_map(PieceHistoryEdit::spans)
-                .map(|span| self.content.piece_tree.text_for_span(span)),
-        )
+        // Persistence joins deleted spans into one payload. Hash logical payloads
+        // rather than storage boundaries so recovery and compaction agree.
+        fingerprint_parts(edits.iter().flat_map(|edit| {
+            let deleted = (!edit.deleted_spans().is_empty())
+                .then(|| self.text_for_spans(edit.deleted_spans()));
+            let inserted = edit
+                .inserted_span()
+                .map(|span| self.content.piece_tree.text_for_span(span).to_string());
+            deleted.into_iter().chain(inserted)
+        }))
     }
 
     fn visible_generation(&self) -> u32 {

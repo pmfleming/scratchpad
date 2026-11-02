@@ -253,7 +253,7 @@ impl TextDocument {
         })
     }
 
-    fn text_for_spans(&self, spans: &[ByteSpan]) -> String {
+    pub(super) fn text_for_spans(&self, spans: &[ByteSpan]) -> String {
         let mut text = String::new();
         for span in spans {
             text.push_str(&self.content.piece_tree.text_for_span(*span));
