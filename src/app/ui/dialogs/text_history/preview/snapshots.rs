@@ -47,7 +47,7 @@ pub(super) fn request(
     }
     if super::snapshot_id(ctx, id) == Some(version_id) {
         if confirm {
-            super::commit(ctx, app);
+            super::commit_snapshot(ctx, app);
         }
         return;
     }
@@ -135,7 +135,7 @@ pub(in super::super) fn poll(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 .memory_mut(|m| m.request_focus(super::super::list::focus_id()));
             super::super::navigation::retain_tool_focus(ui.ctx(), app);
             if pending.confirm {
-                super::commit(ui.ctx(), app);
+                super::commit_snapshot(ui.ctx(), app);
             }
             ui.ctx().request_repaint();
         }

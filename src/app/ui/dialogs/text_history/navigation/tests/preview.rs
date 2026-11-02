@@ -158,7 +158,7 @@ fn hover_changes_the_editor_projection_and_escape_preserves_text_history_and_ses
 }
 
 #[test]
-fn click_confirms_once_and_clicking_outside_discards_the_next_preview() {
+fn click_moves_history_position_and_clicking_outside_discards_the_next_preview() {
     let root = tempfile::tempdir().unwrap();
     let mut app = app_with_history(root.path());
     let id = app.tab_manager.active_tab().unwrap().active_buffer().id;
@@ -181,14 +181,17 @@ fn click_confirms_once_and_clicking_outside_discards_the_next_preview() {
         .active_tab_mut()
         .unwrap()
         .active_buffer_mut();
-    assert_eq!(buffer.document().history_entries().len(), 3);
-    assert_eq!(
-        buffer.document().history_entries().last().unwrap().summary,
-        "Restore history state"
+    assert_eq!(buffer.document().history_entries().len(), 2);
+    assert!(
+        buffer
+            .document()
+            .history_entries()
+            .iter()
+            .all(|entry| entry.is_undone())
     );
-    buffer.undo_last_text_operation().unwrap();
-    assert_eq!(buffer.text(), "current");
     buffer.redo_last_text_operation().unwrap();
+    assert_eq!(buffer.text(), "middle");
+    buffer.undo_last_text_operation().unwrap();
     assert_eq!(buffer.text(), "old");
     h.run_steps(3);
     let ctx = h.ctx.clone();

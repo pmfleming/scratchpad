@@ -258,13 +258,17 @@ pub(super) fn select(
 }
 
 pub(super) fn confirm(ctx: &egui::Context, app: &mut ScratchpadApp, id: u64, after: Option<u64>) {
-    if !select(ctx, app, id, after) {
+    if !super::snapshots::go_to_state(ctx, app, id, after) {
         return;
     }
-    commit(ctx, app);
+    if super::read_follow_focus(ctx) && super::active_buffer(app) != Some(id) {
+        super::navigation::activate_file(app, id);
+    }
+    super::navigation::retain_tool_focus(ctx, app);
+    clear(ctx);
 }
 
-fn commit(ctx: &egui::Context, app: &mut ScratchpadApp) {
+fn commit_snapshot(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let Some(preview) = ctx.data(|d| d.get_temp::<Preview>(key())) else {
         return;
     };

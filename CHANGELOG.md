@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Choosing an existing History state now moves the undo/redo position without adding a restore edit or discarding later changes; both sides of the timeline remain available.
+
 - Removed the History list's inner focus border so the list stays visually integrated with the main panel.
 
 - Shade every History row between the starting document state and the current preview, with distinct endpoint markers.

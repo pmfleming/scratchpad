@@ -121,9 +121,9 @@ fn other_file_jumps_can_leave_the_active_file_untouched() {
     assert_eq!(text(h.state()), "old");
     assert_eq!(h.state().tab_manager.active_tab_index, 1);
     for (key, expected) in [
-        (egui::Key::ArrowDown, "current"),
-        (egui::Key::ArrowDown, "middle"),
-        (egui::Key::Home, "old"),
+        (egui::Key::ArrowUp, "middle"),
+        (egui::Key::ArrowUp, "current"),
+        (egui::Key::Home, "current"),
         (egui::Key::End, "old"),
     ] {
         h.key_press(key);
@@ -145,10 +145,10 @@ fn other_file_jumps_can_leave_the_active_file_untouched() {
     h.run_steps(3);
     assert!(h.query_by_label("other  ·  0").is_none());
     assert_eq!(
-        h.get_by_label("note.txt  ·  3").rect().height(),
+        h.get_by_label("note.txt  ·  2").rect().height(),
         crate::app::theme::TAB_HEIGHT
     );
-    h.get_by_label("note.txt  ·  3").click();
+    h.get_by_label("note.txt  ·  2").click();
     h.run_steps(3);
     assert_eq!(
         h.get_all_by_role_and_label(egui::Role::Button, "State: Oldest retained state")
@@ -187,7 +187,7 @@ fn other_file_jumps_can_leave_the_active_file_untouched() {
             .document()
             .history_entries()
             .len(),
-        4
+        2
     );
 }
 
@@ -352,14 +352,14 @@ fn rail_clicks_and_focused_keys_follow_screen_direction_without_stealing_editor_
     );
     h.key_press(egui::Key::ArrowDown);
     h.run_steps(3);
-    assert_eq!(displayed_text(&h, id), "current");
+    assert_eq!(displayed_text(&h, id), "old");
     assert_eq!(text(h.state()), "middle");
     h.key_press(egui::Key::ArrowUp);
     h.run_steps(3);
     assert_eq!(text(h.state()), "middle");
     h.key_press(egui::Key::Home);
     h.run_steps(3);
-    assert_eq!(displayed_text(&h, id), "middle");
+    assert_eq!(displayed_text(&h, id), "current");
     h.key_press(egui::Key::End);
     h.run_steps(3);
     assert_eq!(displayed_text(&h, id), "old");
@@ -795,6 +795,7 @@ fn clearing_history_respects_scope_and_keeps_the_confirmed_target() {
     }
 }
 
+mod position;
 mod preview;
 mod scrubber;
 mod shading;
