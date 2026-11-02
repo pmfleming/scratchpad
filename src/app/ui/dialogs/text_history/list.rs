@@ -1,3 +1,4 @@
+mod input;
 use super::{
     model::{HistoryAction, TextHistoryRow, row_from_entry, timeline_rows_from_entries},
     snapshots::{self, Catalog},
@@ -9,12 +10,10 @@ use crate::app::{
     ui::{callout, widget_ids},
 };
 use eframe::egui;
+pub(super) use input::request_reveal;
 
 pub(super) fn focus_id() -> egui::Id {
     egui::Id::unique("history.rail.focus")
-}
-fn hover_id() -> egui::Id {
-    egui::Id::unique("history.rail.hover")
 }
 
 fn selected_buffer_key() -> egui::Id {
@@ -25,7 +24,7 @@ pub(super) fn selected_buffer(ctx: &egui::Context) -> Option<u64> {
     ctx.data(|d| d.get_temp(selected_buffer_key()))
 }
 
-fn select_buffer(ctx: &egui::Context, id: u64) {
+pub(super) fn select_buffer(ctx: &egui::Context, id: u64) {
     ctx.data_mut(|d| d.insert_temp(selected_buffer_key(), id));
 }
 
@@ -36,17 +35,20 @@ pub(super) fn render(
     target: Option<u64>,
     ids: &[u64],
     action: &mut Option<HistoryAction>,
+    first: bool,
 ) {
     let mut focus_requested = false;
-    let previous_hover = ui
-        .ctx()
-        .data_mut(|d| d.remove_temp::<(u64, usize)>(hover_id()));
-    let scroll = egui::ScrollArea::vertical()
+    let mut navigation = input::begin(ui, target, first);
+    let mut area = egui::ScrollArea::vertical()
         .id_salt(("history.states", target))
+        .animated(false)
         .auto_shrink([false, false])
         .max_height((ui.available_height() - 20.0 - ui.spacing().item_spacing.y).max(64.0))
-        .min_scrolled_height(64.0)
-        .show(ui, |ui| {
+        .min_scrolled_height(64.0);
+    if let Some(offset) = input::pending_offset(ui.ctx(), target) {
+        area = area.vertical_scroll_offset(offset);
+    }
+    let scroll = area.show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             if let Some(id) = target {
                 let file = FileStates::new(entries, catalog, id);
@@ -55,7 +57,7 @@ pub(super) fn render(
                         .checked_sub(1)
                         .map(|i| row_from_entry(file.states.entries[i]));
                     focus_requested |=
-                        file.render_state(ui, k, row.as_ref(), None, previous_hover, action);
+                        file.render_state(ui, k, row.as_ref(), None, &mut navigation, action);
                 }
             } else {
                 // Build each file's path once, not once per timeline row.
@@ -81,13 +83,13 @@ pub(super) fn render(
                     let k = positions[&(row.buffer_id, row.entry_id)];
                     let name = catalog.get(&row.buffer_id).map(|f| f.label.as_str());
                     focus_requested |=
-                        file.render_state(ui, k, Some(&row), name, previous_hover, action);
+                        file.render_state(ui, k, Some(&row), name, &mut navigation, action);
                 }
                 // A file at position zero still needs its own current-state marker.
                 for &id in ids {
                     let file = &paths[&id];
                     let name = catalog.get(&id).map(|f| f.label.as_str());
-                    focus_requested |= file.render_state(ui, 0, None, name, previous_hover, action);
+                    focus_requested |= file.render_state(ui, 0, None, name, &mut navigation, action);
                 }
             }
             for &id in ids {
@@ -99,7 +101,7 @@ pub(super) fn render(
                     {
                         ui.weak(&file.label);
                     }
-                    snapshots::older_rows(ui, id, catalog, action);
+                    navigation.reachable_hover |= snapshots::older_rows(ui, id, catalog, action, navigation.hover);
                     if matches!(action, Some(HistoryAction::Snapshot { buffer_id, .. }) if *buffer_id == id) {
                         select_buffer(ui.ctx(), id);
                         focus_requested = true;
@@ -107,6 +109,7 @@ pub(super) fn render(
                 }
             }
         });
+    input::scroll_edges(ui, &scroll, &navigation);
     focus_rail(ui, scroll.inner_rect, focus_requested);
 }
 
@@ -161,15 +164,16 @@ impl<'a> FileStates<'a> {
         k: usize,
         row: Option<&TextHistoryRow<'_>>,
         name: Option<&str>,
-        hovered: Option<(u64, usize)>,
+        navigation: &mut input::Navigation,
         action: &mut Option<HistoryAction>,
     ) -> bool {
         let id = self.id;
         let states = &self.states;
-        let visiting = self.visiting;
-        let current = !visiting && k == states.position;
+        let visiting = self.visiting || super::preview::snapshot_id(ui.ctx(), id).is_some();
+        let position = super::preview::position(ui.ctx(), id, states);
+        let current = !visiting && k == position;
         let reachable = states.reachable(k);
-        let undone = k > states.position;
+        let undone = k > position;
         let label = row.map_or("Oldest retained state", |r| r.title);
         let hint = if !reachable {
             "Cannot replay across this change".to_owned()
@@ -185,8 +189,9 @@ impl<'a> FileStates<'a> {
             )
         };
         let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 34.0));
-        if current {
-            reveal_changed_state(ui, rect, id, k);
+        if current && navigation.reveal && (name.is_none() || selected_buffer(ui.ctx()) == Some(id))
+        {
+            ui.scroll_to_rect(rect, navigation.first.then_some(egui::Align::Center));
         }
         if !ui.is_rect_visible(rect) {
             return false;
@@ -199,7 +204,7 @@ impl<'a> FileStates<'a> {
             "history.state",
         )
         .on_hover_text(format!(
-            "{label}\n{hint}{}",
+            "{label}\n{hint}{}\nHover to preview · Click to confirm · Esc to discard",
             row.map_or(String::new(), |r| format!("\n{} · {}", r.label, r.source))
         ));
         response.widget_info(|| {
@@ -210,24 +215,23 @@ impl<'a> FileStates<'a> {
                 format!("State: {label}"),
             )
         });
-        if response.hovered() && reachable {
-            ui.ctx().data_mut(|d| d.insert_temp(hover_id(), (id, k)));
-        }
-        let affected = hovered.is_some_and(|(buffer, destination)| {
-            buffer == id
-                && states.reachable(destination)
-                && k > destination.min(states.position)
-                && k <= destination.max(states.position)
-        });
-        if current || affected || response.hovered() {
+        if current || response.hovered() {
             ui.painter().rect_filled(
                 rect,
                 0,
-                if current || affected {
+                if current {
                     theme::tab_selected_bg(ui)
                 } else {
                     theme::action_bg(ui)
                 },
+            );
+        }
+        if k == states.position && !current && !self.visiting {
+            ui.painter().rect_stroke(
+                rect,
+                0,
+                egui::Stroke::new(1.0, theme::tab_selected_accent(ui)),
+                egui::StrokeKind::Inside,
             );
         }
         paint_node(
@@ -254,28 +258,36 @@ impl<'a> FileStates<'a> {
             callout::muted_text(ui),
         );
         paint_label(ui, rect, row, name);
-        if response.clicked() {
-            select_buffer(ui.ctx(), id);
+        self.navigate_state(&response, k, navigation, action)
+    }
+
+    fn navigate_state(
+        &self,
+        response: &egui::Response,
+        k: usize,
+        navigation: &mut input::Navigation,
+        action: &mut Option<HistoryAction>,
+    ) -> bool {
+        let id = self.id;
+        let states = &self.states;
+        let reachable = states.reachable(k);
+        let hovered = navigation.hover && response.hovered() && reachable;
+        navigation.reachable_hover |= hovered;
+        if response.clicked() || hovered {
+            select_buffer(&response.ctx, id);
         }
-        if response.clicked() && reachable && (!current || visiting) {
+        if response.clicked() && reachable {
             *action = Some(HistoryAction::State {
+                buffer_id: id,
+                after: states.after(k),
+            });
+        } else if hovered {
+            *action = Some(HistoryAction::Preview {
                 buffer_id: id,
                 after: states.after(k),
             });
         }
         response.clicked()
-    }
-}
-
-fn reveal_changed_state(ui: &mut egui::Ui, rect: egui::Rect, buffer: u64, position: usize) {
-    let key = widget_ids::local(ui, ("history.current", buffer));
-    let previous = ui.ctx().data_mut(|d| {
-        let previous = d.get_temp::<usize>(key);
-        d.insert_temp(key, position);
-        previous
-    });
-    if previous != Some(position) && ui.ctx().memory(|m| m.has_focus(focus_id())) {
-        ui.scroll_to_rect(rect, Some(egui::Align::Center));
     }
 }
 

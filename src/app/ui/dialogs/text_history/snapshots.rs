@@ -130,6 +130,10 @@ fn source(ctx: &egui::Context, buffer: &BufferState) -> Source {
     })
 }
 
+pub(super) fn preview_buffer(ctx: &egui::Context, buffer: &BufferState) -> BufferState {
+    source(ctx, buffer).buffer.as_ref().clone()
+}
+
 pub(super) fn cancel_coverage(ctx: &egui::Context, app: &ScratchpadApp) {
     if ctx
         .data_mut(|data| data.remove_temp::<bool>(running_key()))
@@ -316,6 +320,10 @@ pub(super) fn go_to_state(
 
 pub(super) fn execute(ctx: &egui::Context, app: &mut ScratchpadApp, action: HistoryAction) {
     match action {
+        HistoryAction::PreviewSnapshot { .. } => super::preview::execute(ctx, app, action),
+        HistoryAction::Preview { buffer_id, after } => {
+            super::preview::select(ctx, app, buffer_id, after);
+        }
         HistoryAction::State { buffer_id, after } => {
             go_to_state(ctx, app, buffer_id, after);
         }

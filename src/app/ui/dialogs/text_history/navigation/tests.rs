@@ -28,6 +28,20 @@ fn app_with_history(root: &std::path::Path) -> ScratchpadApp {
 fn text(app: &ScratchpadApp) -> String {
     app.tab_manager.tabs.as_slice()[0].active_buffer().text()
 }
+fn displayed_text(h: &Harness<'_, ScratchpadApp>, id: u64) -> String {
+    let buffer = h
+        .state()
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .find_map(|tab| tab.buffer_by_id(id))
+        .unwrap();
+    super::super::preview::history_preview(&h.ctx, buffer).map_or_else(
+        || buffer.text(),
+        |tab| tab.lock().unwrap().tab.active_buffer().text(),
+    )
+}
 fn jump(ctx: &egui::Context, app: &mut ScratchpadApp, id: u64, k: usize) -> bool {
     let entries = snapshots::state_entries(ctx, app);
     let states = States::new(&entries, id);
@@ -107,14 +121,15 @@ fn other_file_jumps_can_leave_the_active_file_untouched() {
     assert_eq!(text(h.state()), "old");
     assert_eq!(h.state().tab_manager.active_tab_index, 1);
     for (key, expected) in [
-        (egui::Key::ArrowUp, "middle"),
-        (egui::Key::ArrowDown, "old"),
-        (egui::Key::Home, "current"),
+        (egui::Key::ArrowDown, "current"),
+        (egui::Key::ArrowDown, "middle"),
+        (egui::Key::Home, "old"),
         (egui::Key::End, "old"),
     ] {
         h.key_press(key);
         h.run_steps(3);
-        assert_eq!(text(h.state()), expected);
+        assert_eq!(displayed_text(&h, id), expected);
+        assert_eq!(text(h.state()), "old");
         assert_eq!(h.state().tab_manager.active_tab_index, 1);
     }
     assert_eq!(
@@ -130,10 +145,10 @@ fn other_file_jumps_can_leave_the_active_file_untouched() {
     h.run_steps(3);
     assert!(h.query_by_label("other  ·  0").is_none());
     assert_eq!(
-        h.get_by_label("note.txt  ·  2").rect().height(),
+        h.get_by_label("note.txt  ·  3").rect().height(),
         crate::app::theme::TAB_HEIGHT
     );
-    h.get_by_label("note.txt  ·  2").click();
+    h.get_by_label("note.txt  ·  3").click();
     h.run_steps(3);
     assert_eq!(
         h.get_all_by_role_and_label(egui::Role::Button, "State: Oldest retained state")
@@ -167,11 +182,12 @@ fn other_file_jumps_can_leave_the_active_file_untouched() {
     h.run_steps(3);
     assert_eq!(text(h.state()), "current");
     assert_eq!(
-        crate::app::ui::editor_content::native_editor::history_feedback::active_offset(
-            &h.ctx,
-            h.state().tab_manager.active_tab().unwrap().active_buffer(),
-        ),
-        Some(0)
+        h.state().tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .document()
+            .history_entries()
+            .len(),
+        4
     );
 }
 
@@ -308,6 +324,7 @@ fn large_history_counts_and_long_names_do_not_expand_the_panel() {
 fn rail_clicks_and_focused_keys_follow_screen_direction_without_stealing_editor_keys() {
     let root = tempfile::tempdir().unwrap();
     let mut app = app_with_history(root.path());
+    let id = app.tab_manager.active_tab().unwrap().active_buffer().id;
     app.state.dialogs.text_history.open();
     let summary = app.tab_manager.tabs.as_slice()[0]
         .active_buffer()
@@ -335,19 +352,22 @@ fn rail_clicks_and_focused_keys_follow_screen_direction_without_stealing_editor_
     );
     h.key_press(egui::Key::ArrowDown);
     h.run_steps(3);
-    assert_eq!(text(h.state()), "old");
+    assert_eq!(displayed_text(&h, id), "current");
+    assert_eq!(text(h.state()), "middle");
     h.key_press(egui::Key::ArrowUp);
     h.run_steps(3);
     assert_eq!(text(h.state()), "middle");
     h.key_press(egui::Key::Home);
     h.run_steps(3);
-    assert_eq!(text(h.state()), "current");
+    assert_eq!(displayed_text(&h, id), "middle");
     h.key_press(egui::Key::End);
     h.run_steps(3);
-    assert_eq!(text(h.state()), "old");
+    assert_eq!(displayed_text(&h, id), "old");
+    assert_eq!(text(h.state()), "middle");
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
     assert!(!h.state().state.dialogs.text_history.is_open());
+    assert_eq!(text(h.state()), "middle");
 }
 
 #[test]
@@ -368,8 +388,7 @@ fn scrubber_steps_only_active_file_and_closes_independently() {
     h.key_press(egui::Key::End);
     h.run_steps(3);
     assert_eq!(text(h.state()), "current");
-    h.get_by_label("Close history").click();
-    h.run_steps(3);
+    // Interacting with the scrubber clicks outside History and dismisses it.
     assert!(!h.state().state.dialogs.text_history.is_open());
     assert!(h.state().state.dialogs.history_scrubber.is_open());
     h.get_by_label("Undo one step").click();
@@ -776,4 +795,5 @@ fn clearing_history_respects_scope_and_keeps_the_confirmed_target() {
     }
 }
 
+mod preview;
 mod scrubber;

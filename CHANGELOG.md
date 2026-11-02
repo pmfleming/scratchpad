@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Made History hover previews reversible: clicking records a new undoable state, while Escape or clicking outside discards the preview. The panel opens at the current state and scrolls when hovering near the list edges.
+
 - Kept `Ctrl+F` for Find, moved Replace to `Ctrl+Shift+F`, and assigned `Ctrl+H` to History.
 
 - Removed the transient “Loading snapshots…” message from history surfaces.

@@ -5,9 +5,11 @@ mod model;
 mod navigation;
 mod panel;
 mod persistence;
+mod preview;
 mod scrubber;
 mod snapshots;
 mod states;
+pub(crate) use preview::history_preview;
 pub(crate) use scrubber::{history_scrubbing, note_editor_history_activity};
 
 use self::model::HistoryAction;
@@ -110,6 +112,7 @@ fn scope_buffer(scope: HistoryTab, app: &ScratchpadApp) -> Option<u64> {
 /// Only the focused rail or scrubber owns navigation; opening a callout never
 /// steals plain arrow keys from the editor.
 pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    preview::prepare(ctx, app);
     let popup_open = egui::Popup::is_any_open(ctx);
     ctx.data_mut(|d| d.insert_temp(egui::Id::unique("history.escape.popup"), popup_open));
     if app.state.dialogs.any_modal_open()
@@ -130,7 +133,7 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
         if scrub {
             scrubber::close(ctx, app);
         } else {
-            app.state.dialogs.text_history.close();
+            preview::close(ctx, app);
         }
         return;
     }
@@ -164,6 +167,11 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
     }
     let entries = snapshots::state_entries(ctx, app);
     let states = states::States::new(&entries, id);
+    let position = if rail {
+        preview::position(ctx, id, &states)
+    } else {
+        states.position
+    };
     let (older, newer) = if scrub {
         (egui::Key::ArrowLeft, egui::Key::ArrowRight)
     } else {
@@ -171,8 +179,8 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
     };
     let mut destination = None;
     for (key, position) in [
-        (older, states.position.saturating_sub(1).max(states.first)),
-        (newer, (states.position + 1).min(states.last)),
+        (older, position.saturating_sub(1).max(states.first)),
+        (newer, (position + 1).min(states.last)),
         (
             egui::Key::Home,
             if scrub { states.first } else { states.last },
@@ -187,7 +195,12 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
         }
     }
     if let Some(position) = destination {
-        snapshots::go_to_state(ctx, app, id, states.after(position));
+        if rail {
+            preview::select(ctx, app, id, states.after(position));
+            list::request_reveal(ctx);
+        } else {
+            snapshots::go_to_state(ctx, app, id, states.after(position));
+        }
     }
 }
 
@@ -195,7 +208,7 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
 /// have had an opportunity to consume Escape.
 pub(crate) fn dismiss_text_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let scrub = app.state.dialogs.history_scrubber.is_open();
-    let history = dismissible_history(app) && app.state.dialogs.text_history.is_open();
+    let history = app.state.dialogs.text_history.is_open();
     if (scrub || history)
         && !app.state.dialogs.any_modal_open()
         && crate::app::app_state::workspace::accessors::pending_action(app).is_none()
@@ -209,7 +222,7 @@ pub(crate) fn dismiss_text_history(ctx: &egui::Context, app: &mut ScratchpadApp)
         if scrub {
             scrubber::close(ctx, app);
         } else {
-            app.state.dialogs.text_history.close();
+            preview::close(ctx, app);
         }
     }
 }
@@ -231,10 +244,15 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
 }
 
 fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    let first = preview::begin(ctx);
+    if first && let Some(id) = active_buffer(app) {
+        list::select_buffer(ctx, id);
+    }
     let mut action = None;
     let mut clear = None;
     let mut selected = scope(ctx, app);
     let close = panel::show(ctx, app, |ui, app| {
+        preview::poll(ui, app);
         snapshots::poll(ui, app);
         snapshots::hydrate(ui, app);
         let entries = snapshots::state_entries(ctx, app);
@@ -281,13 +299,15 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
                 });
             });
         }
-        list::render(ui, &entries, &catalog, target, &ids, &mut action);
+        list::render(ui, &entries, &catalog, target, &ids, &mut action, first);
         snapshots::footer(ui, &catalog);
     });
     if close {
-        crate::app::commands::close_text_history(&mut app.state.dialogs);
+        preview::close(ctx, app);
+        return;
     }
     if let Some(ids) = clear {
+        preview::clear(ctx);
         ctx.data_mut(|d| d.remove::<ClearRequest>(confirm_key()));
         let saved = snapshots::clear_history(ctx, app, &ids);
         let live = workspace_mutation::clear_text_history(app, &ids);
@@ -297,7 +317,7 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
         action = None;
     }
     if let Some(action) = action {
-        snapshots::execute(ctx, app, action);
+        preview::execute(ctx, app, action);
     }
 }
 
@@ -321,11 +341,19 @@ fn file_caption(
             let states = states::States::new(entries, id);
             // Allocate the actual count width before giving the filename the
             // remainder. A fixed allowance makes large counts grow the window.
-            ui.weak(if snapshots::is_browsing(ui.ctx(), app, id) {
-                "Snapshot".to_owned()
-            } else {
-                format!("{} / {}", states.position, states.entries.len())
-            });
+            ui.weak(
+                if snapshots::is_browsing(ui.ctx(), app, id)
+                    || preview::snapshot_id(ui.ctx(), id).is_some()
+                {
+                    "Snapshot".to_owned()
+                } else {
+                    format!(
+                        "{} / {}",
+                        preview::position(ui.ctx(), id, &states),
+                        states.entries.len()
+                    )
+                },
+            );
             truncated_label(
                 ui,
                 &buffer.name,

@@ -76,67 +76,39 @@ fn text(harness: &Harness<'_, ScratchpadApp>) -> String {
 }
 
 #[test]
-fn snapshots_navigate_in_the_existing_editor_and_return_to_detailed_undo() {
+fn snapshot_hover_is_discardable_and_click_appends_one_undoable_state() {
     let root = tempfile::tempdir().unwrap();
     let (app, id, point, label) = fixture(root.path());
-    let mut harness = harness(app);
-    wait(&mut harness, |h| h.query_by_label(&label).is_some());
-    harness.get_by_label(&label).click();
-    wait(&mut harness, |h| text(h) == "ancient");
-    harness.run_steps(2);
-    assert!(harness.query_by_label("Snapshot").is_some());
-    assert!(harness.query_by_label("2 / 2").is_none());
-    assert_eq!(harness.state().tab_manager.tabs.len(), 1);
-    let buffer = harness.state().tab_manager.tabs.as_slice()[0].active_buffer();
-    assert_eq!(buffer.id, id);
-    assert!(buffer.document().history_entries().is_empty());
-    let return_id = visit::browse(&harness.ctx, buffer).unwrap().return_version;
-    assert_ne!(return_id, point);
-    assert!(harness.query_by_label("Recovery points").is_none());
-    assert!(harness.query_by_label("History preview").is_none());
-    assert!(harness.query_by_label("Recovery point").is_none());
-    assert!(
-        harness
-            .ctx
-            .memory(|m| m.has_focus(super::super::super::list::focus_id()))
-    );
-    harness.key_press(egui::Key::ArrowDown);
-    harness.run_steps(3);
-    assert_eq!(text(&harness), "one");
-    let ctx = harness.ctx.clone();
-    // Revisit the snapshot and verify Home can return to the newest native state.
-    snapshots::request(&ctx, harness.state_mut(), id, point);
-    wait(&mut harness, |h| text(h) == "ancient");
-    harness.key_press(egui::Key::Home);
-    harness.run_steps(3);
-    assert_eq!(text(&harness), "two");
-    assert!(harness.query_by_label("2 / 2").is_some());
-    snapshots::request(&ctx, harness.state_mut(), id, point);
-    wait(&mut harness, |h| text(h) == "ancient");
-    harness.get_by_label("Return to latest").click();
-    harness.run_steps(3);
-    assert_eq!(text(&harness), "two");
+    let mut h = harness(app);
+    wait(&mut h, |h| h.query_by_label(&label).is_some());
+    let rect = h.get_by_label(&label).rect();
+    h.hover_at(rect.center());
+    wait(&mut h, |h| {
+        super::super::super::preview::snapshot_id(&h.ctx, id) == Some(point)
+    });
+    assert_eq!(text(&h), "two");
+    let buffer = h.state().tab_manager.tabs.as_slice()[0].active_buffer();
+    let projection = super::super::super::preview::history_preview(&h.ctx, buffer).unwrap();
     assert_eq!(
-        harness.state().tab_manager.tabs.as_slice()[0]
-            .active_buffer()
-            .document()
-            .history_entries()
-            .len(),
-        2
+        projection.lock().unwrap().tab.active_buffer().text(),
+        "ancient"
     );
-    // A click on a normal row also returns from a snapshot to that exact state.
-    let ctx = harness.ctx.clone();
-    snapshots::request(&ctx, harness.state_mut(), id, point);
-    wait(&mut harness, |h| text(h) == "ancient");
-    let entries = snapshots::state_entries(&ctx, harness.state_mut());
-    let target = entries.iter().max_by_key(|entry| entry.global_seq).unwrap();
-    assert!(snapshots::go_to_state(
-        &ctx,
-        harness.state_mut(),
-        id,
-        Some(target.id)
-    ));
-    assert_eq!(text(&harness), "two");
+    assert_eq!(buffer.document().history_entries().len(), 2);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(text(&h), "two");
+    assert!(super::super::super::preview::snapshot_id(&h.ctx, id).is_none());
+    h.state_mut().state.dialogs.text_history.open();
+    h.run_steps(3);
+    h.get_by_label(&label).click();
+    wait(&mut h, |h| text(h) == "ancient");
+    let buffer = h.state_mut().tab_manager.tabs.as_mut_slice()[0].active_buffer_mut();
+    assert_eq!(buffer.document().history_entries().len(), 3);
+    assert!(buffer.snapshot_navigation().is_none());
+    buffer.undo_last_text_operation().unwrap();
+    assert_eq!(buffer.text(), "two");
+    buffer.redo_last_text_operation().unwrap();
+    assert_eq!(buffer.text(), "ancient");
     assert_eq!(
         std::fs::read_to_string(root.path().join("note.txt")).unwrap(),
         "disk contents"

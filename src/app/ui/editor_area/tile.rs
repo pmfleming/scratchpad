@@ -186,13 +186,40 @@ fn render_tile_body_contents(
         .and_then(|tab| tab.buffer_for_view(request.view_id))
         .is_some_and(|buffer| buffer.right_to_left_reading_order);
     let tab = &mut app.tab_manager.tabs.as_mut_slice()[request.tab_index];
-    let Some(_buffer) = tab.buffer_for_view(request.view_id) else {
+    let Some(buffer) = tab.buffer_for_view(request.view_id) else {
         return TileBodyOutcome {
             changed: false,
             focused: false,
             interaction_response: None,
         };
     };
+
+    if let Some(preview) = crate::app::ui::dialogs::history_preview(ui.ctx(), buffer)
+        && let Ok(mut preview) = preview.lock()
+    {
+        let view_id = tab
+            .layout
+            .view(request.view_id)
+            .map_or(preview.tab.layout.active_view_id(), |view| {
+                preview.view_for(view)
+            });
+        content_style.text_edit.request_focus = false;
+        let outcome = show_editor_scroll_area(
+            ui,
+            &mut preview.tab,
+            TileScrollRequest {
+                view_id,
+                pane_path: &request.pane_path,
+                scroll_bar_visibility: editor_scroll_bar_visibility(ui.ctx()),
+                content_style,
+            },
+        );
+        return TileBodyOutcome {
+            changed: false,
+            focused: false,
+            interaction_response: outcome.interaction_response,
+        };
+    }
 
     let previous_snapshot = take_previous_snapshot(tab, request.view_id);
     let outcome = show_editor_scroll_area(

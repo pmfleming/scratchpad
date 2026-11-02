@@ -61,6 +61,7 @@ pub(super) fn show(
             });
         });
     if let Some(response) = response {
+        ctx.data_mut(|d| d.insert_temp(super::preview::rect_key(), response.response.rect));
         callout::mark_scroll_blocker_if_hovered(ctx, &response.response);
         // Ignore the opening click and interactions with the panel's menus.
         close |= dismissible

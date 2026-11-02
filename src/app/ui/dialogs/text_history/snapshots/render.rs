@@ -34,21 +34,27 @@ pub(in super::super) fn older_rows(
     id: u64,
     catalog: &Catalog,
     action: &mut Option<HistoryAction>,
-) {
+    hover: bool,
+) -> bool {
     let Some(file) = catalog.get(&id) else {
-        return;
+        return false;
     };
+    let mut hovered = false;
     for row in file.rows.iter().filter(|row| row.covered.is_none()) {
         widget_ids::scope(ui, ("history.snapshot", id, row.point.id), |ui| {
             ui.horizontal(|ui| {
-                let selected = file.selected == Some(row.point.id);
+                let selected = super::super::preview::snapshot_id(ui.ctx(), id).or(file.selected)
+                    == Some(row.point.id);
                 let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(20.0, 26.0));
                 diamond(ui, rect.center(), selected);
                 let label = timestamp(row.point.created_at_unix_seconds);
-                if ui
-                    .selectable_label(selected, &label)
+                let response = ui
+                    .add_sized(
+                        egui::vec2(ui.available_width(), 26.0),
+                        egui::Button::new(&label).selected(selected).frame(false),
+                    )
                     .on_hover_text(format!(
-                        "{} · {} bytes{}\nView snapshot; editing starts a new branch",
+                        "{} · {} bytes{}\nHover to preview · Click to confirm · Esc to discard",
                         file.label,
                         row.point.bytes,
                         if row.point.has_history {
@@ -56,10 +62,15 @@ pub(in super::super) fn older_rows(
                         } else {
                             ""
                         }
-                    ))
-                    .clicked()
-                {
+                    ));
+                hovered |= hover && response.hovered();
+                if response.clicked() {
                     *action = Some(HistoryAction::Snapshot {
+                        buffer_id: id,
+                        version_id: row.point.id,
+                    });
+                } else if hover && response.hovered() {
+                    *action = Some(HistoryAction::PreviewSnapshot {
                         buffer_id: id,
                         version_id: row.point.id,
                     });
@@ -67,6 +78,7 @@ pub(in super::super) fn older_rows(
             });
         });
     }
+    hovered
 }
 
 pub(in super::super) fn diamond(ui: &egui::Ui, center: egui::Pos2, selected: bool) {

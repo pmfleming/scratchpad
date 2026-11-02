@@ -27,6 +27,14 @@ pub(super) struct TextHistoryAction {
 
 #[derive(Clone, Copy)]
 pub(super) enum HistoryAction {
+    PreviewSnapshot {
+        buffer_id: BufferId,
+        version_id: i64,
+    },
+    Preview {
+        buffer_id: BufferId,
+        after: Option<u64>,
+    },
     State {
         buffer_id: BufferId,
         after: Option<u64>,
