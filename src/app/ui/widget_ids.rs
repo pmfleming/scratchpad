@@ -55,6 +55,10 @@ pub(crate) fn area_id(key: impl Hash) -> Id {
     Id::unique((ID_NAMESPACE, "area", hash_key(&key)))
 }
 
+pub(crate) fn area_layer_id(order: Order, key: impl Hash) -> LayerId {
+    LayerId::new(order, area_id(key))
+}
+
 pub(crate) fn area(key: impl Hash) -> egui::Area {
     egui::Area::new(area_id(key))
 }

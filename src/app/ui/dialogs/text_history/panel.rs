@@ -14,10 +14,7 @@ pub(super) fn show(
     let screen = ctx.content_rect();
     let dismissible = super::dismissible_history(app);
     let popup_open = egui::Popup::is_any_open(ctx);
-    let layer = egui::LayerId::new(
-        egui::Order::Foreground,
-        widget_ids::area_id("text_history_window"),
-    );
+    let layer = widget_ids::area_layer_id(egui::Order::Foreground, "text_history_window");
     let was_visible = ctx.memory(|m| m.areas().visible_last_frame(&layer));
     let frame = egui::Frame::NONE
         .fill(app.state.app_settings.editor_background_color())
