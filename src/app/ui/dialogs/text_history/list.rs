@@ -163,8 +163,9 @@ impl<'a> FileStates<'a> {
     ) -> bool {
         let id = self.id;
         let states = &self.states;
-        let visiting = self.visiting || super::preview::snapshot_id(ui.ctx(), id).is_some();
-        let position = super::preview::position(ui.ctx(), id, states);
+        let visiting = self.visiting;
+        let position = states.position;
+        let starting = super::rail::starting_position(ui.ctx(), id, states);
         let current = !visiting && k == position;
         let reachable = states.reachable(k);
         let undone = k > position;
@@ -198,7 +199,7 @@ impl<'a> FileStates<'a> {
             "history.state",
         )
         .on_hover_text(format!(
-            "{label}\n{hint}{}\nHover to preview · Click to confirm · Esc to discard",
+            "{label}\n{hint}{}\nHover or click to navigate · Esc to close",
             row.map_or(String::new(), |r| format!("\n{} · {}", r.label, r.source))
         ));
         response.widget_info(|| {
@@ -209,14 +210,13 @@ impl<'a> FileStates<'a> {
                 format!("State: {label}"),
             )
         });
-        let in_range = !visiting
-            && (states.position.min(position)..=states.position.max(position)).contains(&k);
+        let in_range = !visiting && (starting.min(position)..=starting.max(position)).contains(&k);
         paint_state_background(
             ui,
             &response,
             current,
             in_range,
-            k == states.position && !current && !self.visiting,
+            k == starting && !current && !self.visiting,
         );
         paint_node(
             ui,
@@ -260,16 +260,13 @@ impl<'a> FileStates<'a> {
         if response.clicked() || hovered {
             select_buffer(&response.ctx, id);
         }
-        if response.clicked() && reachable {
-            *action = Some(HistoryAction::State {
-                buffer_id: id,
-                after: states.after(k),
-            });
-        } else if hovered {
-            *action = Some(HistoryAction::Preview {
-                buffer_id: id,
-                after: states.after(k),
-            });
+        let target = HistoryAction::State {
+            buffer_id: id,
+            after: states.after(k),
+        };
+        let hover_changed = hovered && super::rail::hover_changed(&response.ctx, target);
+        if (response.clicked() || hover_changed) && reachable {
+            *action = Some(target);
         }
         response.clicked()
     }

@@ -58,9 +58,7 @@ pub(super) fn begin(ui: &egui::Ui, target: Option<u64>, first: bool) -> Navigati
         state.armed = true;
     }
     state.target = target;
-    let hover = state.armed
-        && !egui::Popup::is_any_open(ui.ctx())
-        && !super::super::preview::confirming(ui.ctx());
+    let hover = state.armed && !egui::Popup::is_any_open(ui.ctx());
     ui.ctx().data_mut(|d| d.insert_temp(key, state));
     Navigation {
         first,

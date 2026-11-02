@@ -1,6 +1,6 @@
 //! Execute an inclusive native replay target after the shared state model validates it.
 use super::{
-    active_buffer, list, model::TextHistoryAction, preview, request_clear, scope, scope_buffer,
+    active_buffer, list, model::TextHistoryAction, rail, request_clear, scope, scope_buffer,
     scrubber, snapshots, states::States,
 };
 use crate::app::{
@@ -37,7 +37,7 @@ impl Surface {
 
     fn close(self, ctx: &egui::Context, app: &mut ScratchpadApp) {
         match self {
-            Self::Rail => preview::close(ctx, app),
+            Self::Rail => rail::close(ctx, app),
             Self::Scrubber => scrubber::close(ctx, app),
         }
     }
@@ -55,7 +55,7 @@ impl Surface {
         let entries = snapshots::state_entries(ctx, app);
         let states = States::new(&entries, id);
         let position = match self {
-            Self::Rail => preview::position(ctx, id, &states),
+            Self::Rail => states.position,
             Self::Scrubber => states.position,
         };
         let Some(position) = self.destination(ctx, &states, position) else {
@@ -63,7 +63,7 @@ impl Surface {
         };
         match self {
             Self::Rail => {
-                preview::select(ctx, app, id, states.after(position));
+                rail::select(ctx, app, id, states.after(position));
                 list::request_reveal(ctx);
             }
             Self::Scrubber => {
@@ -117,7 +117,7 @@ fn escape_popup_key() -> egui::Id {
 /// Only the focused rail or scrubber owns navigation. History focuses its rail
 /// on opening; the automatic scrubber leaves focus with the editor.
 pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    preview::prepare(ctx, app);
+    rail::prepare(ctx, app);
     let popup_open = egui::Popup::is_any_open(ctx);
     ctx.data_mut(|d| d.insert_temp(escape_popup_key(), popup_open));
     if blocked(app) || popup_open {

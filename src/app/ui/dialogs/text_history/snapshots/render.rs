@@ -43,8 +43,7 @@ pub(in super::super) fn older_rows(
     for row in file.rows.iter().filter(|row| row.covered.is_none()) {
         widget_ids::scope(ui, ("history.snapshot", id, row.point.id), |ui| {
             ui.horizontal(|ui| {
-                let selected = super::super::preview::snapshot_id(ui.ctx(), id).or(file.selected)
-                    == Some(row.point.id);
+                let selected = file.selected == Some(row.point.id);
                 let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(20.0, 26.0));
                 diamond(ui, rect.center(), selected);
                 let label = timestamp(row.point.created_at_unix_seconds);
@@ -54,7 +53,7 @@ pub(in super::super) fn older_rows(
                         egui::Button::new(&label).selected(selected).frame(false),
                     )
                     .on_hover_text(format!(
-                        "{} · {} bytes{}\nHover to preview · Click to confirm · Esc to discard",
+                        "{} · {} bytes{}\nHover or click to visit · Esc to close",
                         file.label,
                         row.point.bytes,
                         if row.point.has_history {
@@ -64,16 +63,15 @@ pub(in super::super) fn older_rows(
                         }
                     ));
                 hovered |= hover && response.hovered();
-                if response.clicked() {
-                    *action = Some(HistoryAction::Snapshot {
-                        buffer_id: id,
-                        version_id: row.point.id,
-                    });
-                } else if hover && response.hovered() {
-                    *action = Some(HistoryAction::PreviewSnapshot {
-                        buffer_id: id,
-                        version_id: row.point.id,
-                    });
+                let target = HistoryAction::Snapshot {
+                    buffer_id: id,
+                    version_id: row.point.id,
+                };
+                let hover_changed = hover
+                    && response.hovered()
+                    && super::super::rail::hover_changed(ui.ctx(), target);
+                if response.clicked() || hover_changed {
+                    *action = Some(target);
                 }
             });
         });

@@ -200,6 +200,9 @@ pub fn apply_text_history_to_entry(
             buffer.apply_text_history_redo(entry_id)
         };
         if let Ok(selection) = result {
+            // Tool navigation updates an already visible scrubber. Automatic
+            // opening belongs to editor undo/redo, not rail hover.
+            buffer.take_text_history_event();
             buffer.mark_dirty_after_local_edit();
             let text_metadata_refresh = buffer.text_metadata_refresh_needed().then(|| {
                 (

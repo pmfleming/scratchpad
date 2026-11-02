@@ -63,10 +63,10 @@ fn opening_history_focuses_navigation_before_any_pointer_interaction() {
     h.key_press(egui::Key::ArrowDown);
     h.run_steps(3);
     assert_eq!(displayed_text(&h, id), "middle");
-    assert_eq!(active_buffer(h.state()).text(), "current");
+    assert_eq!(active_buffer(h.state()).text(), "middle");
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
-    assert_eq!(displayed_text(&h, id), "current");
+    assert_eq!(displayed_text(&h, id), "middle");
     h.get_by_role_and_label(
         egui::Role::Label,
         egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
@@ -75,8 +75,8 @@ fn opening_history_focuses_navigation_before_any_pointer_interaction() {
     h.run_steps(3);
     h.key_press(egui::Key::ArrowDown);
     h.run_steps(3);
-    assert_eq!(displayed_text(&h, id), "middle");
-    assert_eq!(active_buffer(h.state()).text(), "current");
+    assert_eq!(displayed_text(&h, id), "old");
+    assert_eq!(active_buffer(h.state()).text(), "old");
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn first_row_click_without_preview_focus_accepts_pointer_press_and_release() {
 }
 
 #[test]
-fn first_open_previews_and_confirms_before_and_after_switching_files() {
+fn first_open_replays_before_and_after_switching_files() {
     for shortcut in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let mut app = app_with_history(root.path());
@@ -167,7 +167,7 @@ fn first_open_previews_and_confirms_before_and_after_switching_files() {
                 original,
                 "shortcut={shortcut}, picker={picker:?}"
             );
-            assert_eq!(active_buffer(h.state()).text(), latest);
+            assert_eq!(active_buffer(h.state()).text(), original);
             h.get_by_label("State: Oldest retained state").click();
             h.run_steps(3);
             assert_eq!(active_buffer(h.state()).text(), original);

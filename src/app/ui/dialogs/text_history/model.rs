@@ -25,16 +25,8 @@ pub(super) struct TextHistoryAction {
     pub(super) entry_id: u64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum HistoryAction {
-    PreviewSnapshot {
-        buffer_id: BufferId,
-        version_id: i64,
-    },
-    Preview {
-        buffer_id: BufferId,
-        after: Option<u64>,
-    },
     State {
         buffer_id: BufferId,
         after: Option<u64>,

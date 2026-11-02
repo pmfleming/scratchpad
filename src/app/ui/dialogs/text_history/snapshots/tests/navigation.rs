@@ -76,39 +76,39 @@ fn text(harness: &Harness<'_, ScratchpadApp>) -> String {
 }
 
 #[test]
-fn snapshot_hover_is_discardable_and_click_appends_one_undoable_state() {
+fn snapshot_hover_visits_live_and_dismissal_keeps_a_return_route() {
     let root = tempfile::tempdir().unwrap();
     let (app, id, point, label) = fixture(root.path());
     let mut h = harness(app);
     wait(&mut h, |h| h.query_by_label(&label).is_some());
-    let rect = h.get_by_label(&label).rect();
-    h.hover_at(rect.center());
-    wait(&mut h, |h| {
-        super::super::super::preview::snapshot_id(&h.ctx, id) == Some(point)
-    });
-    assert_eq!(text(&h), "two");
-    let buffer = h.state().tab_manager.tabs.as_slice()[0].active_buffer();
-    let projection = super::super::super::preview::history_preview(&h.ctx, buffer).unwrap();
+    h.hover_at(h.get_by_label(&label).rect().center());
+    wait(&mut h, |h| text(h) == "ancient");
     assert_eq!(
-        projection.lock().unwrap().tab.active_buffer().text(),
-        "ancient"
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .snapshot_navigation()
+            .unwrap()
+            .0,
+        point
     );
-    assert_eq!(buffer.document().history_entries().len(), 2);
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
+    assert_eq!(text(&h), "ancient");
+    let ctx = h.ctx.clone();
+    assert!(visit::return_latest(&ctx, h.state_mut(), id));
     assert_eq!(text(&h), "two");
-    assert!(super::super::super::preview::snapshot_id(&h.ctx, id).is_none());
-    h.state_mut().state.dialogs.text_history.open();
-    h.run_steps(3);
-    h.get_by_label(&label).click();
-    wait(&mut h, |h| text(h) == "ancient");
-    let buffer = h.state_mut().tab_manager.tabs.as_mut_slice()[0].active_buffer_mut();
-    assert_eq!(buffer.document().history_entries().len(), 3);
-    assert!(buffer.snapshot_navigation().is_none());
+    let buffer = h
+        .state_mut()
+        .tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut();
+    assert_eq!(buffer.document().history_entries().len(), 2);
     buffer.undo_last_text_operation().unwrap();
-    assert_eq!(buffer.text(), "two");
-    buffer.redo_last_text_operation().unwrap();
-    assert_eq!(buffer.text(), "ancient");
+    assert_eq!(buffer.text(), "one");
     assert_eq!(
         std::fs::read_to_string(root.path().join("note.txt")).unwrap(),
         "disk contents"

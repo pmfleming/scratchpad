@@ -37,10 +37,7 @@ fn displayed_text(h: &Harness<'_, ScratchpadApp>, id: u64) -> String {
         .iter()
         .find_map(|tab| tab.buffer_by_id(id))
         .unwrap();
-    super::super::preview::history_preview(&h.ctx, buffer).map_or_else(
-        || buffer.text(),
-        |tab| tab.lock().unwrap().tab.active_buffer().text(),
-    )
+    buffer.text()
 }
 fn jump(ctx: &egui::Context, app: &mut ScratchpadApp, id: u64, k: usize) -> bool {
     let entries = snapshots::state_entries(ctx, app);
@@ -129,7 +126,7 @@ fn other_file_jumps_can_leave_the_active_file_untouched() {
         h.key_press(key);
         h.run_steps(3);
         assert_eq!(displayed_text(&h, id), expected);
-        assert_eq!(text(h.state()), "old");
+        assert_eq!(text(h.state()), expected);
         assert_eq!(h.state().tab_manager.active_tab_index, 1);
     }
     assert_eq!(
@@ -334,10 +331,10 @@ fn rail_clicks_and_focused_keys_follow_screen_direction() {
         .clone();
     let mut h = harness(app);
     h.run_steps(3);
-    // Opening History gives navigation focus to the rail; arrows only preview.
+    // Opening History gives navigation focus to the rail; arrows replay live.
     h.key_press(egui::Key::ArrowDown);
     h.run_steps(2);
-    assert_eq!(text(h.state()), "current");
+    assert_eq!(text(h.state()), "middle");
     assert_eq!(displayed_text(&h, id), "middle");
     h.get_all_by_role_and_label(egui::Role::Button, &format!("State: {summary}"))
         .last()
@@ -362,12 +359,12 @@ fn rail_clicks_and_focused_keys_follow_screen_direction() {
         h.key_press(key);
         h.run_steps(3);
         assert_eq!(displayed_text(&h, id), expected);
-        assert_eq!(text(h.state()), "middle");
+        assert_eq!(text(h.state()), expected);
     }
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
     assert!(!h.state().state.dialogs.text_history.is_open());
-    assert_eq!(text(h.state()), "middle");
+    assert_eq!(text(h.state()), "old");
 }
 
 #[test]
@@ -801,9 +798,9 @@ fn clearing_history_respects_scope_and_keeps_the_confirmed_target() {
     }
 }
 
+mod live;
 mod opening;
 mod position;
-mod preview;
 mod scrubber;
 mod shading;
 

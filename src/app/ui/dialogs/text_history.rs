@@ -6,11 +6,10 @@ mod navigation;
 pub(crate) use navigation::{dismiss_text_history, handle_text_history_navigation};
 mod panel;
 mod persistence;
-mod preview;
+mod rail;
 mod scrubber;
 mod snapshots;
 mod states;
-pub(crate) use preview::history_preview;
 pub(crate) use scrubber::{history_scrubbing, note_editor_history_activity};
 
 use self::model::HistoryAction;
@@ -127,7 +126,7 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
 }
 
 fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    let first = preview::begin(ctx);
+    let first = rail::begin(ctx, app);
     if first && let Some(id) = active_buffer(app) {
         list::select_buffer(ctx, id);
     }
@@ -143,7 +142,6 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let mut clear = None;
     let mut selected = scope(ctx, app);
     let close = panel::show(ctx, app, |ui, app| {
-        preview::poll(ui, app);
         snapshots::poll(ui, app);
         snapshots::hydrate(ui, app);
         let entries = snapshots::state_entries(ctx, app);
@@ -199,11 +197,11 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
         snapshots::footer(ui, &catalog);
     });
     if close {
-        preview::close(ctx, app);
+        rail::close(ctx, app);
         return;
     }
     if let Some(ids) = clear {
-        preview::clear(ctx);
+        rail::clear(ctx);
         ctx.data_mut(|d| d.remove::<ClearRequest>(confirm_key()));
         let saved = snapshots::clear_history(ctx, app, &ids);
         let live = workspace_mutation::clear_text_history(app, &ids);
@@ -213,7 +211,7 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
         action = None;
     }
     if let Some(action) = action {
-        preview::execute(ctx, app, action);
+        rail::execute(ctx, app, action);
     }
 }
 
@@ -237,19 +235,11 @@ fn file_caption(
             let states = states::States::new(entries, id);
             // Allocate the actual count width before giving the filename the
             // remainder. A fixed allowance makes large counts grow the window.
-            ui.weak(
-                if snapshots::is_browsing(ui.ctx(), app, id)
-                    || preview::snapshot_id(ui.ctx(), id).is_some()
-                {
-                    "Snapshot".to_owned()
-                } else {
-                    format!(
-                        "{} / {}",
-                        preview::position(ui.ctx(), id, &states),
-                        states.entries.len()
-                    )
-                },
-            );
+            ui.weak(if snapshots::is_browsing(ui.ctx(), app, id) {
+                "Snapshot".to_owned()
+            } else {
+                format!("{} / {}", states.position, states.entries.len())
+            });
             truncated_label(
                 ui,
                 &buffer.name,

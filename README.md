@@ -165,12 +165,13 @@ position through the active file's retained edits. It stays visible until you
 resume editing or press Escape. Switch freely between the shortcuts and dragging
 the timeline to update the file live, with a subtle highlight on each change;
 Left/Right and Home/End work while its track has focus. **History…** (`Ctrl+H`) shows the current file, all files,
-or a chosen file. Hover a row to preview the state **after** that change; click to
-confirm it as a new undoable state. Escape or clicking outside discards the preview.
+or a chosen file. Hover or click a row to replay to the state **after** that change.
+Escape or clicking outside closes History and keeps the selected live position.
 Hover near the list's top or bottom to scroll through more states. Opening History
-from the editor focuses the list immediately. Up/Down preview in on-screen order
+from the editor focuses the list immediately. Up/Down navigate in on-screen order
 while the list has focus. The opening state remains outlined
-while the preview row is highlighted. A subtle tint marks the
+while the current row is highlighted. Navigation preserves the redo timeline;
+typing at an older position starts a new branch. A subtle tint marks the
 affected line; neither tool saves files. Diamonds mark reachable snapshots;
 older snapshots remain selectable, with **Return to latest** restoring the preserved
 live position. Clearing undo history requires confirmation and keeps saved snapshots. **Recently Closed** combines archived

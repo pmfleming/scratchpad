@@ -407,22 +407,6 @@ impl BufferState {
         self.refresh.pending_text_history_event.take()
     }
 
-    pub(crate) fn commit_history_preview(
-        &mut self,
-        preview: &DocumentSnapshot,
-        selection: CursorRange,
-    ) -> bool {
-        if self.is_loading_preview || !self.document.commit_history_preview(preview, selection) {
-            return false;
-        }
-        self.snapshot_navigation = None;
-        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Edit);
-        let edit = self.document.latest_operation_record().cloned();
-        self.refresh_text_metadata_after_operation(edit.as_ref());
-        self.mark_dirty_after_local_edit();
-        true
-    }
-
     pub(crate) fn validate_char_replacements(
         &self,
         replacements: TextReplacements<'_>,

@@ -1,11 +1,11 @@
-use super::super::super::preview;
+use super::super::super::rail;
 use super::{app_with_history, harness};
 use crate::app::{domain::CursorRange, theme};
 use eframe::egui;
 use egui_kittest::kittest::{NodeT, Queryable};
 
 #[test]
-fn shading_tracks_the_inclusive_preview_range_in_both_directions() {
+fn shading_tracks_the_inclusive_rail_range_in_both_directions() {
     let root = tempfile::tempdir().unwrap();
     let mut app = app_with_history(root.path());
     let buffer = app
@@ -46,7 +46,7 @@ fn shading_tracks_the_inclusive_preview_range_in_both_directions() {
     for destination in [0_usize, 4, 3, 2] {
         let ctx = h.ctx.clone();
         let after = destination.checked_sub(1).map(|i| entries[i]);
-        preview::select(&ctx, h.state_mut(), id, after);
+        rail::select(&ctx, h.state_mut(), id, after);
         h.run_steps(3);
         let mut rows: Vec<_> = h
             .get_all_by_role(egui::Role::Button)

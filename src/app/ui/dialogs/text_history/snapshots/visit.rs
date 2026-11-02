@@ -109,6 +109,16 @@ pub(in super::super) fn request(
     else {
         return;
     };
+    if ctx
+        .data(|data| data.get_temp::<Pending>(pending_key()))
+        .is_some_and(|pending| {
+            pending.buffer_id == id
+                && pending.version_id == version_id
+                && pending.expected == buffer.document().history_token()
+        })
+    {
+        return;
+    }
     let current = browse(ctx, buffer);
     if current
         .as_ref()
