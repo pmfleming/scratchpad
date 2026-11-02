@@ -37,13 +37,7 @@ fn older_snapshot_counts_exclude_loading_errors_and_reachable_states() {
     use super::{Catalog, FileSnapshots};
     let current = TextDocument::new("current".into());
     let catalog: Catalog = [
-        (
-            1,
-            FileSnapshots {
-                loading: true,
-                ..Default::default()
-            },
-        ),
+        (1, FileSnapshots::default()),
         (
             2,
             FileSnapshots {

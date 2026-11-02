@@ -91,13 +91,7 @@ pub(in super::super) fn footer(ui: &mut egui::Ui, catalog: &Catalog) {
     let status = ui
         .ctx()
         .data(|d| d.get_temp::<String>(super::visit::status_key()))
-        .or_else(|| catalog.values().find_map(|f| f.error.clone()))
-        .or_else(|| {
-            catalog
-                .values()
-                .any(|f| f.loading)
-                .then(|| "Loading snapshots…".into())
-        });
+        .or_else(|| catalog.values().find_map(|f| f.error.clone()));
     if let Some(status) = status {
         let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 20.0));
         ui.put(

@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Removed the transient “Loading snapshots…” message from history surfaces.
+
 - Removed the scrubber's close button; Escape and resumed editing dismiss it.
 
 - Made the scrubber appear on undo/redo and remain available for keyboard or pointer navigation until editing resumes or Escape dismisses it; removed its status-bar button and dedicated shortcut.

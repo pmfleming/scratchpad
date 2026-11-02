@@ -38,7 +38,6 @@ pub(super) struct FileSnapshots {
     rows: Vec<SnapshotRow>,
     pub(super) selected: Option<i64>,
     error: Option<String>,
-    loading: bool,
     source_revision: Option<(DocumentRevision, u64)>,
     version_ids: Vec<i64>,
 }
@@ -254,7 +253,7 @@ pub(super) fn collect(ui: &egui::Ui, app: &ScratchpadApp, buffers: &[u64]) -> Ca
                 file.source_revision = Some((source.revision, source.history_revision));
             }
             Some(Err(error)) => file.error = Some(error),
-            _ => file.loading = true,
+            _ => {}
         }
         ui.ctx()
             .data_mut(|data| data.insert_temp(catalog_key(buffer.id), file.clone()));
