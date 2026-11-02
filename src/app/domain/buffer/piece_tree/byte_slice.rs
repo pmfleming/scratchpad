@@ -1,13 +1,11 @@
 //! Byte-oriented streaming for persisted chunks, whose boundaries may split UTF-8.
-use super::{PieceTreeLite, PieceTreeText};
+use super::{PieceTreeLite, PieceTreeText, slice::Pieces};
 use std::ops::Range;
 
 pub(crate) struct ByteSlice<'a> {
     tree: &'a PieceTreeLite,
     range: Range<usize>,
-    node: usize,
-    leaf: usize,
-    piece: usize,
+    pieces: Pieces<'a>,
     offset: usize,
 }
 impl PieceTreeLite {
@@ -24,9 +22,7 @@ impl PieceTreeLite {
         ByteSlice {
             tree: self,
             range,
-            node,
-            leaf: 0,
-            piece: 0,
+            pieces: Pieces::new(self, node, 0),
             offset,
         }
     }
@@ -35,19 +31,7 @@ impl<'a> Iterator for ByteSlice<'a> {
     type Item = (PieceTreeText<'a>, Range<usize>);
     fn next(&mut self) -> Option<Self::Item> {
         while self.offset < self.range.end {
-            let node = self.tree.root.nodes.get(self.node)?;
-            let Some(leaf) = node.leaves.get(self.leaf) else {
-                self.node += 1;
-                self.leaf = 0;
-                self.piece = 0;
-                continue;
-            };
-            let Some(piece) = leaf.pieces.get(self.piece) else {
-                self.leaf += 1;
-                self.piece = 0;
-                continue;
-            };
-            self.piece += 1;
+            let piece = self.pieces.next()?;
             let start = self.offset;
             self.offset += piece.byte_len;
             if self.offset <= self.range.start {

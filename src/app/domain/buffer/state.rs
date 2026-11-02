@@ -134,17 +134,6 @@ impl BufferState {
         Self::with_format_and_metadata(name, content, path, format, text_metadata)
     }
 
-    #[must_use]
-    pub fn with_format(
-        name: String,
-        content: String,
-        path: Option<PathBuf>,
-        mut format: TextFormatMetadata,
-    ) -> Self {
-        let text_metadata = buffer_text_metadata(&content, &mut format);
-        Self::with_format_and_metadata(name, content, path, format, text_metadata)
-    }
-
     fn with_format_and_metadata(
         name: String,
         content: String,
@@ -350,11 +339,8 @@ impl BufferState {
     }
 
     pub fn replace_text(&mut self, text: String) {
-        self.replace_document_text(text, None);
-    }
-
-    pub fn replace_text_with_format(&mut self, text: String, format: TextFormatMetadata) {
-        self.replace_document_text(text, Some(format));
+        self.document.replace_text(text);
+        self.refresh_text_metadata();
     }
 
     pub fn mark_as_loading_preview(&mut self) {
@@ -535,14 +521,6 @@ impl BufferState {
                 pending_text_history_event: None,
             },
         }
-    }
-
-    fn replace_document_text(&mut self, text: String, format: Option<TextFormatMetadata>) {
-        self.document.replace_text(text);
-        if let Some(format) = format {
-            self.format = format;
-        }
-        self.refresh_text_metadata();
     }
 }
 

@@ -1,6 +1,5 @@
 use eframe::egui;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 use std::io;
 use std::sync::OnceLock;
 
@@ -340,21 +339,6 @@ fn regular_query() -> fontdb::Query<'static> {
         style: fontdb::Style::Normal,
         ..fontdb::Query::default()
     }
-}
-
-pub fn available_os_font_families() -> &'static [String] {
-    static FAMILIES: OnceLock<Vec<String>> = OnceLock::new();
-    FAMILIES.get_or_init(|| {
-        let mut families = BTreeSet::new();
-        for face in system_font_database().faces() {
-            for (family, _) in &face.families {
-                if !family.trim().is_empty() {
-                    families.insert(family.clone());
-                }
-            }
-        }
-        families.into_iter().collect()
-    })
 }
 
 fn system_font_database() -> &'static fontdb::Database {

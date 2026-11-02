@@ -66,7 +66,7 @@ impl TextDocument {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{CursorRange, TextDocument};
 
     #[test]
     fn large_history_restore_checkpoints_the_original_before_deleting_text() {

@@ -33,56 +33,11 @@ fn open_path_count(app: &ScratchpadApp, path: &std::path::Path) -> usize {
 }
 
 #[test]
-fn process_open_tab_result_adds_loaded_file_as_active_tab() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("opened.txt");
-    std::fs::write(&path, "opened").unwrap();
-    let mut app = test_app(
-        directory.path(),
-        vec![WorkspaceTab::new(BufferState::new(
-            "start.txt".to_owned(),
-            String::new(),
-            None,
-        ))],
-    );
-    let mut summary = OpenBatchSummary::default();
-
-    FileController::process_open_tab_result(
-        &mut app,
-        &mut summary,
-        LoadedPathResult {
-            path: path.clone(),
-            disk_state: FileService::read_disk_state(&path).ok(),
-            result: Ok(disk_buffer(&path, "opened")),
-        },
-    );
-
-    assert_eq!(summary.opened_count, 1);
-    assert_eq!(summary.duplicate_count, 0);
-    assert_eq!(app.tab_manager.tabs.as_slice().len(), 2);
-    assert_eq!(app.tab_manager.active_tab_index, 1);
-    assert_eq!(
-        app.tab_manager.tabs.as_slice()[1]
-            .active_buffer()
-            .path
-            .as_deref(),
-        Some(path.as_path())
-    );
-}
-
-#[test]
 fn open_selected_paths_async_deduplicates_pending_path() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("opened.txt");
     std::fs::write(&path, "opened").unwrap();
-    let mut app = test_app(
-        directory.path(),
-        vec![WorkspaceTab::new(BufferState::new(
-            "start.txt".to_owned(),
-            String::new(),
-            None,
-        ))],
-    );
+    let mut app = test_app(directory.path(), vec![WorkspaceTab::untitled()]);
 
     FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
     FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
@@ -97,14 +52,7 @@ fn large_file_stages_first_visible_window_before_background_hydration() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("large.txt");
     std::fs::write(&path, "first visible then fully hydrated").unwrap();
-    let mut app = test_app(
-        directory.path(),
-        vec![WorkspaceTab::new(BufferState::new(
-            "start.txt".to_owned(),
-            String::new(),
-            None,
-        ))],
-    );
+    let mut app = test_app(directory.path(), vec![WorkspaceTab::untitled()]);
 
     FileController::open_selected_paths_async(&mut app, vec![path]);
 
@@ -128,14 +76,7 @@ fn large_open_batch_hydrates_most_recent_tab_before_returning() {
             path
         })
         .collect::<Vec<_>>();
-    let mut app = test_app(
-        directory.path(),
-        vec![WorkspaceTab::new(BufferState::new(
-            "start.txt".to_owned(),
-            String::new(),
-            None,
-        ))],
-    );
+    let mut app = test_app(directory.path(), vec![WorkspaceTab::untitled()]);
 
     FileController::open_selected_paths_async(&mut app, paths.clone());
 
@@ -155,65 +96,80 @@ fn large_open_batch_hydrates_most_recent_tab_before_returning() {
 }
 
 #[test]
-fn process_open_tab_result_reuses_existing_tab_for_duplicate_path() {
-    let directory = tempfile::tempdir().unwrap();
-    let first_path = directory.path().join("first.txt");
-    let second_path = directory.path().join("second.txt");
-    std::fs::write(&first_path, "first").unwrap();
-    std::fs::write(&second_path, "second").unwrap();
-    let mut app = test_app(
-        directory.path(),
-        vec![
-            WorkspaceTab::new(disk_buffer(&first_path, "first")),
-            WorkspaceTab::new(disk_buffer(&second_path, "second")),
-        ],
-    );
-    let target_view = app.tab_manager.tabs.as_slice()[1].layout.active_view_id;
-    let mut summary = OpenBatchSummary::default();
-
-    FileController::process_open_tab_result(
-        &mut app,
-        &mut summary,
-        LoadedPathResult {
-            path: second_path.clone(),
-            disk_state: FileService::read_disk_state(&second_path).ok(),
-            result: Err("should not be read for duplicates".to_owned()),
-        },
-    );
-
-    assert_eq!(summary.duplicate_count, 1);
-    assert_eq!(app.tab_manager.tabs.as_slice().len(), 2);
-    assert_eq!(app.tab_manager.active_tab_index, 1);
-    assert_eq!(
-        app.tab_manager.tabs.as_slice()[1].layout.active_view_id,
-        target_view
-    );
-}
-
-#[test]
-fn process_open_tab_result_records_failed_load_without_adding_tab() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("missing.txt");
-    let mut app = test_app(
-        directory.path(),
-        vec![WorkspaceTab::new(BufferState::new(
-            "start.txt".to_owned(),
-            String::new(),
-            None,
-        ))],
-    );
-    let mut summary = OpenBatchSummary::default();
-
-    FileController::process_open_tab_result(
-        &mut app,
-        &mut summary,
-        LoadedPathResult {
-            path,
-            disk_state: None,
-            result: Err("not found".to_owned()),
-        },
-    );
-
-    assert_eq!(summary.failure_count, 1);
-    assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
+fn open_results_preserve_identity_release_reservations_and_handle_failures() {
+    for (mode, succeeds, counts, tab_count, expected_text) in [
+        ("new", true, (1, 0, 0), 2, Some("loaded")),
+        ("new", false, (0, 0, 1), 1, None),
+        ("existing", false, (0, 1, 0), 2, Some("original")),
+        ("preview", true, (1, 0, 0), 2, Some("loaded")),
+        ("preview", false, (0, 0, 1), 1, None),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("opened.txt");
+        std::fs::write(&path, "loaded").unwrap();
+        let mut app = test_app(directory.path(), vec![WorkspaceTab::untitled()]);
+        let mut buffer = disk_buffer(&path, "original");
+        buffer.is_loading_preview = mode == "preview";
+        let original_id = buffer.id;
+        if mode != "new" {
+            let mut tab = WorkspaceTab::new(buffer);
+            tab.split_active_view(crate::app::domain::SplitAxis::Vertical)
+                .unwrap();
+            let view_id = tab.layout.active_view_id;
+            let (buffer, view) = tab.buffer_and_view_mut(view_id).unwrap();
+            view.set_cursor_range_anchored(buffer, crate::app::domain::CursorRange::default());
+            view.latest_display_snapshot_revision = Some(buffer.document_revision());
+            app.tab_manager
+                .set_tabs(vec![WorkspaceTab::untitled(), tab], 0);
+        }
+        app.state
+            .pending_open_file_paths
+            .insert(crate::app::CanonicalPathKey::from_path(&path));
+        let mut loaded = disk_buffer(&path, "loaded");
+        loaded.refresh_text_metadata_after_operation(None);
+        let mut summary = OpenBatchSummary::default();
+        FileController::process_open_tab_result(
+            &mut app,
+            &mut summary,
+            LoadedPathResult {
+                disk_state: FileService::read_disk_state(&path).ok(),
+                result: if succeeds {
+                    Ok(loaded)
+                } else {
+                    Err("load failed".into())
+                },
+                path: path.clone(),
+            },
+        );
+        assert_eq!(
+            (
+                summary.opened_count,
+                summary.duplicate_count,
+                summary.failure_count
+            ),
+            counts,
+            "{mode}"
+        );
+        assert!(app.state.pending_open_file_paths.is_empty());
+        assert_eq!(app.tab_manager.tabs.as_slice().len(), tab_count);
+        wait_for_background_io(&mut app);
+        if let Some(expected) = expected_text {
+            assert_eq!(app.tab_manager.active_tab_index, 1);
+            assert_eq!(open_path_count(&app, &path), 1);
+            let tab = app.tab_manager.active_tab_mut().unwrap();
+            assert_eq!(tab.active_buffer().text(), expected);
+            assert!(!tab.active_buffer().is_loading_preview);
+            assert!(!tab.active_buffer().text_metadata_refresh_needed());
+            if mode != "new" {
+                assert_eq!(tab.active_buffer().id, original_id);
+                assert_eq!(tab.layout.views.len(), 2);
+            }
+            if mode == "preview" {
+                for view in &mut tab.layout.views {
+                    assert!(view.latest_display_snapshot_revision.is_none());
+                    assert!(view.take_runtime_anchors_for_release().is_empty());
+                }
+            }
+        }
+    }
 }

@@ -30,27 +30,30 @@ impl WorkspaceTab {
         }
     }
 
-    pub fn clear_view_state_for_buffer_replacement(&mut self, buffer_id: BufferId) {
-        let mut anchors_to_release = Vec::new();
-        for view in self.layout.views_mut() {
-            if view.buffer_id != buffer_id {
-                continue;
-            }
+    /// Invalidate every view before replacing the document, preserving its buffer id.
+    pub(crate) fn replace_buffer_from_loaded(
+        &mut self,
+        buffer_id: BufferId,
+        loaded: BufferState,
+    ) -> Option<&mut BufferState> {
+        let buffer = self.buffers.by_id_mut(buffer_id)?;
+        for view in self
+            .layout
+            .views_mut()
+            .iter_mut()
+            .filter(|view| view.buffer_id == buffer_id)
+        {
             view.latest_display_snapshot = None;
             view.latest_display_snapshot_revision = None;
             for anchor in view.take_runtime_anchors_for_release() {
-                anchors_to_release.push(anchor);
-            }
-        }
-
-        if let Some(buffer) = self.buffer_by_id_mut(buffer_id) {
-            for anchor in anchors_to_release {
                 buffer
                     .document_mut()
                     .piece_tree_mut()
                     .release_anchor(anchor);
             }
         }
+        buffer.replace_from_loaded_buffer(loaded);
+        Some(buffer)
     }
 
     pub fn close_view(&mut self, view_id: ViewId) -> bool {

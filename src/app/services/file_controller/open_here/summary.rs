@@ -5,10 +5,10 @@ use crate::app::utils::file_count_label;
 pub(super) struct OpenHereBatchSummary {
     pub(super) opened_count: usize,
     pub(super) migrated_count: usize,
-    already_here_count: usize,
+    pub(super) already_here_count: usize,
     pub(super) failure_count: usize,
     pub(super) artifact_count: usize,
-    last_artifact_warning: Option<String>,
+    pub(super) last_artifact_warning: Option<String>,
 }
 
 impl OpenHereBatchSummary {

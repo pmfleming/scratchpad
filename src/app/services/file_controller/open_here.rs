@@ -76,17 +76,7 @@ impl FileController {
             || OpenHerePathOutcome::AlreadyInCurrentTab,
         );
         let mut summary = OpenHereBatchSummary::default();
-        let mut already_here_count = 0;
-        let mut migrated_count = 0;
-        let mut failure_count = 0;
-
         for outcome in batch.resolved {
-            match outcome {
-                OpenHerePathOutcome::Migrated => migrated_count += 1,
-                OpenHerePathOutcome::AlreadyInCurrentTab => already_here_count += 1,
-                OpenHerePathOutcome::Failed => failure_count += 1,
-                OpenHerePathOutcome::Opened { .. } => {}
-            }
             summary = summary.record(outcome);
         }
 
@@ -101,9 +91,9 @@ impl FileController {
         app.queue_background_path_loads(
             batch.pending_paths,
             PendingBackgroundAction::OpenHere(PendingOpenHereAction {
-                already_here_count,
-                migrated_count,
-                failure_count,
+                already_here_count: summary.already_here_count,
+                migrated_count: summary.migrated_count,
+                failure_count: summary.failure_count,
                 anchor_view_id,
             }),
         );
@@ -125,7 +115,10 @@ impl FileController {
         }
 
         Self::queue_deferred_buffer_refreshes(app, deferred_refreshes);
-        Self::log_open_here_success(app, log_entries)
+        log_entries
+            .into_iter()
+            .map(|artifact_warning| OpenHerePathOutcome::Opened { artifact_warning })
+            .collect()
     }
 
     fn open_loaded_files_here(
@@ -347,16 +340,6 @@ impl FileController {
         }
     }
 
-    fn log_open_here_success(
-        _app: &mut ScratchpadApp,
-        log_entries: Vec<Option<String>>,
-    ) -> Vec<OpenHerePathOutcome> {
-        log_entries
-            .into_iter()
-            .map(|artifact_warning| OpenHerePathOutcome::Opened { artifact_warning })
-            .collect()
-    }
-
     fn failed_open_here_outcomes(file_count: usize) -> Vec<OpenHerePathOutcome> {
         (0..file_count)
             .map(|_| OpenHerePathOutcome::Failed)
@@ -377,17 +360,13 @@ impl FileController {
         action: PendingOpenHereAction,
         results: Vec<LoadedPathResult>,
     ) {
-        let mut summary = OpenHereBatchSummary::default();
-        for _ in 0..action.already_here_count {
-            summary = summary.record(OpenHerePathOutcome::AlreadyInCurrentTab);
-        }
-        for _ in 0..action.migrated_count {
-            summary = summary.record(OpenHerePathOutcome::Migrated);
-        }
-        for _ in 0..action.failure_count {
-            summary = summary.record(OpenHerePathOutcome::Failed);
-        }
-        summary = Self::open_loaded_files_here(app, action.anchor_view_id, results)
+        let summary = OpenHereBatchSummary {
+            already_here_count: action.already_here_count,
+            migrated_count: action.migrated_count,
+            failure_count: action.failure_count,
+            ..OpenHereBatchSummary::default()
+        };
+        let summary = Self::open_loaded_files_here(app, action.anchor_view_id, results)
             .into_iter()
             .fold(summary, |summary, outcome| summary.record(outcome));
 

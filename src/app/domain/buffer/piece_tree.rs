@@ -9,6 +9,7 @@ pub(super) mod preview;
 pub(crate) mod query;
 mod runtime;
 mod slice;
+pub use slice::PieceTreeSlice;
 mod storage;
 mod support;
 #[cfg(test)]
@@ -390,16 +391,6 @@ struct LeafAddress {
     leaf_start_newline: usize,
 }
 
-pub struct PieceTreeSlice<'a> {
-    tree: &'a PieceTreeLite,
-    range_chars: Range<usize>,
-    node_index: usize,
-    leaf_index: usize,
-    piece_index: usize,
-    current_char: usize,
-    finished: bool,
-}
-
 impl PieceTreeLite {
     #[must_use]
     pub fn from_string(text: String) -> Self {
@@ -621,15 +612,12 @@ impl PieceTreeLite {
                 }
             }
 
-            for ch in piece_text[byte_start..].chars() {
-                if current_char >= safe_offset {
-                    return current_line;
-                }
-                if ch == '\n' {
-                    current_line += 1;
-                }
-                current_char += 1;
-            }
+            return current_line
+                + piece_text[byte_start..]
+                    .chars()
+                    .take(safe_offset.saturating_sub(current_char))
+                    .filter(|&ch| ch == '\n')
+                    .count();
         }
 
         current_line

@@ -1,4 +1,7 @@
-use super::{ByteSpan, PieceTreeLite, PieceTreeSlice, PieceTreeSpan, byte_range_for_char_range};
+use super::{
+    ByteSpan, Piece, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite, PieceTreeSpan,
+    byte_range_for_char_range,
+};
 use std::ops::Range;
 
 mod previews;
@@ -6,76 +9,65 @@ pub(super) use previews::{
     previews_for_matches_in_contiguous_text, previews_for_matches_in_piece_spans,
 };
 
-impl PieceTreeLite {
-    #[must_use]
-    pub fn spans_for_line(&self, target_line: usize) -> PieceTreeSlice<'_> {
-        let line_info = self.line_info(target_line);
-        self.spans_for_range(line_info.start_char..line_info.start_char + line_info.char_len)
-    }
+// Both byte and character spans walk the same pieces, without buffering text.
+pub(super) struct Pieces<'a> {
+    nodes: std::slice::Iter<'a, PieceTreeInternalNode>,
+    leaves: std::slice::Iter<'a, PieceTreeLeaf>,
+    pieces: std::slice::Iter<'a, Piece>,
+}
 
-    #[must_use]
-    pub fn spans_for_range(&self, range_chars: Range<usize>) -> PieceTreeSlice<'_> {
-        let normalized = self.normalize_char_range(range_chars);
-        if normalized.is_empty() || self.len_chars() == 0 {
-            return PieceTreeSlice::empty(self, normalized);
-        }
-
-        let address = self.find_leaf_for_char_offset(normalized.start);
-        PieceTreeSlice {
-            tree: self,
-            range_chars: normalized,
-            node_index: address.node_index,
-            leaf_index: address.leaf_index,
-            piece_index: 0,
-            current_char: address.leaf_start_char,
-            finished: false,
+impl<'a> Pieces<'a> {
+    pub(super) fn new(tree: &'a PieceTreeLite, node: usize, leaf: usize) -> Self {
+        let mut nodes = tree.root.nodes[node..].iter();
+        let leaves = nodes.next().map_or(&[][..], |node| &node.leaves[leaf..]);
+        Self {
+            nodes,
+            leaves: leaves.iter(),
+            pieces: [].iter(),
         }
     }
 }
 
-impl<'a> PieceTreeSlice<'a> {
-    fn empty(tree: &'a PieceTreeLite, range_chars: Range<usize>) -> Self {
-        let current_char = range_chars.start;
-        Self {
-            tree,
-            range_chars,
-            node_index: 0,
-            leaf_index: 0,
-            piece_index: 0,
-            current_char,
-            finished: true,
+impl<'a> Iterator for Pieces<'a> {
+    type Item = &'a Piece;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(piece) = self.pieces.next() {
+                return Some(piece);
+            }
+            if let Some(leaf) = self.leaves.next() {
+                self.pieces = leaf.pieces.iter();
+            } else {
+                self.leaves = self.nodes.next()?.leaves.iter();
+            }
         }
     }
+}
 
-    fn advance_piece_cursor(&mut self) {
-        if self.finished || self.node_index >= self.tree.root.nodes.len() {
-            self.finished = true;
-            return;
-        }
+pub struct PieceTreeSlice<'a> {
+    tree: &'a PieceTreeLite,
+    range_chars: Range<usize>,
+    pieces: Pieces<'a>,
+    current_char: usize,
+}
 
-        let node = &self.tree.root.nodes[self.node_index];
-        if self.leaf_index >= node.leaves.len() {
-            self.node_index += 1;
-            self.leaf_index = 0;
-            self.piece_index = 0;
-            if self.node_index >= self.tree.root.nodes.len() {
-                self.finished = true;
-            }
-            return;
-        }
+impl PieceTreeLite {
+    #[must_use]
+    pub fn spans_for_line(&self, target_line: usize) -> PieceTreeSlice<'_> {
+        let line = self.line_info(target_line);
+        self.spans_for_range(line.start_char..line.start_char + line.char_len)
+    }
 
-        let leaf = &node.leaves[self.leaf_index];
-        self.piece_index += 1;
-        if self.piece_index >= leaf.pieces.len() {
-            self.leaf_index += 1;
-            self.piece_index = 0;
-            if self.leaf_index >= node.leaves.len() {
-                self.node_index += 1;
-                self.leaf_index = 0;
-                if self.node_index >= self.tree.root.nodes.len() {
-                    self.finished = true;
-                }
-            }
+    #[must_use]
+    pub fn spans_for_range(&self, range_chars: Range<usize>) -> PieceTreeSlice<'_> {
+        let range_chars = self.normalize_char_range(range_chars);
+        let address = self.find_leaf_for_char_offset(range_chars.start);
+        PieceTreeSlice {
+            tree: self,
+            range_chars,
+            pieces: Pieces::new(self, address.node_index, address.leaf_index),
+            current_char: address.leaf_start_char,
         }
     }
 }
@@ -84,25 +76,14 @@ impl<'a> Iterator for PieceTreeSlice<'a> {
     type Item = PieceTreeSpan<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while !self.finished {
-            let node = self.tree.root.nodes.get(self.node_index)?;
-            let leaf = node.leaves.get(self.leaf_index)?;
-            let Some(piece) = leaf.pieces.get(self.piece_index) else {
-                self.advance_piece_cursor();
-                continue;
-            };
-
+        while !self.range_chars.is_empty() && self.current_char < self.range_chars.end {
+            let piece = self.pieces.next()?;
             let piece_start_char = self.current_char;
             let piece_end_char = piece_start_char + piece.char_len;
             self.current_char = piece_end_char;
-            self.advance_piece_cursor();
 
             if piece_end_char <= self.range_chars.start {
                 continue;
-            }
-            if piece_start_char >= self.range_chars.end {
-                self.finished = true;
-                return None;
             }
 
             let local_start = self.range_chars.start.saturating_sub(piece_start_char);

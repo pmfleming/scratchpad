@@ -63,58 +63,23 @@ fn character_cursor_walks_forward_and_reverse_across_utf8_pieces() {
 }
 
 #[test]
-fn anchor_left_bias_stays_before_insertion_at_same_offset() {
-    let mut tree = PieceTreeLite::from_string("ab".to_owned());
-    let anchor = tree.create_anchor(1, AnchorBias::Left);
-
-    tree.insert_with_source(1, "X", PieceSource::Edit);
-
-    assert_eq!(tree.extract_text(), "aXb");
-    assert_eq!(tree.anchor_position(anchor), Some(1));
-}
-
-#[test]
-fn anchor_right_bias_moves_after_insertion_at_same_offset() {
-    let mut tree = PieceTreeLite::from_string("ab".to_owned());
-    let anchor = tree.create_anchor(1, AnchorBias::Right);
-
-    tree.insert_with_source(1, "X", PieceSource::Edit);
-
-    assert_eq!(tree.anchor_position(anchor), Some(2));
-}
-
-#[test]
-fn anchor_inside_removed_range_collapses_to_start() {
-    let mut tree = PieceTreeLite::from_string("abcdef".to_owned());
-    let anchor = tree.create_anchor(3, AnchorBias::Right);
-
-    tree.remove_char_range(1..5);
-
-    assert_eq!(tree.extract_text(), "af");
-    assert_eq!(tree.anchor_position(anchor), Some(1));
-}
-
-#[test]
-fn release_anchor_removes_registry_entry() {
-    let mut tree = PieceTreeLite::from_string("abc".to_owned());
-    let anchor = tree.create_anchor(1, AnchorBias::Left);
-
-    tree.release_anchor(anchor);
-
-    assert_eq!(tree.anchor_position(anchor), None);
-    assert_eq!(tree.anchor_bias(anchor), None);
-}
-
-#[test]
-fn owner_metadata_survives_edits() {
-    let mut tree = PieceTreeLite::from_string("abcdef".to_owned());
-    let owner = AnchorOwner::new(AnchorOwnerKind::Cursor, Some(42));
-    let anchor = tree.create_anchor_with_owner(3, AnchorBias::Right, owner);
-
-    tree.insert_with_source(0, ">>", PieceSource::Edit);
-    tree.remove_char_range(5..6);
-
-    assert_eq!(tree.anchor_owner(anchor), Some(owner));
+fn anchors_track_bias_deletion_ownership_and_release() {
+    for (bias, after_insert) in [(AnchorBias::Left, 1), (AnchorBias::Right, 2)] {
+        let mut tree = PieceTreeLite::from_string("abc".into());
+        let owner = AnchorOwner::new(AnchorOwnerKind::Cursor, Some(42));
+        let anchor = tree.create_anchor_with_owner(1, bias, owner);
+        tree.insert_with_source(1, "X", PieceSource::Edit);
+        assert_eq!(tree.extract_text(), "aXbc");
+        assert_eq!(tree.anchor_position(anchor), Some(after_insert));
+        tree.remove_char_range(1..3);
+        assert_eq!(tree.extract_text(), "ac");
+        assert_eq!(tree.anchor_position(anchor), Some(1));
+        assert_eq!(tree.anchor_owner(anchor), Some(owner));
+        assert_eq!(tree.anchor_bias(anchor), Some(bias));
+        tree.release_anchor(anchor);
+        assert_eq!(tree.anchor_position(anchor), None);
+        assert_eq!(tree.anchor_bias(anchor), None);
+    }
 }
 
 #[test]
@@ -206,42 +171,30 @@ fn line_lookup_tracks_mixed_edits() {
 }
 
 #[test]
-fn line_lookup_handles_lines_spanning_many_leaves() {
-    let first = "a".repeat(300_000);
-    let second = "β".repeat(150_000);
-    let text = format!("{first}\n{second}\ntail");
-    let tree = PieceTreeLite::from_string(text);
-
-    let first_line = tree.line_info(0);
-    assert_eq!(first_line.start_char, 0);
-    assert_eq!(first_line.char_len, 300_000);
-
-    let second_line = tree.line_info(1);
-    assert_eq!(second_line.start_char, 300_001);
-    assert_eq!(second_line.char_len, 150_000);
-
-    let tail_line = tree.line_info(2);
-    assert_eq!(tail_line.start_char, 450_002);
-    assert_eq!(tail_line.char_len, 4);
-    assert_eq!(tree.line_index_at_offset(450_003), 2);
-}
-
-#[test]
-fn line_lookup_handles_node_boundaries_and_sampled_unicode_lines() {
-    let long_line = "a".repeat(super::MAX_LEAF_BYTES * (super::MAX_LEAVES_PER_INTERNAL + 1));
-    let text = format!(
-        "{long_line}\n{}\n{}",
-        "β😀\n".repeat(130),
-        "z".repeat(300_000)
-    );
-    let mut tree = PieceTreeLite::from_string(text.clone());
-    assert!(tree.root.nodes.len() > 1);
-    assert_line_lookup_matches(&tree, &text);
-
-    tree.insert_with_source(10, "\n界\n", PieceSource::Edit);
-    let mut edited = text;
-    insert_string_at_char(&mut edited, 10, "\n界\n");
-    assert_line_lookup_matches(&tree, &edited);
+fn lookups_and_spans_cross_leaves_nodes_and_sampled_unicode_lines() {
+    for mut text in [
+        format!("{}\n{}\ntail", "a".repeat(300_000), "β".repeat(150_000)),
+        format!(
+            "{}\n{}\n{}",
+            "a".repeat(super::MAX_LEAF_BYTES * (super::MAX_LEAVES_PER_INTERNAL + 1)),
+            "β😀\n".repeat(130),
+            "z".repeat(300_000)
+        ),
+    ] {
+        let mut tree = PieceTreeLite::from_string(text.clone());
+        assert_line_lookup_matches(&tree, &text);
+        tree.insert_with_source(10, "\n界\n", PieceSource::Edit);
+        insert_string_at_char(&mut text, 10, "\n界\n");
+        assert_line_lookup_matches(&tree, &text);
+        for range in [
+            0..tree.len_chars(),
+            10..12,
+            260_000..300_010,
+            4_300_000..4_300_010,
+        ] {
+            assert_spans_match(&tree, &text, range);
+        }
+    }
 }
 
 fn assert_line_lookup_matches(tree: &PieceTreeLite, text: &str) {
@@ -250,6 +203,9 @@ fn assert_line_lookup_matches(tree: &PieceTreeLite, text: &str) {
     for (index, line) in text.split('\n').enumerate() {
         let len = line.chars().count();
         assert_eq!(tree.line_lookup(index), (start, len), "line {index}");
+        for offset in [start, start + len / 2, start + len] {
+            assert_eq!(tree.line_index_at_offset(offset), index, "offset {offset}");
+        }
         last = (start, len);
         start += len + 1;
     }
@@ -292,37 +248,28 @@ fn provenance_tracks_insert_source() {
 }
 
 #[test]
-fn compact_add_buffer_preserves_visible_text_and_history_spans() {
-    let mut tree = PieceTreeLite::from_string("ab".to_owned());
-    tree.insert_with_source(1, "XX", PieceSource::Edit);
-    let mut spans = vec![tree.append_history_text("history", PieceSource::SearchReplace)];
-
-    tree.compact_add_buffer(&mut spans);
-
-    assert_eq!(tree.extract_text(), "aXXb");
-    assert_eq!(tree.text_for_span(spans[0]).as_ref(), "history");
-    assert_eq!(
-        tree.provenance_for_span(spans[0]).source,
-        PieceSource::SearchReplace
-    );
-}
-
-#[test]
-fn compact_add_buffer_rewrites_provenance_for_relocated_history_spans() {
-    let mut tree = PieceTreeLite::from_string("ab".to_owned());
-    tree.insert_with_source(1, "XX", PieceSource::Paste);
-    let mut spans = vec![tree.append_history_text("history", PieceSource::SearchReplace)];
-
-    tree.remove_char_range(1..3);
-    tree.compact_add_buffer(&mut spans);
-
-    assert_eq!(tree.extract_text(), "ab");
-    assert_eq!(tree.text_for_span(spans[0]).as_ref(), "history");
-    assert_eq!(
-        tree.provenance_for_span(spans[0]).source,
-        PieceSource::SearchReplace
-    );
-    assert_eq!(tree.provenance_entry_count(), 1);
+fn compaction_preserves_visible_text_and_relocates_history_provenance() {
+    for remove_insert in [false, true] {
+        let mut tree = PieceTreeLite::from_string("ab".to_owned());
+        tree.insert_with_source(1, "XX", PieceSource::Paste);
+        let mut spans = vec![tree.append_history_text("history", PieceSource::SearchReplace)];
+        if remove_insert {
+            tree.remove_char_range(1..3);
+        }
+        tree.compact_add_buffer(&mut spans);
+        assert_eq!(
+            tree.extract_text(),
+            if remove_insert { "ab" } else { "aXXb" }
+        );
+        assert_eq!(tree.text_for_span(spans[0]).as_ref(), "history");
+        assert_eq!(
+            tree.provenance_for_span(spans[0]).source,
+            PieceSource::SearchReplace
+        );
+        if remove_insert {
+            assert_eq!(tree.provenance_entry_count(), 1);
+        }
+    }
 }
 
 #[test]
@@ -367,7 +314,46 @@ fn randomized_edits_match_string_model() {
         assert_eq!(tree.len_chars(), model.chars().count());
         assert_eq!(tree.len_bytes(), model.len());
         assert_line_lookup_matches(&tree, &model);
+        let a = rng.random_range(0..=tree.len_chars() + 1);
+        let b = rng.random_range(0..=tree.len_chars() + 1);
+        assert_spans_match(&tree, &model, a..b);
+        assert_spans_match(&tree, &model, a..a);
     }
+}
+
+fn assert_spans_match(tree: &PieceTreeLite, text: &str, range: std::ops::Range<usize>) {
+    let len = text.chars().count();
+    let start = range.start.min(range.end).min(len);
+    let end = range.start.max(range.end).min(len);
+    let expected: String = text.chars().skip(start).take(end - start).collect();
+    let mut actual = String::new();
+    let mut offset = start;
+    let mut spans = tree.spans_for_range(range);
+    for span in spans.by_ref() {
+        assert_eq!(span.char_start, offset);
+        assert_eq!(span.char_len, span.text.chars().count());
+        assert_eq!(span.byte_span.byte_len, span.text.len() as u64);
+        assert_eq!(
+            tree.text_for_span(span.byte_span).as_ref(),
+            span.text.as_ref()
+        );
+        actual.push_str(&span.text);
+        offset += span.char_len;
+    }
+    assert!(spans.next().is_none());
+    assert_eq!(offset, end);
+    assert_eq!(actual, expected);
+    // Byte spans deliberately allow ranges within a UTF-8 code point.
+    let bytes = text.as_bytes();
+    let start = start.min(bytes.len());
+    let end = end.min(bytes.len());
+    let mut byte_spans = tree.byte_spans(start..end);
+    let actual: Vec<_> = byte_spans
+        .by_ref()
+        .flat_map(|(text, range)| text.as_bytes()[range].to_vec())
+        .collect();
+    assert!(byte_spans.next().is_none());
+    assert_eq!(actual, bytes[start..end]);
 }
 
 fn random_text(rng: &mut StdRng) -> String {

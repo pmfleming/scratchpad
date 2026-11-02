@@ -61,10 +61,6 @@ impl WorkspaceTabLayout {
         &self.root_pane
     }
 
-    pub fn root_pane_mut(&mut self) -> &mut PaneNode {
-        &mut self.root_pane
-    }
-
     #[must_use]
     pub fn contains_view(&self, view_id: ViewId) -> bool {
         self.root_pane.contains_view(view_id)
@@ -98,10 +94,6 @@ impl WorkspaceTabLayout {
     #[must_use]
     pub fn active_view(&self) -> Option<&EditorViewState> {
         self.view(self.active_view_id)
-    }
-
-    pub fn active_view_mut(&mut self) -> Option<&mut EditorViewState> {
-        self.view_mut(self.active_view_id)
     }
 
     #[must_use]

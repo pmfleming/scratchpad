@@ -350,20 +350,19 @@ fn rail_clicks_and_focused_keys_follow_screen_direction_without_stealing_editor_
         "focus: {:?}",
         h.ctx.memory(|m| m.focused())
     );
-    h.key_press(egui::Key::ArrowDown);
-    h.run_steps(3);
-    assert_eq!(displayed_text(&h, id), "old");
-    assert_eq!(text(h.state()), "middle");
-    h.key_press(egui::Key::ArrowUp);
-    h.run_steps(3);
-    assert_eq!(text(h.state()), "middle");
-    h.key_press(egui::Key::Home);
-    h.run_steps(3);
-    assert_eq!(displayed_text(&h, id), "current");
-    h.key_press(egui::Key::End);
-    h.run_steps(3);
-    assert_eq!(displayed_text(&h, id), "old");
-    assert_eq!(text(h.state()), "middle");
+    for (key, expected) in [
+        (egui::Key::ArrowDown, "old"),
+        (egui::Key::ArrowDown, "old"),
+        (egui::Key::ArrowUp, "middle"),
+        (egui::Key::Home, "current"),
+        (egui::Key::ArrowUp, "current"),
+        (egui::Key::End, "old"),
+    ] {
+        h.key_press(key);
+        h.run_steps(3);
+        assert_eq!(displayed_text(&h, id), expected);
+        assert_eq!(text(h.state()), "middle");
+    }
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
     assert!(!h.state().state.dialogs.text_history.is_open());
@@ -382,12 +381,18 @@ fn scrubber_steps_only_active_file_and_closes_independently() {
     h.get_by_label("Undo one step").click();
     h.run_steps(3);
     assert_eq!(text(h.state()), "middle");
-    h.key_press(egui::Key::ArrowLeft);
-    h.run_steps(3);
-    assert_eq!(text(h.state()), "old");
-    h.key_press(egui::Key::End);
-    h.run_steps(3);
-    assert_eq!(text(h.state()), "current");
+    for (key, expected) in [
+        (egui::Key::ArrowLeft, "old"),
+        (egui::Key::ArrowLeft, "old"),
+        (egui::Key::ArrowRight, "middle"),
+        (egui::Key::Home, "old"),
+        (egui::Key::End, "current"),
+        (egui::Key::ArrowRight, "current"),
+    ] {
+        h.key_press(key);
+        h.run_steps(3);
+        assert_eq!(text(h.state()), expected);
+    }
     // Interacting with the scrubber clicks outside History and dismisses it.
     assert!(!h.state().state.dialogs.text_history.is_open());
     assert!(h.state().state.dialogs.history_scrubber.is_open());
@@ -788,7 +793,7 @@ fn clearing_history_respects_scope_and_keeps_the_confirmed_target() {
         );
         assert_eq!(
             tabs[1].active_buffer().document().history_entries().len(),
-            if mode == "current" { 1 } else { 0 }
+            usize::from(mode == "current")
         );
         assert_eq!(tabs[0].active_buffer().text(), "current");
         assert_eq!(tabs[1].active_buffer().text(), "after");
@@ -799,3 +804,37 @@ mod position;
 mod preview;
 mod scrubber;
 mod shading;
+
+#[test]
+fn simultaneous_navigation_keys_are_consumed_in_priority_order() {
+    use egui::Key::{ArrowDown, ArrowLeft, ArrowRight, ArrowUp, End, Enter, Home};
+    for (surface, older, newer, expected) in [
+        (super::Surface::Rail, ArrowDown, ArrowUp, 1),
+        (super::Surface::Scrubber, ArrowLeft, ArrowRight, 3),
+    ] {
+        let ctx = egui::Context::default();
+        let states = States {
+            entries: vec![],
+            position: 2,
+            first: 1,
+            last: 3,
+        };
+        ctx.begin_pass(egui::RawInput {
+            events: [older, newer, Home, End, Enter]
+                .into_iter()
+                .map(|key| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect(),
+            ..Default::default()
+        });
+        assert_eq!(surface.destination(&ctx, &states, 2), Some(expected));
+        assert_eq!(surface.destination(&ctx, &states, 2), None);
+        assert!(super::consume(&ctx, egui::Modifiers::NONE, Enter));
+        ctx.end_pass().textures_delta.clear();
+    }
+}

@@ -403,7 +403,7 @@ fn render_step_controls(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::Drag;
     use crate::app::domain::TextDocument;
     #[test]
     fn drag_cancellation_is_sticky_across_tab_and_revision_changes() {

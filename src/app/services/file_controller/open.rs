@@ -6,7 +6,7 @@ use crate::app::app_state::{
 };
 use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::diagnostics;
-use crate::app::domain::{BufferState, WorkspaceTab};
+use crate::app::domain::{BufferId, BufferState, WorkspaceTab};
 use crate::app::services::background_io::{ColdFileShellResult, LoadedPathResult};
 use crate::app::services::file_service::FileService;
 use crate::app::utils::summarize_open_results;
@@ -466,11 +466,20 @@ impl FileController {
         summary: &mut OpenBatchSummary,
         loaded: LoadedPathResult,
     ) {
-        if Self::replace_staged_large_file_preview(app, summary, &loaded.path, &loaded.result) {
-            Self::release_pending_open_path(app, &loaded.path);
+        Self::release_pending_open_path(app, &loaded.path);
+        let preview = app
+            .tab_manager
+            .find_tab_by_path(&loaded.path)
+            .and_then(|(index, view)| {
+                app.tab_manager.tabs.as_slice()[index]
+                    .buffer_for_view(view)
+                    .filter(|buffer| buffer.is_loading_preview)
+                    .map(|buffer| (index, buffer.id))
+            });
+        if let Some((index, buffer_id)) = preview {
+            Self::replace_staged_large_file_preview(app, summary, index, buffer_id, loaded);
             return;
         }
-        Self::release_pending_open_path(app, &loaded.path);
         if Self::activate_existing_path(app, &loaded.path).is_some() {
             summary.record_outcome(OpenPathOutcome::AlreadyOpen);
             return;
@@ -520,37 +529,23 @@ impl FileController {
     fn replace_staged_large_file_preview(
         app: &mut ScratchpadApp,
         summary: &mut OpenBatchSummary,
-        path: &Path,
-        result: &Result<BufferState, String>,
-    ) -> bool {
-        let Some((tab_index, view_id)) = app.tab_manager.find_tab_by_path(path) else {
-            return false;
-        };
-        let is_preview = app.tab_manager.tabs.as_slice()[tab_index]
-            .buffer_for_view(view_id)
-            .is_some_and(|buffer| buffer.is_loading_preview);
-        if !is_preview {
-            return false;
-        }
-
-        match result {
+        tab_index: usize,
+        buffer_id: BufferId,
+        loaded: LoadedPathResult,
+    ) {
+        match loaded.result {
             Ok(loaded) => {
-                let deferred_refresh = Self::deferred_buffer_refresh(loaded);
                 let LoadedFile {
                     artifact_warning,
                     mut buffer,
                     ..
-                } = LoadedFile::from_buffer(loaded.clone());
+                } = LoadedFile::from_buffer(loaded);
                 Self::mark_settings_buffer(app, &mut buffer);
                 let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
-                let buffer_id = tab
-                    .buffer_for_view(view_id)
-                    .expect("staged preview buffer exists")
-                    .id;
-                tab.clear_view_state_for_buffer_replacement(buffer_id);
-                tab.buffer_by_id_mut(buffer_id)
-                    .expect("staged preview buffer exists")
-                    .replace_from_loaded_buffer(buffer);
+                let Some(buffer) = tab.replace_buffer_from_loaded(buffer_id, buffer) else {
+                    return;
+                };
+                let deferred_refresh = Self::deferred_buffer_refresh(buffer);
                 app.tab_manager.set_active_tab_index_clamped(tab_index);
                 Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
                 crate::app::app_state::search_runtime::mark_search_dirty(app);
@@ -559,15 +554,14 @@ impl FileController {
             Err(error) => {
                 diagnostics::record_io_error(
                     "open_large_file",
-                    Some(path),
+                    Some(&loaded.path),
                     "file_controller::open",
-                    &std::io::Error::other(error.clone()),
+                    &error,
                 );
                 app.tab_manager.close_tab_internal(tab_index);
                 summary.record_outcome(OpenPathOutcome::Failed);
             }
         }
-        true
     }
 
     /// Finalize a streaming open, persist session,

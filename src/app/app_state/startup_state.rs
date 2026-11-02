@@ -43,22 +43,6 @@ impl ScratchpadApp {
     }
 
     #[must_use]
-    pub fn with_startup_options(startup_options: StartupOptions) -> Self {
-        Self::with_session_store_and_startup(SessionStore::default(), startup_options)
-    }
-
-    #[must_use]
-    pub fn with_runtime_startup_options(startup_options: StartupOptions) -> Self {
-        let session_store = SessionStore::default();
-        let settings_root = session_store.root().to_path_buf();
-        Self::with_stores_and_runtime_startup(
-            session_store,
-            SettingsStore::new(settings_root),
-            startup_options,
-        )
-    }
-
-    #[must_use]
     pub fn with_session_store_and_startup(
         session_store: SessionStore,
         startup_options: StartupOptions,

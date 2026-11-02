@@ -3,6 +3,7 @@ mod file_picker;
 mod list;
 mod model;
 mod navigation;
+pub(crate) use navigation::{dismiss_text_history, handle_text_history_navigation};
 mod panel;
 mod persistence;
 mod preview;
@@ -106,124 +107,6 @@ fn scope_buffer(scope: HistoryTab, app: &ScratchpadApp) -> Option<u64> {
         HistoryTab::CurrentFile => active_buffer(app),
         HistoryTab::File(id) => Some(id),
         HistoryTab::AllFiles => None,
-    }
-}
-
-/// Only the focused rail or scrubber owns navigation; opening a callout never
-/// steals plain arrow keys from the editor.
-pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    preview::prepare(ctx, app);
-    let popup_open = egui::Popup::is_any_open(ctx);
-    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("history.escape.popup"), popup_open));
-    if app.state.dialogs.any_modal_open()
-        || crate::app::app_state::workspace::accessors::pending_action(app).is_some()
-    {
-        return;
-    }
-    let rail =
-        app.state.dialogs.text_history.is_open() && ctx.memory(|m| m.has_focus(list::focus_id()));
-    let scrub = app.state.dialogs.history_scrubber.is_open()
-        && ctx.memory(|m| m.has_focus(scrubber::focus_id()));
-    // Give an open menu the first Escape, even when the timeline retains focus.
-    if egui::Popup::is_any_open(ctx) {
-        return;
-    }
-    if (rail || scrub) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-    {
-        if scrub {
-            scrubber::close(ctx, app);
-        } else {
-            preview::close(ctx, app);
-        }
-        return;
-    }
-    if scrub && scrubber::resume_editor_input(ctx, app) {
-        return;
-    }
-    if !rail && !scrub {
-        return;
-    }
-    if rail
-        && ctx.input_mut(|i| {
-            i.consume_key(
-                egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
-                egui::Key::Delete,
-            )
-        })
-    {
-        request_clear(ctx, app, scope(ctx, app));
-        return;
-    }
-    let id = if scrub {
-        active_buffer(app)
-    } else {
-        scope_buffer(scope(ctx, app), app).or_else(|| list::selected_buffer(ctx))
-    };
-    let Some(id) = id else {
-        return;
-    };
-    if scrub && snapshots::is_browsing(ctx, app, id) {
-        return;
-    }
-    let entries = snapshots::state_entries(ctx, app);
-    let states = states::States::new(&entries, id);
-    let position = if rail {
-        preview::position(ctx, id, &states)
-    } else {
-        states.position
-    };
-    let (older, newer) = if scrub {
-        (egui::Key::ArrowLeft, egui::Key::ArrowRight)
-    } else {
-        (egui::Key::ArrowDown, egui::Key::ArrowUp)
-    };
-    let mut destination = None;
-    for (key, position) in [
-        (older, position.saturating_sub(1).max(states.first)),
-        (newer, (position + 1).min(states.last)),
-        (
-            egui::Key::Home,
-            if scrub { states.first } else { states.last },
-        ),
-        (
-            egui::Key::End,
-            if scrub { states.last } else { states.first },
-        ),
-    ] {
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
-            destination = Some(position);
-        }
-    }
-    if let Some(position) = destination {
-        if rail {
-            preview::select(ctx, app, id, states.after(position));
-            list::request_reveal(ctx);
-        } else {
-            snapshots::go_to_state(ctx, app, id, states.after(position));
-        }
-    }
-}
-
-/// Unfocused history surfaces only dismiss after widgets and application shortcuts
-/// have had an opportunity to consume Escape.
-pub(crate) fn dismiss_text_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    let scrub = app.state.dialogs.history_scrubber.is_open();
-    let history = app.state.dialogs.text_history.is_open();
-    if (scrub || history)
-        && !app.state.dialogs.any_modal_open()
-        && crate::app::app_state::workspace::accessors::pending_action(app).is_none()
-        && !egui::Popup::is_any_open(ctx)
-        && !ctx.data(|d| {
-            d.get_temp::<bool>(egui::Id::unique("history.escape.popup"))
-                .unwrap_or(false)
-        })
-        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-    {
-        if scrub {
-            scrubber::close(ctx, app);
-        } else {
-            preview::close(ctx, app);
-        }
     }
 }
 

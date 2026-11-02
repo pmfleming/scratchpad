@@ -13,7 +13,6 @@ use super::{
 };
 use crate::app::capacity_metrics;
 use crate::app::domain::{CursorRange, buffer::OperationRecord};
-use std::borrow::Cow;
 use std::io;
 use std::ops::Range;
 use std::path::Path;
@@ -160,21 +159,6 @@ impl TextDocument {
         let text = self.content.piece_tree.extract_text();
         capacity_metrics::record_full_text_flatten(text.len());
         text
-    }
-
-    #[must_use]
-    pub fn text_cow(&self) -> Cow<'_, str> {
-        self.content
-            .piece_tree
-            .borrow_range(0..self.content.piece_tree.len_chars())
-            .map_or_else(
-                || {
-                    let text = self.content.piece_tree.extract_text();
-                    capacity_metrics::record_full_text_flatten(text.len());
-                    Cow::Owned(text)
-                },
-                |text| text.into_cow(),
-            )
     }
 
     #[must_use]

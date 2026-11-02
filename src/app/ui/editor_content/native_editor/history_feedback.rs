@@ -82,7 +82,7 @@ pub(super) fn paint(ui: &egui::Ui, frame: &EditorFrame<'_>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{BufferState, current, egui, mark};
 
     #[test]
     fn feedback_is_buffer_scoped_revision_bound_and_temporary() {

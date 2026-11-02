@@ -135,9 +135,7 @@ impl FileController {
         mark_auto_reloaded: bool,
     ) -> Option<()> {
         let tab = app.tab_manager.tabs.as_mut_slice().get_mut(index)?;
-        tab.clear_view_state_for_buffer_replacement(buffer_id);
-        let buffer = tab.buffer_by_id_mut(buffer_id)?;
-        buffer.replace_from_loaded_buffer(loaded);
+        let buffer = tab.replace_buffer_from_loaded(buffer_id, loaded)?;
         buffer.is_dirty = false;
         if mark_auto_reloaded {
             buffer.mark_auto_reloaded_from_disk(disk_state);
