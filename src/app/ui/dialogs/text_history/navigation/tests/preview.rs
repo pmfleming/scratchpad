@@ -256,8 +256,9 @@ fn opening_reveals_the_current_state_and_hover_scrolls_both_edges_until_leaving(
         .unwrap()
         .summary
         .clone();
-    app.state.dialogs.text_history.open();
     let mut h = harness(app);
+    h.run_steps(3);
+    h.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::H);
     h.run_steps(4);
     assert!(
         h.get_all_by_role_and_label(egui::Role::Button, &format!("State: {summary}"))

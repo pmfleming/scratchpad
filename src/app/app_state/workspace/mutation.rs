@@ -4,7 +4,7 @@ pub(crate) use snapshot::install_history_document;
 use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::app_state::settings_controller;
 use crate::app::app_state::workspace::accessors as workspace_accessors;
-use crate::app::domain::{BufferId, CursorRevealMode};
+use crate::app::domain::{BufferId, CursorRevealMode, buffer::DocumentRevision};
 use crate::app::text_history::{TextHistoryCache, TextHistoryEntryView, entries_for_buffer};
 
 pub(crate) fn text_history_entries(app: &ScratchpadApp) -> Vec<TextHistoryEntryView> {
@@ -30,7 +30,7 @@ pub(crate) fn cached_text_history_entries(
     app.state.text_history_cache.entries.clone()
 }
 
-fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, u64, String)> {
+fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, DocumentRevision, u64, String)> {
     app.tab_manager
         .tabs
         .as_slice()
@@ -39,6 +39,8 @@ fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, u64, String)> {
             tab.buffers().map(|buffer| {
                 (
                     buffer.id,
+                    // Replacement documents can reuse the same history counter.
+                    buffer.document().revision_key(),
                     buffer.document().history_revision_counter(),
                     crate::app::text_history::buffer_label(buffer),
                 )

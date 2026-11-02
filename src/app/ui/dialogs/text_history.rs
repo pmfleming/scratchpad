@@ -131,6 +131,14 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if first && let Some(id) = active_buffer(app) {
         list::select_buffer(ctx, id);
     }
+    // Navigate immediately on opening, while preserving an existing dialog or
+    // text-entry workflow's input and Escape handling.
+    let focus_on_open = first
+        && !app.state.search_state.open()
+        && app.state.dialogs.tab_rename.is_none()
+        && !app.state.dialogs.any_modal_open()
+        && !crate::app::app_state::settings_state::showing_settings(app)
+        && !egui::Popup::is_any_open(ctx);
     let mut action = None;
     let mut clear = None;
     let mut selected = scope(ctx, app);
@@ -183,6 +191,11 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
             });
         }
         list::render(ui, &entries, &catalog, target, &ids, &mut action, first);
+        if focus_on_open {
+            ctx.memory_mut(|memory| memory.request_focus(list::focus_id()));
+            lock_navigation_focus(ctx, list::focus_id());
+            navigation::retain_tool_focus(ctx, app);
+        }
         snapshots::footer(ui, &catalog);
     });
     if close {

@@ -114,8 +114,8 @@ fn escape_popup_key() -> egui::Id {
     egui::Id::unique("history.escape.popup")
 }
 
-/// Only the focused rail or scrubber owns navigation; opening a callout never
-/// steals plain arrow keys from the editor.
+/// Only the focused rail or scrubber owns navigation. History focuses its rail
+/// on opening; the automatic scrubber leaves focus with the editor.
 pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut ScratchpadApp) {
     preview::prepare(ctx, app);
     let popup_open = egui::Popup::is_any_open(ctx);

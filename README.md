@@ -167,8 +167,9 @@ the timeline to update the file live, with a subtle highlight on each change;
 Left/Right and Home/End work while its track has focus. **History…** (`Ctrl+H`) shows the current file, all files,
 or a chosen file. Hover a row to preview the state **after** that change; click to
 confirm it as a new undoable state. Escape or clicking outside discards the preview.
-Hover near the list's top or bottom to scroll through more states. Up/Down preview
-in on-screen order while the list has focus. The opening state remains outlined
+Hover near the list's top or bottom to scroll through more states. Opening History
+from the editor focuses the list immediately. Up/Down preview in on-screen order
+while the list has focus. The opening state remains outlined
 while the preview row is highlighted. A subtle tint marks the
 affected line; neither tool saves files. Diamonds mark reachable snapshots;
 older snapshots remain selectable, with **Return to latest** restoring the preserved

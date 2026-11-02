@@ -1,12 +1,12 @@
 use crate::app::domain::buffer::{
-    PieceHistoryEdit, PieceHistoryEntry, preview_text, preview_text_parts,
+    DocumentRevision, PieceHistoryEdit, PieceHistoryEntry, preview_text, preview_text_parts,
 };
 use crate::app::domain::{BufferId, BufferState, PieceSource};
 use std::sync::Arc;
 
 #[derive(Default)]
 pub(crate) struct TextHistoryCache {
-    pub(crate) revisions: Vec<(BufferId, u64, String)>,
+    pub(crate) revisions: Vec<(BufferId, DocumentRevision, u64, String)>,
     pub(crate) entries: Arc<[TextHistoryEntryView]>,
 }
 

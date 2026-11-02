@@ -60,6 +60,10 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Refresh cached History rows when a document is replaced or restored, even if its history revision counter is unchanged, so clicks use the current undo/redo position.
+
+- Focus the History list when it opens so arrow keys navigate immediately, without first hovering a row or switching files.
+
 - Identified snapshot views explicitly in History and Scrubber captions instead of displaying the preserved live branch’s position.
 - Used the same current file name for change rows, oldest-state rows, and snapshot headings in All files history.
 - Kept history replay in the target file’s active split view, matching the History file picker.

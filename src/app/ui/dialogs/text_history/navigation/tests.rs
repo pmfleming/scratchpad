@@ -321,7 +321,7 @@ fn large_history_counts_and_long_names_do_not_expand_the_panel() {
 }
 
 #[test]
-fn rail_clicks_and_focused_keys_follow_screen_direction_without_stealing_editor_keys() {
+fn rail_clicks_and_focused_keys_follow_screen_direction() {
     let root = tempfile::tempdir().unwrap();
     let mut app = app_with_history(root.path());
     let id = app.tab_manager.active_tab().unwrap().active_buffer().id;
@@ -334,10 +334,11 @@ fn rail_clicks_and_focused_keys_follow_screen_direction_without_stealing_editor_
         .clone();
     let mut h = harness(app);
     h.run_steps(3);
-    // Opening the nonmodal History panel leaves arrow keys with the editor.
+    // Opening History gives navigation focus to the rail; arrows only preview.
     h.key_press(egui::Key::ArrowDown);
     h.run_steps(2);
     assert_eq!(text(h.state()), "current");
+    assert_eq!(displayed_text(&h, id), "middle");
     h.get_all_by_role_and_label(egui::Role::Button, &format!("State: {summary}"))
         .last()
         .unwrap()
@@ -800,6 +801,7 @@ fn clearing_history_respects_scope_and_keeps_the_confirmed_target() {
     }
 }
 
+mod opening;
 mod position;
 mod preview;
 mod scrubber;
