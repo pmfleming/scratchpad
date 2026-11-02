@@ -96,6 +96,10 @@ pub(super) fn render(
                         ui.weak(&file.label);
                     }
                     snapshots::older_rows(ui, id, catalog, action);
+                    if matches!(action, Some(HistoryAction::Snapshot { buffer_id, .. }) if *buffer_id == id) {
+                        ui.ctx().data_mut(|d| d.insert_temp(selected_buffer_key(), id));
+                        focus_requested = true;
+                    }
                 }
             }
         });

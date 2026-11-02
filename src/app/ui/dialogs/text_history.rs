@@ -122,7 +122,7 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
     let Some(id) = id else {
         return;
     };
-    if snapshots::is_browsing(ctx, app, id) {
+    if scrub && snapshots::is_browsing(ctx, app, id) {
         return;
     }
     let entries = snapshots::state_entries(ctx, app);

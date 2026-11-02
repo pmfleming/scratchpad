@@ -92,6 +92,23 @@ fn snapshots_navigate_in_the_existing_editor_and_return_to_detailed_undo() {
     assert!(harness.query_by_label("Recovery points").is_none());
     assert!(harness.query_by_label("History preview").is_none());
     assert!(harness.query_by_label("Recovery point").is_none());
+    assert!(
+        harness
+            .ctx
+            .memory(|m| m.has_focus(super::super::super::list::focus_id()))
+    );
+    harness.key_press(egui::Key::ArrowDown);
+    harness.run_steps(3);
+    assert_eq!(text(&harness), "one");
+    let ctx = harness.ctx.clone();
+    // Revisit the snapshot and verify Home can return to the newest native state.
+    snapshots::request(&ctx, harness.state_mut(), id, point);
+    wait(&mut harness, |h| text(h) == "ancient");
+    harness.key_press(egui::Key::Home);
+    harness.run_steps(3);
+    assert_eq!(text(&harness), "two");
+    snapshots::request(&ctx, harness.state_mut(), id, point);
+    wait(&mut harness, |h| text(h) == "ancient");
     harness.get_by_label("Return to latest").click();
     harness.run_steps(3);
     assert_eq!(text(&harness), "two");
