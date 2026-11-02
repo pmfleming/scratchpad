@@ -47,11 +47,11 @@ fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, u64, String)> {
         .collect()
 }
 
-pub(crate) fn clear_text_history(app: &mut ScratchpadApp) -> bool {
+pub(crate) fn clear_text_history(app: &mut ScratchpadApp, buffer_ids: &[BufferId]) -> bool {
     let mut cleared = false;
     for tab in app.tab_manager.tabs.as_mut_slice() {
         for buffer in tab.buffers_mut() {
-            if !buffer.document().history_entries().is_empty() {
+            if buffer_ids.contains(&buffer.id) && !buffer.document().history_entries().is_empty() {
                 buffer.document_mut().clear_operation_history();
                 cleared = true;
             }

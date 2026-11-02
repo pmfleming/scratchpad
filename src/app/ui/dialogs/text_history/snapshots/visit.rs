@@ -41,7 +41,11 @@ pub(in super::super) fn cancel_pending(ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<Pending>(pending_key()));
 }
 
-pub(in super::super) fn clear_history(ctx: &egui::Context, app: &mut ScratchpadApp) -> bool {
+pub(in super::super) fn clear_history(
+    ctx: &egui::Context,
+    app: &mut ScratchpadApp,
+    buffer_ids: &[u64],
+) -> bool {
     cancel_pending(ctx);
     let mut changed = false;
     for buffer in app
@@ -50,6 +54,7 @@ pub(in super::super) fn clear_history(ctx: &egui::Context, app: &mut ScratchpadA
         .as_mut_slice()
         .iter_mut()
         .flat_map(|tab| tab.buffers_mut())
+        .filter(|buffer| buffer_ids.contains(&buffer.id))
     {
         if let Some(mut visit) = browse(ctx, buffer) {
             let mut source = (*visit.source.buffer).clone();

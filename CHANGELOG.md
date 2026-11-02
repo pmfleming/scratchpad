@@ -34,6 +34,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Made Clear history respect Current file, chosen file, or All files scope and keep the confirmed target stable across tab switches.
+
 - Allowed History list arrow and Home/End keys to return from saved snapshots to native undo states, matching row clicks.
 - Made All files history keyboard navigation follow the clicked file independently of the active editor and follow-file preference.
 - Refreshed cached History filenames immediately after rename or Save As.

@@ -718,3 +718,60 @@ fn clear_requires_confirmation_and_cancel_preserves_history() {
     h.run_steps(3);
     h.get_by_label("No files with changes");
 }
+
+#[test]
+fn clearing_history_respects_scope_and_keeps_the_confirmed_target() {
+    use super::super::{HistoryTab, scope_key, write_active_tab};
+    for mode in ["current", "picked", "all"] {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = app_with_history(root.path());
+        let first = app.tab_manager.tabs.as_slice()[0].clone();
+        let mut other = BufferState::new("other.txt".into(), "before".into(), None);
+        other
+            .replace_char_ranges_with_undo(
+                &[(0..6, "after".into())],
+                CursorRange::default(),
+                CursorRange::default(),
+            )
+            .unwrap();
+        let other_id = other.id;
+        app.tab_manager
+            .set_tabs(vec![first, WorkspaceTab::new(other)], 0);
+        app.state.dialogs.text_history.open();
+        let mut h = harness(app);
+        match mode {
+            "all" => write_active_tab(&h.ctx, HistoryTab::AllFiles),
+            "picked" => {
+                h.ctx.data_mut(|d| d.insert_temp(scope_key(), other_id));
+            }
+            _ => {}
+        }
+        h.run_steps(3);
+        h.get_by_label("Clear undo/redo history").click();
+        h.run_steps(2);
+        let description = match mode {
+            "all" => "Clear undo/redo history in all open files?",
+            "picked" => "Clear undo/redo history in other.txt?",
+            _ => "Clear undo/redo history in note.txt?",
+        };
+        h.get_by_label(description);
+        // Changing the current editor after confirmation must not change its target.
+        h.state_mut().tab_manager.set_active_tab_index_clamped(1);
+        h.run_steps(2);
+        h.get_by_label(description);
+        h.get_by_role_and_label(egui::Role::Button, "Clear history")
+            .click();
+        h.run_steps(3);
+        let tabs = h.state().tab_manager.tabs.as_slice();
+        assert_eq!(
+            tabs[0].active_buffer().document().history_entries().len(),
+            if mode == "picked" { 2 } else { 0 }
+        );
+        assert_eq!(
+            tabs[1].active_buffer().document().history_entries().len(),
+            if mode == "current" { 1 } else { 0 }
+        );
+        assert_eq!(tabs[0].active_buffer().text(), "current");
+        assert_eq!(tabs[1].active_buffer().text(), "after");
+    }
+}

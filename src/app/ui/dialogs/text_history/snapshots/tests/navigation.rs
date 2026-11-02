@@ -204,8 +204,8 @@ fn saved_branches_also_offer_return_to_latest() {
         )
         .is_some()
     );
-    assert!(snapshots::clear_history(&ctx, h.state_mut()));
-    crate::app::app_state::workspace::mutation::clear_text_history(h.state_mut());
+    assert!(snapshots::clear_history(&ctx, h.state_mut(), &[id]));
+    crate::app::app_state::workspace::mutation::clear_text_history(h.state_mut(), &[id]);
     let buffer = h.state().tab_manager.tabs.as_slice()[0].active_buffer();
     assert!(buffer.document().history_entries().is_empty());
     assert!(

@@ -35,6 +35,40 @@ fn confirm_key() -> egui::Id {
     egui::Id::unique("history.clear.confirm")
 }
 
+#[derive(Clone)]
+struct ClearRequest {
+    buffer_ids: Vec<u64>,
+    description: String,
+}
+
+fn request_clear(ctx: &egui::Context, app: &ScratchpadApp, selected: HistoryTab) {
+    let target = scope_buffer(selected, app);
+    if selected != HistoryTab::AllFiles && target.is_none() {
+        return;
+    }
+    let buffers: Vec<_> = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .flat_map(|tab| tab.buffers())
+        .filter(|buffer| target.is_none_or(|id| id == buffer.id))
+        .collect();
+    if buffers.is_empty() {
+        return;
+    }
+    let description = if selected == HistoryTab::AllFiles {
+        "Clear undo/redo history in all open files?".into()
+    } else {
+        format!("Clear undo/redo history in {}?", buffers[0].name)
+    };
+    let request = ClearRequest {
+        buffer_ids: buffers.iter().map(|buffer| buffer.id).collect(),
+        description,
+    };
+    ctx.data_mut(|data| data.insert_temp(confirm_key(), request));
+}
+
 fn scope(ctx: &egui::Context, app: &ScratchpadApp) -> HistoryTab {
     let picked = ctx.data(|data| data.get_temp::<u64>(scope_key()));
     if let Some(id) = picked {
@@ -111,7 +145,7 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
             )
         })
     {
-        ctx.data_mut(|d| d.insert_temp(confirm_key(), true));
+        request_clear(ctx, app, scope(ctx, app));
         return;
     }
     let id = if scrub {
@@ -178,7 +212,7 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
     if app.state.dialogs.text_history.is_open() {
         show_history(ctx, app);
     } else {
-        ctx.data_mut(|data| data.remove::<bool>(confirm_key()));
+        ctx.data_mut(|data| data.remove::<ClearRequest>(confirm_key()));
     }
     scrubber::show(ctx, app);
     // The snapshot service belongs to both tools, not to either callout's lifetime.
@@ -190,7 +224,7 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
 
 fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let mut action = None;
-    let mut clear = false;
+    let mut clear = None;
     let mut selected = scope(ctx, app);
     let close = panel::show(ctx, app, |ui, app| {
         snapshots::poll(ui, app);
@@ -216,14 +250,14 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
             file_caption(ui, app, id, &entries);
         }
         snapshot_returns(ui, app, &ids, &catalog, &mut action);
-        let confirming = ctx.data(|data| data.get_temp::<bool>(confirm_key()).unwrap_or(false));
-        if confirming {
+        let confirming = ctx.data(|data| data.get_temp::<ClearRequest>(confirm_key()));
+        if let Some(request) = confirming {
             callout::section_frame(ui).corner_radius(0).show(ui, |ui| {
-                ui.label("Clear undo/redo history in all open files?");
+                ui.label(&request.description);
                 ui.weak("This cannot be undone. Saved snapshots are kept.");
                 ui.horizontal(|ui| {
                     if ui.button("Cancel").clicked() {
-                        ctx.data_mut(|d| d.remove::<bool>(confirm_key()));
+                        ctx.data_mut(|d| d.remove::<ClearRequest>(confirm_key()));
                     }
                     if ui
                         .add(
@@ -234,7 +268,7 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
                         )
                         .clicked()
                     {
-                        clear = true;
+                        clear = Some(request.buffer_ids.clone());
                     }
                 });
             });
@@ -245,10 +279,10 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if close {
         crate::app::commands::close_text_history(&mut app.state.dialogs);
     }
-    if clear {
-        ctx.data_mut(|d| d.remove::<bool>(confirm_key()));
-        let saved = snapshots::clear_history(ctx, app);
-        let live = workspace_mutation::clear_text_history(app);
+    if let Some(ids) = clear {
+        ctx.data_mut(|d| d.remove::<ClearRequest>(confirm_key()));
+        let saved = snapshots::clear_history(ctx, app, &ids);
+        let live = workspace_mutation::clear_text_history(app, &ids);
         if saved && !live {
             app.tab_manager.mark_session_dirty();
         }
@@ -368,8 +402,7 @@ fn controls(
             if control_icon_button(ui, "clear", TRASH, "Clear undo/redo history", false, true)
                 .clicked()
             {
-                ui.ctx()
-                    .data_mut(|data| data.insert_temp(confirm_key(), true));
+                request_clear(ui.ctx(), app, *selected);
             }
         });
     });
