@@ -83,6 +83,9 @@ fn snapshots_navigate_in_the_existing_editor_and_return_to_detailed_undo() {
     wait(&mut harness, |h| h.query_by_label(&label).is_some());
     harness.get_by_label(&label).click();
     wait(&mut harness, |h| text(h) == "ancient");
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Snapshot").is_some());
+    assert!(harness.query_by_label("2 / 2").is_none());
     assert_eq!(harness.state().tab_manager.tabs.len(), 1);
     let buffer = harness.state().tab_manager.tabs.as_slice()[0].active_buffer();
     assert_eq!(buffer.id, id);
@@ -107,6 +110,7 @@ fn snapshots_navigate_in_the_existing_editor_and_return_to_detailed_undo() {
     harness.key_press(egui::Key::Home);
     harness.run_steps(3);
     assert_eq!(text(&harness), "two");
+    assert!(harness.query_by_label("2 / 2").is_some());
     snapshots::request(&ctx, harness.state_mut(), id, point);
     wait(&mut harness, |h| text(h) == "ancient");
     harness.get_by_label("Return to latest").click();

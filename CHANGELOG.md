@@ -34,6 +34,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Identified snapshot views explicitly in History and Scrubber captions instead of displaying the preserved live branch’s position.
 - Used the same current file name for change rows, oldest-state rows, and snapshot headings in All files history.
 - Kept history replay in the target file’s active split view, matching the History file picker.
 

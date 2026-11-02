@@ -211,7 +211,11 @@ fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp, id: u64) -> (bool, Option<
     response.on_hover_text(if visiting { "Viewing a snapshot. Return to latest in History before scrubbing." }
         else { "Drag to move through changes in the file. ←/→ step · Home/End jump · Esc close. Shaded ranges cannot be replayed." });
     render_step_controls(ui, &track, preview, &mut action);
-    ui.weak(format!("{preview} / {}", states.entries.len()));
+    ui.weak(if visiting {
+        "Snapshot".to_owned()
+    } else {
+        format!("{preview} / {}", states.entries.len())
+    });
     snapshots::footer(ui, &catalog);
     (close, action)
 }

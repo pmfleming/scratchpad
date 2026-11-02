@@ -313,7 +313,11 @@ fn file_caption(
             let states = states::States::new(entries, id);
             // Allocate the actual count width before giving the filename the
             // remainder. A fixed allowance makes large counts grow the window.
-            ui.weak(format!("{} / {}", states.position, states.entries.len()));
+            ui.weak(if snapshots::is_browsing(ui.ctx(), app, id) {
+                "Snapshot".to_owned()
+            } else {
+                format!("{} / {}", states.position, states.entries.len())
+            });
             truncated_label(
                 ui,
                 &buffer.name,
