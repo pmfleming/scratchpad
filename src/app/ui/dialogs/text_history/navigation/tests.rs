@@ -505,6 +505,8 @@ fn history_resizes_and_remembers_its_size_when_reopened() {
 fn scrubber_drag_replays_live_with_feedback_and_cancels_when_the_document_changes() {
     let root = tempfile::tempdir().unwrap();
     let mut app = app_with_history(root.path());
+    crate::app::app_state::search_controller::open_search(&mut app);
+    crate::app::app_state::search_controller::set_search_query(&mut app, "current");
     app.state.dialogs.history_scrubber.open();
     let mut h = harness(app);
     h.run_steps(3);
@@ -527,6 +529,7 @@ fn scrubber_drag_replays_live_with_feedback_and_cancels_when_the_document_change
     h.event(egui::Event::PointerMoved(start));
     h.event(press(start, true));
     h.run_steps(2);
+    let mut search_generation = None;
     for (position, expected) in [
         (middle, "middle"),
         (end, "old"),
@@ -541,6 +544,13 @@ fn scrubber_drag_replays_live_with_feedback_and_cancels_when_the_document_change
             "dragging must replay before release"
         );
         assert_eq!(feedback(&h), Some(0));
+        assert!(super::super::history_scrubbing(&h.ctx, h.state()));
+        let generation = h.state().state.search_state.runtime.requested_generation;
+        assert_eq!(
+            *search_generation.get_or_insert(generation),
+            generation,
+            "search should wait until the drag ends"
+        );
     }
     let revision = h
         .state()
@@ -554,6 +564,8 @@ fn scrubber_drag_replays_live_with_feedback_and_cancels_when_the_document_change
     h.event(press(end, false));
     h.run_steps(3);
     assert_eq!(text(h.state()), "old");
+    assert!(!super::super::history_scrubbing(&h.ctx, h.state()));
+    assert!(h.state().state.search_state.runtime.requested_generation > search_generation.unwrap());
     assert_eq!(
         h.state()
             .tab_manager

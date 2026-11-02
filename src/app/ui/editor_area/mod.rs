@@ -27,7 +27,9 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
                 apply_deferred_tile_actions(ui.ctx(), app);
 
-                crate::app::app_state::search_runtime::refresh_search_state(app);
+                if !crate::app::ui::dialogs::history_scrubbing(ui.ctx(), app) {
+                    crate::app::app_state::search_runtime::refresh_search_state(app);
+                }
                 search_replace::show_search_strip(ui, app);
                 let workspace_rect = ui.available_rect_before_wrap();
                 if workspace_rect.width() <= 0.0 || workspace_rect.height() <= 0.0 {
@@ -46,7 +48,9 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                     render_editor_workspace(ui, app, &editor_state, workspace_rect);
                 finalize_editor_render(ui, app, &editor_state, render_outcome);
                 crate::app::ui::tab_drag::handle_editor_drop(ui, app, workspace_rect);
-                crate::app::app_state::search_runtime::refresh_search_state(app);
+                if !crate::app::ui::dialogs::history_scrubbing(ui.ctx(), app) {
+                    crate::app::app_state::search_runtime::refresh_search_state(app);
+                }
                 request_search_repaint(
                     ui.ctx(),
                     matches!(

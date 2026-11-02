@@ -270,18 +270,29 @@ fn restore_text_history_selection(
     else {
         return;
     };
-    settings_controller::activate_workspace_surface(app);
-    app.tab_manager.set_active_tab_index_clamped(tab_index);
-    crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(app);
-    app.tab_manager.pending_scroll_to_active = true;
+    let switching = app.tab_manager.active_tab_index != tab_index
+        || app.tab_manager.tabs.as_slice()[tab_index]
+            .layout
+            .active_view_id
+            != view_id
+        || crate::app::app_state::settings_state::showing_settings(app);
+    if switching {
+        settings_controller::activate_workspace_surface(app);
+        app.tab_manager.set_active_tab_index_clamped(tab_index);
+        crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(app);
+        app.tab_manager.pending_scroll_to_active = true;
+    }
     let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
-    let _ = tab.activate_view(view_id);
+    if switching {
+        let _ = tab.activate_view(view_id);
+    }
     if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
         view.set_cursor_range_anchored(buffer, selection);
         view.set_pending_cursor_range_anchored(buffer, selection);
         view.request_cursor_reveal(CursorRevealMode::Center);
     }
-    crate::app::app_state::search_runtime::refresh_search_view_state(app);
+    // Both replay callers mark search dirty immediately after restoration.
+    // Repainting old search results here would be redundant (and stale).
     workspace_accessors::request_focus_for_view(app, view_id);
 }
 

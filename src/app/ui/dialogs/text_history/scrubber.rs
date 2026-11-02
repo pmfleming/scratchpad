@@ -41,6 +41,24 @@ impl Drag {
     }
 }
 
+pub(crate) fn history_scrubbing(ctx: &egui::Context, app: &ScratchpadApp) -> bool {
+    if !app.state.dialogs.history_scrubber.is_open() || !ctx.input(|i| i.pointer.any_down()) {
+        return false;
+    }
+    let Some(mut drag) = ctx.data(|d| d.get_temp::<Drag>(drag_id())) else {
+        return false;
+    };
+    let Some(buffer) = app.tab_manager.active_tab().map(|tab| tab.active_buffer()) else {
+        return false;
+    };
+    drag.validate(
+        buffer.id,
+        buffer.document().revision_key(),
+        buffer.document().history_revision_counter(),
+    );
+    !drag.cancelled
+}
+
 struct Track<'a> {
     id: u64,
     revision: DocumentRevision,
