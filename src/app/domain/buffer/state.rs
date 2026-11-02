@@ -66,13 +66,14 @@ struct BufferRefreshState {
     text_metadata_refresh_stale: bool,
     line_ending_metadata_exact: bool,
     encoding_compliance_stale: bool,
-    pending_text_history_event: Option<TextHistoryEvent>,
+    pending_text_history_event: Option<(super::HistoryToken, TextHistoryEvent)>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TextHistoryEvent {
     Edit,
     Replay,
+    Navigate,
 }
 
 struct BufferBuildState {
@@ -420,7 +421,7 @@ impl BufferState {
             previous_selection,
             next_selection,
         )?;
-        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Edit);
+        self.note_text_history_event(TextHistoryEvent::Edit);
         let latest_edit = self.document.latest_operation_record().cloned();
         self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Ok(())
@@ -433,11 +434,20 @@ impl BufferState {
     ) {
         self.document
             .push_edit_operation_with_source(record, source);
-        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Edit);
+        self.note_text_history_event(TextHistoryEvent::Edit);
+    }
+
+    /// Latest input wins, including undo boundaries and IME before text commits.
+    pub(crate) fn note_text_history_event(&mut self, event: TextHistoryEvent) {
+        self.refresh.pending_text_history_event = Some((self.document.history_token(), event));
     }
 
     pub(crate) fn take_text_history_event(&mut self) -> Option<TextHistoryEvent> {
-        self.refresh.pending_text_history_event.take()
+        self.refresh
+            .pending_text_history_event
+            .take()
+            .filter(|(token, _)| *token == self.document.history_token())
+            .map(|(_, event)| event)
     }
 
     pub(crate) fn validate_char_replacements(
@@ -449,7 +459,7 @@ impl BufferState {
 
     pub fn undo_last_text_operation(&mut self) -> Option<CursorRange> {
         let selection = self.document.undo_last_operation()?;
-        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
+        self.note_text_history_event(TextHistoryEvent::Replay);
         let latest_edit = self.document.latest_operation_record().cloned();
         self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Some(selection)
@@ -457,7 +467,7 @@ impl BufferState {
 
     pub fn redo_last_text_operation(&mut self) -> Option<CursorRange> {
         let selection = self.document.redo_last_operation()?;
-        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
+        self.note_text_history_event(TextHistoryEvent::Replay);
         let latest_edit = self.document.latest_operation_record().cloned();
         self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Some(selection)
@@ -468,7 +478,7 @@ impl BufferState {
         entry_id: u64,
     ) -> Result<CursorRange, TextHistoryApplyError> {
         let selection = self.document.apply_text_history_undo(entry_id)?;
-        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
+        self.note_text_history_event(TextHistoryEvent::Replay);
         let latest_edit = self.document.latest_operation_record().cloned();
         self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Ok(selection)
@@ -479,7 +489,7 @@ impl BufferState {
         entry_id: u64,
     ) -> Result<CursorRange, TextHistoryApplyError> {
         let selection = self.document.apply_text_history_redo(entry_id)?;
-        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
+        self.note_text_history_event(TextHistoryEvent::Replay);
         let latest_edit = self.document.latest_operation_record().cloned();
         self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Ok(selection)

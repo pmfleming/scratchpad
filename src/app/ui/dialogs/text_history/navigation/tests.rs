@@ -21,6 +21,8 @@ fn app_with_history(root: &std::path::Path) -> ScratchpadApp {
             .unwrap();
     }
     assert_eq!(buffer.document().history_entries().len(), 2);
+    // Fixture construction predates user input and must not carry an edit event.
+    buffer.take_text_history_event();
     let mut app = test_app(root);
     app.tab_manager.set_tabs(vec![WorkspaceTab::new(buffer)], 0);
     app

@@ -163,3 +163,57 @@ fn undo_at_a_boundary_reopens_scrubber_and_edits_close_it() {
     h.run_steps(3);
     assert!(!h.state().state.dialogs.history_scrubber.is_open());
 }
+
+#[test]
+fn the_last_editor_event_in_a_frame_controls_scrubber_visibility() {
+    for edit_last in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = app_with_history(root.path());
+        accessors::request_focus_for_active_view(&mut app);
+        let mut h = harness(app);
+        h.run_steps(3);
+        if !edit_last {
+            h.event(egui::Event::Text("!".into()));
+        }
+        h.key_press_modifiers(CTRL, egui::Key::Z);
+        if edit_last {
+            h.event(egui::Event::Text("!".into()));
+        }
+        h.run_steps(3);
+        assert_eq!(
+            h.state().state.dialogs.history_scrubber.is_open(),
+            !edit_last
+        );
+    }
+}
+
+#[test]
+fn editing_closes_scrubber_even_when_aggregate_budget_evicts_history() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    accessors::request_focus_for_active_view(&mut app);
+    let mut h = harness(app);
+    h.run_steps(3);
+    press(&mut h, egui::Key::Z);
+    assert!(h.state().state.dialogs.history_scrubber.is_open());
+    h.state_mut()
+        .state
+        .app_settings
+        .history
+        .budget
+        .aggregate_byte_budget = 1;
+    h.event(egui::Event::Text("!".into()));
+    h.run_steps(3);
+    assert!(text(h.state()).contains('!'));
+    assert!(
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .document()
+            .history_entries()
+            .is_empty()
+    );
+    assert!(!h.state().state.dialogs.history_scrubber.is_open());
+}

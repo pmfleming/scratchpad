@@ -72,7 +72,6 @@ pub(crate) fn finalize_active_buffer_text_mutation(
     active_tab_index: usize,
 ) {
     let tab = &mut app.tab_manager.tabs.as_mut_slice()[active_tab_index];
-    let buffer_id = tab.buffers.buffer.id;
     let latest_edit = tab
         .buffers
         .buffer
@@ -111,36 +110,11 @@ pub(crate) fn finalize_active_buffer_text_mutation(
     } else {
         crate::app::app_state::workspace::accessors::clear_status_message(app);
     }
-    record_pending_text_history_event(app, active_tab_index, buffer_id);
     app.enforce_aggregate_text_history_budget();
     crate::app::app_state::search_runtime::mark_search_dirty(app);
     app.tab_manager.mark_session_dirty();
     app.note_settings_toml_edit(active_tab_index);
     app.apply_current_tab_ordering();
-}
-
-pub(crate) fn record_pending_text_history_event(
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    buffer_id: BufferId,
-) {
-    if let Some(buffer) = app
-        .tab_manager
-        .tabs
-        .as_mut_slice()
-        .get_mut(tab_index)
-        .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
-    {
-        match buffer.take_text_history_event() {
-            Some(crate::app::domain::buffer::TextHistoryEvent::Replay) => {
-                app.state.dialogs.history_scrubber.open();
-            }
-            Some(crate::app::domain::buffer::TextHistoryEvent::Edit) => {
-                app.state.dialogs.history_scrubber.close();
-            }
-            None => {}
-        }
-    }
 }
 
 /// Undo or redo every entry between the current "Now" boundary and the
@@ -202,7 +176,7 @@ pub fn apply_text_history_to_entry(
         if let Ok(selection) = result {
             // Tool navigation updates an already visible scrubber. Automatic
             // opening belongs to editor undo/redo, not rail hover.
-            buffer.take_text_history_event();
+            buffer.note_text_history_event(crate::app::domain::buffer::TextHistoryEvent::Navigate);
             buffer.mark_dirty_after_local_edit();
             let text_metadata_refresh = buffer.text_metadata_refresh_needed().then(|| {
                 (

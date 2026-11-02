@@ -11,11 +11,11 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
-- Choosing an existing History state now moves the undo/redo position without adding a restore edit or discarding later changes; both sides of the timeline remain available.
+- History hover, clicks, and keyboard navigation now replay the live buffer through the same path as the scrubber. Escape and outside clicks keep the selected position, and navigation preserves the redo timeline.
 
 - Removed the History list's inner focus border so the list stays visually integrated with the main panel.
 
-- Shade every History row between the starting document state and the current preview, with distinct endpoint markers.
+- Shade every History row between the starting document state and the current live position, with distinct endpoint markers.
 
 - Highlight specific matching settings once a search has at least two meaningful characters and matches fewer than half the settings; support setting labels and aliases, including hidden tab-delay controls.
 
@@ -27,7 +27,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 - Replaced settings' Expand all and Collapse all text buttons with right-aligned icons and tooltips.
 
-- Made History hover previews reversible: clicking records a new undoable state, while Escape or clicking outside discards the preview. The panel opens at the current state and scrolls when hovering near the list edges.
+- Snapshot rows visit the live buffer while preserving its original branch and return position across restart. Clearing history during a visit preserves a return route with the undo entries cleared.
 
 - Kept `Ctrl+F` for Find, moved Replace to `Ctrl+Shift+F`, and assigned `Ctrl+H` to History.
 
@@ -59,6 +59,10 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 - Added settled PRIMARY-selection publishing and middle-click paste targeting in the custom editor on X11/Wayland; known trackpad/momentum input no longer receives extra wheel acceleration.
 
 ### Fixed
+
+- Preserve replayability after recovery for replacements that delete multiple piece-tree spans. Their fingerprints now follow persisted payload boundaries.
+- Reject stale history interactions after edits or document replacement, and prevent stationary hover from overriding later navigation.
+- Use one ordered activity stream for scrubber visibility, including undo boundaries and IME input.
 
 - Refresh cached History rows when a document is replaced or restored, even if its history revision counter is unchanged, so clicks use the current undo/redo position.
 

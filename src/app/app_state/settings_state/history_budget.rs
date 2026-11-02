@@ -62,7 +62,14 @@ impl ScratchpadApp {
         else {
             return false;
         };
-        let Some(removed) = buffer.document_mut().drop_oldest_history_entry() else {
+        let activity = buffer.take_text_history_event();
+        let removed = buffer.document_mut().drop_oldest_history_entry();
+        // Budget eviction belongs to the edit that caused it; it must not stale
+        // that edit's visibility event before the UI drains the activity stream.
+        if let Some(activity) = activity {
+            buffer.note_text_history_event(activity);
+        }
+        let Some(removed) = removed else {
             return false;
         };
         crate::app::capacity_metrics::record_history_eviction_aggregate(removed.byte_cost());

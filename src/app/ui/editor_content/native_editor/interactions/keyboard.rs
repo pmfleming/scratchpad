@@ -98,7 +98,12 @@ fn handle_keyboard_events_with(
             &mut handle_movement_event,
         );
         if let Some(show) = scrubber_visibility {
-            crate::app::ui::dialogs::note_editor_history_activity(ui.ctx(), buffer, show);
+            use crate::app::domain::buffer::TextHistoryEvent;
+            buffer.note_text_history_event(if show {
+                TextHistoryEvent::Replay
+            } else {
+                TextHistoryEvent::Edit
+            });
         }
     }
 

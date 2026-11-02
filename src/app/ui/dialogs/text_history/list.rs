@@ -101,10 +101,11 @@ pub(super) fn render(
                     {
                         ui.weak(&file.label);
                     }
-                    navigation.reachable_hover |= snapshots::older_rows(ui, id, catalog, action, navigation.hover);
+                    let (hovered, clicked) = snapshots::older_rows(ui, id, catalog, action, navigation.hover);
+                    navigation.reachable_hover |= hovered;
                     if matches!(action, Some(HistoryAction::Snapshot { buffer_id, .. }) if *buffer_id == id) {
                         select_buffer(ui.ctx(), id);
-                        focus_requested = true;
+                        focus_requested |= clicked;
                     }
                 }
             }

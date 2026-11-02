@@ -16,10 +16,16 @@ an unavailable target or replay conflict leaves text and history unchanged.
 - Explicitly opening History focuses its navigation; automatic scrubber opening
   leaves focus in the editor. Undo at a boundary still opens the scrubber. Editing
   dismisses it, including IME intent before the text is committed.
+- Rail navigation updates an already visible scrubber; it does not open an overlay
+  over the rail. Typing or undo/redo while either tool has focus returns input to
+  the editor without dropping the event.
 - Every cache and outstanding action validates document identity and text/history
   revisions. A gesture accepts its own replay; unrelated changes invalidate it.
 
-Implementation stages: regression coverage, shared validity tokens, live rail
-navigation, snapshot state consolidation, and unified activity handling. Existing
-preview/cancel tests migrate with the corresponding behavior change, retaining
-their focus, split-view, stale-action, and persistence regression coverage.
+Snapshot selection and its preserved return buffer belong to the buffer. UI reads
+do not change visits. Clearing history during a visit first checkpoints the cleared
+return branch, so returning after restart does not resurrect its undo entries.
+
+Regression coverage includes seeded edit/replay/recovery sequences, replay barriers,
+split views, focus, stationary hover, stale snapshot loads, large checkpoints, and
+snapshot return navigation across restart.

@@ -443,3 +443,19 @@ fn large_snapshot_return_preserves_original_checkpoint_and_redo() {
     buffer.redo_last_text_operation().unwrap();
     assert_eq!(buffer.text(), expected);
 }
+
+#[test]
+fn snapshot_hover_does_not_take_keyboard_focus_from_the_editor() {
+    let root = tempfile::tempdir().unwrap();
+    let (app, _, _, label) = fixture(root.path());
+    let mut h = harness(app);
+    wait(&mut h, |h| h.query_by_label(&label).is_some());
+    crate::app::app_state::workspace::accessors::request_focus_for_active_view(h.state_mut());
+    h.run_steps(3);
+    let focus = h.ctx.memory(|m| m.focused());
+    assert_ne!(focus, Some(super::super::super::list::focus_id()));
+    h.hover_at(h.get_by_label(&label).rect().center());
+    wait(&mut h, |h| text(h) == "ancient");
+    h.run_steps(3);
+    assert_eq!(h.ctx.memory(|m| m.focused()), focus);
+}

@@ -121,6 +121,10 @@ pub(super) fn select(
     if !super::snapshots::go_to_state(ctx, app, id, after) {
         return false;
     }
+    if super::read_follow_focus(ctx) && super::active_buffer(app) != Some(id) {
+        super::navigation::activate_file(app, id);
+        super::navigation::retain_tool_focus(ctx, app);
+    }
     if let Some(buffer) = app
         .tab_manager
         .tabs

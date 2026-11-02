@@ -14,7 +14,6 @@ use crate::app::{
 };
 use eframe::egui;
 use egui_phosphor::regular::{CARET_LEFT, CARET_RIGHT};
-pub(crate) use input::note_editor_history_activity;
 pub(super) use input::{close, resume_editor_input};
 
 const SCRUBBER_SCALE: f32 = 1.5;
@@ -37,7 +36,7 @@ struct Drag {
 }
 impl Drag {
     fn validate(&mut self, buffer: u64, revision: HistoryToken) {
-        self.cancelled |= self.buffer != buffer || self.revision != revision
+        self.cancelled |= self.buffer != buffer || self.revision != revision;
     }
 }
 
@@ -76,7 +75,7 @@ impl Track<'_> {
 }
 
 pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    input::sync_editor_activity(ctx, app);
+    input::sync_history_activity(ctx, app);
     if !app.state.dialogs.history_scrubber.is_open() {
         ctx.data_mut(|d| d.remove::<Drag>(drag_id()));
         return;

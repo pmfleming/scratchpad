@@ -35,11 +35,12 @@ pub(in super::super) fn older_rows(
     catalog: &Catalog,
     action: &mut Option<HistoryAction>,
     hover: bool,
-) -> bool {
+) -> (bool, bool) {
     let Some(file) = catalog.get(&id) else {
-        return false;
+        return (false, false);
     };
     let mut hovered = false;
+    let mut clicked = false;
     for row in file.rows.iter().filter(|row| row.covered.is_none()) {
         widget_ids::scope(ui, ("history.snapshot", id, row.point.id), |ui| {
             ui.horizontal(|ui| {
@@ -63,6 +64,7 @@ pub(in super::super) fn older_rows(
                         }
                     ));
                 hovered |= hover && response.hovered();
+                clicked |= response.clicked();
                 let target = HistoryAction::Snapshot {
                     buffer_id: id,
                     version_id: row.point.id,
@@ -76,7 +78,7 @@ pub(in super::super) fn older_rows(
             });
         });
     }
-    hovered
+    (hovered, clicked)
 }
 
 pub(in super::super) fn diamond(ui: &egui::Ui, center: egui::Pos2, selected: bool) {

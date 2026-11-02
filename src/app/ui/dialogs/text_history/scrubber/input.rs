@@ -1,49 +1,36 @@
 use crate::app::{
     app_state::{ScratchpadApp, workspace::accessors},
-    domain::{BufferState, buffer::HistoryToken},
+    domain::buffer::TextHistoryEvent,
 };
 use eframe::egui;
 
-#[derive(Clone)]
-struct EditorActivity {
-    buffer_id: u64,
-    revision: HistoryToken,
-    show: bool,
-}
-
-fn activity_key() -> egui::Id {
-    egui::Id::unique("history.scrubber.editor_activity")
-}
-
-/// Record intent even at an undo boundary or before an IME edit commits.
-pub(crate) fn note_editor_history_activity(ctx: &egui::Context, buffer: &BufferState, show: bool) {
-    let activity = EditorActivity {
-        buffer_id: buffer.id,
-        revision: buffer.document().history_token(),
-        show,
-    };
-    ctx.data_mut(|data| data.insert_temp(activity_key(), activity));
-}
-
-pub(super) fn sync_editor_activity(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    let Some(activity) = ctx.data_mut(|data| {
-        let activity = data.get_temp::<EditorActivity>(activity_key());
-        data.remove::<EditorActivity>(activity_key());
-        activity
-    }) else {
-        return;
-    };
-    // A later edit or tab switch in the same frame supersedes this input.
-    let current = app.tab_manager.active_tab().is_some_and(|tab| {
-        let buffer = tab.active_buffer();
-        buffer.id == activity.buffer_id && buffer.document().history_token() == activity.revision
-    });
-    if current {
-        if activity.show {
-            app.state.dialogs.history_scrubber.open();
-        } else {
-            close(ctx, app);
+/// Drain each buffer once per frame; only the current file controls visibility.
+/// Mutations and input intent share this stream, so later input supersedes earlier input.
+pub(super) fn sync_history_activity(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    let active = super::active_buffer(app);
+    let mut activity = None;
+    for buffer in app
+        .tab_manager
+        .tabs
+        .as_mut_slice()
+        .iter_mut()
+        .flat_map(|tab| tab.buffers_mut())
+    {
+        let event = buffer.take_text_history_event();
+        if Some(buffer.id) == active {
+            activity = event;
         }
+    }
+    match activity {
+        Some(TextHistoryEvent::Replay) => app.state.dialogs.history_scrubber.open(),
+        Some(TextHistoryEvent::Edit) => {
+            app.state.dialogs.history_scrubber.close();
+            ctx.data_mut(|d| d.remove::<super::Drag>(super::drag_id()));
+            if ctx.memory(|m| m.has_focus(super::focus_id())) {
+                accessors::request_focus_for_active_view(app);
+            }
+        }
+        Some(TextHistoryEvent::Navigate) | None => {}
     }
 }
 

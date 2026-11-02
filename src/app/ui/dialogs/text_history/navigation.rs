@@ -54,11 +54,7 @@ impl Surface {
         };
         let entries = snapshots::state_entries(ctx, app);
         let states = States::new(&entries, id);
-        let position = match self {
-            Self::Rail => states.position,
-            Self::Scrubber => states.position,
-        };
-        let Some(position) = self.destination(ctx, &states, position) else {
+        let Some(position) = self.destination(ctx, &states, states.position) else {
             return;
         };
         match self {
@@ -131,7 +127,6 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
         return;
     }
     match surface {
-        Surface::Scrubber if scrubber::resume_editor_input(ctx, app) => return,
         Surface::Rail
             if consume(
                 ctx,
@@ -143,6 +138,9 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
             return;
         }
         _ => {}
+    }
+    if scrubber::resume_editor_input(ctx, app) {
+        return;
     }
     surface.navigate(ctx, app);
 }

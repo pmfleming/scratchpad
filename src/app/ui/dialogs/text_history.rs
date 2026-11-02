@@ -10,7 +10,7 @@ mod rail;
 mod scrubber;
 mod snapshots;
 mod states;
-pub(crate) use scrubber::{history_scrubbing, note_editor_history_activity};
+pub(crate) use scrubber::history_scrubbing;
 
 use self::model::HistoryAction;
 use self::persistence::{read_active_tab, read_follow_focus, write_active_tab, write_follow_focus};

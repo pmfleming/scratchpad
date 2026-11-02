@@ -345,3 +345,64 @@ fn failed_and_repeated_rail_targets_leave_live_history_unchanged() {
     );
     assert_eq!(text(&app), "current");
 }
+
+#[test]
+fn typing_from_the_rail_edits_the_selected_live_state_and_starts_a_branch() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    app.state.dialogs.text_history.open();
+    let mut h = harness(app);
+    h.run_steps(3);
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "middle");
+    h.event(egui::Event::Text("!".into()));
+    h.run_steps(4);
+    let buffer = h.state().tab_manager.active_tab().unwrap().active_buffer();
+    assert!(buffer.text().contains('!'));
+    assert!(buffer.text().contains("middle"));
+    assert_eq!(buffer.document().operation_redo_depth(), 0);
+    assert!(!h.state().state.dialogs.history_scrubber.is_open());
+    h.key_press_modifiers(
+        egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        },
+        egui::Key::Z,
+    );
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "middle");
+    assert!(h.state().state.dialogs.history_scrubber.is_open());
+}
+
+#[test]
+fn selecting_another_files_current_position_follows_focus_without_replaying() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_history(root.path());
+    let first = app.tab_manager.active_tab().unwrap().clone();
+    let id = first.active_buffer().id;
+    let token = first.active_buffer().document().history_token();
+    let after = first
+        .active_buffer()
+        .document()
+        .history_entries()
+        .last()
+        .unwrap()
+        .id;
+    app.tab_manager
+        .set_tabs(vec![first, WorkspaceTab::untitled()], 1);
+    let ctx = egui::Context::default();
+    super::super::super::write_follow_focus(&ctx, true);
+    assert!(rail::select(&ctx, &mut app, id, Some(after)));
+    assert_eq!(app.tab_manager.active_tab().unwrap().active_buffer().id, id);
+    assert_eq!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .document()
+            .history_token(),
+        token
+    );
+}

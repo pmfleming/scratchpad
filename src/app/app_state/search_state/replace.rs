@@ -3,7 +3,6 @@ use super::api::activate_search_match;
 use super::helpers::cursor_range_from_char_range;
 use super::{runtime, visual};
 use crate::app::app_state::StatusDomain;
-use crate::app::app_state::workspace::mutation as workspace_mutation;
 use crate::app::domain::{BufferId, CursorRevealMode, ViewId};
 use crate::app::services::search::{SearchError, SearchProgram, search_program};
 use crate::app::ui::editor_content::native_editor::CursorRange;
@@ -314,6 +313,5 @@ pub(super) fn finalize_tab_buffer_mutation(
     if let Some((buffer_id, revision, snapshot, format)) = text_metadata_refresh {
         app.queue_background_text_metadata_refresh(buffer_id, revision, snapshot, format);
     }
-    workspace_mutation::record_pending_text_history_event(app, tab_index, buffer_id);
     app.note_settings_toml_edit(tab_index);
 }

@@ -513,11 +513,14 @@ impl TextDocument {
         // Persistence joins deleted spans into one payload. Hash logical payloads
         // rather than storage boundaries so recovery and compaction agree.
         fingerprint_parts(edits.iter().flat_map(|edit| {
-            let deleted = (!edit.deleted_spans().is_empty())
-                .then(|| self.text_for_spans(edit.deleted_spans()));
+            let deleted = match edit.deleted_spans() {
+                [] => None,
+                [span] => Some(self.content.piece_tree.text_for_span(*span)),
+                spans => Some(super::PieceTreeText::owned(self.text_for_spans(spans))),
+            };
             let inserted = edit
                 .inserted_span()
-                .map(|span| self.content.piece_tree.text_for_span(span).to_string());
+                .map(|span| self.content.piece_tree.text_for_span(span));
             deleted.into_iter().chain(inserted)
         }))
     }
