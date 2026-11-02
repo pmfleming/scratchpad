@@ -25,6 +25,10 @@ pub(super) fn selected_buffer(ctx: &egui::Context) -> Option<u64> {
     ctx.data(|d| d.get_temp(selected_buffer_key()))
 }
 
+fn select_buffer(ctx: &egui::Context, id: u64) {
+    ctx.data_mut(|d| d.insert_temp(selected_buffer_key(), id));
+}
+
 pub(super) fn render(
     ui: &mut egui::Ui,
     entries: &[TextHistoryEntryView],
@@ -97,7 +101,7 @@ pub(super) fn render(
                     }
                     snapshots::older_rows(ui, id, catalog, action);
                     if matches!(action, Some(HistoryAction::Snapshot { buffer_id, .. }) if *buffer_id == id) {
-                        ui.ctx().data_mut(|d| d.insert_temp(selected_buffer_key(), id));
+                        select_buffer(ui.ctx(), id);
                         focus_requested = true;
                     }
                 }
@@ -251,8 +255,7 @@ impl<'a> FileStates<'a> {
         );
         paint_label(ui, rect, row, name);
         if response.clicked() {
-            ui.ctx()
-                .data_mut(|d| d.insert_temp(selected_buffer_key(), id));
+            select_buffer(ui.ctx(), id);
         }
         if response.clicked() && reachable && (!current || visiting) {
             *action = Some(HistoryAction::State {
