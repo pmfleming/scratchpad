@@ -191,31 +191,25 @@ fn invalid_captures_leave_the_committed_session_intact() {
 }
 
 #[test]
-fn second_owner_is_rejected_but_unsupported_schemas_start_fresh() {
+fn second_owner_and_unsupported_schemas_are_rejected_without_discarding_data() {
     block_on(async {
-        for pragma in ["PRAGMA user_version=9", "PRAGMA user_version=1"] {
+        for pragma in [
+            "PRAGMA user_version=9",
+            "PRAGMA user_version=1",
+            "PRAGMA user_version=999",
+        ] {
             let (root, mut db) = database().await;
-            db.persist(request(&[tab("discarded")]), 1).await.unwrap();
+            db.persist(request(&[tab("preserved")]), 1).await.unwrap();
             assert!(Database::open(root.path()).await.is_err());
             db.conn.execute_batch(pragma).await.unwrap();
+            db.checkpoint().await.unwrap();
             drop(db);
-            let mut db = Database::open(root.path()).await.unwrap();
-            assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 10);
-            assert!(db.load(ReadScope::All).await.unwrap().is_none());
-            assert_eq!(db.startup_notices.len(), 1);
-            assert!(matches!(
-                db.startup_notices[0].level,
-                super::super::RestoreStatusLevel::Warning
-            ));
+            let before = std::fs::read(root.path().join("session.db")).unwrap();
             assert!(Database::open(root.path()).await.is_err());
-            db.persist(request(&[tab("fresh session")]), 1)
-                .await
-                .unwrap();
-            drop(db);
-            let mut db = Database::open(root.path()).await.unwrap();
-            assert!(db.startup_notices.is_empty());
-            let restored = db.load(ReadScope::All).await.unwrap().unwrap();
-            assert_eq!(restored.contents.values().next().unwrap(), "fresh session");
+            assert_eq!(
+                std::fs::read(root.path().join("session.db")).unwrap(),
+                before
+            );
         }
     });
 }

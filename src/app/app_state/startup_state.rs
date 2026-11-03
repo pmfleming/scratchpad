@@ -104,6 +104,7 @@ impl ScratchpadApp {
                     session_store,
                     persist_session_on_drop: true,
                     session_restore_failed: false,
+                    session_reset: None,
                     pending_closed_tabs: Vec::new(),
                     last_session_persist: Instant::now(),
                 },

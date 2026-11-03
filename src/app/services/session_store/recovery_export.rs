@@ -12,8 +12,7 @@ impl SessionStore {
         // Export is a recovery operation, not an interactive fresh start. Never
         // discard an incompatible source database while trying to back it up.
         self.worker.get_or_init(|| {
-            super::DatabaseWorker::open_with_reset(self.root.clone(), false)
-                .map_err(|error| error.to_string())
+            super::DatabaseWorker::open(self.root.clone()).map_err(|error| error.to_string())
         });
         let mut stored = self.read_session(ReadScope::All)?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "no committed session to export")

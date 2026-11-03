@@ -39,6 +39,7 @@ pub(super) fn handle_pending_close_request(app: &mut ScratchpadApp, ctx: &egui::
 /// Keep lifecycle work independent of UI delivery. eframe calls this path even
 /// when minimized/occluded, without consuming the last visible frame's UI input.
 pub(super) fn update_logic(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    crate::app::services::session_manager::poll_session_reset(app);
     app.state.window.lifecycle.update(ctx);
     if handle_pending_close_request(app, ctx) || app.state.window.close_in_progress {
         return;
@@ -127,7 +128,7 @@ pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egu
     dialogs::show_pending_action_modal(ctx, app);
     dialogs::show_encoding_window(ctx, app);
     dialogs::show_text_history_window(ctx, app);
-    dialogs::show_status_history_window(ctx, &mut app.state.dialogs, &app.state.status);
+    dialogs::show_status_history_window(ctx, app);
     record_frame_phase(FramePhase::Dialogs, dialogs_started_at.elapsed());
     let shortcuts_started_at = Instant::now();
     shortcuts::handle_shortcuts(app, ctx);
@@ -239,6 +240,10 @@ pub(crate) fn estimated_tab_strip_width(app: &ScratchpadApp, spacing: f32) -> f3
 }
 
 pub(crate) fn request_exit(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    if app.state.persistence.session_reset.is_some() {
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        return;
+    }
     if app.state.window.close_in_progress {
         return;
     }

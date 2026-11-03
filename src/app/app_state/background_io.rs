@@ -524,6 +524,7 @@ impl ScratchpadApp {
                     std::iter::empty(),
                 );
                 self.state.status.report_startup_restore_failed(error);
+                self.state.dialogs.status_history.open();
                 None
             }
         };

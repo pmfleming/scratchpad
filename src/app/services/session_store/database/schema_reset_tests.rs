@@ -109,7 +109,7 @@ fn recovery_export_does_not_reset_an_unsupported_source() {
 }
 
 #[test]
-fn lazy_initialization_notices_are_shared_and_consumed_once() {
+fn lazy_queries_do_not_silently_reset_an_incompatible_session() {
     block_on(async {
         let (root, db) = database().await;
         db.conn.execute("PRAGMA user_version=9", ()).await.unwrap();
@@ -117,9 +117,9 @@ fn lazy_initialization_notices_are_shared_and_consumed_once() {
         let store = SessionStore::new(root.path().to_owned());
         let clone = store.clone();
         assert!(store.take_notices().is_empty());
-        assert!(clone.closed_tabs().unwrap().is_empty());
-        assert!(!clone.writes_blocked());
-        assert_eq!(store.take_notices().len(), 1);
+        assert!(clone.closed_tabs().is_err());
+        assert!(clone.writes_blocked());
+        assert!(store.take_notices().is_empty());
         assert!(clone.take_notices().is_empty());
     });
 }

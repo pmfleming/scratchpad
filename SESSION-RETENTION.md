@@ -17,7 +17,14 @@ the database on restart. The limits exclude tree metadata and the active editabl
 chunk. Temporary backing is released on process exit; Forget history removes the
 durable tree without promising immediate reclamation of that temporary space.
 
-Schema 10 starts a fresh session when opening a recognized older Scratchpad
-schema. Previous session/history data is discarded; files and settings remain.
-An ownership lock protects replacement. Unknown future versions, foreign databases,
-corruption, and other I/O failures never authorize an automatic reset.
+Schema 10 does not migrate incompatible older or newer session formats. A failed
+restore opens Status with the error and a **Start new session** action. The warning
+explains that the old database will move to a temporary backup, which may be
+deleted during temporary-file cleanup. The backup includes database sidecars and
+is left in temporary storage after app exit. Its location is shown in Status.
+
+Replacement retains the ownership lock, closes database handles, and copies the
+complete file set before removing the originals. Saving resumes after a fresh
+session containing the current workspace is committed at the original location.
+An unsuccessful reset leaves saving paused and can be retried. Saved files and
+settings remain unchanged; no reset happens without selecting the action.

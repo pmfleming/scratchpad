@@ -25,6 +25,8 @@ mod quarantine_tests;
 #[cfg(test)]
 mod range_tests;
 mod read;
+mod reset;
+pub(super) use reset::start_new_session;
 mod schema_reset;
 #[cfg(test)]
 mod schema_reset_tests;
@@ -100,42 +102,17 @@ pub(super) struct Database {
     quarantined: HashMap<String, super::model::SessionBuffer>,
 }
 impl Database {
-    #[cfg(test)]
     async fn open(root: &Path) -> io::Result<Self> {
-        Self::open_with_reset(root, true).await
-    }
-    async fn open_with_reset(root: &Path, reset_unsupported: bool) -> io::Result<Self> {
         create_private_directory(root)?;
         let ownership = private_file(&root.join("session.db.lock"))?;
         ownership.try_lock().map_err(error)?;
+        Self::open_owned(root, ownership).await
+    }
+    async fn open_owned(root: &Path, ownership: File) -> io::Result<Self> {
         let mut db = Self::connect(root, ownership).await?;
-        if let Err(cause) = db.initialize().await {
-            if !reset_unsupported {
-                return Err(cause);
-            }
-            let Some(schema) = cause
-                .get_ref()
-                .and_then(|cause| cause.downcast_ref::<schema_reset::UnsupportedSchema>())
-            else {
-                return Err(cause);
-            };
-            if schema.application != APPLICATION_ID || !(1..10).contains(&schema.version) {
-                return Err(cause);
-            }
-            let detail = schema.to_string();
-            // Keep the ownership lock while closing all database handles and replacing
-            // the incompatible database, including its WAL/SHM sidecars.
-            let ownership = db.ownership;
-            drop(db.conn);
-            drop(db.database);
-            schema_reset::discard(root)?;
-            db = Self::connect(root, ownership).await?;
-            db.initialize().await?;
-            db.startup_notices.push(super::RestoreStatus {
-                level: super::RestoreStatusLevel::Warning,
-                message: format!("Created a new session database because {detail}. Previous session, undo history, closed-tab archives and recovery points were discarded. Files on disk are unchanged."),
-            });
-        }
+        // Version mismatches need the same visible, explicit fresh-start action
+        // as other restore failures. Never silently discard an older session.
+        db.initialize().await?;
         db.load_quarantine().await?;
         // Reserve sequences from cold tabs and parked branches without reading payloads.
         let maximum = db

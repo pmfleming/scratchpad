@@ -230,19 +230,3 @@ pub(super) const HISTORY_DIALOG_SIZE: egui::Vec2 = egui::vec2(
     crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH - 20.0,
     520.0,
 );
-pub(super) fn truncated_label(
-    ui: &mut egui::Ui,
-    text: &str,
-    width: f32,
-    size: f32,
-    color: egui::Color32,
-    sense: egui::Sense,
-) -> egui::Response {
-    ui.add_sized(
-        egui::vec2(width.max(0.0), 0.0),
-        egui::Label::new(egui::RichText::new(text).size(size).color(color))
-            .truncate()
-            .show_tooltip_when_elided(false)
-            .sense(sense),
-    )
-}

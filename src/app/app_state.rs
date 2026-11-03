@@ -109,6 +109,7 @@ pub(crate) struct AppPersistenceState {
     pub(crate) persist_session_on_drop: bool,
     // A failed restore leaves a fallback/partial workspace, never an authoritative session.
     pub(crate) session_restore_failed: bool,
+    pub(crate) session_reset: Option<crate::app::services::session_manager::PendingSessionReset>,
     pub(crate) pending_closed_tabs: Vec<crate::app::services::session_store::CapturedClosedTab>,
     pub(crate) last_session_persist: Instant,
 }
@@ -291,7 +292,7 @@ impl StatusState {
     pub(crate) fn report_startup_restore_failed(&mut self, error: impl Display) {
         self.set_error_status_with_detail(
             StatusDomain::Session,
-            "Could not restore your previous session. Session saving is disabled to protect it; save new edits to files before closing.",
+            "Could not restore your previous session. Start a new session to resume session saving.",
             error.to_string(),
         );
     }

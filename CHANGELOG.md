@@ -12,7 +12,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 - Undo, redo, History clicks, and the selected-branch scrubber share the same persisted position. Hover leaves text unchanged.
 - Removed saved-version snapshots and automatic history expiry. Forget history is explicit and per file.
-- The new session database starts fresh from recognized old schemas; existing files and settings are preserved.
+- Incompatible session versions now show a warning with a **Start new session** action. The old database moves to temporary backup storage before a fresh session is created and saving resumes; files and settings are preserved.
+- Status messages and error details wrap and remain visible without a Detail dropdown.
 
 - Removed the History list's inner focus border so the list stays visually integrated with the main panel.
 

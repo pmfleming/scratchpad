@@ -65,7 +65,7 @@ fn failed_blocking_restore_cannot_erase_healthy_tabs_after_quarantine() {
 }
 
 #[test]
-fn unsupported_schema_resets_and_reports_once_without_blocking_saves() {
+fn incompatible_session_requires_explicit_reset_then_saves_and_restarts() {
     let root = tempfile::tempdir().unwrap();
     let session_root = root.path().join("session");
     let store = SessionStore::new(session_root.clone());
@@ -84,6 +84,7 @@ fn unsupported_schema_resets_and_reports_once_without_blocking_saves() {
         })
         .unwrap();
     drop(store);
+    let previous = std::fs::read(session_root.join("session.db")).unwrap();
     let source = root.path().join("user-note.txt");
     std::fs::write(&source, "saved text").unwrap();
     let mut app = ScratchpadApp::with_stores_and_startup(
@@ -91,19 +92,55 @@ fn unsupported_schema_resets_and_reports_once_without_blocking_saves() {
         SettingsStore::new(root.path().join("settings")),
         StartupOptions::default(),
     );
+    assert!(app.state.persistence.session_restore_failed);
+    assert!(app.state.dialogs.status_history.is_open());
+    assert!(
+        app.state
+            .status
+            .current
+            .as_ref()
+            .unwrap()
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("version 9")
+    );
+    assert_eq!(
+        std::fs::read(session_root.join("session.db")).unwrap(),
+        previous
+    );
+    app.tab_manager.set_tabs(tabs(), 0);
+    let ctx = egui::Context::default();
+    session_manager::start_new_session(&mut app, &ctx);
+    assert!(app.state.persistence.session_reset.is_some());
+    // Closing cannot terminate the backup or lose edits made during the reset.
+    crate::app::app_state::frame::request_exit(&mut app, &ctx);
+    assert!(!app.state.window.close_in_progress);
+    app.tab_manager.tabs.as_mut_slice()[0]
+        .active_buffer_mut()
+        .replace_text("new edits".into());
+    wait_for_reset(&mut app);
     assert!(!app.state.persistence.session_restore_failed);
     assert!(!app.state.persistence.session_store.writes_blocked());
-    let count = app.state.status.history.len();
-    assert!(app.state.status.history.iter().any(|status| {
-        status.severity == crate::app::app_state::StatusSeverity::Warning
-            && status.domain == crate::app::app_state::StatusDomain::Session
-            && status.text.contains("Created a new session database")
-    }));
-    session_manager::report_database_notices(&mut app);
-    assert_eq!(app.state.status.history.len(), count);
-    app.tab_manager.set_tabs(tabs(), 0);
-    session_manager::persist_session_now(&mut app).unwrap();
-    let ctx = egui::Context::default();
+    let detail = app
+        .state
+        .status
+        .current
+        .as_ref()
+        .unwrap()
+        .detail
+        .as_ref()
+        .unwrap();
+    let backup = std::path::PathBuf::from(
+        detail
+            .lines()
+            .next()
+            .unwrap()
+            .strip_prefix("Previous session moved to: ")
+            .unwrap(),
+    );
+    assert_eq!(std::fs::read(backup.join("session.db")).unwrap(), previous);
+    assert!(detail.contains("temporary-file cleanup"));
     let output = logic(&mut app, &ctx, &close_input());
     assert!(
         output.viewport_commands[&egui::ViewportId::ROOT].contains(&egui::ViewportCommand::Close)
@@ -114,7 +151,66 @@ fn unsupported_schema_resets_and_reports_once_without_blocking_saves() {
     assert_eq!(std::fs::read_to_string(source).unwrap(), "saved text");
     let restored = SessionStore::new(session_root).load().unwrap().unwrap();
     assert_eq!(restored.tabs.len(), 2);
-    assert_eq!(restored.tabs[0].active_buffer().text(), "healthy");
+    assert_eq!(restored.tabs[0].active_buffer().text(), "new edits");
+    std::fs::remove_dir_all(backup).unwrap();
+}
+
+fn wait_for_reset(app: &mut ScratchpadApp) {
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while app.state.persistence.session_reset.is_some() && Instant::now() < deadline {
+        session_manager::poll_session_reset(app);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(app.state.persistence.session_reset.is_none());
+}
+
+#[test]
+fn failed_reset_keeps_saving_paused_and_can_be_retried() {
+    let root = tempfile::tempdir().unwrap();
+    let session_root = root.path().join("session");
+    std::fs::write(&session_root, "blocked directory").unwrap();
+    let mut app = ScratchpadApp::with_stores_and_startup(
+        SessionStore::new(session_root.clone()),
+        SettingsStore::new(root.path().join("settings")),
+        StartupOptions::default(),
+    );
+    let ctx = egui::Context::default();
+    session_manager::start_new_session(&mut app, &ctx);
+    wait_for_reset(&mut app);
+    assert!(app.state.persistence.session_restore_failed);
+    assert!(
+        app.state
+            .status
+            .current
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("try again")
+    );
+    assert_eq!(
+        std::fs::read_to_string(&session_root).unwrap(),
+        "blocked directory"
+    );
+    std::fs::remove_file(&session_root).unwrap();
+    session_manager::start_new_session(&mut app, &ctx);
+    wait_for_reset(&mut app);
+    assert!(!app.state.persistence.session_restore_failed);
+    let detail = app
+        .state
+        .status
+        .current
+        .as_ref()
+        .unwrap()
+        .detail
+        .as_ref()
+        .unwrap();
+    let backup = detail
+        .lines()
+        .next()
+        .unwrap()
+        .strip_prefix("Previous session moved to: ")
+        .unwrap();
+    std::fs::remove_dir_all(backup).unwrap();
 }
 
 #[test]

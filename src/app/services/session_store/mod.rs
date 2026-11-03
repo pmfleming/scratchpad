@@ -59,6 +59,18 @@ impl SessionStore {
         &self.root
     }
 
+    pub(crate) fn start_new_session(
+        &mut self,
+        request: SessionPersistRequest,
+    ) -> io::Result<PathBuf> {
+        // Retire the cached open failure or old worker, including stale clones.
+        let previous = std::mem::replace(&mut self.worker, Arc::new(OnceLock::new()));
+        let worker = previous.get().and_then(|result| result.as_ref().ok());
+        let (worker, backup) = database::start_new_session(&self.root, worker, request)?;
+        let _ = self.worker.set(Ok(worker));
+        Ok(backup)
+    }
+
     fn worker(&self) -> io::Result<&DatabaseWorker> {
         self.worker
             .get_or_init(|| {

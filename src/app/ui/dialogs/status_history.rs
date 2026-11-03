@@ -1,8 +1,6 @@
-use super::common::{HISTORY_DIALOG_SIZE, truncated_label};
+use super::common::HISTORY_DIALOG_SIZE;
 use super::common::{history_dialog_card, history_dialog_header, show_centered_callout};
-use crate::app::app_state::{
-    DialogState, StatusDomain, StatusMessage, StatusSeverity, StatusState,
-};
+use crate::app::app_state::{ScratchpadApp, StatusDomain, StatusMessage, StatusSeverity};
 use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg};
 use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
@@ -47,19 +45,16 @@ impl StatusHistoryRow {
     }
 }
 
-pub(crate) fn show_status_history_window(
-    ctx: &egui::Context,
-    dialogs: &mut DialogState,
-    status: &StatusState,
-) {
-    if !dialogs.status_history.is_open() {
+pub(crate) fn show_status_history_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    if !app.state.dialogs.status_history.is_open() {
         return;
     }
 
-    let rows = status_history_rows(status.history.iter());
+    let rows = status_history_rows(app.state.status.history.iter());
     let filter = read_filter(ctx);
     let mut next_filter = filter;
     let mut close_requested = false;
+    let mut start_requested = false;
 
     show_centered_callout(
         ctx,
@@ -74,6 +69,8 @@ pub(crate) fn show_status_history_window(
                     filter,
                     &mut next_filter,
                     &mut close_requested,
+                    app,
+                    &mut start_requested,
                 );
             });
         },
@@ -83,7 +80,11 @@ pub(crate) fn show_status_history_window(
         write_filter(ctx, next_filter);
     }
     if close_requested {
-        dialogs.status_history.close();
+        app.state.dialogs.status_history.close();
+    }
+    if start_requested {
+        write_filter(ctx, StatusFilter::All);
+        crate::app::services::session_manager::start_new_session(app, ctx);
     }
 }
 
@@ -99,12 +100,59 @@ fn render_status_history_window(
     filter: StatusFilter,
     next_filter: &mut StatusFilter,
     close_requested: &mut bool,
+    app: &ScratchpadApp,
+    start_requested: &mut bool,
 ) {
     settings::apply_dialog_typography(ui);
     callout::apply_spacing(ui);
     ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
     if render_header(ui) {
         *close_requested = true;
+    }
+
+    if app.state.persistence.session_restore_failed {
+        history_dialog_card(ui, STATUS_CARD_CORNER_RADIUS, |ui| {
+            ui.heading("Start a new session");
+            if let Some(detail) = rows
+                .iter()
+                .find(|row| {
+                    row.domain == StatusDomain::Session && row.severity == StatusSeverity::Error
+                })
+                .and_then(|row| row.detail.as_ref())
+            {
+                ui.add(egui::Label::new(detail).wrap());
+            }
+            ui.add(egui::Label::new(
+                "The previous session could not be opened. Starting a new session will move the old session file to a temporary backup and create a new file at the usual location. The backup may be deleted during temporary-file cleanup."
+            ).wrap());
+            ui.add(
+                egui::Label::new(format!(
+                    "Session file: {}",
+                    app.state
+                        .persistence
+                        .session_store
+                        .root()
+                        .join("session.db")
+                        .display()
+                ))
+                .wrap(),
+            );
+            let resetting = app.state.persistence.session_reset.is_some();
+            let busy = app.state.background_io.has_pending_background_actions();
+            *start_requested = ui
+                .add_enabled(
+                    !resetting && !busy,
+                    egui::Button::new(if resetting {
+                        "Creating new session…"
+                    } else {
+                        "Start new session"
+                    }),
+                )
+                .clicked();
+            if busy && !resetting {
+                ui.label("Waiting for current file operations to finish…");
+            }
+        });
     }
 
     ui.add_space(4.0);
@@ -203,7 +251,7 @@ fn render_history_rows(ui: &mut egui::Ui, rows: &[&StatusHistoryRow]) {
             .id_salt(widget_ids::ctx_key("status_history.scroll.content"))
             .auto_shrink([false, false])
             .max_height(ui.available_height())
-            .min_scrolled_height(STATUS_LIST_MIN_HEIGHT)
+            .min_scrolled_height(STATUS_LIST_MIN_HEIGHT.min(ui.available_height().max(0.0)))
             .show(ui, |ui| {
                 ui.set_max_width(ui.available_width());
                 for row in rows {
@@ -243,35 +291,29 @@ fn render_row_pill_contents(ui: &mut egui::Ui, row: &StatusHistoryRow) {
         );
         ui.add_space(8.0);
         ui.vertical(|ui| {
-            let text_width = ui.available_width().max(0.0);
-            truncated_label(
-                ui,
-                &row.text,
-                text_width,
-                14.0,
-                callout::text(ui),
-                egui::Sense::hover(),
-            )
-            .on_hover_text(&row.text);
-            truncated_label(
-                ui,
-                domain_label(row.domain),
-                text_width,
-                12.0,
-                callout::muted_text(ui),
-                egui::Sense::hover(),
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(&row.text)
+                        .size(14.0)
+                        .color(callout::text(ui)),
+                )
+                .wrap(),
+            );
+            ui.label(
+                egui::RichText::new(domain_label(row.domain))
+                    .size(12.0)
+                    .color(callout::muted_text(ui)),
             );
             if let Some(detail) = &row.detail {
-                egui::CollapsingHeader::new("Detail")
-                    .id_salt(("status_history.detail", row.id))
-                    .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new(detail)
-                                .size(12.0)
-                                .monospace()
-                                .color(callout::muted_text(ui)),
-                        );
-                    });
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(detail)
+                            .size(12.0)
+                            .monospace()
+                            .color(callout::muted_text(ui)),
+                    )
+                    .wrap(),
+                );
             }
         });
     });
@@ -342,6 +384,81 @@ fn filter_id() -> egui::Id {
 mod tests {
     use super::{StatusFilter, StatusHistoryRow, status_history_rows};
     use crate::app::app_state::{StatusDomain, StatusMessage, StatusSeverity};
+
+    #[test]
+    fn full_status_details_and_reset_action_are_visible_without_expanding() {
+        use crate::app::{
+            app_state::test_support::test_app,
+            fonts::{EditorFontPreset, EditorFontSelection, apply_editor_fonts},
+            services::session_manager,
+        };
+        use eframe::egui;
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_app(root.path());
+        app.state.persistence.session_restore_failed = true;
+        let message = "Could not restore your previous session. Start a new session to resume session saving. This complete message should wrap rather than being cut off.";
+        let detail =
+            "Session format version 999 is incompatible with this build (expected version 10).";
+        app.state
+            .status
+            .set_error_status_with_detail(StatusDomain::Session, message, detail);
+        app.state.dialogs.status_history.open();
+        let mut harness = Harness::builder()
+            .allow_missing_glyphs()
+            .with_size(egui::vec2(1100.0, 900.0))
+            .with_context_setup(|ctx| {
+                apply_editor_fonts(
+                    ctx,
+                    &EditorFontSelection::scratchpad(EditorFontPreset::Standard),
+                    4.0,
+                )
+                .unwrap();
+            })
+            .build_ui_state(
+                |ui, app| {
+                    super::show_status_history_window(ui.ctx(), app);
+                },
+                app,
+            );
+        harness.run_steps(3);
+        assert!(harness.query_by_label(message).is_some());
+        assert!(harness.query_by_label("Detail").is_none());
+        assert!(harness.query_by_label("Start new session").is_some());
+        // Choosing a filter cannot hide the failure reason above the reset action.
+        super::write_filter(&harness.ctx, StatusFilter::Info);
+        harness.run_steps(2);
+        assert!(harness.query_by_label(detail).is_some());
+        harness.get_by_label("Start new session").click();
+        harness.run_steps(2);
+        assert!(harness.state().state.persistence.session_reset.is_some());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while harness.state().state.persistence.session_reset.is_some()
+            && std::time::Instant::now() < deadline
+        {
+            session_manager::poll_session_reset(harness.state_mut());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(!harness.state().state.persistence.session_restore_failed);
+        let detail = harness
+            .state()
+            .state
+            .status
+            .current
+            .as_ref()
+            .unwrap()
+            .detail
+            .as_ref()
+            .unwrap();
+        let backup = detail
+            .lines()
+            .next()
+            .unwrap()
+            .strip_prefix("Previous session moved to: ")
+            .unwrap();
+        std::fs::remove_dir_all(backup).unwrap();
+    }
     #[test]
     fn status_history_rows_are_newest_first() {
         let older = message(1, "Older");

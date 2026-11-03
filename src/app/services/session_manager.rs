@@ -7,6 +7,9 @@ use crate::app::services::settings_store::AppSettings;
 use eframe::egui;
 use std::time::Instant;
 
+mod reset;
+pub(crate) use reset::{PendingSessionReset, poll_session_reset, start_new_session};
+
 pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context) {
     ctx.request_repaint_after(std::time::Duration::from_mins(1));
     if app.startup_restore_pending()
@@ -102,6 +105,7 @@ pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettin
         Err(error) => {
             app.state.persistence.session_restore_failed = true;
             app.state.status.report_startup_restore_failed(error);
+            app.state.dialogs.status_history.open();
             None
         }
     }

@@ -147,15 +147,16 @@ Settings are available in the app with `Ctrl + ,` and are stored as TOML:
 | Linux | `$XDG_CONFIG_HOME/scratchpad/settings.toml` or `~/.config/scratchpad/settings.toml` | `$XDG_STATE_HOME/scratchpad` or `~/.local/state/scratchpad` |
 
 Sessions use a local embedded Turso `session.db`; settings remain TOML and user
-files keep their existing save paths. Schema 10 starts a fresh session when it
-recognizes an older Scratchpad database, discarding its session and history data
-while preserving saved text files and settings. Unknown schemas, foreign databases,
-corruption, and I/O errors never authorize a reset. Resets are reported in the
-`[]` status log. See [history storage](SESSION-RETENTION.md).
+files keep their existing save paths. If a session cannot be opened, including an
+older or newer incompatible format, the `[]` status panel shows the full error
+and offers **Start new session**. After warning you, this action moves the old
+database to a temporary backup and creates a fresh session at the usual location.
+The backup path remains visible in Status; temporary-file cleanup may delete it.
+Saved text files and settings are preserved. See [history storage](SESSION-RETENTION.md).
 
 Closing during startup restore leaves the previous session intact. If startup
-restore fails, session saving stays disabled for that run to protect the saved
-workspace; save new edits to files before closing. A protected/unavailable session
+restore fails, session saving stays paused until you start a new session. If you
+choose not to, save new edits to files before closing. A protected/unavailable session
 store does not prevent exit. Retryable save errors still keep the window open,
 without retrying automatic last-tab shutdown every frame.
 
