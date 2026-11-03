@@ -291,6 +291,11 @@ impl TextDocument {
             .map(|_| self.content.piece_tree.clone());
         let entry = PieceHistoryEntry {
             id: self.history.next_id,
+            parent_id: self.history.entries.last().map_or(0, |e| e.id),
+            edited_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
             global_seq: next_text_history_global_seq(),
             source,
             visible_generation_before: generation_before,
@@ -416,6 +421,10 @@ impl TextDocument {
         latest.next_selection = merged_record.next_selection;
         latest.visible_generation_after = visible_generation_after;
         latest.global_seq = next_text_history_global_seq();
+        latest.edited_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         latest.fingerprint = fingerprint;
         latest.summary = operation_summary(latest.source, merged_record);
         let new_cost = latest.byte_cost();

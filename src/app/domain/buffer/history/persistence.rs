@@ -13,6 +13,10 @@ pub struct PersistedCursorRange {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PersistedHistoryEntry {
     pub id: u64,
+    pub parent_id: u64,
+    pub edited_at: u64,
+    pub current: bool,
+    pub selected_tip: bool,
     pub global_seq: u64,
     pub source: PieceSource,
     pub visible_generation_before: u32,

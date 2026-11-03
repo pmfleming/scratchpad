@@ -45,7 +45,19 @@ pub(super) fn validate(entries: &[PersistedHistoryEntry]) -> io::Result<()> {
     let mut previous = 0;
     entries
         .iter()
-        .try_for_each(|entry| validate_entry(entry, &mut previous))
+        .try_for_each(|entry| validate_entry(entry, &mut previous))?;
+    let current: Vec<_> = entries.iter().filter(|e| e.current).collect();
+    let tips: Vec<_> = entries.iter().filter(|e| e.selected_tip).collect();
+    if current.len() > 1 || tips.len() > 1 || (!entries.is_empty() && tips.is_empty()) {
+        return Err(invalid("invalid history cursor"));
+    }
+    crate::app::domain::buffer::edit_tree::EditTree::restore(
+        entries.iter().map(|e| (e.id, e.parent_id)),
+        current.first().map_or(0, |e| e.id),
+        tips.first().map_or(0, |e| e.id),
+    )
+    .ok_or_else(|| invalid("invalid history tree"))?;
+    Ok(())
 }
 
 fn history_entry(row: &turso::Row, previous: &mut i64) -> io::Result<PersistedHistoryEntry> {
@@ -53,6 +65,8 @@ fn history_entry(row: &turso::Row, previous: &mut i64) -> io::Result<PersistedHi
     validate_entry(&entry, previous)?;
     if entry.id as i64 != row.get::<i64>(0).map_err(error)?
         || entry.global_seq as i64 != row.get::<i64>(2).map_err(error)?
+        || entry.parent_id as i64 != row.get::<i64>(3).map_err(error)?
+        || entry.edited_at as i64 != row.get::<i64>(4).map_err(error)?
     {
         return Err(invalid("history key does not match entry ID"));
     }
@@ -61,7 +75,9 @@ fn history_entry(row: &turso::Row, previous: &mut i64) -> io::Result<PersistedHi
 
 impl Database {
     pub(super) async fn read_history(&self, id: &str) -> io::Result<Vec<PersistedHistoryEntry>> {
-        self.map_history(id, Ok).await
+        let entries = self.map_history(id, Ok).await?;
+        validate(&entries).map_err(|cause| damaged(id, cause))?;
+        Ok(entries)
     }
 
     pub(super) async fn read_history_fingerprints(
@@ -78,7 +94,7 @@ impl Database {
     ) -> io::Result<Vec<T>> {
         let mut previous = 0;
         self.query_collect(
-            "SELECT seq, entry, global_seq FROM history WHERE temp_id=? ORDER BY seq",
+            "SELECT seq, entry, global_seq, parent_id, edited_at FROM history WHERE temp_id=? ORDER BY seq",
             [id],
             |row| {
                 history_entry(row, &mut previous)
@@ -111,6 +127,16 @@ impl Database {
         if old == fingerprints {
             return Ok(());
         }
+        let now = entries.iter().find(|e| e.current).map_or(0, |e| e.id);
+        let tip = entries.iter().find(|e| e.selected_tip).map_or(0, |e| e.id);
+        let latest = entries
+            .iter()
+            .filter(|e| e.source != crate::app::domain::PieceSource::Load)
+            .max_by_key(|e| e.global_seq);
+        let edited_at = latest.map_or(0, |e| e.edited_at);
+        let edit_seq = latest.map_or(0, |e| e.global_seq);
+        self.execute_cached("INSERT INTO document_history VALUES(?,?,?,?,?) ON CONFLICT(temp_id) DO UPDATE SET now_id=excluded.now_id,tip_id=excluded.tip_id,edited_at=excluded.edited_at,edit_seq=excluded.edit_seq",
+            params![id, now as i64, tip as i64, edited_at as i64, edit_seq as i64]).await?;
         let Some((first, last)) = entries.first().zip(entries.last()) else {
             return self
                 .execute_cached("DELETE FROM history WHERE temp_id=?", [id])
@@ -148,8 +174,8 @@ impl Database {
                 continue;
             }
             let bytes = serde_json::to_vec(entry).map_err(invalid)?;
-            self.execute_cached("INSERT INTO history(temp_id, seq, global_seq, entry, bytes) VALUES(?, ?, ?, ?, ?) ON CONFLICT(temp_id, seq) DO UPDATE SET global_seq=excluded.global_seq, entry=excluded.entry, bytes=excluded.bytes",
-                params![id, entry.id as i64, entry.global_seq as i64, bytes.as_slice(), bytes.len() as i64]).await?;
+            self.execute_cached("INSERT INTO history(temp_id, seq, global_seq, entry, bytes, parent_id, edited_at) VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(temp_id, seq) DO UPDATE SET global_seq=excluded.global_seq, entry=excluded.entry, bytes=excluded.bytes, parent_id=excluded.parent_id, edited_at=excluded.edited_at",
+                params![id, entry.id as i64, entry.global_seq as i64, bytes.as_slice(), bytes.len() as i64, entry.parent_id as i64, entry.edited_at as i64]).await?;
         }
         Ok(())
     }

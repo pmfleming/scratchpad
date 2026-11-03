@@ -4,16 +4,6 @@ use turso::params;
 mod navigation;
 pub(crate) use navigation::{HistoryCheckpoint, RestoredVersion};
 
-pub(super) const NAVIGATION_UPGRADE: &str = "
-ALTER TABLE buffer_versions ADD COLUMN text_digest BLOB;
-ALTER TABLE buffer_versions ADD COLUMN anchor_seq INTEGER;
-ALTER TABLE buffer_versions ADD COLUMN anchor_before INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE buffer_versions ADD COLUMN branch_history BLOB;
-ALTER TABLE buffer_versions ADD COLUMN branch_bytes INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE buffer_versions ADD COLUMN history_high_water INTEGER NOT NULL DEFAULT 0;
-CREATE INDEX version_sequences ON buffer_versions(history_high_water);
-CREATE INDEX version_sizes ON buffer_versions(temp_id,bytes,branch_bytes,digest);";
-
 pub(super) const VERSION_INTERVAL_SECONDS: i64 = 300;
 pub(super) const SCHEMA: &str = "
 CREATE TABLE buffer_versions(id INTEGER PRIMARY KEY AUTOINCREMENT, temp_id TEXT NOT NULL REFERENCES buffer_ids(id) ON DELETE CASCADE,

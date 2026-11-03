@@ -62,8 +62,12 @@ CREATE TABLE session_state(id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT 
 CREATE TABLE tabs(position INTEGER PRIMARY KEY, payload BLOB NOT NULL) STRICT;
 CREATE TABLE buffer_ids(id TEXT PRIMARY KEY) STRICT;
 CREATE TABLE history(temp_id TEXT NOT NULL REFERENCES buffer_ids(id) ON DELETE CASCADE,
-                     seq INTEGER NOT NULL, global_seq INTEGER NOT NULL CHECK(global_seq>0),
+                     seq INTEGER NOT NULL, parent_id INTEGER NOT NULL CHECK(parent_id>=0 AND parent_id<seq), edited_at INTEGER NOT NULL, global_seq INTEGER NOT NULL CHECK(global_seq>0),
                      entry BLOB NOT NULL, bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0), PRIMARY KEY(temp_id, seq)) STRICT;
+CREATE TABLE document_history(temp_id TEXT PRIMARY KEY REFERENCES buffer_ids(id) ON DELETE CASCADE,
+    now_id INTEGER NOT NULL, tip_id INTEGER NOT NULL, edited_at INTEGER NOT NULL, edit_seq INTEGER NOT NULL) STRICT;
+CREATE INDEX document_recency ON document_history(edited_at DESC, edit_seq DESC);
+CREATE INDEX history_parent ON history(temp_id, parent_id);
 CREATE INDEX history_global_seq ON history(global_seq);
 CREATE INDEX history_sizes ON history(temp_id, bytes);
 CREATE TABLE snapshots(id TEXT PRIMARY KEY REFERENCES buffer_ids(id) ON DELETE CASCADE,
@@ -128,6 +132,9 @@ impl Database {
             else {
                 return Err(cause);
             };
+            if schema.application != APPLICATION_ID || !(1..10).contains(&schema.version) {
+                return Err(cause);
+            }
             let detail = schema.to_string();
             // Keep the ownership lock while closing all database handles and replacing
             // the incompatible database, including its WAL/SHM sidecars.
@@ -189,37 +196,7 @@ impl Database {
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID && version == 9 {
-            return Ok(());
-        }
-        if application == APPLICATION_ID && matches!(version, 6..=8) {
-            let undo_tokens = if version == 6 {
-                "ALTER TABLE buffer_versions ADD COLUMN source_token TEXT; CREATE UNIQUE INDEX version_source ON buffer_versions(temp_id, source_token);"
-            } else {
-                ""
-            };
-            // One transactional payload scan during upgrade, never during usage
-            // polling or retention. Covering indexes keep even overflow pages
-            // out of the accounting read path on the pinned Turso engine.
-            let sizes = if version < 8 {
-                "ALTER TABLE history ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0);
-                ALTER TABLE blobs ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0);
-                UPDATE history SET bytes=length(entry);
-                UPDATE blobs SET bytes=length(body);
-                CREATE INDEX history_sizes ON history(temp_id, bytes);
-                CREATE INDEX blob_sizes ON blobs(bytes, digest);"
-            } else {
-                ""
-            };
-            self.create_schema(&format!(
-                "{undo_tokens} {sizes} {} PRAGMA user_version=9;",
-                versions::NAVIGATION_UPGRADE
-            ))
-            .await?;
-            self.startup_notices.push(super::RestoreStatus {
-                level: super::RestoreStatusLevel::Info,
-                message: format!("Upgraded session database schema from {version} to 9. Session and history data were retained."),
-            });
+        if application == APPLICATION_ID && version == 10 {
             return Ok(());
         }
         if version != 0
@@ -238,7 +215,7 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=9;",
+            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=10;",
             quarantine::SCHEMA,
             closed::SCHEMA,
             versions::SCHEMA

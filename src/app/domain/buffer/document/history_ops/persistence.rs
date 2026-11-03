@@ -14,6 +14,20 @@ impl TextDocument {
     ) -> PersistedHistoryEntry {
         PersistedHistoryEntry {
             id: entry.id,
+            parent_id: entry.parent_id,
+            edited_at: entry.edited_at,
+            current: self
+                .history
+                .entries
+                .iter()
+                .rev()
+                .find(|e| !e.is_undone())
+                .is_some_and(|e| e.id == entry.id),
+            selected_tip: self
+                .history
+                .entries
+                .last()
+                .is_some_and(|e| e.id == entry.id),
             global_seq: entry.global_seq,
             source: entry.source,
             visible_generation_before: entry.visible_generation_before,
@@ -47,6 +61,8 @@ impl TextDocument {
         register_text_history_global_seq(persisted.global_seq);
         PieceHistoryEntry {
             id: persisted.id,
+            parent_id: persisted.parent_id,
+            edited_at: persisted.edited_at,
             global_seq: persisted.global_seq,
             source: persisted.source,
             visible_generation_before: persisted.visible_generation_before,

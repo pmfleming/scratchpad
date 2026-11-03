@@ -57,6 +57,8 @@ pub enum PieceHistoryEdit {
 #[derive(Clone, Debug)]
 pub struct PieceHistoryEntry {
     pub id: u64,
+    pub parent_id: u64,
+    pub edited_at: u64,
     pub global_seq: u64,
     pub source: PieceSource,
     pub visible_generation_before: u32,
