@@ -101,7 +101,6 @@ impl Database {
                     tab: CapturedSessionTab {
                         session_tab: tab.clone(),
                         buffer_snapshots: Vec::new(),
-                        recovery_points: Vec::new(),
                         preserve_existing: true,
                         discard_history: false,
                     },
@@ -117,9 +116,7 @@ impl Database {
                 .iter()
                 .any(|buffer| live.contains(buffer.temp_id.as_str()))
         });
-        request.expired_versions = self
-            .apply_archive_policy(&mut retained, &request.recovery_policy)
-            .await?;
+
         request.closed_tabs = retained;
         Ok(old)
     }

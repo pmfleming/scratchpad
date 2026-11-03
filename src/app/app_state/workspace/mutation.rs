@@ -1,53 +1,7 @@
-mod snapshot;
-pub(crate) use snapshot::install_history_document;
-
 use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::app_state::settings_controller;
 use crate::app::app_state::workspace::accessors as workspace_accessors;
-use crate::app::domain::{BufferId, CursorRevealMode, buffer::HistoryToken};
-use crate::app::text_history::{TextHistoryEntryView, entries_for_buffer};
-
-pub(crate) fn text_history_entries(app: &ScratchpadApp) -> Vec<TextHistoryEntryView> {
-    let mut entries = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .flat_map(|tab| tab.buffers().flat_map(entries_for_buffer))
-        .collect::<Vec<_>>();
-    sort_text_history_entries(&mut entries);
-    entries
-}
-
-pub(crate) fn cached_text_history_entries(
-    app: &mut ScratchpadApp,
-) -> std::sync::Arc<[TextHistoryEntryView]> {
-    let revisions = text_history_revisions(app);
-    if app.state.text_history_cache.revisions != revisions {
-        app.state.text_history_cache.entries = text_history_entries(app).into();
-        app.state.text_history_cache.revisions = revisions;
-    }
-    app.state.text_history_cache.entries.clone()
-}
-
-fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, HistoryToken, String)> {
-    app.tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .flat_map(|tab| {
-            tab.buffers().map(|buffer| {
-                (
-                    buffer.id,
-                    // Replacement documents can reuse the same history counter.
-                    buffer.document().history_token(),
-                    crate::app::text_history::buffer_label(buffer),
-                )
-            })
-        })
-        .collect()
-}
-
+use crate::app::domain::{BufferId, CursorRevealMode};
 pub(crate) fn clear_text_history(app: &mut ScratchpadApp, buffer_ids: &[BufferId]) -> bool {
     let mut cleared = false;
     for tab in app.tab_manager.tabs.as_mut_slice() {
@@ -115,40 +69,6 @@ pub(crate) fn finalize_active_buffer_text_mutation(
     app.tab_manager.mark_session_dirty();
     app.note_settings_toml_edit(active_tab_index);
     app.apply_current_tab_ordering();
-}
-
-/// Undo or redo every entry between the current "Now" boundary and the
-/// clicked entry, inclusive — but only within the clicked entry's own
-/// buffer. The direction is inferred from the clicked entry's current
-/// state (an applied entry is undone, an undone entry is redone). The
-/// per-buffer document already replays a contiguous batch internally when
-/// given any single entry id, so a single call is enough. Other buffers'
-/// histories are left alone even when their seqs fall between Now and the
-/// click target.
-pub fn apply_text_history_to_entry(
-    app: &mut ScratchpadApp,
-    buffer_id: BufferId,
-    entry_id: u64,
-    follow_focus: bool,
-) -> bool {
-    let Some(target) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .find_map(|tab| tab.buffer_by_id(buffer_id))
-        .and_then(|buffer| {
-            buffer
-                .document()
-                .history_entries()
-                .iter()
-                .find(|e| e.id == entry_id)
-        })
-        .map(|e| if e.is_undone() { e.id } else { e.parent_id })
-    else {
-        return false;
-    };
-    navigate_text_history(app, buffer_id, target, follow_focus)
 }
 
 pub(crate) fn navigate_text_history(
@@ -274,87 +194,15 @@ fn restore_text_history_selection(
     workspace_accessors::request_focus_for_view(app, view_id);
 }
 
-fn sort_text_history_entries(entries: &mut [TextHistoryEntryView]) {
-    entries.sort_by_key(|entry| (entry.global_seq, entry.buffer_id, entry.id));
-}
-
 #[cfg(test)]
 mod tests {
     use super::ScratchpadApp;
-    use super::apply_text_history_to_entry;
-    use super::sort_text_history_entries;
-    use crate::app::domain::{BufferId, BufferState, PieceSource, SplitAxis, WorkspaceTab};
+    use super::navigate_text_history;
+    use crate::app::domain::{BufferState, SplitAxis, WorkspaceTab};
     use crate::app::services::session_store::SessionStore;
     use crate::app::services::settings_store::SettingsStore;
-    use crate::app::text_history::TextHistoryEntryView;
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
     use crate::app::{domain::TabManager, startup::StartupOptions};
-
-    #[test]
-    fn cached_history_labels_follow_rename_and_save_as_without_edits() {
-        let mut app = test_app_with_tabs(["before.txt"]);
-        app.tab_manager.tabs.as_mut_slice()[0]
-            .active_buffer_mut()
-            .replace_char_ranges_with_undo(
-                &[(0..0, "hello".into())],
-                CursorRange::default(),
-                CursorRange::default(),
-            )
-            .unwrap();
-        let first = super::cached_text_history_entries(&mut app);
-        let second = super::cached_text_history_entries(&mut app);
-        assert!(std::sync::Arc::ptr_eq(&first, &second));
-        assert_eq!(
-            super::cached_text_history_entries(&mut app)[0].label,
-            "before.txt"
-        );
-        app.tab_manager.tabs.as_mut_slice()[0]
-            .active_buffer_mut()
-            .name = "renamed.txt".into();
-        assert_eq!(
-            super::cached_text_history_entries(&mut app)[0].label,
-            "renamed.txt"
-        );
-        app.tab_manager.tabs.as_mut_slice()[0]
-            .active_buffer_mut()
-            .path = Some(std::path::PathBuf::from("saved.txt"));
-        assert_eq!(
-            super::cached_text_history_entries(&mut app)[0].label,
-            "saved.txt"
-        );
-    }
-
-    #[test]
-    fn text_history_sort_uses_global_sequence_before_entry_id() {
-        let mut entries = vec![entry(30, 10, 1), entry(1, 20, 2)];
-
-        sort_text_history_entries(&mut entries);
-
-        assert_eq!(
-            entries
-                .iter()
-                .rev()
-                .map(|entry| (entry.buffer_id, entry.id))
-                .collect::<Vec<_>>(),
-            vec![(2, 1), (1, 30)]
-        );
-    }
-
-    fn entry(id: u64, global_seq: u64, buffer_id: BufferId) -> TextHistoryEntryView {
-        TextHistoryEntryView {
-            id,
-            global_seq,
-            buffer_id,
-            label: format!("file-{buffer_id}"),
-            source: PieceSource::Edit,
-            summary: String::new(),
-            undone: false,
-            replayable: true,
-            edit_count: 1,
-            deleted_preview: String::new(),
-            inserted_preview: String::new(),
-        }
-    }
 
     #[test]
     fn follow_history_undo_activates_containing_tab_and_moves_one_view() {
@@ -375,14 +223,6 @@ mod tests {
                 next_selection,
             )
             .expect("record text history");
-        let entry_id = app.tab_manager.tabs.as_slice()[target_tab_index]
-            .buffers
-            .buffer
-            .document()
-            .history_entries()
-            .last()
-            .expect("history entry")
-            .id;
 
         app.tab_manager.active_tab_index = target_tab_index;
         let original_view_id = app.tab_manager.tabs.as_slice()[target_tab_index]
@@ -405,12 +245,7 @@ mod tests {
         }
         app.tab_manager.active_tab_index = 0;
 
-        assert!(apply_text_history_to_entry(
-            &mut app,
-            target_buffer_id,
-            entry_id,
-            true
-        ));
+        assert!(navigate_text_history(&mut app, target_buffer_id, 0, true));
 
         let tab = &app.tab_manager.tabs.as_slice()[app.tab_manager.active_tab_index];
         let original_view = tab.layout.view(original_view_id).expect("original view");

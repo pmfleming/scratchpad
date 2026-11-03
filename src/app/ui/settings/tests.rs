@@ -48,12 +48,8 @@ fn settings_have_five_independent_categories_without_nested_disclosures() {
     ] {
         harness.get_by_role_and_label(egui::Role::DisclosureTriangle, label);
     }
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 9);
-    for label in [
-        "Memory per file",
-        "Memory across all files",
-        "Saved undo per file",
-    ] {
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 5);
+    for label in ["Memory per file", "Memory across all files"] {
         harness.get_by_role_and_label(egui::Role::Slider, label);
     }
     assert!(harness.query_by_label("Reset section").is_none());
@@ -91,7 +87,10 @@ fn search_reveals_matching_groups_without_losing_collapse_state() {
     assert!(harness.query_by_role(egui::Role::Slider).is_none());
     let ctx = harness.ctx.clone();
     ctx.data_mut(|data| {
-        data.insert_temp(egui::Id::unique("settings.search"), "persisted".to_owned())
+        data.insert_temp(
+            egui::Id::unique("settings.search"),
+            "history memory".to_owned(),
+        )
     });
     harness.run_steps(2);
     assert_eq!(
@@ -100,7 +99,7 @@ fn search_reveals_matching_groups_without_losing_collapse_state() {
             .count(),
         1
     );
-    harness.get_by_role_and_label(egui::Role::Slider, "Saved undo per file");
+    harness.get_by_role_and_label(egui::Role::Slider, "Memory per file");
     ctx.data_mut(|data| {
         data.insert_temp(
             egui::Id::unique("settings.search"),
@@ -120,7 +119,7 @@ fn search_reveals_matching_groups_without_losing_collapse_state() {
     assert!(harness.query_by_role(egui::Role::Slider).is_none());
     harness.get_by_label("Expand all").click_accesskit();
     harness.run_steps(2);
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 9);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 5);
 }
 
 #[test]
@@ -157,14 +156,7 @@ fn appearance_controls_share_right_edge_and_all_sliders_share_columns() {
             assert!((find("label.Editor padding").center_y - reference.center_y).abs() < 1.0);
             assert!((left(find("label.Editor padding")) - left(find("label.Font"))).abs() < 1.0);
         }
-        for label in [
-            "Indent width",
-            "Closed-tab budget",
-            "Recovery-point budget",
-            "Memory per file",
-            "Memory across all files",
-            "Saved undo per file",
-        ] {
+        for label in ["Indent width", "Memory per file", "Memory across all files"] {
             let slider = find(&format!("slider.{label}"));
             assert!(
                 (left(reference) - left(slider)).abs() < 1.0,
@@ -229,7 +221,6 @@ fn styled_controls_fit_and_align_with_production_fonts_in_both_themes() {
                     ("dropdown.Font", "Font"),
                     ("dropdown.Size", "Size"),
                     ("combo.Place new tabs", "Place new tabs"),
-                    ("combo.Retention", "Keep closed tabs for"),
                     ("button.Open file", "Settings file"),
                 ] {
                     let control = find(control);
@@ -764,7 +755,6 @@ fn exact_value_inputs_and_recommended_limits_keep_slider_values_in_sync() {
     for (label, value) in [
         ("Memory per file", 83.0),
         ("Memory across all files", 1024.0),
-        ("Saved undo per file", 0.0),
     ] {
         harness
             .get_by_role_and_label(egui::Role::SpinButton, label)
@@ -781,7 +771,6 @@ fn exact_value_inputs_and_recommended_limits_keep_slider_values_in_sync() {
     let budget = harness.state().state.app_settings.history.budget;
     assert_eq!(budget.per_file_byte_budget, 83 * 1024 * 1024);
     assert_eq!(budget.aggregate_byte_budget, 1024 * 1024 * 1024);
-    assert_eq!(budget.persisted_payload_budget, 0);
     harness.get_by_label("Use recommended").click_accesskit();
     harness.run_steps(2);
     assert!(

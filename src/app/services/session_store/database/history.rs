@@ -1,6 +1,5 @@
 //! `seq` is the stable per-document entry ID, NOT global_seq (which changes
-//! when typing coalesces). Undo flags and payload-budget stripping also mutate
-//! existing entries. Fingerprint the complete serialized row; retain no undo
+//! when typing coalesces). Position markers also mutate existing entries. Fingerprint the complete serialized row; retain no undo
 //! payload copies in the worker's comparison cache.
 use super::{Database, decode, error, invalid, quarantine::damaged};
 use crate::app::domain::PersistedHistoryEntry;
@@ -143,8 +142,7 @@ impl Database {
                 .await;
         };
         let last = last.id;
-        // Budget evictions and redo-branch truncation are range deletes, with
-        // individual deletes for interior holes (selective history operations).
+        // Explicit Forget history can replace the entire tree, including IDs.
         self.execute_cached(
             "DELETE FROM history WHERE temp_id=? AND (seq<? OR seq>?)",
             params![id, first.id as i64, last as i64],

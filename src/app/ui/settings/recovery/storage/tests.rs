@@ -40,17 +40,14 @@ fn payload_total_counts_exclusive_categories_once_not_overlapping_references() {
     let mut usage = sample_usage();
     let s = &mut usage.stored;
     s.live_text = 1;
-    s.recovery_text = 2;
-    s.shared_text = 3;
     s.undo = 4;
     s.session_metadata = 5;
     s.archive_metadata = 6;
-    s.snapshot_metadata = 7;
     s.unreferenced_text = 8;
     s.reusable_pages = 999;
     s.archive_referenced_bytes = 888;
-    assert_eq!(payload_total(&usage), 36);
-    usage.stored.shared_text = u64::MAX;
+    assert_eq!(payload_total(&usage), 24);
+    usage.stored.undo = u64::MAX;
     assert_eq!(payload_total(&usage), u64::MAX);
 }
 #[test]
@@ -58,7 +55,6 @@ fn both_pies_and_exact_values_are_visible_without_nested_disclosures() {
     for dark in [true, false] {
         let mut usage = sample_usage();
         usage.stored.archives = 6;
-        usage.stored.recovery_points = 10;
         usage.stored.live_text = 58;
         let mut harness = Harness::builder()
             .with_size(egui::vec2(800.0, 1600.0))
@@ -94,14 +90,14 @@ fn both_pies_and_exact_values_are_visible_without_nested_disclosures() {
             "Files on disk",
             "9.77 MiB",
             "Disk breakdown",
-            "Recovery payloads",
+            "History payloads",
             "Session database",
             "Settings files",
             "Allocated on disk",
-            "Shared text",
+            "Current & archived text",
             "Undo history",
             "Archive references",
-            "Recovery payload total",
+            "History payload total",
         ] {
             harness.get_by_label(label);
         }
@@ -122,7 +118,7 @@ fn both_pies_and_exact_values_are_visible_without_nested_disclosures() {
         assert_eq!(reference.font_id.size, 15.0);
         for (index, (heading, following)) in [
             ("Disk breakdown", "Allocated on disk"),
-            ("Recovery payloads", "Recovery payload total"),
+            ("History payloads", "History payload total"),
         ]
         .into_iter()
         .enumerate()
@@ -231,7 +227,7 @@ fn unavailable_recovery_is_not_an_empty_chart() {
         );
     harness.run();
     harness.get_by_label("Recovery details unavailable");
-    assert!(harness.query_by_label("Recovery payloads").is_none());
+    assert!(harness.query_by_label("History payloads").is_none());
     assert!(harness.query_by_label("Allocated on disk").is_none());
     assert_eq!(harness.get_all_by_role(egui::Role::Image).count(), 2);
 }

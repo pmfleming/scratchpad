@@ -50,17 +50,6 @@ const SETTINGS: &[(&str, &str, &str)] = &[
     ),
     (
         "history",
-        "Keep closed tabs for",
-        "retention days expiry archives",
-    ),
-    ("history", "Closed-tab budget", "archive storage limits MiB"),
-    (
-        "history",
-        "Recovery-point budget",
-        "snapshot storage limits MiB",
-    ),
-    (
-        "history",
         "Memory per file",
         "undo RAM per file budget limits MiB",
     ),
@@ -68,11 +57,6 @@ const SETTINGS: &[(&str, &str, &str)] = &[
         "history",
         "Memory across all files",
         "undo RAM aggregate total budget limits MiB",
-    ),
-    (
-        "history",
-        "Saved undo per file",
-        "persisted history budget limits MiB",
     ),
     ("application", "On launch", "startup continue session fresh"),
     (

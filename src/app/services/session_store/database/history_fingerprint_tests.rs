@@ -36,7 +36,7 @@ fn compact_history_cache_persists_complete_row_changes_and_survives_reopen() {
                 entry.next_selection.primary_prefer_next_row =
                     !entry.next_selection.primary_prefer_next_row;
             },
-            PersistedHistoryEntry::drop_payloads,
+            |entry| entry.flags.persisted = !entry.flags.persisted,
             |entry| entry.fingerprint ^= 1,
         ];
         for (index, mutate) in mutations.into_iter().enumerate() {

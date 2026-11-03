@@ -261,19 +261,6 @@ pub(crate) fn set_recovery_settings(
     apply_setting_effects(app, changed, SettingEffects::HISTORY_BUDGET);
 }
 
-pub(crate) fn reset_retention_and_limits_to_recommended(app: &mut ScratchpadApp) {
-    let defaults = crate::app::services::settings_store::RecoverySettings::default();
-    let recovery = &mut app.state.app_settings.history.recovery;
-    recovery.archive_retention_days = defaults.archive_retention_days;
-    recovery.archive_byte_budget = defaults.archive_byte_budget;
-    recovery.snapshot_byte_budget = defaults.snapshot_byte_budget;
-    // Keep reopening preferences and migration grace intact. Apply and persist
-    // the complete recommendation together, not as separate partial resets.
-    app.state.app_settings.reset_history_budget_to_auto();
-    app.tab_manager.mark_session_dirty();
-    apply_setting_effects(app, true, SettingEffects::HISTORY_BUDGET);
-}
-
 pub(crate) fn set_tab_list_width_from_layout(app: &mut ScratchpadApp, width: f32) {
     let next = width.clamp(
         ScratchpadApp::VERTICAL_TAB_LIST_MIN_WIDTH,
@@ -399,4 +386,9 @@ pub(crate) fn toggle_tab_list(app: &mut ScratchpadApp) {
             "Tab list hidden. Press Ctrl+Alt+B to show it."
         },
     );
+}
+
+pub(crate) fn reset_history_cache_to_recommended(app: &mut ScratchpadApp) {
+    app.state.app_settings.reset_history_budget_to_auto();
+    apply_setting_effects(app, true, SettingEffects::HISTORY_BUDGET);
 }

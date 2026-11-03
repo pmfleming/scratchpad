@@ -126,8 +126,6 @@ pub(crate) struct SessionBuffer {
     // writer drains this into history rows before serializing tab metadata.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub text_history: Vec<PersistedHistoryEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub snapshot_navigation: Option<(i64, i64)>,
 }
 
 impl From<&crate::app::domain::BufferState> for SessionBuffer {
@@ -151,7 +149,6 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
             disk_len: buffer.disk_state.as_ref().map(|state| state.len),
             disk_content_digest: buffer.disk_content_digest.clone(),
             text_history: buffer.document().exported_history(),
-            snapshot_navigation: buffer.snapshot_navigation(),
         }
     }
 }

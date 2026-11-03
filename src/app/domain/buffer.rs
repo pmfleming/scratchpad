@@ -22,8 +22,7 @@ pub(crate) use document::{TextReplacementError, TextReplacements};
 pub(crate) use history::{
     ByteSpan, PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry, PieceHistoryFlags,
     TEXT_HISTORY_COALESCE_WINDOW, TextDocumentOperationRecord, TextHistoryApplyError,
-    fingerprint_parts, next_text_history_global_seq, preview_text, preview_text_parts,
-    register_text_history_global_seq,
+    fingerprint_parts, next_text_history_global_seq, register_text_history_global_seq,
 };
 pub use history::{
     OperationRecord, PersistedCursorRange, PersistedHistoryEdit, PersistedHistoryEntry,

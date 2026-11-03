@@ -199,7 +199,6 @@ impl Restorer {
                     buffer.disk_content_digest
                 };
                 state.is_settings_file = buffer.is_settings_file;
-                state.set_snapshot_navigation(buffer.snapshot_navigation);
                 state
             })
             .collect()

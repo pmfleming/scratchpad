@@ -78,10 +78,12 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
                     .text("Now")
                     .show_value(false),
             );
-            let focus = ui.interact(
+            let focus = crate::app::ui::widget_ids::interact(
+                ui,
                 response.rect,
                 focus_id(),
                 egui::Sense::focusable_noninteractive(),
+                "history-focus",
             );
             if response.drag_started() || response.clicked() {
                 focus.request_focus();

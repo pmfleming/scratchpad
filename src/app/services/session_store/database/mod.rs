@@ -15,8 +15,6 @@ mod history_fingerprint_tests;
 mod incremental_tests;
 #[cfg(test)]
 mod inventory_tests;
-#[cfg(test)]
-mod navigation_tests;
 mod persist;
 mod profiling;
 pub use profiling::SessionMaintenanceFixture;
@@ -26,13 +24,6 @@ mod quarantine_tests;
 #[cfg(test)]
 mod range_tests;
 mod read;
-mod retention;
-#[cfg(test)]
-mod retention_policy_tests;
-#[cfg(test)]
-mod retention_regression_tests;
-#[cfg(test)]
-mod retention_tests;
 mod schema_reset;
 #[cfg(test)]
 mod schema_reset_tests;
@@ -41,9 +32,6 @@ mod size_tests;
 #[cfg(test)]
 mod tests;
 pub(super) mod usage;
-#[cfg(test)]
-mod version_tests;
-pub(super) mod versions;
 mod worker;
 
 use super::model::SessionManifest;
@@ -97,7 +85,6 @@ pub(super) struct Database {
     database: TursoDatabase,
     ownership: File,
     startup_notices: Vec<super::RestoreStatus>,
-    navigation_roots: HashMap<String, (i64, i64)>,
     tab_cache: Vec<Vec<u8>>,
     state_cache: Vec<u8>,
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
@@ -107,7 +94,6 @@ pub(super) struct Database {
     // only describe snapshots written by this process. None requires a fresh scan.
     inventory: Option<ContentInventory>,
     latest_request: u64,
-    recovery_policy: Option<crate::app::services::settings_store::RecoverySettings>,
     pub(super) blocked: Option<String>,
     verified: bool,
     quarantined: HashMap<String, super::model::SessionBuffer>,
@@ -152,7 +138,7 @@ impl Database {
         db.load_quarantine().await?;
         // Reserve sequences from cold tabs and parked branches without reading payloads.
         let maximum = db
-            .integer("SELECT max(value) FROM (SELECT coalesce(max(global_seq),0) AS value FROM history UNION ALL SELECT coalesce(max(history_high_water),0) FROM buffer_versions)")
+            .integer("SELECT coalesce(max(global_seq),0) FROM history")
             .await?;
         crate::app::domain::buffer::register_text_history_global_seq(maximum as u64);
         Ok(db)
@@ -179,7 +165,6 @@ impl Database {
             database,
             ownership,
             startup_notices: Vec::new(),
-            navigation_roots: HashMap::new(),
             tab_cache: Vec::new(),
             state_cache: Vec::new(),
             revisions: HashMap::new(),
@@ -187,7 +172,6 @@ impl Database {
             history_cache: HashMap::new(),
             inventory: None,
             latest_request: 0,
-            recovery_policy: None,
             blocked: None,
             verified: false,
             quarantined: HashMap::new(),
@@ -215,10 +199,9 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=10;",
+            "{SCHEMA} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=10;",
             quarantine::SCHEMA,
-            closed::SCHEMA,
-            versions::SCHEMA
+            closed::SCHEMA
         ))
         .await
     }
@@ -315,14 +298,6 @@ impl Database {
     }
     // Only acknowledge our own writes: an earlier unexpected write must still
     // invalidate the inventory on the next save.
-    async fn acknowledge_inventory_writes(&mut self, before: i64) {
-        let after = self.integer("SELECT total_changes()").await.ok();
-        if let Some(inventory) = &mut self.inventory
-            && inventory.connection_changes == Some(before)
-        {
-            inventory.connection_changes = after;
-        }
-    }
 
     async fn finish_transaction(&mut self, result: io::Result<()>) -> io::Result<()> {
         let result = match result {

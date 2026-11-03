@@ -38,7 +38,7 @@ const CATEGORIES: [Category; 5] = [
         key: "history",
         title: "History",
         subtitle: "Recovery and storage",
-        search: "recovery reopening archives closed tabs changed files retention days expiry budgets limits undo memory RAM persisted saved per-file total recommended automatic disk usage payloads database journal settings reusable references",
+        search: "recovery reopening archives closed tabs changed files branches Now changes undo memory cache per-file total recommended disk usage payloads database journal settings reusable references",
         render: super::recovery::render_recovery_category,
     },
     Category {
@@ -154,13 +154,6 @@ pub(super) fn text_history_budget(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         4,
         4096,
     );
-    byte_budget_row(
-        ui,
-        "Saved undo per file",
-        &mut budget.persisted_payload_budget,
-        0,
-        1024,
-    );
     if budget != original {
         crate::app::app_state::settings_controller::set_history_budget(app, budget);
     }
@@ -183,7 +176,7 @@ mod tests {
         for (query, key) in [
             ("auto-hide", "workspace"),
             ("gutter", "editors"),
-            ("persisted per-file", "history"),
+            ("branches", "history"),
             ("font size", "appearance"),
             ("toml", "application"),
         ] {

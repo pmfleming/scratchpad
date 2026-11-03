@@ -155,24 +155,6 @@ fn retained_workspace_reopens_with_undo_and_recovers_versions_without_overwritin
         "reopen cannot duplicate a consumed archive"
     );
 
-    let points = store.buffer_versions(&id).unwrap();
-    assert_eq!(points.len(), 1);
-    let text = store.restore_buffer_version(points[0].id).unwrap();
-    workspace_controller::append_tab(
-        &mut app,
-        WorkspaceTab::new(BufferState::new("recovered".into(), text, None)),
-    );
-    let recovered = app.tab_manager.active_tab().unwrap().active_buffer();
-    assert_eq!(recovered.text(), "before");
-    assert!(recovered.path.is_none());
-    assert_ne!(recovered.temp_id, id);
-    assert_eq!(app.tab_manager.tabs.len(), count + 1);
-    assert!(store.restore_buffer_version(i64::MAX).is_err());
-    assert_eq!(
-        app.tab_manager.tabs.len(),
-        count + 1,
-        "an expired version cannot create a tab"
-    );
     let original = app.tab_manager.tabs.as_mut_slice()[index].active_buffer_mut();
     assert_eq!(original.text(), "before after");
     original.document_mut().undo_last_operation().unwrap();

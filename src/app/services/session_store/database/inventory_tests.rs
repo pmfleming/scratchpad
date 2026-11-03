@@ -18,58 +18,23 @@ async fn assert_inventory(db: &Database) {
 }
 
 #[test]
-fn history_backfill_and_navigation_preserve_inventory_without_hiding_unknown_writes() {
+fn navigation_preserves_inventory_without_hiding_unknown_writes() {
     block_on(async {
         let (_root, mut db) = database().await;
         let mut live = tab("original λ");
-        let id = live.active_buffer().temp_id.clone();
-        let mut save = request(std::slice::from_ref(&live));
-        save.version_history = true;
-        db.persist(save, 1).await.unwrap();
-        let target = db.version_history(&id).await.unwrap()[0].id;
-        db.conn
-            .execute("UPDATE buffer_versions SET text_digest=NULL", ())
+        db.persist(request(std::slice::from_ref(&live)), 1)
             .await
             .unwrap();
-        // Model a legacy row already present when the inventory was loaded.
-        db.inventory.as_mut().unwrap().connection_changes =
-            Some(db.integer("SELECT total_changes()").await.unwrap());
-        assert_eq!(
-            db.version_history(&id).await.unwrap()[0].text_digest,
-            blake3::hash("original λ".as_bytes()).as_bytes()
-        );
-        assert_inventory(&db).await;
-        assert_eq!(
-            db.inventory.as_ref().unwrap().connection_changes,
-            Some(db.integer("SELECT total_changes()").await.unwrap())
-        );
         super::tests::insert(&mut live, 0, "new ");
-        db.navigate_version(
-            super::versions::HistoryCheckpoint {
-                temp_id: id.clone(),
-                snapshot: live.active_buffer().document_snapshot(),
-                history: live.active_buffer().document().exported_history(),
-            },
-            target,
-        )
-        .await
-        .unwrap();
-        assert_inventory(&db).await;
-        assert!(db.chunk_cache.contains_key(&id));
-        assert_eq!(
-            db.inventory.as_ref().unwrap().connection_changes,
-            Some(db.integer("SELECT total_changes()").await.unwrap())
-        );
+        live.active_buffer_mut().navigate_history(1).unwrap();
         db.persist(request(std::slice::from_ref(&live)), 2)
             .await
             .unwrap();
-        // Unknown writes preceding a known backfill must not be acknowledged.
-        db.conn.execute_batch("INSERT INTO buffer_ids VALUES('unexpected'); UPDATE buffer_versions SET text_digest=NULL;").await.unwrap();
-        db.version_history(&id).await.unwrap();
-        assert_ne!(
-            db.inventory.as_ref().unwrap().connection_changes,
-            Some(db.integer("SELECT total_changes()").await.unwrap())
-        );
+        assert_inventory(&db).await;
+        db.conn
+            .execute("INSERT INTO buffer_ids VALUES('unexpected')", ())
+            .await
+            .unwrap();
         db.persist(request(std::slice::from_ref(&live)), 3)
             .await
             .unwrap();

@@ -1,5 +1,4 @@
 mod history_ops;
-mod recovery;
 mod tree_ops;
 
 use super::history::{OperationDirection, TextDocumentEditOperation, TextHistoryApplyError};
@@ -253,11 +252,6 @@ impl TextDocument {
         self.history.entries.first().map(|entry| entry.global_seq)
     }
 
-    pub fn drop_oldest_history_entry(&mut self) -> Option<PieceHistoryEntry> {
-        // Durable edits are never evicted to meet a memory budget.
-        None
-    }
-
     pub fn set_history_budget(&mut self, budget: TextHistoryBudget) {
         self.history.budget = budget.sanitized();
     }
@@ -298,7 +292,9 @@ impl TextDocument {
         if self.navigate_history(now).is_err() {
             self.content = original_content;
             self.history.tree = tree;
-            for entry in &mut self.history.entries { entry.flags.replayable = false; }
+            for entry in &mut self.history.entries {
+                entry.flags.replayable = false;
+            }
         }
         self.refresh_tree_flags();
         self.advance_history_revision();
@@ -382,20 +378,6 @@ impl TextDocument {
 
     pub fn redo_last_operation(&mut self) -> Option<CursorRange> {
         self.replay_last_operation(OperationDirection::Redo)
-    }
-
-    pub(crate) fn apply_text_history_undo(
-        &mut self,
-        entry_id: u64,
-    ) -> Result<CursorRange, TextHistoryApplyError> {
-        self.apply_text_history_entry(entry_id, OperationDirection::Undo)
-    }
-
-    pub(crate) fn apply_text_history_redo(
-        &mut self,
-        entry_id: u64,
-    ) -> Result<CursorRange, TextHistoryApplyError> {
-        self.apply_text_history_entry(entry_id, OperationDirection::Redo)
     }
 
     // --- Native editor direct mutation API ---

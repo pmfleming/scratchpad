@@ -40,8 +40,7 @@ for methodology, budgets, and additional results.
   checks, and external-file conflict handling.
 - Visibility for control characters, ANSI escapes, carriage-return output, and
   other text artifacts.
-- Per-document undo/redo, a navigable text-history view, and configurable
-  history memory budgets.
+- Per-document undo/redo, preserved edit branches, and a visible Now in History.
 - Session recovery for open files, unsaved text, workspace layouts, settings,
   and file metadata.
 - Platform profiles for Windows, generic Linux desktops, and Hyprland.
@@ -164,22 +163,20 @@ without retrying automatic last-tab shutdown every frame.
 position through the active file's retained edits. It stays visible until you
 resume editing or press Escape. Switch freely between the shortcuts and dragging
 the timeline to update the file live, with a subtle highlight on each change;
-Left/Right and Home/End work while its track has focus. **History…** (`Ctrl+H`) shows the current file, all files,
-or a chosen file. Hover or click a row to replay to the state **after** that change.
-Escape or clicking outside closes History and keeps the selected live position.
-Hover near the list's top or bottom to scroll through more states. Opening History
-from the editor focuses the list immediately. Up/Down navigate in on-screen order
-while the list has focus. The opening state remains outlined
-while the current row is highlighted. Navigation preserves the redo timeline;
-typing at an older position starts a new branch. A subtle tint marks the
-affected line; neither tool saves files. Diamonds mark reachable snapshots;
-older snapshots remain selectable, with **Return to latest** restoring the preserved
-live position. Clearing undo history requires confirmation and keeps saved snapshots. **Recently Closed** combines archived
-tabs and disk-only file entries; normal reopening restores archives automatically
-and separates externally changed files from recovered unsaved text.
-Configure undo/snapshot/archive budgets, expiry and reopening in **Settings >
-History & Recovery**, alongside measured data-directory disk usage.
-See [retention, storage limits, and schema changes](SESSION-RETENTION.md).
+Left/Right and Home/End navigate while the scrubber has focus. **History…** (`Ctrl+H`)
+shows each file's edit tree, with a visible **Now** at the selected state. Click an
+edit to select the text after it; hovering does not change text. Escape or clicking
+outside keeps the selected state. Undo moves to the parent; redo follows the selected
+branch. Editing after undo keeps the old branch available in History.
+
+The scrubber shows one selected file and branch. History's recently edited list
+helps find both open and closed files. Viewing old edits does not change that order.
+All branches survive closing and restarting. **Forget history** requires confirmation
+and replaces a file's tree with its current contents; it does not change the source
+file. There are no separate snapshots or automatic expiry settings.
+
+**Settings > History & Recovery** contains reopening preferences and measured disk
+usage. See [history storage and schema changes](SESSION-RETENTION.md).
 
 Start with [the configuration guide](docs/configuration.md). It documents the
 TOML sections, shortcut syntax, platform overrides, runtime environment

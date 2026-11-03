@@ -14,9 +14,9 @@ pub(super) fn run() {
         "stored_usage",
         "closed_token_lookup",
         "closed_archive_append",
-        "save_after_history_backfill",
+        "save_after_branch",
         "save_after_navigation",
-        "periodic_snapshot_save",
+        "incremental_save",
     ] {
         for step in 0..9 {
             fixture
@@ -39,9 +39,7 @@ pub(super) fn run() {
                         fixture.sample(scenario).expect("maintenance operation");
                     let mut outcome = StepOutcome::items(hashed as usize);
                     outcome.result_unit = "snapshot-bytes-hashed";
-                    outcome.result_label = format!(
-                        "{hashed} incremental snapshot bytes hashed (excludes version identity hashing)"
-                    );
+                    outcome.result_label = format!("{hashed} incremental snapshot bytes hashed");
                     outcome.phase_elapsed_ns =
                         serde_json::json!({"action_ns": action, "save_ns": save});
                     outcome

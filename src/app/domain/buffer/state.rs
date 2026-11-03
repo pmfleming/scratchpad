@@ -28,7 +28,6 @@ pub type BufferId = u64;
 pub struct BufferState {
     pub id: BufferId,
     document: TextDocument,
-    snapshot_navigation: Option<SnapshotVisit>,
     pub name: String,
     pub path: Option<PathBuf>,
     pub path_key: Option<CanonicalPathKey>,
@@ -50,15 +49,6 @@ pub struct BufferState {
     pub active_selection: Option<Range<usize>>,
     pub has_non_compliant_characters: bool,
     refresh: BufferRefreshState,
-}
-
-/// Selected snapshot and preserved native branch. Rendering only reads this state.
-#[derive(Clone)]
-pub(crate) struct SnapshotVisit {
-    pub version_id: i64,
-    pub return_version: i64,
-    pub source: Option<std::sync::Arc<BufferState>>,
-    revision: super::HistoryToken,
 }
 
 #[derive(Clone)]
@@ -319,50 +309,6 @@ impl BufferState {
         }
     }
 
-    pub(crate) fn snapshot_visit(&self) -> Option<&SnapshotVisit> {
-        self.snapshot_navigation
-            .as_ref()
-            .filter(|visit| visit.revision == self.document.history_token())
-    }
-
-    pub(crate) fn snapshot_navigation(&self) -> Option<(i64, i64)> {
-        self.snapshot_visit()
-            .map(|visit| (visit.version_id, visit.return_version))
-    }
-
-    pub(crate) fn set_snapshot_navigation(&mut self, ids: Option<(i64, i64)>) {
-        self.snapshot_navigation = ids.map(|(version_id, return_version)| SnapshotVisit {
-            version_id,
-            return_version,
-            source: None,
-            revision: self.document.history_token(),
-        });
-    }
-
-    pub(crate) fn set_snapshot_return_buffer(&mut self, source: std::sync::Arc<BufferState>) {
-        if let Some(visit) = self.snapshot_navigation.as_mut()
-            && visit.revision == self.document.history_token()
-        {
-            visit.source = Some(source);
-        }
-    }
-
-    pub(crate) fn reconcile_snapshot_navigation(&mut self) {
-        if self.snapshot_visit().is_none() {
-            self.snapshot_navigation = None;
-        }
-    }
-
-    /// Install an existing history state without recording a replacement edit.
-    pub(crate) fn install_history_document(&mut self, document: TextDocument) {
-        self.document = document;
-        self.snapshot_navigation = None;
-        self.active_selection = None;
-        self.refresh.pending_text_history_event = None;
-        self.refresh_text_metadata();
-        self.mark_dirty_after_local_edit();
-    }
-
     pub fn replace_text(&mut self, text: String) {
         self.document.replace_text(text);
         self.refresh_text_metadata();
@@ -496,28 +442,6 @@ impl BufferState {
         Some(selection)
     }
 
-    pub(crate) fn apply_text_history_undo(
-        &mut self,
-        entry_id: u64,
-    ) -> Result<CursorRange, TextHistoryApplyError> {
-        let selection = self.document.apply_text_history_undo(entry_id)?;
-        self.note_text_history_event(TextHistoryEvent::Replay);
-        let latest_edit = self.document.latest_operation_record().cloned();
-        self.refresh_text_metadata_after_operation(latest_edit.as_ref());
-        Ok(selection)
-    }
-
-    pub(crate) fn apply_text_history_redo(
-        &mut self,
-        entry_id: u64,
-    ) -> Result<CursorRange, TextHistoryApplyError> {
-        let selection = self.document.apply_text_history_redo(entry_id)?;
-        self.note_text_history_event(TextHistoryEvent::Replay);
-        let latest_edit = self.document.latest_operation_record().cloned();
-        self.refresh_text_metadata_after_operation(latest_edit.as_ref());
-        Ok(selection)
-    }
-
     #[must_use]
     pub fn display_name(&self) -> String {
         self.name.clone()
@@ -537,7 +461,6 @@ impl BufferState {
         Self {
             id,
             document,
-            snapshot_navigation: None,
             name: state.name,
             path: state.path,
             path_key: state.path_key,

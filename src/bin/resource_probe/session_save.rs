@@ -47,10 +47,8 @@ pub(super) fn run() {
     std::fs::create_dir_all(&root).expect("create isolated save fixture");
     let mut buffer = BufferState::new("50-MiB-unsaved".into(), fixture(34 * MB), None);
     buffer.document_mut().set_history_budget(TextHistoryBudget {
-        per_file_entry_limit: 4096,
         per_file_byte_budget: 32 * MB as u64,
         aggregate_byte_budget: 64 * MB as u64,
-        persisted_payload_budget: 16 * MB as u64,
         derived_from_memory: false,
     });
     let payload = fixture(16 * MB);

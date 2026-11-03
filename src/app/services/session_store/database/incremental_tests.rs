@@ -35,7 +35,7 @@ fn history_appends_updates_prunes_and_restarts_without_rewriting_unchanged_entri
         insert(&mut tabs[0], 0, "new");
         db.persist(request(&tabs), 2).await.unwrap();
         assert_eq!(count(&db, "insert").await, 1);
-        assert_eq!(count(&db, "update").await, 0);
+        assert_eq!(count(&db, "update").await, 1);
         let payload = db
             .conn
             .query("SELECT payload FROM tabs", ())
@@ -56,7 +56,7 @@ fn history_appends_updates_prunes_and_restarts_without_rewriting_unchanged_entri
             .undo_last_operation()
             .unwrap();
         db.persist(request(&tabs), 3).await.unwrap();
-        assert_eq!(count(&db, "update").await, 1);
+        assert_eq!(count(&db, "update").await, 2);
         assert_eq!(count(&db, "insert").await, 0);
         // Coalescing changes global_seq, payload, and selections under the same ID.
         let mut captured = request(&tabs);
@@ -65,26 +65,28 @@ fn history_appends_updates_prunes_and_restarts_without_rewriting_unchanged_entri
         last.global_seq += 100;
         last.next_selection.primary_index += 1;
         last.summary.push_str(" coalesced");
-        entries[0].drop_payloads();
+        entries[0].summary.push_str(" initial");
         let expected = entries.clone();
         reset(&db).await;
         db.persist(captured, 4).await.unwrap();
         assert_eq!(count(&db, "update").await, 2);
         assert_eq!(db.read_history(&id).await.unwrap(), expected);
-        // Drop the prefix, redo suffix, and an interior entry in one capture.
-        let mut captured = request(&tabs);
-        captured.tabs[0].session_tab.buffers[0].text_history =
-            vec![expected[1].clone(), expected[3].clone()];
-        db.persist(captured, 5).await.unwrap();
-        assert_eq!(count(&db, "delete").await, 3);
+        // Forget replaces all branches with a single initial insertion.
+        tabs[0]
+            .active_buffer_mut()
+            .document_mut()
+            .clear_operation_history();
+        let expected = tabs[0].active_buffer().document().exported_history();
+        reset(&db).await;
+        db.persist(request(&tabs), 5).await.unwrap();
+        assert_eq!(count(&db, "delete").await, 5);
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
         assert!(
-            crate::app::domain::buffer::next_text_history_global_seq() > expected[3].global_seq
+            crate::app::domain::buffer::next_text_history_global_seq() > expected[0].global_seq
         );
         let mut captured = request(&tabs);
-        captured.tabs[0].session_tab.buffers[0].text_history =
-            vec![expected[1].clone(), expected[3].clone()];
+        captured.tabs[0].session_tab.buffers[0].text_history = expected.clone();
         reset(&db).await;
         db.persist(captured, 1).await.unwrap();
         assert_eq!(
@@ -108,8 +110,6 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             ("parts", "INSERT"),
             ("tabs", "INSERT"),
             ("session_state", "INSERT"),
-            ("buffer_versions", "INSERT"),
-            ("version_parts", "INSERT"),
             ("closed_tabs", "INSERT"),
             ("snapshots", "DELETE"),
             ("buffer_ids", "DELETE"),
@@ -134,7 +134,6 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             });
             let mut changed = request(&tabs);
             changed.font_size = 24.0;
-            changed.version_history = true;
             changed.closed_tabs.extend(archived.clone());
             assert!(db.persist(changed, 2).await.is_err(), "{table}");
             assert!(db.conn.is_autocommit().unwrap());
@@ -147,12 +146,6 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             assert!(db.chunk_cache.is_empty());
             assert!(db.history_cache.is_empty());
             assert!(db.state_cache.is_empty() && db.tab_cache.is_empty());
-            assert_eq!(
-                db.integer("SELECT count(*) FROM buffer_versions")
-                    .await
-                    .unwrap(),
-                0
-            );
             assert_eq!(
                 db.integer("SELECT count(*) FROM closed_tabs")
                     .await
@@ -173,15 +166,14 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
                 .unwrap();
             let mut retry = request(&tabs);
             retry.font_size = 24.0;
-            retry.version_history = true;
             retry.closed_tabs.extend(archived.clone());
             db.persist(retry, 2).await.unwrap();
             assert_eq!(db.latest_request, 2);
             assert!(db.inventory.as_ref().unwrap().snapshots.contains(&id));
             assert!(db.revisions.contains_key(&id));
             assert!(db.chunk_cache.contains_key(&id));
-            assert_eq!(db.history_cache[&id].len(), 2);
-            assert_eq!(db.read_history(&id).await.unwrap().len(), 2);
+            assert_eq!(db.history_cache[&id].len(), 3);
+            assert_eq!(db.read_history(&id).await.unwrap().len(), 3);
             let stored = db.load(ReadScope::All).await.unwrap().unwrap();
             assert_eq!(stored.contents.len(), 1 + usize::from(archived.is_some()));
             assert_eq!(stored.contents[&id], "baoriginal");
@@ -404,7 +396,7 @@ fn strict_types_and_foreign_keys_are_enforced_by_turso() {
             .unwrap();
         db.conn
             .execute(
-                "INSERT INTO history(temp_id, seq, global_seq, entry) VALUES('clean', 1, 1, x'00')",
+                "INSERT INTO history(temp_id, seq, parent_id, edited_at, global_seq, entry) VALUES('clean', 1, 0, 0, 1, x'00')",
                 (),
             )
             .await

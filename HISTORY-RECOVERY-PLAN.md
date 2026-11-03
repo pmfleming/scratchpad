@@ -1,3 +1,5 @@
+> Historical design, superseded by [the edit-tree plan](UNDO-REWRITE-PLAN.md) and the current navigation contract.
+
 # History & recovery implementation
 
 Stages (each ends with a commit):

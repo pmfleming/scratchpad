@@ -38,15 +38,7 @@ pub(super) fn summary(ui: &mut egui::Ui, usage: &StorageUsage) {
     if usage.stored_error.is_none() {
         description(
             ui,
-            &format!(
-                "{} · {}",
-                counted(usage.stored.archives as u64, "closed tab", "closed tabs"),
-                counted(
-                    usage.stored.recovery_points,
-                    "recovery point",
-                    "recovery points"
-                )
-            ),
+            &counted(usage.stored.archives as u64, "closed tab", "closed tabs"),
         );
     } else {
         description(ui, "Recovery counts and payload sizes unavailable.");
@@ -79,10 +71,10 @@ pub(super) fn details(ui: &mut egui::Ui, usage: &StorageUsage) {
         );
         return;
     }
-    breakdown_heading(ui, "Recovery payloads");
+    breakdown_heading(ui, "History payloads");
     let colors = chart::payload_colors(ui.visuals().dark_mode);
     let rows = payload_rows(usage);
-    let parts: [_; 8] = std::array::from_fn(|index| {
+    let parts: [_; 5] = std::array::from_fn(|index| {
         let (label, bytes, help) = rows[index];
         chart::Part {
             label,
@@ -94,7 +86,7 @@ pub(super) fn details(ui: &mut egui::Ui, usage: &StorageUsage) {
     chart::breakdown(ui, "recovery.payload.pie", &parts);
     usage_row(
         ui,
-        "Recovery payload total",
+        "History payload total",
         payload_total(usage),
         "Included in the database and journal, not extra disk usage.",
     );
@@ -112,7 +104,7 @@ pub(super) fn details(ui: &mut egui::Ui, usage: &StorageUsage) {
     );
 }
 
-fn payload_rows(usage: &StorageUsage) -> [(&'static str, u64, &'static str); 8] {
+fn payload_rows(usage: &StorageUsage) -> [(&'static str, u64, &'static str); 5] {
     let stored = &usage.stored;
     [
         (
@@ -121,19 +113,9 @@ fn payload_rows(usage: &StorageUsage) -> [(&'static str, u64, &'static str); 8] 
             "Text referenced only by current or archived buffers.",
         ),
         (
-            "Historical snapshot text",
-            stored.recovery_text,
-            "Text referenced only by historical snapshots.",
-        ),
-        (
-            "Shared text",
-            stored.shared_text,
-            "Text shared by current or archived buffers and historical snapshots; counted once.",
-        ),
-        (
             "Undo history",
             stored.undo,
-            "Detailed undo data for open tabs, archives and saved return branches.",
+            "All changes and branches for open and closed files.",
         ),
         (
             "Session metadata",
@@ -144,11 +126,6 @@ fn payload_rows(usage: &StorageUsage) -> [(&'static str, u64, &'static str); 8] 
             "Archive metadata",
             stored.archive_metadata,
             "Metadata for retained closed tabs.",
-        ),
-        (
-            "Recovery point metadata",
-            stored.snapshot_metadata,
-            "Estimated metadata size for stored recovery points.",
         ),
         (
             "Awaiting cleanup",

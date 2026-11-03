@@ -134,8 +134,7 @@ mod tests {
             usage.total_file_bytes,
             usage.database + usage.journal + usage.other
         );
-        assert_eq!(usage.stored.shared_text, 1600);
-        assert_eq!(usage.stored.live_text + usage.stored.recovery_text, 0);
+        assert_eq!(usage.stored.live_text, 1600);
         let settings = root.path().join("settings");
         fs::create_dir(&settings).unwrap();
         fs::write(settings.join("settings.toml"), [0; 321]).unwrap();

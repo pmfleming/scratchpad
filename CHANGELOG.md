@@ -6,12 +6,13 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Added
 
-- Retained closed workspace tabs under configurable age and byte budgets, including unsaved text and undo/redo history, with reopening after restart.
-- Added bounded per-buffer save points sharing stored text chunks; recover them into new tabs from the Saved Versions menu.
+- File edit trees with an empty starting point, explicit Now, preserved branches, and recently edited file discovery, including closed files.
 
 ### Changed
 
-- History hover, clicks, and keyboard navigation now replay the live buffer through the same path as the scrubber. Escape and outside clicks keep the selected position, and navigation preserves the redo timeline.
+- Undo, redo, History clicks, and the selected-branch scrubber share the same persisted position. Hover leaves text unchanged.
+- Removed saved-version snapshots and automatic history expiry. Forget history is explicit and per file.
+- The new session database starts fresh from recognized old schemas; existing files and settings are preserved.
 
 - Removed the History list's inner focus border so the list stays visually integrated with the main panel.
 

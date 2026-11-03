@@ -329,7 +329,7 @@ fn target_history_redo_replays_through_the_clicked_entry() {
     document.undo_last_operation();
     document.undo_last_operation();
 
-    document.apply_text_history_redo(clicked_entry).unwrap();
+    document.navigate_history(clicked_entry).unwrap();
 
     assert_eq!(document.extract_text(), "abc");
     assert_eq!(document.operation_undo_depth(), 3);
@@ -342,7 +342,9 @@ fn target_history_undo_replays_clicked_entry_and_later_entries() {
     insert_isolated_sequence!(&mut document, "abc");
     let clicked_entry = document.history_entries()[1].id;
 
-    document.apply_text_history_undo(clicked_entry).unwrap();
+    document
+        .navigate_history(document.history.tree.parent(clicked_entry).unwrap())
+        .unwrap();
 
     assert_eq!(document.extract_text(), "a");
     assert_eq!(document.operation_undo_depth(), 1);
@@ -376,7 +378,7 @@ fn target_history_undo_rejects_when_current_text_no_longer_matches_entry() {
     document.delete_char_range_internal(1..2);
     document.insert_raw_text("x", 1);
 
-    let result = document.apply_text_history_undo(entry_id);
+    let result = document.navigate_history(document.history.tree.parent(entry_id).unwrap());
 
     assert_eq!(result, Err(TextHistoryApplyError::Conflict));
     assert_eq!(document.extract_text(), "axc");
@@ -477,10 +479,8 @@ fn no_op_edits_are_dropped_from_multi_edit_records() {
 fn memory_and_payload_budgets_do_not_delete_durable_changes() {
     let mut document = empty_document!();
     document.set_history_budget(TextHistoryBudget {
-        per_file_entry_limit: 100,
         per_file_byte_budget: 1 << 20,
         aggregate_byte_budget: 1 << 20,
-        persisted_payload_budget: 0,
         derived_from_memory: false,
     });
     insert_isolated_sequence!(&mut document, &"x".repeat(105));
@@ -513,10 +513,8 @@ fn cached_history_byte_usage_tracks_history_mutations() {
     assert_history_byte_usage_consistent(&document);
 
     document.set_history_budget(TextHistoryBudget {
-        per_file_entry_limit: 1,
         per_file_byte_budget: 64 * 1024 * 1024,
         aggregate_byte_budget: 64 * 1024 * 1024,
-        persisted_payload_budget: 64 * 1024 * 1024,
         derived_from_memory: false,
     });
     assert_history_byte_usage_consistent(&document);
@@ -524,9 +522,6 @@ fn cached_history_byte_usage_tracks_history_mutations() {
     let exported = document.exported_history();
     let mut restored = TextDocument::new(document.extract_text());
     restored.restore_exported_history(exported);
-    assert_history_byte_usage_consistent(&restored);
-
-    restored.drop_oldest_history_entry();
     assert_history_byte_usage_consistent(&restored);
 
     restored.clear_operation_history();

@@ -112,7 +112,6 @@ impl ScratchpadApp {
                 chrome: ChromeState::default(),
                 settings_tab_index: usize::MAX,
                 pending_settings_toml_refresh: None,
-                text_history_cache: crate::app::text_history::TextHistoryCache::default(),
                 search_state: SearchState::default(),
                 workspace_selection:
                     crate::app::app_state::workspace::display_tabs::WorkspaceSelectionState::default(

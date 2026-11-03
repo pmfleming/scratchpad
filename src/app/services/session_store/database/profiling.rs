@@ -1,14 +1,12 @@
 //! Production-path fixture for Scratchpad Performance Lens; no timing budgets here.
-use super::super::{CapturedClosedTab, HistoryCheckpoint, SessionPersistRequest, SessionStore};
+use super::super::{CapturedClosedTab, SessionPersistRequest, SessionStore};
 use crate::app::domain::{BufferState, WorkspaceTab};
-use futures_lite::future::block_on;
 use std::{io, path::PathBuf, time::Instant};
 
 pub struct SessionMaintenanceFixture {
     store: SessionStore,
     tabs: Vec<WorkspaceTab>,
     token: String,
-    target: i64,
 }
 
 impl SessionMaintenanceFixture {
@@ -34,41 +32,20 @@ impl SessionMaintenanceFixture {
             request.closed_tabs.push(archive);
         }
         store.persist_request(request)?;
-        let target = store.buffer_versions(&tabs[0].active_buffer().temp_id)?[0].id;
-        Ok(Self {
-            store,
-            tabs,
-            token,
-            target,
-        })
+        Ok(Self { store, tabs, token })
     }
 
-    /// Fixture-only legacy/clock setup, excluded from measured samples. Acknowledge
-    /// this injection so it does not itself force a cold save before the action.
+    /// Prepare a recorded edit; fixture setup is excluded from measured samples.
     pub fn prepare(&mut self, scenario: &str) -> io::Result<()> {
-        let sql = match scenario {
-            "save_after_history_backfill" => {
-                Some("UPDATE buffer_versions SET text_digest=NULL WHERE id=?")
-            }
-            "periodic_snapshot_save" => Some(
-                "UPDATE buffer_versions SET created_at=0 WHERE temp_id=(SELECT temp_id FROM buffer_versions WHERE id=?)",
-            ),
-            _ => None,
-        };
-        if let Some(sql) = sql {
-            let target = self.target;
-            self.store.worker()?.call(move |db| {
-                block_on(async {
-                    let before = db.integer("SELECT total_changes()").await?;
-                    db.execute_cached(sql, [target]).await?;
-                    db.acknowledge_inventory_writes(before).await;
-                    Ok(())
-                })
-            })?;
-        }
-        if scenario.starts_with("save_after_") || scenario == "periodic_snapshot_save" {
+        if scenario.starts_with("save_after_") || scenario == "incremental_save" {
             let buffer = self.tabs[0].active_buffer_mut();
-            buffer.document_mut().insert_direct(1, "x");
+            if scenario == "save_after_branch" {
+                buffer
+                    .navigate_history(1)
+                    .map_err(|error| io::Error::other(format!("{error:?}")))?;
+            }
+            let text = format!("x{}", buffer.text());
+            buffer.document_mut().replace_exact_with_history(&text);
             buffer.is_dirty = true;
         }
         Ok(())
@@ -100,26 +77,17 @@ impl SessionMaintenanceFixture {
                     .push(CapturedClosedTab::capture(&archive, None));
                 self.store.persist_request(request)?;
             }
-            "save_after_history_backfill" => {
-                self.store
-                    .buffer_versions(&self.tabs[0].active_buffer().temp_id)?;
-            }
             "save_after_navigation" => {
-                let buffer = self.tabs[0].active_buffer();
-                self.store.navigate_version(
-                    HistoryCheckpoint {
-                        temp_id: buffer.temp_id.clone(),
-                        snapshot: buffer.document_snapshot(),
-                        history: buffer.document().exported_history(),
-                    },
-                    self.target,
-                )?;
+                self.tabs[0]
+                    .active_buffer_mut()
+                    .navigate_history(1)
+                    .map_err(|error| io::Error::other(format!("{error:?}")))?;
             }
-            "periodic_snapshot_save" => {}
+            "save_after_branch" | "incremental_save" => {}
             _ => return Err(io::Error::other("unknown session profile scenario")),
         }
         let action = start.elapsed().as_nanos();
-        if scenario.starts_with("save_after_") || scenario == "periodic_snapshot_save" {
+        if scenario.starts_with("save_after_") || scenario == "incremental_save" {
             let start = Instant::now();
             let profile = self.store.persist_profiled(&self.tabs, 0, 16.0, false)?;
             Ok((

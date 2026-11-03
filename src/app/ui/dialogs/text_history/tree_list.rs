@@ -111,7 +111,7 @@ pub(super) fn show(ui: &mut egui::Ui, buffer: &BufferState) -> Option<u64> {
         for index in range {
             let row = visible[index];
             let current = row.id == document.history_now();
-            ui.push_id((buffer.id, row.id), |ui| {
+            crate::app::ui::widget_ids::scope(ui, (buffer.id, row.id), |ui| {
                 ui.horizontal(|ui| {
                     ui.add_space((row.depth as f32 * 14.0).min(140.0));
                     if row.fork {

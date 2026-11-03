@@ -25,16 +25,11 @@ struct Prepared {
     state: Vec<u8>,
     tabs: Vec<Vec<u8>>,
     snapshots: Vec<CapturedSessionBuffer>,
-    recovery_points: Vec<super::super::capture::CapturedRecoveryPoint>,
     buffers: HashMap<String, RecoveryBuffer>,
     full_cleanup: bool,
     closed: Vec<super::closed::ClosedRow>,
     closed_changed: bool,
     old_closed: Vec<super::closed::ClosedRow>,
-    version_history: bool,
-    recovery_policy: crate::app::services::settings_store::RecoverySettings,
-    expired_versions: Vec<i64>,
-    navigation_roots: HashSet<i64>,
     chunk_checkpoints: HashMap<String, super::chunking::ChunkCheckpoint>,
 }
 impl Prepared {
@@ -54,9 +49,6 @@ impl Prepared {
         };
         let mut prepared = Self {
             state: serde_json::to_vec(&manifest).map_err(invalid)?,
-            version_history: request.version_history,
-            recovery_policy: request.recovery_policy,
-            expired_versions: request.expired_versions,
             ..Self::default()
         };
         for tab in request.tabs {
@@ -79,9 +71,6 @@ impl Prepared {
     fn push_tab(&mut self, mut tab: CapturedSessionTab) -> io::Result<(Vec<u8>, SessionTab)> {
         validation::validate_tab(&tab.session_tab)?;
         for buffer in &mut tab.session_tab.buffers {
-            if let Some((selected, back)) = buffer.snapshot_navigation {
-                self.navigation_roots.extend([selected, back]);
-            }
             let entries = std::mem::take(&mut buffer.text_history);
             let history = (!tab.preserve_existing || tab.discard_history).then_some(entries);
             if let Some(entries) = &history {
@@ -105,7 +94,6 @@ impl Prepared {
                 return Err(invalid("duplicate recovery content identity across tabs"));
             }
         }
-        self.recovery_points.extend(tab.recovery_points);
         let payload = serde_json::to_vec(&tab.session_tab).map_err(invalid)?;
         // Supplied snapshots are authoritative, independently of capture policy.
         for snapshot in tab.buffer_snapshots {
@@ -191,7 +179,6 @@ impl Database {
             .as_ref()
             .is_some_and(|inventory| inventory.full_cleanup_pending);
         self.prepare_history_changes(prepared).await?;
-        self.filter_committed_recovery_points(prepared).await?;
         prepared.snapshots.retain(|buffer| {
             self.revisions.get(&buffer.temp_id) != Some(&buffer.snapshot.revision_key())
         });
@@ -238,31 +225,9 @@ impl Database {
         Ok(())
     }
 
-    async fn filter_committed_recovery_points(&self, prepared: &mut Prepared) -> io::Result<()> {
-        // Captures can race their UI acknowledgement (or come from synchronous
-        // callers). Already committed undo tokens are not a reason to transact.
-        let mut new_points = Vec::new();
-        for point in prepared.recovery_points.drain(..) {
-            let existing = self
-                .query_collect(
-                    "SELECT id FROM buffer_versions WHERE temp_id=? AND source_token=?",
-                    params![point.temp_id.as_str(), format!("undo-{}", point.sequence)],
-                    |row| row.get::<i64>(0).map_err(error),
-                )
-                .await?;
-            if existing.is_empty() && !self.quarantined.contains_key(&point.temp_id) {
-                new_points.push(point);
-            }
-        }
-        prepared.recovery_points = new_points;
-        Ok(())
-    }
     fn has_changes(&self, prepared: &Prepared) -> bool {
-        self.recovery_policy.as_ref() != Some(&prepared.recovery_policy)
-            || prepared.full_cleanup
+        prepared.full_cleanup
             || prepared.closed_changed
-            || !prepared.recovery_points.is_empty()
-            || !prepared.expired_versions.is_empty()
             || !prepared.snapshots.is_empty()
             || self.state_cache != prepared.state
             || self.tab_cache != prepared.tabs
@@ -319,8 +284,6 @@ impl Database {
                 .into_iter()
                 .map(|buffer| (buffer.temp_id, buffer.snapshot.revision_key())),
         );
-        self.navigation_roots
-            .retain(|id, _| prepared.buffers.contains_key(id) || self.quarantined.contains_key(id));
         self.history_cache
             .retain(|id, _| prepared.buffers.contains_key(id));
         self.history_cache.extend(
@@ -328,7 +291,6 @@ impl Database {
                 buffer.history_fingerprints.map(|entries| (id, entries))
             }),
         );
-        self.recovery_policy = Some(prepared.recovery_policy);
         self.state_cache = prepared.state;
         self.tab_cache = prepared.tabs;
     }
@@ -349,8 +311,6 @@ impl Database {
         self.write_prepared_metadata(prepared).await?;
         profile.manifest_write_ns = start.elapsed().as_nanos();
         let start = Instant::now();
-        self.expire_prepared_versions(prepared, &mut removed_digests)
-            .await?;
         self.delete_stale_content(prepared, inventory, removed_digests)
             .await?;
         profile.stale_cleanup_ns = start.elapsed().as_nanos();
@@ -385,14 +345,6 @@ impl Database {
         removed_digests: &mut HashSet<Vec<u8>>,
         profile: &mut SessionPersistProfile,
     ) -> io::Result<()> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            .min(i64::MAX as u64) as i64;
-        for point in &prepared.recovery_points {
-            self.preserve_undo_snapshot(point, now).await?;
-        }
         for buffer in &prepared.snapshots {
             let checkpoint = self
                 .write_content(&buffer.temp_id, &buffer.snapshot, removed_digests, profile)
@@ -400,10 +352,6 @@ impl Database {
             prepared
                 .chunk_checkpoints
                 .insert(buffer.temp_id.clone(), checkpoint);
-            if prepared.version_history {
-                self.checkpoint_version(&buffer.temp_id, now, &buffer.snapshot)
-                    .await?;
-            }
         }
         Ok(())
     }
@@ -429,30 +377,6 @@ impl Database {
                 .await?;
         }
         Ok(())
-    }
-
-    async fn expire_prepared_versions(
-        &self,
-        prepared: &Prepared,
-        removed_digests: &mut HashSet<Vec<u8>>,
-    ) -> io::Result<()> {
-        for &id in &prepared.expired_versions {
-            self.collect_digests(
-                "SELECT digest FROM version_parts WHERE version_id=?",
-                [id],
-                removed_digests,
-            )
-            .await?;
-            self.execute_cached("DELETE FROM buffer_versions WHERE id=?", [id])
-                .await?;
-        }
-        self.prune_recovery_points(
-            &prepared.recovery_policy,
-            &prepared.closed,
-            &prepared.navigation_roots,
-            removed_digests,
-        )
-        .await
     }
 
     async fn delete_stale_content(
@@ -493,23 +417,21 @@ impl Database {
             .iter()
             .filter(|id| !prepared.buffers.contains_key(*id) && !self.quarantined.contains_key(*id))
         {
-            self.collect_version_digests(id, &mut removed_digests)
-                .await?;
             self.execute_cached("DELETE FROM buffer_ids WHERE id=?", [id.as_str()])
                 .await?;
         }
         // Quarantined and shared parts remain GC roots even after live tabs close.
         if prepared.full_cleanup {
             self.execute_cached(
-                "DELETE FROM blobs WHERE digest NOT IN (SELECT digest FROM parts UNION SELECT digest FROM version_parts)",
+                "DELETE FROM blobs WHERE digest NOT IN (SELECT digest FROM parts)",
                 (),
             )
             .await?;
         } else {
             for digest in removed_digests {
                 self.execute_cached(
-                    "DELETE FROM blobs WHERE digest=? AND NOT EXISTS(SELECT 1 FROM parts WHERE digest=?) AND NOT EXISTS(SELECT 1 FROM version_parts WHERE digest=?)",
-                    params![digest.as_slice(), digest.as_slice(), digest.as_slice()],
+                    "DELETE FROM blobs WHERE digest=? AND NOT EXISTS(SELECT 1 FROM parts WHERE digest=?)",
+                    params![digest.as_slice(), digest.as_slice()],
                 ).await?;
             }
         }

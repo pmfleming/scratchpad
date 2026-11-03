@@ -474,10 +474,6 @@ impl PieceTreeLite {
         self.runtime.generation()
     }
 
-    pub(crate) fn share_storage_from(&mut self, current: &Self) {
-        self.storage = current.storage.clone();
-    }
-
     fn line_samples_for_piece(&self, piece: &Piece, piece_text: &str) -> Arc<Vec<PieceLineSample>> {
         let span = ByteSpan {
             buffer: piece.buffer,

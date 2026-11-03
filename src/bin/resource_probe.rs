@@ -219,10 +219,8 @@ fn run_edited_buffer_search_preview_cycle(piece_count: usize) -> StepOutcome {
 fn run_provenance_retained_memory_cycle(edit_count: usize) -> StepOutcome {
     let mut document = TextDocument::new(String::new());
     document.set_history_budget(TextHistoryBudget {
-        per_file_entry_limit: 100,
         per_file_byte_budget: MB as u64,
         aggregate_byte_budget: 4 * MB as u64,
-        persisted_payload_budget: MB as u64,
         derived_from_memory: false,
     });
 

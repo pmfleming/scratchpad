@@ -1,9 +1,8 @@
 mod persistence;
 
 use super::super::history::{
-    CoalescedEdit, OperationDirection, TextDocumentEditOperation, TextHistoryApplyError,
-    coalesced_local_edit_record, deleted_spans_or_payload, entry_sealed_by_divider,
-    operation_summary,
+    CoalescedEdit, OperationDirection, TextDocumentEditOperation, coalesced_local_edit_record,
+    deleted_spans_or_payload, entry_sealed_by_divider, operation_summary,
 };
 use super::super::{
     ByteSpan, PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry, PieceHistoryFlags,
@@ -25,22 +24,6 @@ impl TextDocument {
             OperationDirection::Redo => self.history.tree.redo_target()?,
         };
         self.navigate_history(target).ok()
-    }
-
-    pub(super) fn apply_text_history_entry(
-        &mut self,
-        entry_id: u64,
-        direction: OperationDirection,
-    ) -> Result<CursorRange, TextHistoryApplyError> {
-        let target = match direction {
-            OperationDirection::Undo => self
-                .history
-                .tree
-                .parent(entry_id)
-                .ok_or(TextHistoryApplyError::OutOfBounds)?,
-            OperationDirection::Redo => entry_id,
-        };
-        self.navigate_history(target)
     }
 
     pub(super) fn operation_from_history_entry(

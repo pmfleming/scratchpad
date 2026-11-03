@@ -72,25 +72,6 @@ impl PersistedHistoryEdit {
         }
     }
 
-    pub fn drop_payload(&mut self) {
-        match self {
-            Self::Inserted {
-                inserted_payload, ..
-            } => *inserted_payload = None,
-            Self::Deleted {
-                deleted_payload, ..
-            } => *deleted_payload = None,
-            Self::Replaced {
-                deleted_payload,
-                inserted_payload,
-                ..
-            } => {
-                *deleted_payload = None;
-                *inserted_payload = None;
-            }
-        }
-    }
-
     #[must_use]
     pub fn has_all_payloads(&self) -> bool {
         match self {
@@ -158,13 +139,6 @@ impl PersistedHistoryEntry {
             .iter()
             .map(PersistedHistoryEdit::payload_bytes)
             .sum()
-    }
-
-    pub fn drop_payloads(&mut self) {
-        for edit in &mut self.edits {
-            edit.drop_payload();
-        }
-        self.flags.replayable = false;
     }
 
     pub fn has_all_payloads(&self) -> bool {

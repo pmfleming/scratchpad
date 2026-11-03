@@ -62,16 +62,22 @@ fn replay_across_a_barrier_is_atomic_in_both_directions() {
     document.history.entries[20].flags.replayable = false;
     let revision = document.revision_key();
     let history_revision = document.history_revision_counter();
-    assert!(document.apply_text_history_undo(first).is_err());
+    assert!(
+        document
+            .navigate_history(document.history.tree.parent(first).unwrap())
+            .is_err()
+    );
     assert_eq!(document.extract_text(), "λ".repeat(40));
     assert!(document.revision_key() == revision);
     assert_eq!(document.history_revision_counter(), history_revision);
     assert!(document.history_entries().iter().all(|e| !e.is_undone()));
 
     document.history.entries[20].flags.replayable = true;
-    document.apply_text_history_undo(first).unwrap();
+    document
+        .navigate_history(document.history.tree.parent(first).unwrap())
+        .unwrap();
     document.history.entries[20].flags.replayable = false;
-    assert!(document.apply_text_history_redo(last).is_err());
+    assert!(document.navigate_history(last).is_err());
     assert_eq!(document.extract_text(), "");
     assert!(document.history_entries().iter().all(|e| e.is_undone()));
 }

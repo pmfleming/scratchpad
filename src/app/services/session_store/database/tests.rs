@@ -7,9 +7,8 @@ pub(super) fn tab(text: &str) -> WorkspaceTab {
     WorkspaceTab::new(BufferState::new("note".into(), text.into(), None))
 }
 pub(super) fn request(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
-    let mut request = SessionPersistRequest::capture(tabs, 0, 16.0, false);
+    let request = SessionPersistRequest::capture(tabs, 0, 16.0, false);
     // Most low-level tests isolate live snapshot GC; version retention has its own tests.
-    request.version_history = false;
     request
 }
 pub(super) fn insert(tab: &mut WorkspaceTab, at: usize, text: &str) {

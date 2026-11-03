@@ -76,6 +76,15 @@ fn navigate(ctx: &egui::Context, app: &mut ScratchpadApp, buffer: u64, node: u64
     {
         accessors::consume_focus_request(app, view);
     }
+    if result && let Some(tab) = app.tab_manager.active_tab() {
+        let buffer = tab.active_buffer();
+        let offset = tab
+            .layout
+            .active_view()
+            .and_then(|view| view.cursor_range)
+            .map_or(0, |selection| selection.primary.index);
+        crate::app::ui::editor_content::native_editor::history_feedback::mark(ctx, buffer, offset);
+    }
     ctx.request_repaint();
     result
 }
@@ -257,10 +266,12 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
                     }
                 });
         }
-        let response = ui.interact(
+        let response = crate::app::ui::widget_ids::interact(
+            ui,
             ui.min_rect(),
             focus_id(),
             egui::Sense::focusable_noninteractive(),
+            "history-focus",
         );
         response
             .widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListBox, true, "File history"));

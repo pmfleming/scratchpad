@@ -8,7 +8,6 @@ use crate::app::services::settings_store::{
 };
 use crate::app::shortcut_keymap::InvalidShortcutOverride;
 use crate::app::startup::StartupOptions;
-use crate::app::text_history::TextHistoryCache;
 use eframe::egui;
 use search_state::SearchState;
 use std::collections::{HashSet, VecDeque};
@@ -140,7 +139,6 @@ pub struct ScratchpadAppState {
     pub(crate) chrome: ChromeState,
     pub(crate) settings_tab_index: usize,
     pub(crate) pending_settings_toml_refresh: Option<BufferId>,
-    pub(crate) text_history_cache: TextHistoryCache,
     pub(crate) search_state: SearchState,
     pub(crate) workspace_selection: WorkspaceSelectionState,
     pub(crate) pending_open_file_paths: HashSet<CanonicalPathKey>,

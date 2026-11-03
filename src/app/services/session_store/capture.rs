@@ -15,9 +15,6 @@ pub(crate) struct SessionPersistRequest {
     pub(super) word_wrap: bool,
     pub(super) tabs: Vec<CapturedSessionTab>,
     pub(crate) closed_tabs: Vec<CapturedClosedTab>,
-    pub(super) version_history: bool,
-    pub(crate) recovery_policy: crate::app::services::settings_store::RecoverySettings,
-    pub(super) expired_versions: Vec<i64>,
 }
 
 #[derive(Clone)]
@@ -31,7 +28,6 @@ pub(crate) struct CapturedClosedTab {
 pub(super) struct CapturedSessionTab {
     pub(super) session_tab: SessionTab,
     pub(super) buffer_snapshots: Vec<CapturedSessionBuffer>,
-    pub(super) recovery_points: Vec<CapturedRecoveryPoint>,
     pub(super) preserve_existing: bool,
     pub(super) discard_history: bool,
 }
@@ -42,13 +38,6 @@ pub(super) struct CapturedSessionBuffer {
     pub(super) snapshot: DocumentSnapshot,
 }
 
-#[derive(Clone)]
-pub(super) struct CapturedRecoveryPoint {
-    pub temp_id: String,
-    pub sequence: u64,
-    pub snapshot: DocumentSnapshot,
-}
-
 impl SessionPersistRequest {
     pub(crate) fn close_tab(&mut self, index: usize, closed: CapturedClosedTab) {
         self.tabs.remove(index);
@@ -57,14 +46,6 @@ impl SessionPersistRequest {
             .saturating_sub(usize::from(index < self.active_tab_index))
             .min(self.tabs.len().saturating_sub(1));
         self.closed_tabs.push(closed);
-    }
-
-    pub(crate) fn recovery_tokens(&self) -> Vec<(String, u64)> {
-        self.tabs
-            .iter()
-            .flat_map(|tab| &tab.recovery_points)
-            .map(|point| (point.temp_id.clone(), point.sequence))
-            .collect()
     }
 
     pub(crate) fn capture(
@@ -81,9 +62,6 @@ impl SessionPersistRequest {
             word_wrap,
             tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
             closed_tabs: Vec::new(),
-            version_history: true,
-            recovery_policy: crate::app::services::settings_store::RecoverySettings::default(),
-            expired_versions: Vec::new(),
         }
     }
 
@@ -102,9 +80,6 @@ impl SessionPersistRequest {
             font_size,
             word_wrap,
             closed_tabs: Vec::new(),
-            version_history: true,
-            recovery_policy: crate::app::services::settings_store::RecoverySettings::default(),
-            expired_versions: Vec::new(),
             tabs: tabs
                 .iter()
                 .enumerate()
@@ -162,7 +137,6 @@ impl CapturedSessionTab {
         Self {
             session_tab: SessionTab::from(session_tab),
             buffer_snapshots: Vec::new(),
-            recovery_points: Vec::new(),
             preserve_existing: true,
             discard_history: false,
         }
@@ -194,19 +168,6 @@ impl CapturedSessionTab {
                 root_pane: SessionPaneNode::from(tab.layout.root_pane()),
             },
             buffer_snapshots,
-            recovery_points: tab
-                .buffers()
-                .filter_map(|buffer| {
-                    buffer
-                        .document()
-                        .recovery_snapshot()
-                        .map(|(sequence, snapshot)| CapturedRecoveryPoint {
-                            temp_id: buffer.temp_id.clone(),
-                            sequence,
-                            snapshot,
-                        })
-                })
-                .collect(),
             preserve_existing: false,
             discard_history: false,
         }
