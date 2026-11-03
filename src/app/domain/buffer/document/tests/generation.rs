@@ -2,7 +2,7 @@ use super::TextDocument;
 use super::helpers::insert_edit;
 
 #[test]
-fn history_token_invalidates_replay_clear_prune_restore_and_replacement() {
+fn history_token_invalidates_replay_clear_restore_and_replacement() {
     let mut document = TextDocument::new("base".into());
     let original = document.history_token();
     insert_edit(&mut document, 0, "a");
@@ -16,9 +16,6 @@ fn history_token_invalidates_replay_clear_prune_restore_and_replacement() {
     let before = document.history_token();
     let history = document.exported_history();
     document.restore_exported_history(history);
-    assert_ne!(document.history_token(), before);
-    let before = document.history_token();
-    document.drop_oldest_history_entry();
     assert_ne!(document.history_token(), before);
     let before = document.history_token();
     document.clear_operation_history();

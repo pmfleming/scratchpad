@@ -64,7 +64,7 @@ macro_rules! assert_undo_restores_text {
 }
 
 #[test]
-fn large_edit_root_checkpoint_preserves_undo_redo_payload_access() {
+fn large_edit_preserves_undo_redo_payload_access() {
     let mut document = TextDocument::new("base".to_owned());
     let inserted = "x".repeat(super::super::history::TEXT_HISTORY_ROOT_CHECKPOINT_MIN_BYTES);
     let inserted_chars = inserted.chars().count();
@@ -83,7 +83,6 @@ fn large_edit_root_checkpoint_preserves_undo_redo_payload_access() {
         PieceSource::Paste,
     );
 
-    assert!(document.history_entries()[0].checkpoint_before.is_some());
     assert_eq!(
         document.undo_last_operation(),
         Some(CursorRange::one(CharCursor::new(4)))
@@ -91,7 +90,7 @@ fn large_edit_root_checkpoint_preserves_undo_redo_payload_access() {
     assert_eq!(document.extract_text(), "base");
     assert_eq!(
         document
-            .operation_from_history_entry(&document.history_entries()[0])
+            .operation_from_history_entry(&document.history_entries()[1])
             .edits[0]
             .inserted_text,
         inserted
@@ -162,8 +161,8 @@ fn adjacent_backspaces_coalesce_into_one_delete_entry() {
     delete_edit(&mut document, 1..2, 2, 1);
 
     assert_eq!(document.extract_text(), "a");
-    assert_eq!(document.operation_undo_depth(), 1);
-    let record = history_record(&document);
+    assert_eq!(document.operation_undo_depth(), 2);
+    let record = entry_record(&document, 1);
     assert_eq!(record.edits[0].start_char, 1);
     assert_eq!(record.edits[0].deleted_text, "bcd");
 
@@ -385,7 +384,7 @@ fn target_history_undo_rejects_when_current_text_no_longer_matches_entry() {
 }
 
 #[test]
-fn undo_then_typing_clears_redo_without_coalescing_into_survivor() {
+fn undo_then_typing_preserves_alternative_without_coalescing_into_ancestor() {
     let mut document = empty_document!();
     insert_isolated_sequence!(&mut document, "abc");
 
@@ -396,7 +395,10 @@ fn undo_then_typing_clears_redo_without_coalescing_into_survivor() {
     assert_eq!(document.operation_undo_depth(), 3);
     assert_eq!(document.operation_redo_depth(), 0);
     assert_entry_inserted_text!(&document, 1, "b");
-    assert_entry_inserted_text!(&document, 2, "x");
+    assert_entry_inserted_text!(&document, 2, "c");
+    assert_entry_inserted_text!(&document, 3, "x");
+    document.navigate_history(3).unwrap();
+    assert_eq!(document.extract_text(), "abc");
 }
 
 #[test]
@@ -461,115 +463,38 @@ fn no_op_edits_are_dropped_from_multi_edit_records() {
     );
 
     assert_eq!(document.extract_text(), "a");
-    assert_eq!(document.operation_undo_depth(), 1);
-    let record = history_record(&document);
+    assert_eq!(document.operation_undo_depth(), 2);
+    let record = entry_record(&document, 1);
     assert_eq!(record.edits.len(), 1);
     assert_eq!(record.edits[0].deleted_text, "b");
     assert_eq!(
-        document.history_entries()[0].visible_generation_before,
+        document.history_entries()[1].visible_generation_before,
         before
     );
 }
 
 #[test]
-fn per_file_entry_limit_evicts_oldest_entries() {
+fn memory_and_payload_budgets_do_not_delete_durable_changes() {
     let mut document = empty_document!();
     document.set_history_budget(TextHistoryBudget {
         per_file_entry_limit: 100,
-        per_file_byte_budget: 64 * 1024 * 1024,
-        aggregate_byte_budget: 64 * 1024 * 1024,
-        persisted_payload_budget: 64 * 1024 * 1024,
+        per_file_byte_budget: 1 << 20,
+        aggregate_byte_budget: 1 << 20,
+        persisted_payload_budget: 0,
         derived_from_memory: false,
     });
-
-    for index in 0..105 {
-        document.history.latest_update_at = None;
-        insert_edit(&mut document, index, "x");
-    }
-
-    assert_eq!(document.history_entries().len(), 100);
-    assert_eq!(document.operation_undo_depth(), 100);
-    assert_eq!(document.extract_text(), "x".repeat(105));
-    let first_record = entry_record(&document, 0);
-    assert_eq!(first_record.edits[0].start_char, 5);
-    let (token, snapshot) = document
-        .recovery_snapshot()
-        .expect("pre-prune recovery point");
-    assert_eq!(snapshot.extract_text(), "");
-    document.acknowledge_recovery_snapshot(token + 1);
-    assert!(document.recovery_snapshot().is_some());
-    document.acknowledge_recovery_snapshot(token);
-    assert!(document.recovery_snapshot().is_none());
-}
-
-#[test]
-fn budget_shrink_eviction_bumps_history_revision() {
-    let mut document = empty_document!();
     insert_isolated_sequence!(&mut document, &"x".repeat(105));
-    let revision_before = document.history_revision_counter();
-
-    document.set_history_budget(TextHistoryBudget {
-        per_file_entry_limit: 100,
-        per_file_byte_budget: 64 * 1024 * 1024,
-        aggregate_byte_budget: 64 * 1024 * 1024,
-        persisted_payload_budget: 64 * 1024 * 1024,
-        derived_from_memory: false,
-    });
-
-    assert_eq!(document.history_entries().len(), 100);
-    assert_ne!(document.history_revision_counter(), revision_before);
-}
-
-#[test]
-fn compaction_keeps_retained_history_replayable() {
-    let mut document = empty_document!();
-    insert_isolated_sequence!(&mut document, "abc");
-
-    document.drop_oldest_history_entry();
-    assert_eq!(document.recovery_snapshot().unwrap().1.extract_text(), "");
-
-    assert_eq!(document.extract_text(), "abc");
-    document.undo_last_operation();
-    assert_eq!(document.extract_text(), "ab");
-    document.redo_last_operation();
-    assert_eq!(document.extract_text(), "abc");
-}
-
-#[test]
-fn computed_recovery_boundary_is_cached_and_acknowledged_until_history_changes() {
-    let mut document = TextDocument::new("base".into());
-    document.set_history_budget(TextHistoryBudget {
-        per_file_entry_limit: 4096,
-        per_file_byte_budget: 64 << 20,
-        aggregate_byte_budget: 64 << 20,
-        persisted_payload_budget: 1 << 20,
-        derived_from_memory: false,
-    });
-    insert_edit(&mut document, 0, &"x".repeat((1 << 20) + 1));
-    let (token, first) = document.recovery_snapshot().unwrap();
-    assert_eq!(first.extract_text(), "base");
-    let (_, repeated) = document.recovery_snapshot().unwrap();
+    assert_eq!(document.history_entries().len(), 105);
     assert!(
-        first.revision_key() == repeated.revision_key(),
-        "must reuse the reconstructed tree"
+        document
+            .exported_history()
+            .iter()
+            .all(|e| e.has_all_payloads())
     );
-    document.acknowledge_recovery_snapshot(token + 1);
-    assert!(document.recovery_snapshot().is_some());
-    document.acknowledge_recovery_snapshot(token);
-    assert!(document.recovery_snapshot().is_none());
-    assert!(document.recovery_snapshot().is_none());
-    insert_edit(&mut document, 0, "new");
-    assert!(
-        document.recovery_snapshot().is_some(),
-        "history edits invalidate the cache"
-    );
-    let mut budget = document.history.budget;
-    budget.persisted_payload_budget = 64 << 20;
-    document.set_history_budget(budget);
-    assert!(
-        document.recovery_snapshot().is_none(),
-        "budget changes invalidate the cache"
-    );
+    document.navigate_history(0).unwrap();
+    assert_eq!(document.extract_text(), "");
+    document.navigate_history(105).unwrap();
+    assert_eq!(document.extract_text(), "x".repeat(105));
 }
 
 #[test]
@@ -617,10 +542,10 @@ fn backspace_across_hard_dividers_starts_new_entries() {
     delete_edit(&mut document, 0..1, 1, 0);
 
     assert_eq!(document.extract_text(), "");
-    assert_eq!(document.operation_undo_depth(), 3);
-    assert_eq!(entry_record(&document, 0).edits[0].deleted_text, "b");
-    assert_eq!(entry_record(&document, 1).edits[0].deleted_text, ".");
-    assert_eq!(entry_record(&document, 2).edits[0].deleted_text, "a");
+    assert_eq!(document.operation_undo_depth(), 4);
+    assert_eq!(entry_record(&document, 1).edits[0].deleted_text, "b");
+    assert_eq!(entry_record(&document, 2).edits[0].deleted_text, ".");
+    assert_eq!(entry_record(&document, 3).edits[0].deleted_text, "a");
 }
 
 #[test]
@@ -632,10 +557,10 @@ fn forward_delete_across_hard_divider_starts_new_entries() {
     delete_edit(&mut document, 0..1, 0, 0);
 
     assert_eq!(document.extract_text(), "");
-    assert_eq!(document.operation_undo_depth(), 3);
-    assert_eq!(entry_record(&document, 0).edits[0].deleted_text, "a");
-    assert_eq!(entry_record(&document, 1).edits[0].deleted_text, ".");
-    assert_eq!(entry_record(&document, 2).edits[0].deleted_text, "b");
+    assert_eq!(document.operation_undo_depth(), 4);
+    assert_eq!(entry_record(&document, 1).edits[0].deleted_text, "a");
+    assert_eq!(entry_record(&document, 2).edits[0].deleted_text, ".");
+    assert_eq!(entry_record(&document, 3).edits[0].deleted_text, "b");
 }
 
 #[test]
@@ -646,8 +571,8 @@ fn adjacent_pre_burst_backspace_coalesces_as_replacement() {
     delete_edit(&mut document, 0..1, 2, 0);
 
     assert_eq!(document.extract_text(), "a");
-    assert_eq!(document.operation_undo_depth(), 1);
-    let record = history_record(&document);
+    assert_eq!(document.operation_undo_depth(), 2);
+    let record = entry_record(&document, 1);
     assert_eq!(record.edits[0].start_char, 0);
     assert_eq!(record.edits[0].deleted_text, "z");
     assert_eq!(record.edits[0].inserted_text, "a");
@@ -659,20 +584,19 @@ fn adjacent_pre_burst_backspace_coalesces_as_replacement() {
 }
 
 #[test]
-fn imported_history_keeps_only_contiguous_undone_suffix_redoable() {
+fn tree_position_is_authoritative_when_restoring_history() {
     let mut source = empty_document!();
     insert_isolated_sequence!(&mut source, "abc");
     source.history.entries[0].flags.undone = true;
-    source.history.entries[1].flags.undone = false;
-    source.history.entries[2].flags.undone = true;
     let exported = source.exported_history();
-
-    let mut restored = TextDocument::new("abc".to_owned());
+    let mut restored = TextDocument::new("abc".into());
     restored.restore_exported_history(exported);
-
-    assert!(!restored.history_entries()[0].is_undone());
-    assert!(!restored.history_entries()[0].flags.replayable);
-    assert!(!restored.history_entries()[1].is_undone());
-    assert!(restored.history_entries()[2].is_undone());
-    assert_eq!(restored.operation_redo_depth(), 1);
+    assert_eq!(restored.history_now(), 3);
+    assert_eq!(restored.operation_redo_depth(), 0);
+    assert!(
+        restored
+            .history_entries()
+            .iter()
+            .all(|e| !e.is_undone() && e.flags.replayable)
+    );
 }

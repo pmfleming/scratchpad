@@ -39,20 +39,25 @@ fn tree_rows_and_positions_round_trip_transactionally() {
             let at = tab.active_buffer().document().piece_tree().len_chars();
             super::tests::insert(&mut tab, at, text);
         }
-        let mut request = request(&[tab]);
-        let entries = &mut request.tabs[0].session_tab.buffers[0].text_history;
-        assert_eq!(entries.len(), 3);
-        entries[2].parent_id = entries[0].id;
-        for entry in entries.iter_mut() {
-            entry.current = false;
-        }
-        entries[0].current = true;
+        let document = tab.active_buffer_mut().document_mut();
+        document.navigate_history(1).unwrap();
+        document
+            .replace_char_ranges_with_undo(
+                &[(1..1, "branch".into())],
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap();
+        document.navigate_history(1).unwrap();
+        let request = request(&[tab]);
+        let entries = &request.tabs[0].session_tab.buffers[0].text_history;
+        assert_eq!(entries.len(), 4);
         let expected = entries.clone();
         let id = request.tabs[0].session_tab.buffers[0].temp_id.clone();
         db.persist(request, 1).await.unwrap();
         assert_eq!(db.read_history(&id).await.unwrap(), expected);
         assert_eq!(
-            db.integer("SELECT count(*) FROM document_history WHERE now_id=1 AND tip_id=3")
+            db.integer("SELECT count(*) FROM document_history WHERE now_id=1 AND tip_id=4")
                 .await
                 .unwrap(),
             1
@@ -61,6 +66,12 @@ fn tree_rows_and_positions_round_trip_transactionally() {
         drop(db);
         let db = Database::open(root.path()).await.unwrap();
         assert_eq!(db.read_history(&id).await.unwrap(), expected);
+        let mut document = crate::app::domain::TextDocument::new("a".into());
+        document.restore_exported_history(db.read_history(&id).await.unwrap());
+        document.redo_last_operation().unwrap();
+        assert_eq!(document.extract_text(), "abranch");
+        document.navigate_history(3).unwrap();
+        assert_eq!(document.extract_text(), "abc");
         assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 10);
     });
 }

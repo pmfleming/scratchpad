@@ -1,10 +1,9 @@
 use super::super::super::history::{persist_cursor_range, restore_cursor_range};
 use super::super::super::{
-    ByteSpan, PersistedHistoryEdit, PersistedHistoryEntry, PieceHistoryEdit, PieceHistoryEdits,
+    PersistedHistoryEdit, PersistedHistoryEntry, PieceHistoryEdit, PieceHistoryEdits,
     PieceHistoryEntry, PieceSource, register_text_history_global_seq,
 };
 use super::super::TextDocument;
-use crate::app::capacity_metrics;
 use std::sync::Arc;
 
 impl TextDocument {
@@ -16,18 +15,8 @@ impl TextDocument {
             id: entry.id,
             parent_id: entry.parent_id,
             edited_at: entry.edited_at,
-            current: self
-                .history
-                .entries
-                .iter()
-                .rev()
-                .find(|e| !e.is_undone())
-                .is_some_and(|e| e.id == entry.id),
-            selected_tip: self
-                .history
-                .entries
-                .last()
-                .is_some_and(|e| e.id == entry.id),
+            current: self.history.tree.now() == entry.id,
+            selected_tip: self.history.tree.tip() == entry.id,
             global_seq: entry.global_seq,
             source: entry.source,
             visible_generation_before: entry.visible_generation_before,
@@ -73,69 +62,6 @@ impl TextDocument {
             flags,
             previous_selection: restore_cursor_range(persisted.previous_selection),
             next_selection: restore_cursor_range(persisted.next_selection),
-            checkpoint_before: None,
-            checkpoint_after: None,
-        }
-    }
-
-    pub(in crate::app::domain::buffer::document) fn enforce_history_budget(&mut self) {
-        let mut remove_count = self
-            .history
-            .entries
-            .len()
-            .saturating_sub(self.history.budget.per_file_entry_limit);
-        let mut retained_bytes = self.history.byte_usage;
-        for (index, entry) in self.history.entries.iter().enumerate() {
-            if index < remove_count {
-                retained_bytes = retained_bytes.saturating_sub(entry.byte_cost());
-                continue;
-            }
-            if retained_bytes as u64 <= self.history.budget.per_file_byte_budget {
-                break;
-            }
-            retained_bytes = retained_bytes.saturating_sub(entry.byte_cost());
-            remove_count = index + 1;
-        }
-
-        if remove_count > 0 {
-            self.preserve_undo_boundary();
-            let removed_entries = self
-                .history
-                .entries
-                .drain(0..remove_count)
-                .collect::<Vec<_>>();
-            for removed in removed_entries {
-                let cost = removed.byte_cost();
-                self.history.byte_usage = self.history.byte_usage.saturating_sub(cost);
-                self.remove_history_depth(&removed);
-                capacity_metrics::record_history_eviction_per_file(cost);
-            }
-            self.advance_history_revision();
-            self.compact_history_storage();
-        }
-    }
-
-    pub(in crate::app::domain::buffer::document) fn compact_history_storage(&mut self) {
-        let mut spans = self.history_spans();
-        for entry in &mut self.history.entries {
-            entry.checkpoint_before = None;
-            entry.checkpoint_after = None;
-        }
-        Arc::make_mut(&mut self.content.piece_tree).compact_add_buffer(&mut spans);
-        self.replace_history_spans(spans);
-    }
-
-    pub(in crate::app::domain::buffer::document) fn normalize_imported_redo_state(&mut self) {
-        let mut in_undone_suffix = true;
-        for entry in self.history.entries.iter_mut().rev() {
-            if in_undone_suffix && entry.is_undone() {
-                continue;
-            }
-            in_undone_suffix = false;
-            if entry.is_undone() {
-                entry.flags.undone = false;
-                entry.flags.replayable = false;
-            }
         }
     }
 
@@ -150,39 +76,5 @@ impl TextDocument {
     ) -> PieceHistoryEdit {
         let tree = Arc::make_mut(&mut self.content.piece_tree);
         edit.into_piece(|text| tree.append_history_text(text, source))
-    }
-
-    fn history_spans(&self) -> Vec<ByteSpan> {
-        self.history
-            .entries
-            .iter()
-            .flat_map(|entry| entry.edits.iter())
-            .flat_map(PieceHistoryEdit::spans)
-            .collect()
-    }
-
-    fn replace_history_spans(&mut self, spans: Vec<ByteSpan>) {
-        let expected = self.history_spans().len();
-        debug_assert_eq!(
-            expected,
-            spans.len(),
-            "history span replacement count mismatch"
-        );
-        let mut spans = spans.into_iter();
-        for entry in &mut self.history.entries {
-            for edit in &mut entry.edits {
-                edit.each_span_mut(|slot| {
-                    if let Some(next) = spans.next() {
-                        *slot = next;
-                    } else {
-                        debug_assert!(false, "history span replacement iterator ran short");
-                    }
-                });
-            }
-        }
-        debug_assert!(
-            spans.next().is_none(),
-            "history span replacement iterator had extra spans"
-        );
     }
 }

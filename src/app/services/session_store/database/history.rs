@@ -131,7 +131,7 @@ impl Database {
         let tip = entries.iter().find(|e| e.selected_tip).map_or(0, |e| e.id);
         let latest = entries
             .iter()
-            .filter(|e| e.source != crate::app::domain::PieceSource::Load)
+            .filter(|e| e.edited_at != 0)
             .max_by_key(|e| e.global_seq);
         let edited_at = latest.map_or(0, |e| e.edited_at);
         let edit_seq = latest.map_or(0, |e| e.global_seq);

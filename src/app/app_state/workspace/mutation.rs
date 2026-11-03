@@ -131,6 +131,32 @@ pub fn apply_text_history_to_entry(
     entry_id: u64,
     follow_focus: bool,
 ) -> bool {
+    let Some(target) = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .find_map(|tab| tab.buffer_by_id(buffer_id))
+        .and_then(|buffer| {
+            buffer
+                .document()
+                .history_entries()
+                .iter()
+                .find(|e| e.id == entry_id)
+        })
+        .map(|e| if e.is_undone() { e.id } else { e.parent_id })
+    else {
+        return false;
+    };
+    navigate_text_history(app, buffer_id, target, follow_focus)
+}
+
+pub(crate) fn navigate_text_history(
+    app: &mut ScratchpadApp,
+    buffer_id: BufferId,
+    entry_id: u64,
+    follow_focus: bool,
+) -> bool {
     let Some(tab_index) = tab_index_for_buffer(app, buffer_id) else {
         app.state.status.set_error_status_in_domain(
             StatusDomain::History,
@@ -138,41 +164,12 @@ pub fn apply_text_history_to_entry(
         );
         return false;
     };
-    let target = app.tab_manager.tabs.as_slice()[tab_index]
-        .buffer_by_id(buffer_id)
-        .and_then(|buffer| {
-            buffer
-                .document()
-                .history_entries()
-                .iter()
-                .find(|entry| entry.id == entry_id)
-        })
-        .map(|entry| (!entry.is_undone(), entry.flags.replayable));
-    let Some((undo, replayable)) = target else {
-        app.state.status.set_error_status_in_domain(
-            StatusDomain::History,
-            "Text history entry is no longer available.",
-        );
-        return false;
-    };
-    if !replayable {
-        app.state.status.set_error_status_in_domain(
-            StatusDomain::History,
-            "Text history entry is not replayable in that direction.",
-        );
-        return false;
-    }
-
     let (selection, text_metadata_refresh) = {
         let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
         let Some(buffer) = tab.buffer_by_id_mut(buffer_id) else {
             return false;
         };
-        let result = if undo {
-            buffer.apply_text_history_undo(entry_id)
-        } else {
-            buffer.apply_text_history_redo(entry_id)
-        };
+        let result = buffer.navigate_history(entry_id);
         if let Ok(selection) = result {
             // Tool navigation updates an already visible scrubber. Automatic
             // opening belongs to editor undo/redo, not rail hover.

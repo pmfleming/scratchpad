@@ -18,6 +18,7 @@ pub enum BufferFreshness {
 
 impl BufferState {
     pub fn sync_to_disk_state(&mut self, disk_state: Option<DiskFileState>) {
+        self.document.seal_history_group();
         self.disk_content_digest =
             (!self.is_dirty && disk_state.is_some()).then(|| self.document().content_digest());
         self.set_disk_state(disk_state, BufferFreshness::InSync);
@@ -43,7 +44,25 @@ impl BufferState {
     }
 
     pub fn mark_dirty_after_local_edit(&mut self) {
-        self.is_dirty = true;
+        let navigating = self
+            .refresh
+            .pending_text_history_event
+            .as_ref()
+            .is_some_and(|(token, event)| {
+                *token == self.document.history_token()
+                    && matches!(
+                        event,
+                        super::TextHistoryEvent::Replay | super::TextHistoryEvent::Navigate
+                    )
+            });
+        self.is_dirty = if navigating {
+            self.disk_content_digest.as_ref().map_or(
+                self.path.is_some() || self.document.piece_tree().len_chars() != 0,
+                |saved| *saved != self.document.content_digest(),
+            )
+        } else {
+            true
+        };
         if self.freshness == BufferFreshness::AutoReloaded {
             self.freshness = BufferFreshness::InSync;
         }

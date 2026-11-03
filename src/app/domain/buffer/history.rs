@@ -18,7 +18,6 @@ use super::piece_tree::PieceTreeLite;
 use crate::app::domain::CursorRange;
 use smallvec::SmallVec;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub type PieceHistoryEdits = SmallVec<[PieceHistoryEdit; 1]>;
@@ -28,6 +27,7 @@ static NEXT_TEXT_HISTORY_GLOBAL_SEQ: AtomicU64 = AtomicU64::new(1);
 pub(crate) const TEXT_HISTORY_COALESCE_WINDOW: std::time::Duration =
     std::time::Duration::from_millis(1200);
 pub(crate) const TEXT_HISTORY_PREVIEW_MAX_CHARS: usize = 80;
+#[cfg(test)]
 pub(crate) const TEXT_HISTORY_ROOT_CHECKPOINT_MIN_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -69,8 +69,6 @@ pub struct PieceHistoryEntry {
     pub flags: PieceHistoryFlags,
     pub previous_selection: CursorRange,
     pub next_selection: CursorRange,
-    pub(crate) checkpoint_before: Option<Arc<PieceTreeLite>>,
-    pub(crate) checkpoint_after: Option<Arc<PieceTreeLite>>,
 }
 
 impl PieceHistoryEdit {

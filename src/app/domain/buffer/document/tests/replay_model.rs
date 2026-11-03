@@ -1,30 +1,22 @@
 use super::{CursorRange, TextDocument, helpers::insert_isolated_edit};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
-fn jump(document: &mut TextDocument, position: usize, target: usize) {
-    if target < position {
-        let id = document.history_entries()[target].id;
-        document.apply_text_history_undo(id).unwrap();
-    } else if target > position {
-        let id = document.history_entries()[target - 1].id;
-        document.apply_text_history_redo(id).unwrap();
-    }
-}
-
 #[test]
 fn seeded_history_replay_matches_independent_text_states_and_survives_restart() {
     for seed in 0..12 {
         let mut rng = StdRng::seed_from_u64(seed);
         let mut document = TextDocument::new("α\r\n尾".into());
-        let mut states = vec![document.extract_text()];
-        let mut position = 0;
+        let mut states = std::collections::BTreeMap::from([
+            (0, String::new()),
+            (document.history_now(), document.extract_text()),
+        ]);
         for step in 0..240 {
             if step < 40 || rng.random_range(0..4) == 0 {
-                let mut model: Vec<char> = states[position].chars().collect();
+                let mut model: Vec<char> = states[&document.history_now()].chars().collect();
                 let start = rng.random_range(0..=model.len());
                 let end = rng.random_range(start..=model.len());
                 let inserted = format!("{step}λ\n");
-                document.history.latest_update_at = None;
+                document.seal_history_group();
                 document
                     .replace_char_ranges_with_undo(
                         &[(start..end, inserted.clone())],
@@ -33,26 +25,27 @@ fn seeded_history_replay_matches_independent_text_states_and_survives_restart() 
                     )
                     .unwrap();
                 model.splice(start..end, inserted.chars());
-                states.truncate(position + 1);
-                states.push(model.into_iter().collect());
-                position += 1;
+                states.insert(document.history_now(), model.into_iter().collect());
             } else {
-                let target = rng.random_range(0..states.len());
-                jump(&mut document, position, target);
-                position = target;
+                let target = *states
+                    .keys()
+                    .nth(rng.random_range(0..states.len()))
+                    .unwrap();
+                document.navigate_history(target).unwrap();
             }
             assert_eq!(
                 document.extract_text(),
-                states[position],
+                states[&document.history_now()],
                 "seed {seed}, step {step}"
             );
             assert_eq!(document.history_entries().len(), states.len() - 1);
-            assert_eq!(document.operation_undo_depth(), position);
-            assert_eq!(document.operation_redo_depth(), states.len() - 1 - position);
             if step % 37 == 0 {
                 let history = document.exported_history();
-                document = TextDocument::new(states[position].clone());
+                let now = document.history_now();
+                let tip = document.history_tip();
+                document = TextDocument::new(states[&now].clone());
                 document.restore_exported_history(history);
+                assert_eq!((document.history_now(), document.history_tip()), (now, tip));
             }
         }
     }

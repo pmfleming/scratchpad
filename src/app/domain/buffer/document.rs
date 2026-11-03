@@ -1,10 +1,8 @@
 mod history_ops;
 mod recovery;
+mod tree_ops;
 
-use super::history::{
-    OperationDirection, TEXT_HISTORY_ROOT_CHECKPOINT_MIN_BYTES, TextDocumentEditOperation,
-    TextHistoryApplyError,
-};
+use super::history::{OperationDirection, TextDocumentEditOperation, TextHistoryApplyError};
 use super::{
     ByteSpan, DocumentSnapshot, LineEndingStyle, PersistedHistoryEntry, PieceHistoryEdit,
     PieceHistoryEntry, PieceSource, PieceTreeLite, TextDocumentOperationRecord, TextHistoryBudget,
@@ -87,36 +85,28 @@ impl TextDocumentContentState {
 #[derive(Clone)]
 pub(super) struct TextDocumentHistoryState {
     pub(super) entries: Vec<PieceHistoryEntry>,
+    pub(super) tree: super::edit_tree::EditTree,
     pub(super) byte_usage: usize,
-    pub(super) undo_depth: usize,
-    pub(super) redo_depth: usize,
     pub(super) next_id: u64,
     pub(super) revision_counter: u64,
     pub(super) budget: TextHistoryBudget,
     pub(super) latest_operation_record: Option<TextDocumentOperationRecord>,
     pub(super) latest_update_at: Option<Instant>,
     pub(super) pending_generation_before: Option<u32>,
-    pub(super) pending_checkpoint_before: Option<Arc<PieceTreeLite>>,
-    pub(super) pending_recovery: Option<(u64, DocumentSnapshot)>,
-    recovery_cache: recovery::RecoveryCache,
 }
 
 impl Default for TextDocumentHistoryState {
     fn default() -> Self {
         Self {
             entries: Vec::new(),
+            tree: super::edit_tree::EditTree::default(),
             byte_usage: 0,
-            undo_depth: 0,
-            redo_depth: 0,
             next_id: 1,
             revision_counter: 0,
             budget: TextHistoryBudget::default(),
             latest_operation_record: None,
             latest_update_at: None,
             pending_generation_before: None,
-            pending_checkpoint_before: None,
-            pending_recovery: None,
-            recovery_cache: recovery::RecoveryCache::default(),
         }
     }
 }
@@ -132,11 +122,13 @@ impl TextDocument {
         text: String,
         preferred_line_ending: LineEndingStyle,
     ) -> Self {
-        Self {
+        let mut document = Self {
             identity: next_document_identity(),
             content: TextDocumentContentState::new(text, preferred_line_ending),
             history: TextDocumentHistoryState::default(),
-        }
+        };
+        document.record_initial_content();
+        document
     }
 
     pub(crate) fn from_utf8_file(
@@ -146,18 +138,16 @@ impl TextDocument {
     ) -> io::Result<(Self, String, usize)> {
         let (piece_tree, sample, line_count) =
             PieceTreeLite::from_utf8_file(path, file_offset, sample_limit)?;
-        Ok((
-            Self {
-                identity: next_document_identity(),
-                content: TextDocumentContentState {
-                    piece_tree: Arc::new(piece_tree),
-                    preferred_line_ending: platform_default_line_ending(),
-                },
-                history: TextDocumentHistoryState::default(),
+        let mut document = Self {
+            identity: next_document_identity(),
+            content: TextDocumentContentState {
+                piece_tree: Arc::new(piece_tree),
+                preferred_line_ending: platform_default_line_ending(),
             },
-            sample,
-            line_count,
-        ))
+            history: TextDocumentHistoryState::default(),
+        };
+        document.record_initial_content();
+        Ok((document, sample, line_count))
     }
 
     /// Extract the full text content as a new String from the piece tree.
@@ -212,12 +202,12 @@ impl TextDocument {
 
     #[must_use]
     pub fn operation_undo_depth(&self) -> usize {
-        self.history.undo_depth
+        self.history.tree.position()
     }
 
     #[must_use]
     pub fn operation_redo_depth(&self) -> usize {
-        self.history.redo_depth
+        self.history.tree.route().len() - self.history.tree.position()
     }
 
     #[must_use]
@@ -226,15 +216,10 @@ impl TextDocument {
     }
 
     pub fn clear_operation_history(&mut self) {
-        self.history.entries.clear();
-        self.history.byte_usage = 0;
-        self.history.undo_depth = 0;
-        self.history.redo_depth = 0;
-        self.history.latest_operation_record = None;
-        self.history.latest_update_at = None;
-        self.history.pending_generation_before = None;
-        self.history.pending_checkpoint_before = None;
-        self.advance_history_revision();
+        let revision = self.history.revision_counter;
+        self.history = TextDocumentHistoryState::default();
+        self.history.revision_counter = revision.wrapping_add(1);
+        self.record_initial_content();
     }
 
     #[must_use]
@@ -269,63 +254,54 @@ impl TextDocument {
     }
 
     pub fn drop_oldest_history_entry(&mut self) -> Option<PieceHistoryEntry> {
-        if self.history.entries.is_empty() {
-            None
-        } else {
-            self.preserve_undo_boundary();
-            self.advance_history_revision();
-            let removed = self.history.entries.remove(0);
-            self.history.byte_usage = self.history.byte_usage.saturating_sub(removed.byte_cost());
-            self.remove_history_depth(&removed);
-            self.compact_history_storage();
-            Some(removed)
-        }
+        // Durable edits are never evicted to meet a memory budget.
+        None
     }
 
     pub fn set_history_budget(&mut self, budget: TextHistoryBudget) {
         self.history.budget = budget.sanitized();
-        self.enforce_history_budget();
     }
 
     pub fn exported_history(&self) -> Vec<PersistedHistoryEntry> {
-        let mut entries = self
-            .history
+        self.history
             .entries
             .iter()
             .map(|entry| self.export_history_entry(entry))
-            .collect::<Vec<_>>();
-        let mut payload_bytes = entries
-            .iter()
-            .map(PersistedHistoryEntry::payload_bytes)
-            .sum::<usize>();
-        let budget = self.history.budget.persisted_payload_budget as usize;
-        for entry in &mut entries {
-            if payload_bytes <= budget {
-                break;
-            }
-            payload_bytes = payload_bytes.saturating_sub(entry.payload_bytes());
-            entry.drop_payloads();
-        }
-        entries
+            .collect()
     }
 
     pub fn restore_exported_history(&mut self, entries: Vec<PersistedHistoryEntry>) {
+        if entries.is_empty() {
+            return;
+        }
+        let now = entries.iter().find(|e| e.current).map_or(0, |e| e.id);
+        let tip = entries.iter().find(|e| e.selected_tip).map_or(0, |e| e.id);
+        let Some(tree) = super::edit_tree::EditTree::restore(
+            entries.iter().map(|e| (e.id, e.parent_id)),
+            now,
+            tip,
+        ) else {
+            return;
+        };
+        let original_content = self.content.clone();
+        self.content.piece_tree = Arc::new(PieceTreeLite::from_string(String::new()));
         self.history.entries.clear();
         self.history.byte_usage = 0;
-        self.history.undo_depth = 0;
-        self.history.redo_depth = 0;
-        let mut max_id = 0_u64;
+        self.history.latest_update_at = None;
+        self.history.tree = super::edit_tree::EditTree::restore(tree.links(), 0, tip).unwrap();
         for persisted in entries {
-            max_id = max_id.max(persisted.id);
             let entry = self.import_history_entry(persisted);
             self.history.byte_usage += entry.byte_cost();
             self.history.entries.push(entry);
         }
-        self.normalize_imported_redo_state();
-        self.refresh_history_depths();
-        self.history.next_id = max_id.saturating_add(1).max(1);
+        self.history.next_id = self.history.entries.last().map_or(1, |e| e.id + 1);
+        if self.navigate_history(now).is_err() {
+            self.content = original_content;
+            self.history.tree = tree;
+            for entry in &mut self.history.entries { entry.flags.replayable = false; }
+        }
+        self.refresh_tree_flags();
         self.advance_history_revision();
-        self.enforce_history_budget();
     }
 
     pub fn set_preferred_line_ending(&mut self, preferred_line_ending: LineEndingStyle) {
@@ -365,13 +341,6 @@ impl TextDocument {
 
         validate_replacements(replacements, self.content.piece_tree.len_chars())?;
         self.capture_pending_history_generation_before();
-        let checkpoint_bytes = replacements
-            .iter()
-            .map(|(range, replacement)| range.len().max(replacement.len()))
-            .max()
-            .unwrap_or_default();
-        self.capture_pending_history_checkpoint(checkpoint_bytes);
-
         let mut operation_record = TextDocumentOperationRecord {
             previous_selection,
             next_selection,
@@ -439,7 +408,6 @@ impl TextDocument {
     /// Insert text directly via piece tree.
     pub fn insert_direct(&mut self, char_index: usize, text: &str) {
         self.capture_pending_history_generation_before();
-        self.capture_pending_history_checkpoint(text.len());
         self.insert_raw_text_with_source(text, char_index, PieceSource::Edit);
     }
 
@@ -450,7 +418,6 @@ impl TextDocument {
         source: PieceSource,
     ) {
         self.capture_pending_history_generation_before();
-        self.capture_pending_history_checkpoint(text.len());
         self.insert_raw_text_with_source(text, char_index, source);
     }
 
@@ -466,7 +433,6 @@ impl TextDocument {
     /// Delete a char range directly via piece tree.
     pub fn delete_char_range_direct(&mut self, char_range: Range<usize>) {
         self.capture_pending_history_generation_before();
-        self.capture_pending_history_checkpoint(char_range.len());
         self.delete_char_range_internal(char_range);
     }
 
@@ -535,59 +501,6 @@ impl TextDocument {
     fn capture_pending_history_generation_before(&mut self) {
         if self.history.pending_generation_before.is_none() {
             self.history.pending_generation_before = Some(self.visible_generation());
-        }
-    }
-
-    fn capture_pending_history_checkpoint(&mut self, changed_bytes: usize) {
-        if changed_bytes < TEXT_HISTORY_ROOT_CHECKPOINT_MIN_BYTES
-            || self.history.pending_checkpoint_before.is_some()
-            || self.content.piece_tree.has_live_anchors()
-        {
-            return;
-        }
-        self.history.pending_checkpoint_before = Some(self.content.piece_tree.clone());
-    }
-
-    fn add_history_depth(&mut self, entry: &PieceHistoryEntry) {
-        if entry.is_undone() {
-            self.history.redo_depth = self.history.redo_depth.saturating_add(1);
-        } else {
-            self.history.undo_depth = self.history.undo_depth.saturating_add(1);
-        }
-    }
-
-    fn remove_history_depth(&mut self, entry: &PieceHistoryEntry) {
-        if entry.is_undone() {
-            self.history.redo_depth = self.history.redo_depth.saturating_sub(1);
-        } else {
-            self.history.undo_depth = self.history.undo_depth.saturating_sub(1);
-        }
-    }
-
-    fn mark_history_entry_undone(&mut self, index: usize, undone: bool) {
-        let was_undone = self.history.entries[index].is_undone();
-        if was_undone == undone {
-            return;
-        }
-        if undone {
-            self.history.undo_depth = self.history.undo_depth.saturating_sub(1);
-            self.history.redo_depth = self.history.redo_depth.saturating_add(1);
-        } else {
-            self.history.redo_depth = self.history.redo_depth.saturating_sub(1);
-            self.history.undo_depth = self.history.undo_depth.saturating_add(1);
-        }
-        self.history.entries[index].flags.undone = undone;
-    }
-
-    fn refresh_history_depths(&mut self) {
-        self.history.undo_depth = 0;
-        self.history.redo_depth = 0;
-        for entry in &self.history.entries {
-            if entry.is_undone() {
-                self.history.redo_depth += 1;
-            } else {
-                self.history.undo_depth += 1;
-            }
         }
     }
 }

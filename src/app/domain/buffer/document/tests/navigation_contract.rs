@@ -43,3 +43,44 @@ fn separate_files_have_independent_navigation_positions() {
     first.redo_last_operation().unwrap();
     assert_eq!(first.extract_text(), "first");
 }
+
+#[test]
+fn initial_contents_and_alternative_paths_survive_recovery() {
+    let mut document = TextDocument::new("initial\r\nλ".into());
+    let initial = document.history_now();
+    document.undo_last_operation().unwrap();
+    assert_eq!(document.extract_text(), "");
+    document.redo_last_operation().unwrap();
+    insert_isolated_edit(&mut document, 0, "old ");
+    let old = document.history_now();
+    document.navigate_history(initial).unwrap();
+    insert_isolated_edit(&mut document, 0, "new ");
+    let new = document.history_now();
+    document.navigate_history(initial).unwrap();
+    let history = document.exported_history();
+    let mut restored = TextDocument::new(document.extract_text());
+    restored.restore_exported_history(history);
+    assert_eq!(restored.history_tip(), new);
+    restored.redo_last_operation().unwrap();
+    assert_eq!(restored.extract_text(), "new initial\r\nλ");
+    restored.navigate_history(old).unwrap();
+    assert_eq!(restored.extract_text(), "old initial\r\nλ");
+    restored.navigate_history(new).unwrap();
+    assert_eq!(restored.extract_text(), "new initial\r\nλ");
+    assert_eq!(restored.history_entries().len(), 3);
+}
+
+#[test]
+fn reload_is_an_edit_and_forget_history_keeps_an_initial_insertion() {
+    let mut document = TextDocument::new("original".into());
+    insert_isolated_edit(&mut document, 0, "edit ");
+    document.replace_exact_with_history("external\r\ntext");
+    document.undo_last_operation().unwrap();
+    assert_eq!(document.extract_text(), "edit original");
+    document.redo_last_operation().unwrap();
+    assert_eq!(document.extract_text(), "external\r\ntext");
+    document.clear_operation_history();
+    assert_eq!(document.history_entries().len(), 1);
+    document.undo_last_operation().unwrap();
+    assert_eq!(document.extract_text(), "");
+}

@@ -374,8 +374,20 @@ impl BufferState {
 
     pub fn replace_from_loaded_buffer(&mut self, loaded: BufferState) {
         let id = self.id;
+        let temp_id = self.temp_id.clone();
+        let history = if self.is_loading_preview {
+            None
+        } else {
+            self.document
+                .replace_exact_with_history(&loaded.document.extract_text());
+            Some(self.document.clone())
+        };
         *self = loaded;
         self.id = id;
+        self.temp_id = temp_id;
+        if let Some(document) = history {
+            self.document = document;
+        }
         self.active_selection = None;
         self.refresh.pending_text_history_event = None;
     }
@@ -463,6 +475,17 @@ impl BufferState {
         let latest_edit = self.document.latest_operation_record().cloned();
         self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Some(selection)
+    }
+
+    pub(crate) fn navigate_history(
+        &mut self,
+        target: u64,
+    ) -> Result<CursorRange, TextHistoryApplyError> {
+        let selection = self.document.navigate_history(target)?;
+        self.note_text_history_event(TextHistoryEvent::Navigate);
+        self.refresh_text_metadata();
+        self.mark_dirty_after_local_edit();
+        Ok(selection)
     }
 
     pub fn redo_last_text_operation(&mut self) -> Option<CursorRange> {

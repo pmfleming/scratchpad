@@ -20,22 +20,11 @@ impl TextDocument {
         &mut self,
         direction: OperationDirection,
     ) -> Option<CursorRange> {
-        let entry_id = match direction {
-            OperationDirection::Undo => self
-                .history
-                .entries
-                .iter()
-                .rev()
-                .find(|entry| !entry.is_undone() && entry.flags.replayable)
-                .map(|entry| entry.id)?,
-            OperationDirection::Redo => self
-                .history
-                .entries
-                .iter()
-                .find(|entry| entry.is_undone() && entry.flags.replayable)
-                .map(|entry| entry.id)?,
+        let target = match direction {
+            OperationDirection::Undo => self.history.tree.parent(self.history.tree.now())?,
+            OperationDirection::Redo => self.history.tree.redo_target()?,
         };
-        self.apply_text_history_entry(entry_id, direction).ok()
+        self.navigate_history(target).ok()
     }
 
     pub(super) fn apply_text_history_entry(
@@ -43,72 +32,15 @@ impl TextDocument {
         entry_id: u64,
         direction: OperationDirection,
     ) -> Result<CursorRange, TextHistoryApplyError> {
-        let index = self
-            .history
-            .entries
-            .iter()
-            .position(|entry| entry.id == entry_id)
-            .ok_or(TextHistoryApplyError::OutOfBounds)?;
-        let indices = self.replayable_indices_at(index, direction)?;
-
-        let mut candidate = self.clone();
-        let selection = candidate.apply_text_history_indices(indices, direction)?;
-        *self = candidate;
-        Ok(selection)
-    }
-
-    fn apply_text_history_indices(
-        &mut self,
-        indices: Vec<usize>,
-        direction: OperationDirection,
-    ) -> Result<CursorRange, TextHistoryApplyError> {
-        if indices.len() == 1 && !self.content.piece_tree.has_live_anchors() {
-            let idx = indices[0];
-            let entry = &self.history.entries[idx];
-            let (expected_generation, checkpoint, selection) = match direction {
-                OperationDirection::Undo => (
-                    entry.visible_generation_after,
-                    &entry.checkpoint_before,
-                    entry.previous_selection,
-                ),
-                OperationDirection::Redo => (
-                    entry.visible_generation_before,
-                    &entry.checkpoint_after,
-                    entry.next_selection,
-                ),
-            };
-            if self.visible_generation() == expected_generation
-                && let Some(checkpoint) = checkpoint
-            {
-                self.content.piece_tree = Arc::clone(checkpoint);
-                self.mark_history_entry_undone(idx, matches!(direction, OperationDirection::Undo));
-                self.history.latest_update_at = None;
-                self.history.pending_generation_before = None;
-                self.history.pending_checkpoint_before = None;
-                self.advance_history_revision();
-                return Ok(selection);
-            }
-        }
-
-        let mut applied_selection = None;
-        for idx in indices {
-            if !self.history.entries[idx].flags.replayable {
-                return Err(TextHistoryApplyError::Conflict);
-            }
-            let record = self.operation_from_history_entry(&self.history.entries[idx]);
-            self.validate_text_history_record(idx, &record, direction)?;
-            self.apply_operation_record(&record, direction);
-            self.mark_history_entry_undone(idx, matches!(direction, OperationDirection::Undo));
-            applied_selection = Some(direction.selection(&record));
-            self.history.latest_operation_record = Some(record);
-        }
-        if applied_selection.is_some() {
-            self.history.latest_update_at = None;
-            self.history.pending_generation_before = None;
-            self.history.pending_checkpoint_before = None;
-        }
-        self.advance_history_revision();
-        applied_selection.ok_or(TextHistoryApplyError::Conflict)
+        let target = match direction {
+            OperationDirection::Undo => self
+                .history
+                .tree
+                .parent(entry_id)
+                .ok_or(TextHistoryApplyError::OutOfBounds)?,
+            OperationDirection::Redo => entry_id,
+        };
+        self.navigate_history(target)
     }
 
     pub(super) fn operation_from_history_entry(
@@ -145,112 +77,23 @@ impl TextDocument {
             .retain(|edit| !edit.deleted_text.is_empty() || !edit.inserted_text.is_empty());
         if record.edits.is_empty() {
             self.history.pending_generation_before = None;
-            self.history.pending_checkpoint_before = None;
             return;
         }
 
         self.history.latest_operation_record = Some(record.clone());
-        let old_len = self.history.entries.len();
-        let mut removed_bytes = 0usize;
-        let mut removed_redo_depth = 0usize;
-        self.history.entries.retain(|entry| {
-            let keep = !entry.is_undone();
-            if !keep {
-                removed_bytes += entry.byte_cost();
-                removed_redo_depth += 1;
-            }
-            keep
-        });
-        if self.history.entries.len() != old_len {
-            self.history.byte_usage = self.history.byte_usage.saturating_sub(removed_bytes);
-            self.history.redo_depth = self.history.redo_depth.saturating_sub(removed_redo_depth);
-            self.history.latest_update_at = None;
-        }
         if self.try_coalesce_history(&record, source) {
             self.advance_history_revision();
             self.history.pending_generation_before = None;
-            self.history.pending_checkpoint_before = None;
             return;
         }
 
         let entry = self.history_entry_from_operation(record, source);
         self.history.byte_usage += entry.byte_cost();
-        self.add_history_depth(&entry);
+        assert!(self.history.tree.append(entry.id));
         self.history.entries.push(entry);
         self.advance_history_revision();
-        self.enforce_history_budget();
+
         self.history.pending_generation_before = None;
-        self.history.pending_checkpoint_before = None;
-    }
-
-    fn apply_operation_record(
-        &mut self,
-        record: &TextDocumentOperationRecord,
-        direction: OperationDirection,
-    ) {
-        let mut edits = record.edits.iter();
-        while let Some(edit) = match direction {
-            OperationDirection::Undo => edits.next_back(),
-            OperationDirection::Redo => edits.next(),
-        } {
-            let replaced_len = edit.expected_text(direction).chars().count();
-            self.replace_char_range_raw(
-                edit.start_char..edit.start_char + replaced_len,
-                edit.replacement_text(direction),
-            );
-        }
-    }
-
-    fn replayable_indices_at(
-        &self,
-        index: usize,
-        direction: OperationDirection,
-    ) -> Result<Vec<usize>, TextHistoryApplyError> {
-        let entry_undone = self.history.entries[index].is_undone();
-        match direction {
-            OperationDirection::Undo if entry_undone => Err(TextHistoryApplyError::Conflict),
-            OperationDirection::Redo if !entry_undone => Err(TextHistoryApplyError::Conflict),
-            OperationDirection::Undo => Ok((index..self.history.entries.len())
-                .rev()
-                .filter(|i| !self.history.entries[*i].is_undone())
-                .collect()),
-            OperationDirection::Redo => Ok((0..=index)
-                .filter(|i| self.history.entries[*i].is_undone())
-                .collect()),
-        }
-    }
-
-    fn validate_text_history_record(
-        &self,
-        index: usize,
-        record: &TextDocumentOperationRecord,
-        direction: OperationDirection,
-    ) -> Result<(), TextHistoryApplyError> {
-        let expected_generation = self
-            .history
-            .entries
-            .get(index)
-            .map(|entry| match direction {
-                OperationDirection::Undo => entry.visible_generation_after,
-                OperationDirection::Redo => entry.visible_generation_before,
-            });
-        if expected_generation == Some(self.visible_generation()) {
-            return Ok(());
-        }
-
-        // Compare each affected range once. A fingerprint required the same
-        // extraction plus two temporary vectors, and could accept a collision.
-        record.edits.iter().try_for_each(|edit| {
-            let expected = edit.expected_text(direction);
-            let range = edit.start_char..edit.start_char + expected.chars().count();
-            if range.end > self.content.piece_tree.len_chars() {
-                return Err(TextHistoryApplyError::OutOfBounds);
-            }
-            if !expected.is_empty() && self.content.piece_tree.extract_range(range) != expected {
-                return Err(TextHistoryApplyError::Conflict);
-            }
-            Ok(())
-        })
     }
 
     pub(super) fn text_for_spans(&self, spans: &[ByteSpan]) -> String {
@@ -261,7 +104,7 @@ impl TextDocument {
         text
     }
 
-    fn history_entry_from_operation(
+    pub(super) fn history_entry_from_operation(
         &mut self,
         record: TextDocumentOperationRecord,
         source: PieceSource,
@@ -282,16 +125,9 @@ impl TextDocument {
             .collect::<PieceHistoryEdits>();
         let fingerprint = self.fingerprint_for_history_edits(&edits);
         self.history.latest_update_at = Some(Instant::now());
-        let mut checkpoint_before = self.history.pending_checkpoint_before.take();
-        if let Some(before) = &mut checkpoint_before {
-            Arc::make_mut(before).share_storage_from(self.content.piece_tree.as_ref());
-        }
-        let checkpoint_after = checkpoint_before
-            .as_ref()
-            .map(|_| self.content.piece_tree.clone());
         let entry = PieceHistoryEntry {
             id: self.history.next_id,
-            parent_id: self.history.entries.last().map_or(0, |e| e.id),
+            parent_id: self.history.tree.now(),
             edited_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -310,8 +146,6 @@ impl TextDocument {
             },
             previous_selection: record.previous_selection,
             next_selection: record.next_selection,
-            checkpoint_before,
-            checkpoint_after,
         };
         self.history.next_id = self.history.next_id.saturating_add(1);
         entry
@@ -373,7 +207,8 @@ impl TextDocument {
             .latest_update_at
             .map(|updated_at| now.duration_since(updated_at));
         if latest.source != PieceSource::Edit
-            || latest.is_undone()
+            || latest.id != self.history.tree.now()
+            || latest.id != self.history.tree.tip()
             || elapsed.is_none_or(|d| d > TEXT_HISTORY_COALESCE_WINDOW)
         {
             return false;
@@ -394,7 +229,7 @@ impl TextDocument {
                 let removed = self.history.entries.remove(latest_index);
                 self.history.byte_usage =
                     self.history.byte_usage.saturating_sub(removed.byte_cost());
-                self.remove_history_depth(&removed);
+                assert!(self.history.tree.cancel_open_leaf(removed.id));
                 self.history.latest_update_at = None;
             }
         }
