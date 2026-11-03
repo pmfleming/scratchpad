@@ -39,6 +39,20 @@ impl PartialEq for ClosedRow {
 impl Eq for ClosedRow {}
 
 impl Database {
+    pub(in crate::app::services::session_store) async fn recent_history_files(
+        &self,
+    ) -> io::Result<Vec<super::super::retained::RecentHistoryFile>> {
+        self.query_collect(
+            "SELECT c.token, json_extract(b.value,'$.temp_id'), coalesce(json_extract(b.value,'$.path'),json_extract(b.value,'$.name')), coalesce(h.edited_at,0), coalesce(h.edit_seq,0) FROM closed_tabs c, json_each(CAST(c.payload AS TEXT),'$.buffers') b LEFT JOIN document_history h ON h.temp_id=json_extract(b.value,'$.temp_id') ORDER BY h.edited_at DESC,h.edit_seq DESC",
+            (), |row| Ok(super::super::retained::RecentHistoryFile {
+                token: row.get(0).map_err(error)?,
+                temp_id: row.get(1).map_err(error)?,
+                label: row.get(2).map_err(error)?,
+                edited_at: row.get::<i64>(3).map_err(error)? as u64,
+                edit_seq: row.get::<i64>(4).map_err(error)? as u64,
+            }),
+        ).await
+    }
     pub(in crate::app::services::session_store) async fn closed_rows(
         &self,
     ) -> io::Result<Vec<ClosedRow>> {

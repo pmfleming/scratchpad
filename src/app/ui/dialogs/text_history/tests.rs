@@ -1,65 +1,157 @@
-use super::{
-    HistoryTab,
-    model::{entry_counts, timeline_rows_from_entries},
-    read_active_tab, read_follow_focus, write_active_tab, write_follow_focus,
+use super::*;
+use crate::app::{
+    app_state::test_support::test_app,
+    domain::{BufferState, WorkspaceTab},
+    fonts::{EditorFontPreset, EditorFontSelection, apply_editor_fonts},
 };
-use crate::app::{domain::PieceSource, text_history::TextHistoryEntryView};
+use eframe::App;
+use egui_kittest::{Harness, kittest::Queryable};
 
-#[test]
-fn history_preferences_defer_changes_and_never_persist_picked_buffers() {
-    let ctx = eframe::egui::Context::default();
-    assert_eq!(read_active_tab(&ctx), HistoryTab::CurrentFile);
-    assert!(read_follow_focus(&ctx));
-    for (new, expected, follow) in [
-        (HistoryTab::AllFiles, HistoryTab::AllFiles, false),
-        (HistoryTab::File(999), HistoryTab::CurrentFile, true),
-        (HistoryTab::CurrentFile, HistoryTab::CurrentFile, false),
-    ] {
-        let old = read_active_tab(&ctx);
-        write_active_tab(&ctx, new);
-        write_follow_focus(&ctx, follow);
-        assert_eq!(read_active_tab(&ctx), old);
-        assert_eq!(read_follow_focus(&ctx), !follow);
-        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
-            .textures_delta
-            .clear();
-        assert_eq!(read_active_tab(&ctx), expected);
-        assert_eq!(read_follow_focus(&ctx), follow);
+fn app(root: &std::path::Path) -> ScratchpadApp {
+    let mut app = test_app(root);
+    let mut buffer = BufferState::new("note.txt".into(), "base".into(), None);
+    for text in ["one", "two"] {
+        let len = buffer.document().piece_tree().len_chars();
+        buffer
+            .replace_char_ranges_with_undo(
+                &[(0..len, text.into())],
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap();
     }
+    app.tab_manager.set_tabs(vec![WorkspaceTab::new(buffer)], 0);
+    app.state.dialogs.text_history.open();
+    app
+}
+fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
+    Harness::builder()
+        .allow_missing_glyphs()
+        .with_size(egui::vec2(1200.0, 850.0))
+        .with_context_setup(|ctx| {
+            apply_editor_fonts(
+                ctx,
+                &EditorFontSelection::scratchpad(EditorFontPreset::Standard),
+                4.0,
+            )
+            .unwrap();
+        })
+        .build_ui_state(
+            |ui, app| App::ui(app, ui, &mut eframe::Frame::_new_kittest()),
+            app,
+        )
+}
+fn text(app: &ScratchpadApp) -> String {
+    app.tab_manager.active_tab().unwrap().active_buffer().text()
 }
 
 #[test]
-fn timeline_and_picker_keep_file_identity_with_ties_undo_and_colliding_entry_ids() {
-    let entries: Vec<_> = [(1, 10, 1), (1, 12, 2), (3, 12, 1), (2, 12, 1)]
-        .into_iter()
-        .map(|(id, global_seq, buffer_id)| TextHistoryEntryView {
-            id,
-            global_seq,
-            buffer_id,
-            label: "same.txt".into(),
-            source: PieceSource::Edit,
-            summary: format!("edit-{id}"),
-            undone: buffer_id == 2,
-            replayable: true,
-            edit_count: 1,
-            deleted_preview: String::new(),
-            inserted_preview: "é".into(),
-        })
-        .collect();
-    let rows = timeline_rows_from_entries(entries.iter());
+fn now_is_visible_hover_is_inert_and_click_selects_a_state() {
+    let root = tempfile::tempdir().unwrap();
+    let mut h = harness(app(root.path()));
+    h.run_steps(3);
+    assert!(h.query_by_label("Now · Replace match").is_some());
+    let root_row = h.get_by_label("Empty document");
+    h.hover_at(root_row.rect().center());
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "two");
+    h.get_by_label("Empty document").click();
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "");
+    assert!(h.query_by_label("Now · Empty document").is_some());
+    h.key_press(egui::Key::ArrowRight);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "base");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(!h.state().state.dialogs.text_history.is_open());
+    assert_eq!(text(h.state()), "base");
+}
+
+#[test]
+fn branches_remain_selectable_and_recent_order_ignores_navigation() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app(root.path());
+    let buffer = app
+        .tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut();
+    let id = buffer.id;
+    let before = buffer.document().last_edit();
+    buffer.navigate_history(1).unwrap();
+    assert_eq!(before, buffer.document().last_edit());
+    buffer
+        .replace_char_ranges_with_undo(
+            &[(0..4, "alternate".into())],
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+    let mut h = harness(app);
+    h.run_steps(3);
+    assert!(h.query_by_label("Branch 2").is_some());
+    assert!(h.query_by_label("Branch 4").is_some());
+    let ctx = h.ctx.clone();
+    assert!(navigate(&ctx, h.state_mut(), id, 3));
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "two");
+    assert!(navigate(&ctx, h.state_mut(), id, 4));
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "alternate");
+}
+
+#[test]
+fn history_typing_delivers_first_event_to_editor() {
+    let root = tempfile::tempdir().unwrap();
+    let mut h = harness(app(root.path()));
+    h.run_steps(3);
+    h.event(egui::Event::Text("X".into()));
+    h.run_steps(3);
+    assert!(text(h.state()).contains('X'));
+}
+
+#[test]
+fn scrubber_shows_only_the_selected_route_and_opens_without_moving_now() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app(root.path());
+    app.state.dialogs.text_history.close();
+    let buffer = app
+        .tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut();
+    buffer.navigate_history(1).unwrap();
+    buffer
+        .replace_char_ranges_with_undo(
+            &[(0..4, "branch".into())],
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+    buffer.undo_last_text_operation().unwrap();
+    let mut h = harness(app);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "base");
+    assert!(h.query_by_label("Now · 1 of 2 changes").is_some());
+    assert!(h.state().state.dialogs.history_scrubber.is_open());
+    let before = h
+        .state()
+        .tab_manager
+        .active_tab()
+        .unwrap()
+        .active_buffer()
+        .document()
+        .history_now();
+    h.run_steps(3);
     assert_eq!(
-        rows.iter()
-            .map(|r| (r.buffer_id, r.entry_id))
-            .collect::<Vec<_>>(),
-        [(1, 2), (1, 3), (2, 1), (1, 1)]
+        before,
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .document()
+            .history_now()
     );
-    assert!(rows[2].undone);
-    assert_eq!(rows[0].title, "edit-2");
-    assert_eq!(rows[0].inserted, "é");
-    let counts = entry_counts(&entries);
-    assert_eq!(counts[&1], 3);
-    assert_eq!(counts[&2], 1);
-    assert!(!counts.contains_key(&99));
-    assert!(entry_counts(&[]).is_empty());
-    assert!(timeline_rows_from_entries([].iter()).is_empty());
 }

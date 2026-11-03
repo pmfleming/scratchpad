@@ -3,6 +3,15 @@ use futures_lite::future::block_on;
 use std::io;
 
 #[derive(Clone, Debug)]
+pub(crate) struct RecentHistoryFile {
+    pub token: String,
+    pub temp_id: String,
+    pub label: String,
+    pub edited_at: u64,
+    pub edit_seq: u64,
+}
+
+#[derive(Clone, Debug)]
 pub struct ClosedTabInfo {
     pub token: String,
     pub closed_at_unix_seconds: i64,
@@ -12,6 +21,10 @@ pub struct ClosedTabInfo {
 }
 
 impl SessionStore {
+    pub(crate) fn recent_history_files(&self) -> io::Result<Vec<RecentHistoryFile>> {
+        self.worker()?
+            .call(|db| block_on(db.recent_history_files()))
+    }
     pub fn buffer_versions(&self, temp_id: &str) -> io::Result<Vec<super::BufferVersionInfo>> {
         let id = temp_id.to_owned();
         self.worker()?
