@@ -146,7 +146,7 @@ impl CapturedSessionTab {
         let mut buffers = Vec::new();
         let mut buffer_snapshots = Vec::new();
         for buffer in tab.buffers() {
-            buffers.push(SessionBuffer::from(buffer));
+            buffers.push(SessionBuffer::capture(buffer));
             if !buffer.is_loading_preview
                 && (buffer.path.is_none()
                     || buffer.is_dirty
@@ -180,7 +180,7 @@ mod tests {
     use crate::app::domain::{BufferState, WorkspaceTab};
 
     #[test]
-    fn clean_disk_buffer_is_persisted_as_metadata_not_a_redundant_snapshot() {
+    fn clean_disk_buffer_retains_initial_edit_and_current_content_cache() {
         let mut buffer = BufferState::new(
             "large.txt".to_owned(),
             "partial".to_owned(),
@@ -193,7 +193,7 @@ mod tests {
 
         let captured = CapturedSessionTab::capture(&WorkspaceTab::new(buffer));
 
-        assert!(captured.buffer_snapshots.is_empty());
+        assert_eq!(captured.buffer_snapshots.len(), 1);
         assert_eq!(captured.session_tab.buffers.len(), 1);
 
         let mut dirty = BufferState::new(

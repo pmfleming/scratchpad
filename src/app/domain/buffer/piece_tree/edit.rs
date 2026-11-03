@@ -41,6 +41,37 @@ impl PieceTreeLite {
             .append_add_text(text, source, edit.generation());
         let add_start = add_span.start_byte;
         let inserted_pieces = build_chunked_pieces(PieceBuffer::Add, add_start, text);
+        self.insert_pieces_at(offset_chars, inserted_pieces, edit)
+    }
+
+    /// Reattach immutable history text without appending a second copy on replay.
+    pub(crate) fn insert_history_spans(&mut self, offset_chars: usize, spans: &[ByteSpan]) {
+        let mut pieces = Vec::new();
+        let mut bytes = 0;
+        for span in spans {
+            let text = self.storage.text_for_span(*span);
+            pieces.extend(build_chunked_pieces(
+                span.buffer,
+                span.start_byte as usize,
+                &text,
+            ));
+            bytes += text.len();
+        }
+        if bytes == 0 {
+            return;
+        }
+        self.save_changes
+            .record(self.byte_offset_for_char(offset_chars), 0, bytes);
+        let edit = self.begin_edit();
+        self.insert_pieces_at(offset_chars, pieces, edit);
+    }
+
+    fn insert_pieces_at(
+        &mut self,
+        offset_chars: usize,
+        inserted_pieces: Vec<Piece>,
+        edit: PieceTreeEdit,
+    ) -> usize {
         let inserted_chars = inserted_pieces.iter().map(|piece| piece.char_len).sum();
 
         let address = self.find_leaf_for_char_offset(offset_chars);

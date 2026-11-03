@@ -1,7 +1,7 @@
 //! Character-index selections shared by documents, history, views and adapters.
 use std::ops::Range;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CharCursor {
     pub index: usize,
     pub prefer_next_row: bool,
@@ -17,7 +17,7 @@ impl CharCursor {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CursorRange {
     pub primary: CharCursor,
     pub secondary: CharCursor,

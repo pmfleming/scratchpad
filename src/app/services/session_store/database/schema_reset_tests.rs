@@ -44,8 +44,8 @@ fn tree_rows_and_positions_round_trip_transactionally() {
         document
             .replace_char_ranges_with_undo(
                 &[(1..1, "branch".into())],
-                Default::default(),
-                Default::default(),
+                crate::app::domain::CursorRange::default(),
+                crate::app::domain::CursorRange::default(),
             )
             .unwrap();
         document.navigate_history(1).unwrap();
@@ -122,4 +122,106 @@ fn lazy_initialization_notices_are_shared_and_consumed_once() {
         assert_eq!(store.take_notices().len(), 1);
         assert!(clone.take_notices().is_empty());
     });
+}
+
+#[test]
+fn inconsistent_cursor_and_corrupt_branch_payload_are_rejected() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let tabs = vec![tab("immutable")];
+        db.persist(request(&tabs), 1).await.unwrap();
+        let mut malformed = request(&tabs);
+        malformed.tabs[0].session_tab.buffers[0].text_history[0].fingerprint ^= 1;
+        assert!(db.persist(malformed, 2).await.is_err());
+        let id = &tabs[0].active_buffer().temp_id;
+        assert_eq!(db.read_history(id).await.unwrap().len(), 1);
+        db.conn
+            .execute("UPDATE document_history SET now_id=999", ())
+            .await
+            .unwrap();
+        assert!(db.read_history(id).await.is_err());
+        assert!(
+            db.hydrate(request(&tabs).tabs.remove(0).session_tab)
+                .await
+                .is_err()
+        );
+    });
+}
+
+#[test]
+fn closed_file_branches_now_and_edit_recency_survive_restart_and_forget() {
+    use crate::app::services::session_store::{CapturedClosedTab, SessionPersistRequest};
+    let root = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(root.path().to_owned());
+    let mut tab = tab("");
+    let doc = tab.active_buffer_mut().document_mut();
+    for text in ["a", "ab", "abc"] {
+        doc.replace_exact_with_history(text);
+    }
+    doc.navigate_history(1).unwrap();
+    doc.replace_exact_with_history("alternate");
+    let last_edit = doc.last_edit();
+    doc.navigate_history(1).unwrap();
+    let archive = CapturedClosedTab::capture(&tab, None);
+    let token = archive.token.clone();
+    let mut save = SessionPersistRequest::capture(&[], 0, 16.0, false);
+    save.closed_tabs.push(archive);
+    store.persist_request(save).unwrap();
+    drop(store);
+    let store = SessionStore::new(root.path().to_owned());
+    let recent = store.recent_history_files().unwrap();
+    assert_eq!((recent[0].edited_at, recent[0].edit_seq), last_edit);
+    let mut reopened = store.restore_closed_tab(&token).unwrap();
+    let doc = reopened.active_buffer_mut().document_mut();
+    assert_eq!((doc.history_now(), doc.history_tip()), (1, 4));
+    doc.redo_last_operation().unwrap();
+    assert_eq!(doc.extract_text(), "alternate");
+    doc.navigate_history(3).unwrap();
+    assert_eq!(doc.extract_text(), "abc");
+    assert_eq!(doc.last_edit(), last_edit);
+    doc.clear_operation_history();
+    store.persist(&[reopened], 0, 16.0, false).unwrap();
+    drop(store);
+    let restored = SessionStore::new(root.path().to_owned())
+        .load()
+        .unwrap()
+        .unwrap();
+    let doc = restored.tabs[0].active_buffer().document();
+    assert_eq!(doc.extract_text(), "abc");
+    assert_eq!(doc.history_entries().len(), 1);
+}
+
+#[test]
+#[ignore = "manual edit-tree database profile"]
+fn profile_edit_tree_database_growth_and_restart() {
+    use std::time::Instant;
+    for count in [1_000, 10_000] {
+        let root = tempfile::tempdir().unwrap();
+        let store = SessionStore::new(root.path().to_owned());
+        let mut tab = tab("");
+        for index in 0..count {
+            tab.active_buffer_mut()
+                .document_mut()
+                .replace_exact_with_history(if index % 2 == 0 { "α" } else { "β" });
+        }
+        let start = Instant::now();
+        store.persist(&[tab], 0, 16.0, false).unwrap();
+        let save = start.elapsed();
+        drop(store);
+        let start = Instant::now();
+        let restored = SessionStore::new(root.path().to_owned())
+            .load()
+            .unwrap()
+            .unwrap();
+        let restart = start.elapsed();
+        assert_eq!(restored.tabs[0].active_buffer().text(), "β");
+        eprintln!(
+            "database nodes={count} save_ms={} restart_ms={} database_bytes={}",
+            save.as_millis(),
+            restart.as_millis(),
+            std::fs::metadata(root.path().join("session.db"))
+                .unwrap()
+                .len()
+        );
+    }
 }

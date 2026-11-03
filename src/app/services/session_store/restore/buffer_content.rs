@@ -133,7 +133,7 @@ impl Restorer {
                         false,
                         BufferFreshness::InSync,
                     )
-                } else if !buffer.text_history.is_empty() {
+                } else if !buffer.text_history.is_empty() || buffer.history_document.is_some() {
                     // Keep this text and its undo stack together as a historical
                     // branch. Application restore automatically detaches it and
                     // opens the changed disk file with a fresh history.
@@ -168,25 +168,11 @@ impl Restorer {
         path: &Path,
     ) -> RestoredBufferContent {
         match FileService::read_file(path) {
-            Ok(file_content) => {
-                let matches_baseline = buffer
-                    .disk_content_digest
-                    .as_ref()
-                    .is_some_and(|digest| *digest == file_content.document.content_digest());
-                if !matches_baseline {
-                    // Legacy metadata-only sessions have no historical text to
-                    // validate against. Keep their records, but never replay
-                    // them against an unrelated external file.
-                    for entry in &mut buffer.text_history {
-                        entry.flags.replayable = false;
-                    }
-                }
-                RestoredBufferContent::from_file_content(
-                    file_content,
-                    FileService::read_disk_state(path).ok(),
-                    BufferFreshness::InSync,
-                )
-            }
+            Ok(file_content) => RestoredBufferContent::from_file_content(
+                file_content,
+                FileService::read_disk_state(path).ok(),
+                BufferFreshness::InSync,
+            ),
             Err(_) => RestoredBufferContent::empty(buffer, BufferFreshness::MissingOnDisk),
         }
     }
@@ -243,9 +229,13 @@ impl RestoredBufferContent {
         freshness: BufferFreshness,
     ) -> Self {
         let (format, text_metadata) = session_buffer_format_and_metadata(buffer, &content);
-        let mut document =
-            TextDocument::with_preferred_line_ending(content, text_metadata.preferred_line_ending);
-        document.restore_exported_history(std::mem::take(&mut buffer.text_history));
+        let mut document = buffer.history_document.take().unwrap_or_else(|| {
+            TextDocument::with_preferred_line_ending(content, text_metadata.preferred_line_ending)
+        });
+        document.set_preferred_line_ending(text_metadata.preferred_line_ending);
+        if !buffer.text_history.is_empty() {
+            document.restore_exported_history(std::mem::take(&mut buffer.text_history));
+        }
         Self::new(
             document,
             format,

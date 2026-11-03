@@ -147,11 +147,11 @@ Settings are available in the app with `Ctrl + ,` and are stored as TOML:
 | Linux | `$XDG_CONFIG_HOME/scratchpad/settings.toml` or `~/.config/scratchpad/settings.toml` | `$XDG_STATE_HOME/scratchpad` or `~/.local/state/scratchpad` |
 
 Sessions use a local embedded Turso `session.db`; settings remain TOML and user
-files keep their existing save paths. Schemas 6–8 upgrade transactionally to
-schema 9. Unsupported session schemas automatically start a fresh database,
-discarding previous session/undo/recovery data, not saved text files or settings.
-Upgrades and resets are reported in the `[]` status log. See [migration and recovery export](docs/turso-migration.md)
-before backing up, recovering, or downgrading a session database.
+files keep their existing save paths. Schema 10 starts a fresh session when it
+recognizes an older Scratchpad database, discarding its session and history data
+while preserving saved text files and settings. Unknown schemas, foreign databases,
+corruption, and I/O errors never authorize a reset. Resets are reported in the
+`[]` status log. See [history storage](SESSION-RETENTION.md).
 
 Closing during startup restore leaves the previous session intact. If startup
 restore fails, session saving stays disabled for that run to protect the saved

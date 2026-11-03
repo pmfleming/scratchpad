@@ -25,6 +25,17 @@ pub(super) fn workspace_tab_from_restored_buffers(
         let mut restored =
             EditorViewState::restored(view.id, view.buffer_id, view.show_line_numbers);
         restored.set_zoom_factor(view.zoom_factor);
+        if let Some(mut selection) = view.selection
+            && let Some(buffer) = buffers
+                .iter_mut()
+                .find(|buffer| buffer.id == view.buffer_id)
+        {
+            let len = buffer.document().piece_tree().len_chars();
+            selection.primary.index = selection.primary.index.min(len);
+            selection.secondary.index = selection.secondary.index.min(len);
+            restored.set_cursor_range_anchored(buffer, selection);
+            restored.set_pending_cursor_range_anchored(buffer, selection);
+        }
         views.push(restored);
     }
 

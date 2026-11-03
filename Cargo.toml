@@ -15,6 +15,7 @@ inspection = ["eframe/inspection"]
 count-lines = ["dep:proc-macro2", "dep:syn"]
 
 [dependencies]
+tempfile = "3.27.0"
 eframe = "=0.37.0"
 egui-phosphor = { path = "crates/egui_phosphor" }
 rfd = "0.17.2"
@@ -54,7 +55,6 @@ egui_kittest = "=0.37.0"
 egui_system_font_provider = "=0.37.0"
 criterion = "0.8.2"
 rand = "0.10.1"
-tempfile = "3.27.0"
 
 [[bin]]
 name = "count_lines"

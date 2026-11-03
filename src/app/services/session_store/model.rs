@@ -126,10 +126,23 @@ pub(crate) struct SessionBuffer {
     // writer drains this into history rows before serializing tab metadata.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub text_history: Vec<PersistedHistoryEntry>,
+    #[serde(skip)]
+    pub history_document: Option<crate::app::domain::TextDocument>,
+    #[serde(skip)]
+    pub history_capture: Option<crate::app::domain::buffer::HistorySnapshot>,
 }
 
 impl From<&crate::app::domain::BufferState> for SessionBuffer {
     fn from(buffer: &crate::app::domain::BufferState) -> Self {
+        let mut metadata = Self::capture(buffer);
+        metadata.text_history = buffer.document().exported_history();
+        metadata.history_capture = None;
+        metadata
+    }
+}
+
+impl SessionBuffer {
+    pub(crate) fn capture(buffer: &crate::app::domain::BufferState) -> Self {
         Self {
             id: buffer.id,
             name: buffer.name.clone(),
@@ -148,7 +161,9 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
                 .and_then(|state| state.modified_millis),
             disk_len: buffer.disk_state.as_ref().map(|state| state.len),
             disk_content_digest: buffer.disk_content_digest.clone(),
-            text_history: buffer.document().exported_history(),
+            text_history: Vec::new(),
+            history_document: None,
+            history_capture: Some(buffer.document().history_snapshot()),
         }
     }
 }
@@ -157,6 +172,8 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
 pub(crate) struct SessionView {
     pub id: u64,
     pub buffer_id: u64,
+    #[serde(default)]
+    pub selection: Option<crate::app::domain::CursorRange>,
     pub show_line_numbers: bool,
     #[serde(default = "crate::app::domain::view::default_zoom_factor")]
     pub zoom_factor: f32,
@@ -169,6 +186,7 @@ impl From<&crate::app::domain::EditorViewState> for SessionView {
         Self {
             id: view.id,
             buffer_id: view.buffer_id,
+            selection: view.pending_cursor_range.or(view.cursor_range),
             show_line_numbers: view.show_line_numbers,
             zoom_factor: view.zoom_factor(),
             show_control_chars: false,

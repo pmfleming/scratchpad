@@ -617,7 +617,7 @@ mod tests {
 
         assert_eq!(apply_outdent(&mut buffer, &cursor(2), 4), None);
         assert_eq!(buffer.text(), "plain");
-        assert_eq!(buffer.document().operation_undo_depth(), 0);
+        assert_eq!(buffer.document().operation_undo_depth(), 1);
     }
 
     #[test]
@@ -664,7 +664,7 @@ mod tests {
 
         assert_eq!(buffer.text(), "\tone\n\ttwo\nthree");
         assert_eq!(next, selection(2, 9));
-        assert_eq!(buffer.document().operation_undo_depth(), 1);
+        assert_eq!(buffer.document().operation_undo_depth(), 2);
         assert_eq!(buffer.undo_last_text_operation(), Some(original_selection));
         assert_eq!(buffer.text(), "one\ntwo\nthree");
     }
@@ -678,7 +678,7 @@ mod tests {
 
         assert_eq!(buffer.text(), "one\ntwo\nthree");
         assert_eq!(next, selection(0, 6));
-        assert_eq!(buffer.document().operation_undo_depth(), 1);
+        assert_eq!(buffer.document().operation_undo_depth(), 2);
         assert_eq!(buffer.undo_last_text_operation(), Some(selected));
         assert_eq!(buffer.text(), "\tone\n    two\nthree");
     }

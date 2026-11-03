@@ -55,7 +55,7 @@ fn lock_navigation_focus(ctx: &egui::Context, id: egui::Id) {
                 tab: false,
                 escape: true,
             },
-        )
+        );
     });
 }
 fn close(ctx: &egui::Context, app: &mut ScratchpadApp) {
@@ -191,7 +191,7 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
         }
         match event {
             Some(TextHistoryEvent::Replay) if !app.state.dialogs.text_history.is_open() => {
-                app.state.dialogs.history_scrubber.open()
+                app.state.dialogs.history_scrubber.open();
             }
             Some(TextHistoryEvent::Edit) => app.state.dialogs.history_scrubber.close(),
             _ => {}
@@ -266,22 +266,7 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
                     }
                 });
         }
-        let response = crate::app::ui::widget_ids::interact(
-            ui,
-            ui.min_rect(),
-            focus_id(),
-            egui::Sense::focusable_noninteractive(),
-            "history-focus",
-        );
-        response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListBox, true, "File history"));
-        if focus || (first && !app.state.search_state.open() && !app.state.dialogs.any_modal_open())
-        {
-            response.request_focus();
-        }
-        if response.has_focus() {
-            lock_navigation_focus(ctx, focus_id());
-        }
+        history_focus(ui, ctx, app, focus, first);
     });
     if action.is_none() && old_selected != state.selected && !first {
         action = state.selected.and_then(|id| {
@@ -303,7 +288,7 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if let Some(token) = reopen {
         crate::app::app_state::workspace::lifecycle::reopen_archived_tab(app, &token);
         ctx.data_mut(|d| {
-            d.get_temp_mut_or_default::<HistoryUi>(state_key()).selected = active_buffer(app)
+            d.get_temp_mut_or_default::<HistoryUi>(state_key()).selected = active_buffer(app);
         });
     }
     if should_close {
@@ -316,6 +301,29 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
             .map(|v| v.id)
     {
         accessors::consume_focus_request(app, view);
+    }
+}
+
+fn history_focus(
+    ui: &egui::Ui,
+    ctx: &egui::Context,
+    app: &ScratchpadApp,
+    focus: bool,
+    first: bool,
+) {
+    let response = crate::app::ui::widget_ids::interact(
+        ui,
+        ui.min_rect(),
+        focus_id(),
+        egui::Sense::focusable_noninteractive(),
+        "history-focus",
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListBox, true, "File history"));
+    if focus || (first && !app.state.search_state.open() && !app.state.dialogs.any_modal_open()) {
+        response.request_focus();
+    }
+    if response.has_focus() {
+        lock_navigation_focus(ctx, focus_id());
     }
 }
 

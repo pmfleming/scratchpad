@@ -376,7 +376,7 @@ fn target_history_undo_rejects_when_current_text_no_longer_matches_entry() {
     insert_isolated_sequence!(&mut document, "abc");
     let entry_id = document.history_entries()[1].id;
     document.delete_char_range_internal(1..2);
-    document.insert_raw_text("x", 1);
+    document.insert_raw_text_with_source("x", 1, PieceSource::Edit);
 
     let result = document.navigate_history(document.history.tree.parent(entry_id).unwrap());
 

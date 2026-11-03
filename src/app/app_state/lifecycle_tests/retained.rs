@@ -30,7 +30,7 @@ fn ordinary_open_restores_archived_unsaved_text_and_undo_history() {
     let buffer = app.tab_manager.active_tab().unwrap().active_buffer();
     assert_eq!(buffer.text(), "unsaved");
     assert!(buffer.is_dirty);
-    assert_eq!(buffer.document().operation_undo_depth(), 1);
+    assert_eq!(buffer.document().operation_undo_depth(), 2);
     assert_eq!(std::fs::read_to_string(path).unwrap(), "original");
     assert!(
         app.state
@@ -87,11 +87,11 @@ fn startup_external_changes_keep_historical_undo_separate_without_a_prompt() {
         assert_eq!(disk.is_some(), !missing && open_disk);
         if let Some(disk) = disk {
             assert_eq!(disk.text(), "external");
-            assert!(disk.document().history_entries().is_empty());
+            assert_eq!(disk.document().history_entries().len(), 1);
         }
         let recovered = buffers.iter().find(|buffer| buffer.path.is_none()).unwrap();
         assert_eq!(recovered.text(), "saved edit");
-        assert_eq!(recovered.document().operation_undo_depth(), 1);
+        assert_eq!(recovered.document().operation_undo_depth(), 2);
         assert_eq!(recovered.freshness, BufferFreshness::InSync);
         assert!(recovered.disk_state.is_none());
         assert!(recovered.disk_content_digest.is_none());

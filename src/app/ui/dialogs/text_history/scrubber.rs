@@ -56,7 +56,10 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
         ),
         480.0,
         |ui| {
-            let buffer = app.tab_manager.active_tab().unwrap().active_buffer();
+            let Some(tab) = app.tab_manager.active_tab() else {
+                return;
+            };
+            let buffer = tab.active_buffer();
             let document = buffer.document();
             let route = document.history_route();
             ui.label(&buffer.name);
@@ -111,11 +114,11 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
                     d.remove::<Drag>(drag_key());
                 }
             });
-            let label = document
-                .history_entries()
-                .iter()
-                .find(|e| e.id == document.history_now())
-                .map_or("Empty document", |e| e.summary.as_str());
+            let entries = document.history_entries();
+            let label = entries
+                .binary_search_by_key(&document.history_now(), |entry| entry.id)
+                .ok()
+                .map_or("Empty document", |index| entries[index].summary.as_str());
             ui.label(label);
         },
     );

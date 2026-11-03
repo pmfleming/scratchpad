@@ -1,4 +1,4 @@
-//! Logical v7 export, not a raw copy of a potentially live database/WAL.
+//! Logical edit-tree export, not a raw copy of a potentially live database/WAL.
 use super::{SessionStore, database::ReadScope};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
@@ -15,7 +15,7 @@ impl SessionStore {
             super::DatabaseWorker::open_with_reset(self.root.clone(), false)
                 .map_err(|error| error.to_string())
         });
-        let stored = self.read_session(ReadScope::All)?.ok_or_else(|| {
+        let mut stored = self.read_session(ReadScope::All)?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "no committed session to export")
         })?;
         let mut directory = fs::DirBuilder::new();
@@ -33,6 +33,16 @@ impl SessionStore {
                     &destination.join(format!("{}.tmp", buffer.temp_id)),
                     |file| file.write_all(text.as_bytes()),
                 )?;
+            }
+        }
+        for buffer in stored
+            .manifest
+            .tabs
+            .iter_mut()
+            .flat_map(|tab| &mut tab.buffers)
+        {
+            if let Some(document) = buffer.history_document.take() {
+                buffer.text_history = document.exported_history();
             }
         }
         write_new(&destination.join("session.json"), |file| {

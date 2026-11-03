@@ -1,7 +1,7 @@
+use super::history_rows::HistoryRows;
 use super::{
     ContentInventory, Database, SessionPersistProfile, error, invalid, quarantine::damaged,
 };
-use crate::app::domain::PersistedHistoryEntry;
 use crate::app::services::session_store::{
     capture::{CapturedSessionBuffer, CapturedSessionTab, SessionPersistRequest},
     model::{SessionManifest, SessionTab},
@@ -16,7 +16,7 @@ struct RecoveryBuffer {
     required: bool,
     retain: bool,
     // None means cold or quarantined: preserve the committed history.
-    history: Option<Vec<PersistedHistoryEntry>>,
+    history: Option<HistoryRows>,
     history_fingerprints: Option<Vec<super::history::HistoryFingerprint>>,
 }
 
@@ -71,17 +71,21 @@ impl Prepared {
     fn push_tab(&mut self, mut tab: CapturedSessionTab) -> io::Result<(Vec<u8>, SessionTab)> {
         validation::validate_tab(&tab.session_tab)?;
         for buffer in &mut tab.session_tab.buffers {
-            let entries = std::mem::take(&mut buffer.text_history);
+            let entries = buffer
+                .history_capture
+                .take()
+                .map(HistoryRows::Document)
+                .unwrap_or_else(|| HistoryRows::Exported(std::mem::take(&mut buffer.text_history)));
             let history = (!tab.preserve_existing || tab.discard_history).then_some(entries);
             if let Some(entries) = &history {
-                super::history::validate(entries)?;
+                entries.validate()?;
             }
             let required = validation::needs_snapshot(buffer);
             let policy = RecoveryBuffer {
                 required,
                 retain: tab.preserve_existing || required || buffer.disk_len.is_none(),
                 history_fingerprints: history
-                    .as_deref()
+                    .as_ref()
                     .map(super::history::fingerprints)
                     .transpose()?,
                 history,

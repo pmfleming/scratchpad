@@ -1,4 +1,5 @@
 mod persistence;
+pub(crate) use persistence::HistorySnapshot;
 
 use super::super::history::{
     CoalescedEdit, OperationDirection, TextDocumentEditOperation, coalesced_local_edit_record,
@@ -209,7 +210,9 @@ impl TextDocument {
                 self.history.latest_operation_record = Some(merged_record);
             }
             CoalescedEdit::Noop => {
-                let removed = self.history.entries.remove(latest_index);
+                let Some(removed) = self.history.entries.pop() else {
+                    return false;
+                };
                 self.history.byte_usage =
                     self.history.byte_usage.saturating_sub(removed.byte_cost());
                 assert!(self.history.tree.cancel_open_leaf(removed.id));

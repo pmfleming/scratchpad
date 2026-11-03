@@ -59,7 +59,7 @@ fn persists_split_views_and_active_view() {
 }
 
 #[test]
-fn restored_clean_buffer_reloads_newer_disk_content() {
+fn restored_clean_buffer_preserves_history_for_external_change_resolution() {
     let directory = tempfile::tempdir().unwrap();
     let file_path = directory.path().join("tracked.txt");
     std::fs::write(&file_path, "session").unwrap();
@@ -80,10 +80,10 @@ fn restored_clean_buffer_reloads_newer_disk_content() {
     std::fs::write(&file_path, "disk").unwrap();
     let restored = store.load().unwrap().unwrap();
 
-    assert_eq!(restored.tabs[0].buffers.buffer.text(), "disk");
+    assert_eq!(restored.tabs[0].buffers.buffer.text(), "session");
     assert_eq!(
         restored.tabs[0].buffers.buffer.freshness,
-        BufferFreshness::InSync
+        BufferFreshness::ConflictOnDisk
     );
 }
 

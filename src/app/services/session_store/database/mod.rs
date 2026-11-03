@@ -11,6 +11,7 @@ mod fault_tests;
 mod history;
 #[cfg(test)]
 mod history_fingerprint_tests;
+mod history_rows;
 #[cfg(test)]
 mod incremental_tests;
 #[cfg(test)]

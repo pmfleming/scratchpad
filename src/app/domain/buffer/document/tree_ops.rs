@@ -1,20 +1,42 @@
 use super::super::{PieceHistoryEdits, PieceHistoryFlags, next_text_history_global_seq};
-use super::*;
+use super::{
+    CursorRange, OperationDirection, PieceHistoryEdit, PieceHistoryEntry, PieceSource,
+    TextDocument, TextDocumentEditOperation, TextDocumentOperationRecord, TextHistoryApplyError,
+};
 
 impl TextDocument {
+    #[must_use]
     pub fn history_now(&self) -> u64 {
         self.history.tree.now()
     }
+    #[must_use]
     pub fn history_tip(&self) -> u64 {
         self.history.tree.tip()
     }
+    #[must_use]
     pub fn history_route(&self) -> &[u64] {
         self.history.tree.route()
     }
+    pub(crate) fn history_structure_key(&self) -> (u64, usize, u64) {
+        (
+            self.identity,
+            self.history.entries.len(),
+            self.history.entries.last().map_or(0, |entry| entry.id),
+        )
+    }
+    pub(crate) fn is_on_history_route(&self, node: u64) -> bool {
+        self.history.tree.is_on_route(node)
+    }
+
+    pub(crate) fn is_history_node_applied(&self, node: u64) -> bool {
+        self.history.tree.is_applied(node)
+    }
+
     pub fn seal_history_group(&mut self) {
         self.history.latest_update_at = None;
     }
 
+    #[must_use]
     pub fn last_edit(&self) -> (u64, u64) {
         self.history
             .entries
@@ -25,19 +47,23 @@ impl TextDocument {
     }
 
     pub(super) fn record_initial_content(&mut self) {
-        let mut start = 0;
-        let edits: PieceHistoryEdits = self
-            .byte_spans_for_range(0..self.piece_tree().len_chars())
-            .into_iter()
-            .map(|span| {
-                let edit = PieceHistoryEdit::Inserted {
-                    start_char: start,
-                    span,
-                };
-                start += self.piece_tree().text_for_span(span).chars().count() as u32;
-                edit
-            })
-            .collect();
+        let (edits, fingerprint) = self.piece_tree().initial_file_history().unwrap_or_else(|| {
+            let mut start = 0;
+            let edits: PieceHistoryEdits = self
+                .byte_spans_for_range(0..self.piece_tree().len_chars())
+                .into_iter()
+                .map(|span| {
+                    let edit = PieceHistoryEdit::Inserted {
+                        start_char: start,
+                        span,
+                    };
+                    start += self.piece_tree().text_for_span(span).chars().count() as u32;
+                    edit
+                })
+                .collect();
+            let fingerprint = self.fingerprint_for_history_edits(&edits);
+            (edits, fingerprint)
+        });
         if edits.is_empty() {
             return;
         }
@@ -49,7 +75,7 @@ impl TextDocument {
             source: PieceSource::Load,
             visible_generation_before: 0,
             visible_generation_after: self.visible_generation(),
-            fingerprint: self.fingerprint_for_history_edits(&edits),
+            fingerprint,
             summary: "Initial contents".into(),
             edits,
             flags: PieceHistoryFlags {
@@ -73,7 +99,8 @@ impl TextDocument {
             .iter()
             .copied()
             .collect();
-        for entry in &mut self.history.entries {
+        for index in 0..self.history.entries.len() {
+            let entry = &mut self.history.entries[index];
             entry.flags.undone = !applied.contains(&entry.id);
         }
     }
@@ -93,9 +120,11 @@ impl TextDocument {
             return Ok(self
                 .history
                 .entries
-                .iter()
-                .find(|e| e.id == target)
-                .map_or(CursorRange::default(), |e| e.next_selection));
+                .binary_search_by_key(&target, |e| e.id)
+                .ok()
+                .map_or(CursorRange::default(), |index| {
+                    self.history.entries[index].next_selection
+                }));
         }
         let original = self.content.clone();
         let mut selection = CursorRange::default();
@@ -112,34 +141,7 @@ impl TextDocument {
                         .map(|id| (*id, OperationDirection::Redo)),
                 )
             {
-                let index = self
-                    .history
-                    .entries
-                    .binary_search_by_key(&id, |e| e.id)
-                    .map_err(|_| TextHistoryApplyError::OutOfBounds)?;
-                if !self.history.entries[index].flags.replayable {
-                    return Err(TextHistoryApplyError::Conflict);
-                }
-                let record = self.operation_from_history_entry(&self.history.entries[index]);
-                let mut edits = record.edits.iter();
-                while let Some(edit) = match direction {
-                    OperationDirection::Undo => edits.next_back(),
-                    OperationDirection::Redo => edits.next(),
-                } {
-                    let expected = edit.expected_text(direction);
-                    let end = edit
-                        .start_char
-                        .checked_add(expected.chars().count())
-                        .ok_or(TextHistoryApplyError::OutOfBounds)?;
-                    if end > self.piece_tree().len_chars() {
-                        return Err(TextHistoryApplyError::OutOfBounds);
-                    }
-                    let range = edit.start_char..end;
-                    if self.piece_tree().extract_range(range.clone()) != expected {
-                        return Err(TextHistoryApplyError::Conflict);
-                    }
-                    self.replace_char_range_raw(range, edit.replacement_text(direction));
-                }
+                let record = self.replay_history_node(id, direction)?;
                 selection = direction.selection(&record);
                 latest_record = Some(record);
             }
@@ -150,20 +152,14 @@ impl TextDocument {
             return Err(error);
         }
         for &id in &transition.undo {
-            let index = self
-                .history
-                .entries
-                .binary_search_by_key(&id, |e| e.id)
-                .unwrap();
-            self.history.entries[index].flags.undone = true;
+            if let Ok(index) = self.history.entries.binary_search_by_key(&id, |e| e.id) {
+                self.history.entries[index].flags.undone = true;
+            }
         }
         for &id in &transition.redo {
-            let index = self
-                .history
-                .entries
-                .binary_search_by_key(&id, |e| e.id)
-                .unwrap();
-            self.history.entries[index].flags.undone = false;
+            if let Ok(index) = self.history.entries.binary_search_by_key(&id, |e| e.id) {
+                self.history.entries[index].flags.undone = false;
+            }
         }
         self.history.tree.commit(transition);
         self.history.latest_operation_record = latest_record;
@@ -171,6 +167,61 @@ impl TextDocument {
         self.seal_history_group();
         self.advance_history_revision();
         Ok(selection)
+    }
+
+    fn replay_history_node(
+        &mut self,
+        id: u64,
+        direction: OperationDirection,
+    ) -> Result<TextDocumentOperationRecord, TextHistoryApplyError> {
+        let index = self
+            .history
+            .entries
+            .binary_search_by_key(&id, |e| e.id)
+            .map_err(|_| TextHistoryApplyError::OutOfBounds)?;
+        if !self.history.entries[index].flags.replayable {
+            return Err(TextHistoryApplyError::Conflict);
+        }
+        for edit in &self.history.entries[index].edits {
+            for span in edit
+                .deleted_spans()
+                .iter()
+                .copied()
+                .chain(edit.inserted_span())
+            {
+                self.piece_tree()
+                    .check_history_span(span)
+                    .map_err(|_| TextHistoryApplyError::Conflict)?;
+            }
+        }
+        let record = self.operation_from_history_entry(&self.history.entries[index]);
+        let stored_edits = self.history.entries[index].edits.clone();
+        let mut edits = record.edits.iter().zip(stored_edits.iter());
+        while let Some((edit, stored)) = match direction {
+            OperationDirection::Undo => edits.next_back(),
+            OperationDirection::Redo => edits.next(),
+        } {
+            let expected = edit.expected_text(direction);
+            let end = edit
+                .start_char
+                .checked_add(expected.chars().count())
+                .ok_or(TextHistoryApplyError::OutOfBounds)?;
+            if end > self.piece_tree().len_chars() {
+                return Err(TextHistoryApplyError::OutOfBounds);
+            }
+            let range = edit.start_char..end;
+            if self.piece_tree().extract_range(range.clone()) != expected {
+                return Err(TextHistoryApplyError::Conflict);
+            }
+            let spans = match direction {
+                OperationDirection::Undo => stored.deleted_spans().to_vec(),
+                OperationDirection::Redo => stored.inserted_span().into_iter().collect(),
+            };
+            let tree = std::sync::Arc::make_mut(&mut self.content.piece_tree);
+            tree.remove_char_range(range);
+            tree.insert_history_spans(edit.start_char, &spans);
+        }
+        Ok(record)
     }
 
     pub(crate) fn replace_exact_with_history(&mut self, text: &str) {

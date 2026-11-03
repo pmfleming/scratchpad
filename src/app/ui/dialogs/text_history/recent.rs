@@ -88,7 +88,7 @@ pub(super) fn show(
                             state.selected = *id;
                             state.all_files = false;
                         } else {
-                            reopen = token.clone();
+                            reopen.clone_from(token);
                         }
                     }
                     if edited.0 != 0 {

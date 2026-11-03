@@ -24,15 +24,9 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 - Added a font-size slider beside the preset dropdown, adjustable from 8 to 72 pt.
 
-- Show custom closed-tab retention directly in the dropdown without an extra row, and limit the slider and presets to 365 days.
-
 - Replaced settings' Expand all and Collapse all text buttons with right-aligned icons and tooltips.
 
-- Snapshot rows visit the live buffer while preserving its original branch and return position across restart. Clearing history during a visit preserves a return route with the undo entries cleared.
-
 - Kept `Ctrl+F` for Find, moved Replace to `Ctrl+Shift+F`, and assigned `Ctrl+H` to History.
-
-- Removed the transient “Loading snapshots…” message from history surfaces.
 
 - Removed the scrubber's close button; Escape and resumed editing dismiss it.
 
@@ -44,14 +38,9 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 - Bounded history previews and shared cached entries across panel, scrubber, and keyboard rendering instead of cloning full edit text.
 
 - Made History resizable with square corners and the workspace background; Linux and Hyprland dismiss it with Escape or an outside click instead of a close button.
-- Replaced History's overflow menu with a direct trash-can button to clear history and a visible follow-file checkbox.
 - Kept the History panel width stable with large change counts and switched the editor immediately when choosing a file in History.
-- Limited the History file picker to files with changes and matched tab-overflow typography, row sizing, and scrolling, with aligned counts and truncated names.
 - Made the history scrubber update the file and highlight the current change while dragging, retaining guards against edits or file switches during a drag.
-- Enlarged the history scrubber's width, track, and handle to 1.5×, with a content-sized height and no empty status footer, while retaining the project's text sizing.
-- Shared cached recovery-query results across UI frames instead of copying archive/version lists, and removed the obsolete startup-conflict dialog workflow.
 - Reduced session-worker history caches to per-row fingerprints and reused unchanged chunk hashes through bounded byte-range edit tracking.
-- Advanced session storage to schema 8 with transactional upgrades from schemas 6 and 7. Stored byte counts and covering indexes avoid scanning undo/text payloads during retention accounting and disk-usage refreshes. Older schemas are preserved but not migrated.
 - Made warm session saves insert only new buffer IDs and collect only affected recovery blobs, with conservative rescans after restart, rollback, or detected damage. Positional tab-row rewrites and full capture/preparation costs remain.
 - Added Linux lint and runtime-test coverage, including the native file watcher.
 - Updated to upstream `eframe`/`egui` 0.37.0 and removed the local Wayland presentation fork, retaining WGPU by default and the Linux Glow fallback.
@@ -61,6 +50,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Preserve each view's caret and selection when reopening a closed file or restoring a session.
+
 - Preserve replayability after recovery for replacements that delete multiple piece-tree spans. Their fingerprints now follow persisted payload boundaries.
 - Reject stale history interactions after edits or document replacement, and prevent stationary hover from overriding later navigation.
 - Use one ordered activity stream for scrubber visibility, including undo boundaries and IME input.
@@ -69,26 +60,14 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 - Focus the History list when it opens so arrow keys navigate immediately, without first hovering a row or switching files.
 
-- Identified snapshot views explicitly in History and Scrubber captions instead of displaying the preserved live branch’s position.
-- Used the same current file name for change rows, oldest-state rows, and snapshot headings in All files history.
 - Kept history replay in the target file’s active split view, matching the History file picker.
 
-- Made Clear history respect Current file, chosen file, or All files scope and keep the confirmed target stable across tab switches.
-
-- Allowed History list arrow and Home/End keys to return from saved snapshots to native undo states, matching row clicks.
-- Made All files history keyboard navigation follow the clicked file independently of the active editor and follow-file preference.
 - Refreshed cached History filenames immediately after rename or Save As.
 
 - Let search, tab renaming, settings, and popups handle Escape before dismissing an unfocused History panel.
-- Preserved Return to latest when clearing history while viewing a saved branch with its own undo history.
 - Kept reload and preview revision guards stable across view-only anchor updates while rejecting independently replaced documents.
-- Kept history-preview replay tied to the original document identity, and preserved the selected view when restoring text with follow-focus disabled.
 - Rejected stale reload and encoding-reopen results after intervening edits, document replacement, path changes or newer disk baselines, preserving current text.
 - Cleared stale disk/settings-file metadata consistently when recovering untitled archive copies, and exposed accessible names for recently closed file buttons.
-- Quarantined damaged closed-tab content encountered during undo compaction without blocking healthy session saves.
-- Cached and acknowledged computed undo recovery points so idle saves no longer repeatedly reconstruct history and write unchanged recovery tokens.
-- Excluded pinned and quarantined data from retention-budget totals so it cannot evict all unprotected archives and recovery points.
-- Restored changed clean files from disk consistently in mixed split tabs while keeping the original archive available after subsequent saves.
 - Protected saved sessions from placeholder/partial-workspace saves during startup restore and from fallback saves after restore failure, including shutdown and drop.
 - Allowed shutdown when session writes are permanently blocked, while keeping retryable save failures open without per-frame last-tab exit retries.
 - Kept piece-tree line indexes revision-local so snapshots cannot corrupt line lookup after history compaction.

@@ -211,9 +211,12 @@ fn cold_history_is_lazy_and_survives_metadata_saves_and_quarantine() {
         let cold = request(&tabs).tabs.pop().unwrap().session_tab;
         assert_eq!(
             db.hydrate(cold.clone()).await.unwrap().0.buffers[0]
-                .text_history
+                .history_document
+                .as_ref()
+                .unwrap()
+                .history_entries()
                 .len(),
-            1
+            2
         );
         db.conn
             .execute(
@@ -225,7 +228,7 @@ fn cold_history_is_lazy_and_survives_metadata_saves_and_quarantine() {
         assert!(db.hydrate(cold).await.is_err());
         assert!(db.quarantined.contains_key(&id));
         db.persist(request(&[]), 3).await.unwrap();
-        assert_eq!(db.integer("SELECT count(*) FROM history").await.unwrap(), 1);
+        assert_eq!(db.integer("SELECT count(*) FROM history").await.unwrap(), 2);
         assert_eq!(db.integer("SELECT count(*) FROM parts").await.unwrap(), 1);
     });
 }

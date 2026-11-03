@@ -23,12 +23,14 @@ pub(super) struct RestoreSummary {
     pub(super) reloaded_clean_buffers: usize,
     conflicted_buffers: usize,
     missing_buffers: usize,
+    invalid_histories: usize,
 }
 impl RestoreSummary {
     pub(super) fn merge(&mut self, other: Self) {
         self.reloaded_clean_buffers += other.reloaded_clean_buffers;
         self.conflicted_buffers += other.conflicted_buffers;
         self.missing_buffers += other.missing_buffers;
+        self.invalid_histories += other.invalid_histories;
     }
     pub(super) fn record(&mut self, freshness: BufferFreshness) {
         match freshness {
@@ -38,6 +40,15 @@ impl RestoreSummary {
         }
     }
     pub(super) fn into_status(self) -> Option<RestoreStatus> {
+        if self.invalid_histories > 0 {
+            return Some(RestoreStatus {
+                level: RestoreStatusLevel::Warning,
+                message: format!(
+                    "Could not replay history for {} files. Retained their current text.",
+                    self.invalid_histories
+                ),
+            });
+        }
         if self.conflicted_buffers > 0 || self.missing_buffers > 0 {
             return Some(RestoreStatus {
                 level: RestoreStatusLevel::Warning,
@@ -162,11 +173,18 @@ impl Restorer {
             .into_iter()
             .map(|mut buffer| {
                 let mut restored = self.restore_buffer_content(&mut buffer);
-                // Clean disk-backed buffers have history metadata but no recovery text.
-                if !buffer.text_history.is_empty() {
-                    restored
+                // Hydrated history is streamed through the bounded text cache.
+                if let Some(mut document) = buffer.history_document.take() {
+                    document
+                        .set_preferred_line_ending(restored.text_metadata.preferred_line_ending);
+                    restored.document = document;
+                }
+                if !buffer.text_history.is_empty()
+                    && !restored
                         .document
-                        .restore_exported_history(std::mem::take(&mut buffer.text_history));
+                        .restore_exported_history(std::mem::take(&mut buffer.text_history))
+                {
+                    summary.invalid_histories += 1;
                 }
                 if !buffer.is_dirty
                     && restored.freshness == BufferFreshness::InSync

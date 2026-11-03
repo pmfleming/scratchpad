@@ -21,7 +21,15 @@ fn disk_reconciliation_preserves_dirty_edits_but_reloads_clean_files() {
             true,
             ConflictOnDisk,
         ),
-        ("session", Some("disk"), false, false, "disk", false, InSync),
+        (
+            "session",
+            Some("disk"),
+            false,
+            false,
+            "session",
+            true,
+            ConflictOnDisk,
+        ),
         ("session", None, true, false, "session", true, MissingOnDisk),
     ] {
         let root = tempfile::tempdir().unwrap();
@@ -81,6 +89,7 @@ fn restore_status_reports_counts_and_prioritizes_warnings() {
         ),
     ] {
         let summary = RestoreSummary {
+            invalid_histories: 0,
             reloaded_clean_buffers: reloaded,
             conflicted_buffers: conflicts,
             missing_buffers: missing,

@@ -1,6 +1,8 @@
 mod history_ops;
+pub(crate) use history_ops::HistorySnapshot;
 mod tree_ops;
 
+use super::PersistentVector;
 use super::history::{OperationDirection, TextDocumentEditOperation, TextHistoryApplyError};
 use super::{
     ByteSpan, DocumentSnapshot, LineEndingStyle, PersistedHistoryEntry, PieceHistoryEdit,
@@ -83,7 +85,7 @@ impl TextDocumentContentState {
 
 #[derive(Clone)]
 pub(super) struct TextDocumentHistoryState {
-    pub(super) entries: Vec<PieceHistoryEntry>,
+    pub(super) entries: PersistentVector<PieceHistoryEntry>,
     pub(super) tree: super::edit_tree::EditTree,
     pub(super) byte_usage: usize,
     pub(super) next_id: u64,
@@ -97,7 +99,7 @@ pub(super) struct TextDocumentHistoryState {
 impl Default for TextDocumentHistoryState {
     fn default() -> Self {
         Self {
-            entries: Vec::new(),
+            entries: PersistentVector::default(),
             tree: super::edit_tree::EditTree::default(),
             byte_usage: 0,
             next_id: 1,
@@ -222,7 +224,7 @@ impl TextDocument {
     }
 
     #[must_use]
-    pub fn history_entries(&self) -> &[PieceHistoryEntry] {
+    pub fn history_entries(&self) -> &PersistentVector<PieceHistoryEntry> {
         &self.history.entries
     }
 
@@ -256,6 +258,7 @@ impl TextDocument {
         self.history.budget = budget.sanitized();
     }
 
+    #[must_use]
     pub fn exported_history(&self) -> Vec<PersistedHistoryEntry> {
         self.history
             .entries
@@ -264,9 +267,48 @@ impl TextDocument {
             .collect()
     }
 
-    pub fn restore_exported_history(&mut self, entries: Vec<PersistedHistoryEntry>) {
+    /// The repository validates each row before handing it to this streaming importer.
+    pub(crate) fn import_history_row(&mut self, persisted: PersistedHistoryEntry) {
+        let entry = self.import_history_entry(persisted);
+        self.history.byte_usage += entry.byte_cost();
+        self.history.next_id = entry.id.saturating_add(1);
+        self.history.entries.push(entry);
+    }
+
+    pub(crate) fn finish_history_import(&mut self, now: u64, tip: u64) -> bool {
+        let Some(tree) = super::edit_tree::EditTree::restore(
+            self.history
+                .entries
+                .iter()
+                .map(|entry| (entry.id, entry.parent_id)),
+            0,
+            tip,
+        ) else {
+            return false;
+        };
+        if !tree.route().contains(&now) && now != 0 {
+            return false;
+        }
+        self.history.tree = tree;
+        if self.navigate_history(now).is_err() {
+            return false;
+        }
+        self.refresh_tree_flags();
+        self.seal_history_group();
+        true
+    }
+
+    pub fn restore_exported_history(&mut self, entries: Vec<PersistedHistoryEntry>) -> bool {
         if entries.is_empty() {
-            return;
+            return true;
+        }
+        if entries
+            .iter()
+            .any(|entry| entry.id == u64::MAX || !entry.payloads_valid())
+            || entries.iter().filter(|entry| entry.current).count() > 1
+            || entries.iter().filter(|entry| entry.selected_tip).count() > 1
+        {
+            return false;
         }
         let now = entries.iter().find(|e| e.current).map_or(0, |e| e.id);
         let tip = entries.iter().find(|e| e.selected_tip).map_or(0, |e| e.id);
@@ -275,14 +317,18 @@ impl TextDocument {
             now,
             tip,
         ) else {
-            return;
+            return false;
+        };
+        let Some(root_tree) = super::edit_tree::EditTree::restore(tree.links(), 0, tip) else {
+            return false;
         };
         let original_content = self.content.clone();
         self.content.piece_tree = Arc::new(PieceTreeLite::from_string(String::new()));
-        self.history.entries.clear();
+        let original_history = std::mem::take(&mut self.history);
+        self.history.budget = original_history.budget;
         self.history.byte_usage = 0;
         self.history.latest_update_at = None;
-        self.history.tree = super::edit_tree::EditTree::restore(tree.links(), 0, tip).unwrap();
+        self.history.tree = root_tree;
         for persisted in entries {
             let entry = self.import_history_entry(persisted);
             self.history.byte_usage += entry.byte_cost();
@@ -291,13 +337,13 @@ impl TextDocument {
         self.history.next_id = self.history.entries.last().map_or(1, |e| e.id + 1);
         if self.navigate_history(now).is_err() {
             self.content = original_content;
-            self.history.tree = tree;
-            for entry in &mut self.history.entries {
-                entry.flags.replayable = false;
-            }
+            self.history = original_history;
+            return false;
         }
         self.refresh_tree_flags();
+        self.identity = next_document_identity();
         self.advance_history_revision();
+        true
     }
 
     pub fn set_preferred_line_ending(&mut self, preferred_line_ending: LineEndingStyle) {
@@ -436,10 +482,6 @@ impl TextDocument {
         self.push_operation_record(converted, source);
     }
 
-    fn insert_raw_text(&mut self, text: &str, char_index: usize) {
-        self.insert_raw_text_with_source(text, char_index, PieceSource::Edit);
-    }
-
     fn insert_raw_text_with_source(&mut self, text: &str, char_index: usize, source: PieceSource) {
         Arc::make_mut(&mut self.content.piece_tree).insert_with_source(char_index, text, source);
     }
@@ -450,11 +492,6 @@ impl TextDocument {
             "start must be <= end, but got {char_range:?}"
         );
         Arc::make_mut(&mut self.content.piece_tree).remove_char_range(char_range);
-    }
-
-    fn replace_char_range_raw(&mut self, char_range: Range<usize>, replacement: &str) {
-        self.delete_char_range_internal(char_range.clone());
-        self.insert_raw_text(replacement, char_range.start);
     }
 
     fn fingerprint_for_history_edits(&self, edits: &[PieceHistoryEdit]) -> u64 {

@@ -123,7 +123,10 @@ fn changed_clean_buffer_in_a_mixed_split_uses_disk_and_forks_the_entire_archive(
             .unwrap();
         assert_eq!(clean.text(), "external clean");
         assert!(!clean.is_dirty);
-        assert_eq!(clean.document().operation_undo_depth(), 0);
+        assert_eq!(clean.document().operation_undo_depth(), 2);
+        let mut document = clean.document().clone();
+        document.undo_last_operation().unwrap();
+        assert_eq!(document.extract_text(), "original clean");
         let other = tab
             .buffers()
             .find(|buffer| buffer.name.starts_with("other.txt"))
@@ -135,7 +138,7 @@ fn changed_clean_buffer_in_a_mixed_split_uses_disk_and_forks_the_entire_archive(
         } else {
             assert_eq!(other.text(), "unsaved original other");
             assert_eq!(other.path.as_ref(), Some(&other_path));
-            assert_eq!(other.document().operation_undo_depth(), 1);
+            assert_eq!(other.document().operation_undo_depth(), 2);
         }
         store.persist(&[tab], 0, 14.0, false).unwrap();
         assert_eq!(store.closed_tabs().unwrap()[0].token, token);

@@ -2,7 +2,10 @@ mod analysis;
 mod document;
 pub mod edit_tree;
 mod history;
+mod persistent_vector;
 mod piece_tree;
+pub use persistent_vector::PersistentVector;
+pub(crate) use piece_tree::text_cache;
 mod snapshot;
 mod state;
 
@@ -16,6 +19,7 @@ pub use analysis::{
     EncodingSource, LineEndingCounts, LineEndingStyle, TextArtifactSummary, TextFormatMetadata,
     analyze_line_endings, display_line_count, platform_default_line_ending,
 };
+pub(crate) use document::HistorySnapshot;
 pub use document::TextDocument;
 pub(crate) use document::{DocumentRevision, HistoryToken};
 pub(crate) use document::{TextReplacementError, TextReplacements};

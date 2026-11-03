@@ -237,15 +237,6 @@ impl TextDocumentEditOperation {
             OperationDirection::Redo => &self.deleted_text,
         }
     }
-
-    /// Text that should replace `expected_text` for the given replay direction
-    /// (the "after" side).
-    pub(crate) fn replacement_text(&self, direction: OperationDirection) -> &str {
-        match direction {
-            OperationDirection::Undo => &self.deleted_text,
-            OperationDirection::Redo => &self.inserted_text,
-        }
-    }
 }
 
 /// Editor input before it is recorded in document history.

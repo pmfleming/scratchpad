@@ -12,6 +12,9 @@ fn per_view_zoom_survives_session_and_closed_tab_restore() {
     let second = tab.split_active_view(SplitAxis::Vertical).unwrap();
     tab.layout.view_mut(first).unwrap().set_zoom_factor(1.25);
     tab.layout.view_mut(second).unwrap().set_zoom_factor(0.75);
+    tab.layout.view_mut(first).unwrap().cursor_range = Some(CursorRange::two(1, 3));
+    tab.layout.view_mut(second).unwrap().pending_cursor_range =
+        Some(CursorRange::one(CharCursor::new(4)));
     store
         .persist(std::slice::from_ref(&tab), 0, 18.0, false)
         .unwrap();
@@ -27,6 +30,14 @@ fn per_view_zoom_survives_session_and_closed_tab_restore() {
             22.5
         );
         assert_eq!(restored.layout.active_view_id(), second);
+        assert_eq!(
+            restored.layout.view(first).unwrap().cursor_range,
+            Some(CursorRange::two(1, 3))
+        );
+        assert_eq!(
+            restored.layout.view(second).unwrap().pending_cursor_range,
+            Some(CursorRange::one(CharCursor::new(4)))
+        );
     };
     check(&store.load().unwrap().unwrap().tabs[0]);
     let closed = super::CapturedClosedTab::capture(&tab, None);
@@ -100,7 +111,7 @@ fn persisted_dirty_file(text: &str) -> (tempfile::TempDir, WorkspaceTab, Session
 }
 
 #[test]
-fn saved_clean_buffer_discards_obsolete_recovery_text() {
+fn saved_clean_buffer_updates_current_content_cache() {
     let (directory, mut tab, store) = persisted_dirty_file("old dirty text");
     let path = directory.path().join("saved.txt");
     std::fs::write(&path, "current saved text").unwrap();
@@ -112,13 +123,16 @@ fn saved_clean_buffer_discards_obsolete_recovery_text() {
     store
         .persist(std::slice::from_ref(&tab), 0, 16.0, false)
         .unwrap();
-    assert!(
+    assert_eq!(
         store
             .read_session(super::database::ReadScope::All)
             .unwrap()
             .unwrap()
             .contents
-            .is_empty()
+            .into_values()
+            .next()
+            .unwrap(),
+        "current saved text"
     );
     assert_eq!(
         store.load().unwrap().unwrap().tabs[0].buffers.buffer.text(),
@@ -127,7 +141,7 @@ fn saved_clean_buffer_discards_obsolete_recovery_text() {
 }
 
 #[test]
-fn clean_cold_backup_is_preserved_but_available_disk_is_authoritative() {
+fn clean_cold_history_is_preserved_for_external_change_resolution() {
     let (directory, mut tab, store) = persisted_dirty_file("backup text");
     let path = directory.path().join("saved.txt");
     std::fs::write(&path, "new disk text").unwrap();
@@ -156,7 +170,7 @@ fn clean_cold_backup_is_preserved_but_available_disk_is_authoritative() {
     );
     assert_eq!(
         store.load().unwrap().unwrap().tabs[0].buffers.buffer.text(),
-        "new disk text"
+        "backup text"
     );
     std::fs::remove_file(path).unwrap();
     assert_eq!(
@@ -166,7 +180,7 @@ fn clean_cold_backup_is_preserved_but_available_disk_is_authoritative() {
 }
 
 #[test]
-fn clean_disk_buffer_restores_exported_history_without_redundant_content() {
+fn clean_disk_buffer_restores_complete_edit_tree() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("saved.txt");
     let mut buffer = BufferState::new("saved.txt".into(), "before".into(), Some(path.clone()));
@@ -175,7 +189,7 @@ fn clean_disk_buffer_restores_exported_history_without_redundant_content() {
         .document_mut()
         .replace_char_ranges_with_undo(&[(6..6, " after".into())], cursor(6), cursor(12))
         .unwrap();
-    assert_eq!(buffer.document().operation_undo_depth(), 1);
+    assert_eq!(buffer.document().operation_undo_depth(), 2);
     std::fs::write(&path, buffer.text()).unwrap();
     buffer.sync_to_disk_state(Some(FileService::read_disk_state(&path).unwrap()));
     let store = SessionStore::new(directory.path().join("session"));
@@ -184,7 +198,7 @@ fn clean_disk_buffer_restores_exported_history_without_redundant_content() {
         .unwrap();
     let mut restored = store.load().unwrap().unwrap();
     let document = restored.tabs[0].buffers.buffer.document_mut();
-    assert_eq!(document.operation_undo_depth(), 1);
+    assert_eq!(document.operation_undo_depth(), 2);
     assert!(document.undo_last_operation().is_some());
     assert_eq!(document.extract_text(), "before");
 }

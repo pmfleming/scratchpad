@@ -21,26 +21,49 @@ pub struct Navigation {
 }
 
 impl EditTree {
+    #[must_use]
     pub fn now(&self) -> NodeId {
         self.position.checked_sub(1).map_or(ROOT, |i| self.route[i])
     }
 
+    #[must_use]
     pub fn tip(&self) -> NodeId {
         self.route.last().copied().unwrap_or(ROOT)
     }
 
+    #[must_use]
     pub fn route(&self) -> &[NodeId] {
         &self.route
     }
 
+    #[must_use]
     pub fn position(&self) -> usize {
         self.position
     }
 
+    #[must_use]
     pub fn parent(&self, id: NodeId) -> Option<NodeId> {
         self.parents.get(&id).map(|&(parent, _)| parent)
     }
 
+    #[must_use]
+    pub fn is_on_route(&self, id: NodeId) -> bool {
+        id == ROOT
+            || self
+                .parents
+                .get(&id)
+                .is_some_and(|&(_, depth)| self.route.get(depth - 1) == Some(&id))
+    }
+
+    #[must_use]
+    pub fn is_applied(&self, id: NodeId) -> bool {
+        id == ROOT
+            || self.parents.get(&id).is_some_and(|&(_, depth)| {
+                depth <= self.position && self.route.get(depth - 1) == Some(&id)
+            })
+    }
+
+    #[must_use]
     pub fn redo_target(&self) -> Option<NodeId> {
         self.route.get(self.position).copied()
     }
@@ -92,6 +115,7 @@ impl EditTree {
     }
 
     /// Compute a transition before changing text or the current cursor.
+    #[must_use]
     pub fn navigation(&self, target: NodeId) -> Option<Navigation> {
         let depth = if target == ROOT {
             0

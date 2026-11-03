@@ -15,8 +15,8 @@ fn app(root: &std::path::Path) -> ScratchpadApp {
         buffer
             .replace_char_ranges_with_undo(
                 &[(0..len, text.into())],
-                Default::default(),
-                Default::default(),
+                crate::app::domain::CursorRange::default(),
+                crate::app::domain::CursorRange::default(),
             )
             .unwrap();
     }
@@ -84,8 +84,8 @@ fn branches_remain_selectable_and_recent_order_ignores_navigation() {
     buffer
         .replace_char_ranges_with_undo(
             &[(0..4, "alternate".into())],
-            Default::default(),
-            Default::default(),
+            crate::app::domain::CursorRange::default(),
+            crate::app::domain::CursorRange::default(),
         )
         .unwrap();
     let mut h = harness(app);
@@ -125,8 +125,8 @@ fn scrubber_shows_only_the_selected_route_and_opens_without_moving_now() {
     buffer
         .replace_char_ranges_with_undo(
             &[(0..4, "branch".into())],
-            Default::default(),
-            Default::default(),
+            crate::app::domain::CursorRange::default(),
+            crate::app::domain::CursorRange::default(),
         )
         .unwrap();
     buffer.undo_last_text_operation().unwrap();
@@ -154,4 +154,67 @@ fn scrubber_shows_only_the_selected_route_and_opens_without_moving_now() {
             .document()
             .history_now()
     );
+}
+
+#[test]
+fn forget_requires_confirmation_and_keeps_current_text_as_a_new_initial_edit() {
+    let root = tempfile::tempdir().unwrap();
+    let mut h = harness(app(root.path()));
+    h.run_steps(3);
+    h.get_by_label("Forget history…").click();
+    h.run_steps(2);
+    assert_eq!(text(h.state()), "two");
+    assert_eq!(
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .document()
+            .history_entries()
+            .len(),
+        3
+    );
+    h.get_by_label("Forget this file's history").click();
+    h.run_steps(2);
+    let document = h
+        .state()
+        .tab_manager
+        .active_tab()
+        .unwrap()
+        .active_buffer()
+        .document();
+    assert_eq!(document.history_entries().len(), 1);
+    assert_eq!(document.history_now(), 1);
+    assert_eq!(text(h.state()), "two");
+}
+
+#[test]
+#[ignore = "manual virtualized History rendering profile"]
+fn profile_edit_tree_history_rendering() {
+    use std::time::Instant;
+    for count in [1_000, 10_000] {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = app(root.path());
+        let document = app
+            .tab_manager
+            .active_tab_mut()
+            .unwrap()
+            .active_buffer_mut()
+            .document_mut();
+        for index in 0..count {
+            document.replace_exact_with_history(if index % 2 == 0 { "α" } else { "β" });
+        }
+        let start = Instant::now();
+        let mut h = harness(app);
+        h.run_steps(3);
+        let opening = start.elapsed();
+        let start = Instant::now();
+        h.run_steps(20);
+        eprintln!(
+            "history_ui nodes={count} opening_ms={} warm_frame_us={}",
+            opening.as_millis(),
+            start.elapsed().as_micros() / 20
+        );
+    }
 }

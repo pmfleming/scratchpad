@@ -14,6 +14,7 @@ mod storage;
 mod support;
 #[cfg(test)]
 mod tests;
+pub(crate) mod text_cache;
 
 #[cfg(test)]
 pub(crate) use super::history::PIECE_PROVENANCE_ENTRY_LIMIT;
@@ -422,6 +423,20 @@ impl PieceTreeLite {
         };
         tree.assign_missing_leaf_ids();
         Ok((tree, sample, line_count))
+    }
+
+    pub(crate) fn check_history_span(&self, span: ByteSpan) -> io::Result<()> {
+        self.storage.check_history_span(span)
+    }
+    #[cfg(test)]
+    pub(crate) fn add_storage_bytes(&self) -> usize {
+        self.storage.add_bytes()
+    }
+
+    pub(crate) fn initial_file_history(&self) -> Option<(super::PieceHistoryEdits, u64)> {
+        (self.generation() == 0)
+            .then(|| self.storage.initial_file_history())
+            .flatten()
     }
 
     fn line_scan_start_for_leaf(

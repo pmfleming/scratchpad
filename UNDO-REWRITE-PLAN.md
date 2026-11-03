@@ -1,6 +1,8 @@
 # Undo and history rewrite plan
 
-Status: implementation in progress, with a separate commit for each stage.
+Status: implemented in seven stages, with a separate commit for each stage.
+Linux validation is complete. Windows validation and the strict quality gate
+have the limitations recorded below.
 
 Replace the linear undo log and snapshot navigation with a persistent edit tree
 for each file. A visible **Now** marker identifies the state currently shown in
@@ -240,3 +242,57 @@ Require ordinary edits and nearby undo/redo to avoid work proportional to the
 entire retained tree. Use lazy payload loading and virtualized UI rows; introduce
 internal reconstruction caches where measurements justify them. Full-history
 retention must not require keeping all text versions in RAM.
+
+## Implementation and validation record — 2026-11-03
+
+Stages 1–6 are commits `c2a1185`, `0a49593`, `f65defe`, `691d4ac`, `ed60e71`,
+and `4668174`. Stage 7 adds streaming history reconstruction and capture,
+persistent shared metadata, immutable file backing, bounded loaded text chunks,
+incremental History row caches, corruption checks, and per-view selection restore.
+The database is schema 10 and the session format is version 8.
+
+Validation completed:
+
+- All-feature tests: 645 passed, none failed, eight ignored. The three manual
+  edit-tree performance tests were also run separately and passed.
+- Formatting, all-feature compilation, strict all-target Clippy, all four
+  feature combinations, Linux target compilation, and Turso lock identity checks
+  passed. Dependency audit completed with eight allowed advisory warnings.
+- An isolated native Linux/Hyprland session exercised undo, branch creation,
+  alternate-path clicks, inert hover, the first typed character from History,
+  scrubber pointer navigation, and restart at an ancestor. Text, Now, selected
+  tip, alternate branches, and caret position survived restart. The existing
+  user database was not used for these tests.
+- Automated tests cover closed-file branch reopening, recency, explicit Forget,
+  external disk changes, corrupt payloads/positions, rollback, split selections,
+  large Unicode branches, eviction/reload, and shared metadata mutation.
+
+Debug-build profiles used 1,000, 10,000, and 100,000 short edits. Nearby undo/redo
+measured approximately 14 microseconds; with a background capture held, it ranged
+from 14 to 23 microseconds. Capture itself measured below 0.1 microseconds. A full
+100,000-node root roundtrip took 1.94 seconds. Warm History frames at 1,000 and
+10,000 edits measured about 2.7 milliseconds. A 10,000-node first save took
+6.76 seconds, restart 421 milliseconds, and the database occupied 9.80 MB.
+These are local debug measurements, not release performance guarantees. Long
+seeks and initial persistence still perform work proportional to the visited tree.
+
+Validation limits and remaining risks:
+
+- The Windows target toolchain was unavailable; neither Windows compilation nor
+  native Windows interaction was validated locally.
+- The fresh RustQualityLens run did not pass. Measurement and practice commands
+  completed, with no test or practice failures. Strict checking reports partial
+  macro/fingerprint evidence, three unmet required human reviews, and 17 module
+  threshold findings, including History and session storage. Its partial
+  reliability inventory observes 11 `expect` sites against a budget of 10 and
+  two existing database-worker `unwrap` sites against zero. No budgets were raised
+  and no findings were suppressed.
+- One new `expect` is in temporary history-chunk loading: infallible rendering and
+  export assume the private backing file remains readable. Seeks preflight I/O
+  and preserve Now/content on failure; spill failures preserve the in-memory text
+  and report a warning. A later backing-file read failure during an infallible
+  rendering/export path can still panic. This remains a reliability limitation.
+
+Local evidence is retained in `target/undo-rewrite-validation/` and
+`target/quality-runs/undo-rewrite-stage7-final/`. The latter includes the exact
+source patch, stable source hashes, commands, strict diagnostics, and summary.

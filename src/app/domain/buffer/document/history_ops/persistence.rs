@@ -11,27 +11,12 @@ impl TextDocument {
         &self,
         entry: &PieceHistoryEntry,
     ) -> PersistedHistoryEntry {
-        PersistedHistoryEntry {
-            id: entry.id,
-            parent_id: entry.parent_id,
-            edited_at: entry.edited_at,
-            current: self.history.tree.now() == entry.id,
-            selected_tip: self.history.tree.tip() == entry.id,
-            global_seq: entry.global_seq,
-            source: entry.source,
-            visible_generation_before: entry.visible_generation_before,
-            visible_generation_after: entry.visible_generation_after,
-            fingerprint: entry.fingerprint,
-            summary: entry.summary.clone(),
-            flags: entry.flags,
-            previous_selection: persist_cursor_range(entry.previous_selection),
-            next_selection: persist_cursor_range(entry.next_selection),
-            edits: entry
-                .edits
-                .iter()
-                .map(|edit| self.export_history_edit(edit))
-                .collect(),
-        }
+        export_entry(
+            entry,
+            &self.content.piece_tree,
+            self.history_now(),
+            self.history_tip(),
+        )
     }
 
     pub(in crate::app::domain::buffer::document) fn import_history_entry(
@@ -65,10 +50,6 @@ impl TextDocument {
         }
     }
 
-    fn export_history_edit(&self, edit: &PieceHistoryEdit) -> PersistedHistoryEdit {
-        edit.to_persisted(|span| self.content.piece_tree.text_for_span(span).to_string())
-    }
-
     fn import_history_edit(
         &mut self,
         edit: PersistedHistoryEdit,
@@ -76,5 +57,65 @@ impl TextDocument {
     ) -> PieceHistoryEdit {
         let tree = Arc::make_mut(&mut self.content.piece_tree);
         edit.into_piece(|text| tree.append_history_text(text, source))
+    }
+}
+
+fn export_entry(
+    entry: &PieceHistoryEntry,
+    tree: &super::super::super::PieceTreeLite,
+    now: u64,
+    tip: u64,
+) -> PersistedHistoryEntry {
+    PersistedHistoryEntry {
+        id: entry.id,
+        parent_id: entry.parent_id,
+        edited_at: entry.edited_at,
+        current: now == entry.id,
+        selected_tip: tip == entry.id,
+        global_seq: entry.global_seq,
+        source: entry.source,
+        visible_generation_before: entry.visible_generation_before,
+        visible_generation_after: entry.visible_generation_after,
+        fingerprint: entry.fingerprint,
+        summary: entry.summary.clone(),
+        flags: entry.flags,
+        previous_selection: persist_cursor_range(entry.previous_selection),
+        next_selection: persist_cursor_range(entry.next_selection),
+        edits: entry
+            .edits
+            .iter()
+            .map(|edit| edit.to_persisted(|span| tree.text_for_span(span).to_string()))
+            .collect(),
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct HistorySnapshot {
+    entries: crate::app::domain::buffer::PersistentVector<PieceHistoryEntry>,
+    tree: Arc<super::super::super::PieceTreeLite>,
+    now: u64,
+    tip: u64,
+    last_edit: (u64, u64),
+}
+impl HistorySnapshot {
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+    pub(crate) fn entry(&self, index: usize) -> PersistedHistoryEntry {
+        export_entry(&self.entries[index], &self.tree, self.now, self.tip)
+    }
+    pub(crate) fn positions(&self) -> (u64, u64, u64, u64) {
+        (self.now, self.tip, self.last_edit.0, self.last_edit.1)
+    }
+}
+impl TextDocument {
+    pub(crate) fn history_snapshot(&self) -> HistorySnapshot {
+        HistorySnapshot {
+            entries: self.history.entries.clone(),
+            tree: self.content.piece_tree.clone(),
+            now: self.history_now(),
+            tip: self.history_tip(),
+            last_edit: self.last_edit(),
+        }
     }
 }

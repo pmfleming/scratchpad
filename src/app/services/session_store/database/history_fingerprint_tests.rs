@@ -37,7 +37,10 @@ fn compact_history_cache_persists_complete_row_changes_and_survives_reopen() {
                     !entry.next_selection.primary_prefer_next_row;
             },
             |entry| entry.flags.persisted = !entry.flags.persisted,
-            |entry| entry.fingerprint ^= 1,
+            |entry| {
+                entry.previous_selection.secondary_prefer_next_row =
+                    !entry.previous_selection.secondary_prefer_next_row;
+            },
         ];
         for (index, mutate) in mutations.into_iter().enumerate() {
             let mut capture = request(&tabs);

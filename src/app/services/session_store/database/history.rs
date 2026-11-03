@@ -1,6 +1,7 @@
 //! `seq` is the stable per-document entry ID, NOT global_seq (which changes
 //! when typing coalesces). Position markers also mutate existing entries. Fingerprint the complete serialized row; retain no undo
 //! payload copies in the worker's comparison cache.
+use super::history_rows::HistoryRows;
 use super::{Database, decode, error, invalid, quarantine::damaged};
 use crate::app::domain::PersistedHistoryEntry;
 use crate::app::services::session_store::model::SessionTab;
@@ -23,10 +24,10 @@ fn fingerprint(entry: &PersistedHistoryEntry) -> io::Result<HistoryFingerprint> 
     })
 }
 
-pub(super) fn fingerprints(
-    entries: &[PersistedHistoryEntry],
-) -> io::Result<Vec<HistoryFingerprint>> {
-    entries.iter().map(fingerprint).collect()
+pub(super) fn fingerprints(entries: &HistoryRows) -> io::Result<Vec<HistoryFingerprint>> {
+    (0..entries.len())
+        .map(|index| fingerprint(&entries.entry(index)))
+        .collect()
 }
 
 fn validate_entry(entry: &PersistedHistoryEntry, previous: &mut i64) -> io::Result<()> {
@@ -35,6 +36,9 @@ fn validate_entry(entry: &PersistedHistoryEntry, previous: &mut i64) -> io::Resu
         return Err(invalid(
             "history IDs must increase and global sequences must be positive",
         ));
+    }
+    if !entry.payloads_valid() {
+        return Err(invalid("history payload is missing or corrupt"));
     }
     *previous = seq;
     Ok(())
@@ -73,9 +77,45 @@ fn history_entry(row: &turso::Row, previous: &mut i64) -> io::Result<PersistedHi
 }
 
 impl Database {
+    #[cfg(test)]
     pub(super) async fn read_history(&self, id: &str) -> io::Result<Vec<PersistedHistoryEntry>> {
         let entries = self.map_history(id, Ok).await?;
         validate(&entries).map_err(|cause| damaged(id, cause))?;
+        let positions = self
+            .query_collect(
+                "SELECT now_id,tip_id FROM document_history WHERE temp_id=?",
+                [id],
+                |row| {
+                    Ok((
+                        row.get::<i64>(0).map_err(error)?,
+                        row.get::<i64>(1).map_err(error)?,
+                    ))
+                },
+            )
+            .await?;
+        let expected = (
+            entries
+                .iter()
+                .find(|e| e.current)
+                .map_or(0, |e| e.id as i64),
+            entries
+                .iter()
+                .find(|e| e.selected_tip)
+                .map_or(0, |e| e.id as i64),
+        );
+        if positions.is_empty() && entries.is_empty() {
+            let known = self
+                .query_collect("SELECT id FROM buffer_ids WHERE id=?", [id], |row| {
+                    row.get::<String>(0).map_err(error)
+                })
+                .await?;
+            if known.is_empty() {
+                return Ok(entries);
+            }
+        }
+        if positions.first().copied() != Some(expected) {
+            return Err(damaged(id, "history position is missing or inconsistent"));
+        }
         Ok(entries)
     }
 
@@ -104,10 +144,67 @@ impl Database {
         .await
     }
 
+    async fn read_history_document(
+        &self,
+        id: &str,
+    ) -> io::Result<Option<crate::app::domain::TextDocument>> {
+        let positions = self
+            .query_collect(
+                "SELECT now_id,tip_id FROM document_history WHERE temp_id=?",
+                [id],
+                |row| {
+                    Ok((
+                        row.get::<i64>(0).map_err(error)?,
+                        row.get::<i64>(1).map_err(error)?,
+                    ))
+                },
+            )
+            .await?;
+        let Some(&(now, tip)) = positions.first() else {
+            // An untracked cold shell can hydrate directly from its source file.
+            let known = self
+                .query_collect("SELECT id FROM buffer_ids WHERE id=?", [id], |row| {
+                    row.get::<String>(0).map_err(error)
+                })
+                .await?;
+            return if known.is_empty() {
+                Ok(None)
+            } else {
+                Err(damaged(id, "missing history position"))
+            };
+        };
+        let mut document = crate::app::domain::TextDocument::new(String::new());
+        let mut rows = self.conn.query("SELECT seq,entry,global_seq,parent_id,edited_at FROM history WHERE temp_id=? ORDER BY seq", [id]).await.map_err(error)?;
+        let mut previous = 0;
+        let (mut marked_now, mut marked_tip) = (0, 0);
+        while let Some(row) = rows.next().await.map_err(error)? {
+            let entry = history_entry(&row, &mut previous).map_err(|cause| damaged(id, cause))?;
+            if entry.current {
+                if marked_now != 0 {
+                    return Err(damaged(id, "multiple history cursors"));
+                }
+                marked_now = entry.id as i64;
+            }
+            if entry.selected_tip {
+                if marked_tip != 0 {
+                    return Err(damaged(id, "multiple selected branches"));
+                }
+                marked_tip = entry.id as i64;
+            }
+            document.import_history_row(entry);
+        }
+        if (marked_now, marked_tip) != (now, tip)
+            || !document.finish_history_import(now as u64, tip as u64)
+        {
+            return Err(damaged(id, "invalid history position or replay"));
+        }
+        Ok(Some(document))
+    }
+
     pub(super) async fn read_histories(&self, tabs: &mut [SessionTab]) -> io::Result<()> {
         for buffer in tabs.iter_mut().flat_map(|tab| &mut tab.buffers) {
             if !self.quarantined.contains_key(&buffer.temp_id) {
-                buffer.text_history = self.read_history(&buffer.temp_id).await?;
+                buffer.history_document = self.read_history_document(&buffer.temp_id).await?;
             }
         }
         Ok(())
@@ -116,7 +213,7 @@ impl Database {
     pub(super) async fn write_history(
         &self,
         id: &str,
-        entries: &[PersistedHistoryEntry],
+        entries: &HistoryRows,
         fingerprints: &[HistoryFingerprint],
     ) -> io::Result<()> {
         let old = self
@@ -124,19 +221,15 @@ impl Database {
             .get(id)
             .ok_or_else(|| invalid("history cache not primed"))?;
         if old == fingerprints {
+            if entries.len() == 0 {
+                self.execute_cached("INSERT INTO document_history VALUES(?,0,0,0,0) ON CONFLICT(temp_id) DO NOTHING", [id]).await?;
+            }
             return Ok(());
         }
-        let now = entries.iter().find(|e| e.current).map_or(0, |e| e.id);
-        let tip = entries.iter().find(|e| e.selected_tip).map_or(0, |e| e.id);
-        let latest = entries
-            .iter()
-            .filter(|e| e.edited_at != 0)
-            .max_by_key(|e| e.global_seq);
-        let edited_at = latest.map_or(0, |e| e.edited_at);
-        let edit_seq = latest.map_or(0, |e| e.global_seq);
+        let (now, tip, edited_at, edit_seq) = entries.positions();
         self.execute_cached("INSERT INTO document_history VALUES(?,?,?,?,?) ON CONFLICT(temp_id) DO UPDATE SET now_id=excluded.now_id,tip_id=excluded.tip_id,edited_at=excluded.edited_at,edit_seq=excluded.edit_seq",
             params![id, now as i64, tip as i64, edited_at as i64, edit_seq as i64]).await?;
-        let Some((first, last)) = entries.first().zip(entries.last()) else {
+        let Some((first, last)) = fingerprints.first().zip(fingerprints.last()) else {
             return self
                 .execute_cached("DELETE FROM history WHERE temp_id=?", [id])
                 .await;
@@ -152,7 +245,7 @@ impl Database {
             .iter()
             .filter(|entry| entry.id >= first.id && entry.id <= last)
         {
-            if entries
+            if fingerprints
                 .binary_search_by_key(&entry.id, |entry| entry.id)
                 .is_err()
             {
@@ -163,15 +256,16 @@ impl Database {
                 .await?;
             }
         }
-        for (entry, fingerprint) in entries.iter().zip(fingerprints) {
+        for (index, fingerprint) in fingerprints.iter().enumerate() {
             if old
-                .binary_search_by_key(&entry.id, |entry| entry.id)
+                .binary_search_by_key(&fingerprint.id, |entry| entry.id)
                 .ok()
                 .is_some_and(|index| old[index] == *fingerprint)
             {
                 continue;
             }
-            let bytes = serde_json::to_vec(entry).map_err(invalid)?;
+            let entry = entries.entry(index);
+            let bytes = serde_json::to_vec(&entry).map_err(invalid)?;
             self.execute_cached("INSERT INTO history(temp_id, seq, global_seq, entry, bytes, parent_id, edited_at) VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(temp_id, seq) DO UPDATE SET global_seq=excluded.global_seq, entry=excluded.entry, bytes=excluded.bytes, parent_id=excluded.parent_id, edited_at=excluded.edited_at",
                 params![id, entry.id as i64, entry.global_seq as i64, bytes.as_slice(), bytes.len() as i64, entry.parent_id as i64, entry.edited_at as i64]).await?;
         }

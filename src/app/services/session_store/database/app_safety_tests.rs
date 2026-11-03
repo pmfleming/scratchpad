@@ -76,7 +76,7 @@ fn unsupported_schema_resets_and_reports_once_without_blocking_saves() {
         .call(|db| {
             block_on(async {
                 db.conn
-                    .execute("PRAGMA user_version=999", ())
+                    .execute("PRAGMA user_version=9", ())
                     .await
                     .map_err(database::error)?;
                 db.checkpoint().await

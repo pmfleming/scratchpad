@@ -256,8 +256,7 @@ fn order_direction_cmp<T: Ord>(direction: TabOrderDirection, left: T, right: T) 
 
 fn tab_latest_edit_sequence(tab: &WorkspaceTab) -> u64 {
     tab.buffers()
-        .flat_map(|buffer| buffer.document().history_entries())
-        .map(|entry| entry.global_seq)
+        .map(|buffer| buffer.document().last_edit().1)
         .max()
         .unwrap_or(0)
 }

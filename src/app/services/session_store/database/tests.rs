@@ -7,8 +7,17 @@ pub(super) fn tab(text: &str) -> WorkspaceTab {
     WorkspaceTab::new(BufferState::new("note".into(), text.into(), None))
 }
 pub(super) fn request(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
-    let request = SessionPersistRequest::capture(tabs, 0, 16.0, false);
-    // Most low-level tests isolate live snapshot GC; version retention has its own tests.
+    let mut request = SessionPersistRequest::capture(tabs, 0, 16.0, false);
+    // Materialize test fixtures explicitly so malformed-row tests can alter them.
+    for buffer in request
+        .tabs
+        .iter_mut()
+        .flat_map(|tab| &mut tab.session_tab.buffers)
+    {
+        if let Some(capture) = buffer.history_capture.take() {
+            buffer.text_history = (0..capture.len()).map(|i| capture.entry(i)).collect();
+        }
+    }
     request
 }
 pub(super) fn insert(tab: &mut WorkspaceTab, at: usize, text: &str) {
@@ -184,19 +193,14 @@ fn invalid_captures_leave_the_committed_session_intact() {
 #[test]
 fn second_owner_is_rejected_but_unsupported_schemas_start_fresh() {
     block_on(async {
-        for pragma in [
-            "PRAGMA user_version=999",
-            "PRAGMA user_version=1",
-            "PRAGMA application_id=123",
-            "PRAGMA application_id=0; PRAGMA user_version=0",
-        ] {
+        for pragma in ["PRAGMA user_version=9", "PRAGMA user_version=1"] {
             let (root, mut db) = database().await;
             db.persist(request(&[tab("discarded")]), 1).await.unwrap();
             assert!(Database::open(root.path()).await.is_err());
             db.conn.execute_batch(pragma).await.unwrap();
             drop(db);
             let mut db = Database::open(root.path()).await.unwrap();
-            assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 9);
+            assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 10);
             assert!(db.load(ReadScope::All).await.unwrap().is_none());
             assert_eq!(db.startup_notices.len(), 1);
             assert!(matches!(

@@ -134,6 +134,46 @@ impl PersistedHistoryEdit {
 }
 
 impl PersistedHistoryEntry {
+    /// Validate the complete reversible payload before importing any spans.
+    #[must_use]
+    pub fn payloads_valid(&self) -> bool {
+        let mut parts = Vec::new();
+        for edit in &self.edits {
+            let pairs = match edit {
+                PersistedHistoryEdit::Inserted {
+                    inserted_len,
+                    inserted_payload,
+                    ..
+                } => vec![(*inserted_len, inserted_payload)],
+                PersistedHistoryEdit::Deleted {
+                    deleted_len,
+                    deleted_payload,
+                    ..
+                } => vec![(*deleted_len, deleted_payload)],
+                PersistedHistoryEdit::Replaced {
+                    deleted_len,
+                    deleted_payload,
+                    inserted_len,
+                    inserted_payload,
+                    ..
+                } => vec![
+                    (*deleted_len, deleted_payload),
+                    (*inserted_len, inserted_payload),
+                ],
+            };
+            for (len, payload) in pairs {
+                let Some(text) = payload.as_deref() else {
+                    return false;
+                };
+                if text.chars().count() != len as usize {
+                    return false;
+                }
+                parts.push(text);
+            }
+        }
+        self.flags.replayable && super::fingerprint_parts(parts) == self.fingerprint
+    }
+
     pub fn payload_bytes(&self) -> usize {
         self.edits
             .iter()

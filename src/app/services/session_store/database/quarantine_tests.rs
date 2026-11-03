@@ -33,7 +33,11 @@ fn cold_damage_keeps_healthy_saves_and_retains_original_data_across_restart() {
         let id = tabs[1].buffers.buffer.temp_id.clone();
         db.persist(request(&tabs), 1).await.unwrap();
         db.load(ReadScope::Shells).await.unwrap();
-        let original = request(&tabs).tabs.pop().unwrap().session_tab;
+        let mut original = request(&tabs).tabs.pop().unwrap().session_tab;
+        original
+            .buffers
+            .iter_mut()
+            .for_each(|b| b.text_history.clear());
         let original_bytes = serde_json::to_vec(&original).unwrap();
         damage(&db, &id).await;
         let failure = db.hydrate(original).await.err().unwrap();
@@ -202,8 +206,12 @@ fn quarantine_archives_committed_metadata_not_a_stale_hydration_payload() {
         let queued = request(&tabs).tabs.pop().unwrap().session_tab;
         tabs[1].buffers.buffer.name = "latest committed name".into();
         db.persist(request(&tabs), 2).await.unwrap();
-        let committed =
-            serde_json::to_vec(&request(&tabs).tabs.pop().unwrap().session_tab).unwrap();
+        let mut metadata = request(&tabs).tabs.pop().unwrap().session_tab;
+        metadata
+            .buffers
+            .iter_mut()
+            .for_each(|b| b.text_history.clear());
+        let committed = serde_json::to_vec(&metadata).unwrap();
         damage(&db, &tabs[1].buffers.buffer.temp_id).await;
         assert!(db.hydrate(queued).await.is_err());
         assert_eq!(archive(&db).await, committed);
@@ -262,7 +270,7 @@ fn malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures() {
             "UPDATE snapshots SET digest=x'00' WHERE id=?",
             "UPDATE parts SET part=9 WHERE temp_id=?",
             "DELETE FROM snapshots WHERE id=?",
-            "UPDATE history SET seq=seq+1 WHERE temp_id=?",
+            "UPDATE history SET seq=seq+100 WHERE temp_id=?",
             "UPDATE history SET global_seq=global_seq+1 WHERE temp_id=?",
             "UPDATE history SET entry=x'00' WHERE temp_id=?",
         ] {

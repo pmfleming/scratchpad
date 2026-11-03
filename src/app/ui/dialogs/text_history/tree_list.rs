@@ -1,3 +1,4 @@
+mod cache;
 use crate::app::domain::{BufferState, buffer::HistoryToken};
 use eframe::egui;
 use std::{
@@ -9,13 +10,14 @@ use std::{
 struct Row {
     id: u64,
     depth: usize,
-    title: String,
     fork: bool,
 }
 #[derive(Clone)]
 struct TreeRows {
     token: HistoryToken,
-    rows: Arc<[Row]>,
+    rows: Vec<Row>,
+    positions: HashMap<u64, usize>,
+    structure: (u64, usize, u64),
 }
 
 fn rows(buffer: &BufferState) -> Vec<Row> {
@@ -27,7 +29,6 @@ fn rows(buffer: &BufferState) -> Vec<Row> {
     let mut rows = vec![Row {
         id: 0,
         depth: 0,
-        title: "Empty document".into(),
         fork: false,
     }];
     let mut pending = Vec::new();
@@ -41,7 +42,6 @@ fn rows(buffer: &BufferState) -> Vec<Row> {
         rows.push(Row {
             id: entry.id,
             depth,
-            title: entry.summary.clone(),
             fork,
         });
         if let Some(next) = children.get(&entry.id) {
@@ -54,106 +54,119 @@ fn rows(buffer: &BufferState) -> Vec<Row> {
 pub(super) fn show(ui: &mut egui::Ui, buffer: &BufferState) -> Option<u64> {
     let document = buffer.document();
     let key = egui::Id::unique(("history.tree.rows", buffer.id));
-    let token = document.history_token();
-    let previous = ui.ctx().data(|d| d.get_temp::<TreeRows>(key));
-    let changed = previous.as_ref().is_none_or(|c| c.token != token);
-    let cached = if changed {
-        TreeRows {
-            token,
-            rows: rows(buffer).into(),
-        }
-    } else {
-        previous.unwrap()
-    };
-    if changed {
-        ui.ctx().data_mut(|d| d.insert_temp(key, cached.clone()));
-    }
+    let (cached, changed) = cache::load(ui.ctx(), buffer, key);
     let collapsed_key = key.with("collapsed");
     let mut collapsed = ui
         .ctx()
         .data(|d| d.get_temp::<HashSet<u64>>(collapsed_key))
         .unwrap_or_default();
     if changed {
-        let route = document.history_route();
-        collapsed.retain(|id| !route[..document.operation_undo_depth()].contains(id));
+        collapsed.retain(|id| !document.is_history_node_applied(*id));
     }
-    let mut hidden_depth = None;
-    let visible: Vec<_> = cached
-        .rows
-        .iter()
-        .filter(|row| {
-            if let Some(depth) = hidden_depth {
-                if row.depth > depth || (!row.fork && row.depth == depth) {
-                    return false;
-                }
-                hidden_depth = None;
-            }
-            if collapsed.contains(&row.id) {
-                hidden_depth = Some(row.depth);
-            }
-            true
-        })
-        .collect();
-    let selected: HashSet<_> = document.history_route().iter().copied().collect();
+    let visible = cache::visible(ui.ctx(), key, &cached, &collapsed);
     let mut scroll = egui::ScrollArea::vertical()
         .id_salt(("history.tree.scroll", buffer.id))
         .max_height(360.0)
         .auto_shrink([false, true]);
-    if changed
-        && let Some(index) = visible
-            .iter()
-            .position(|row| row.id == document.history_now())
-    {
-        scroll = scroll.vertical_scroll_offset((index as f32 * 28.0 - 120.0).max(0.0));
+    if changed {
+        let index = visible
+            .as_ref()
+            .and_then(|indices| {
+                indices
+                    .iter()
+                    .position(|&i| cached.rows[i].id == document.history_now())
+            })
+            .or_else(|| {
+                if visible.is_none() {
+                    cached.positions.get(&document.history_now()).copied()
+                } else {
+                    None
+                }
+            });
+        if let Some(index) = index {
+            scroll = scroll.vertical_scroll_offset((index as f32 * 28.0 - 120.0).max(0.0));
+        }
     }
     let mut action = None;
-    scroll.show_rows(ui, 28.0, visible.len(), |ui, range| {
-        for index in range {
-            let row = visible[index];
-            let current = row.id == document.history_now();
-            crate::app::ui::widget_ids::scope(ui, (buffer.id, row.id), |ui| {
-                ui.horizontal(|ui| {
-                    ui.add_space((row.depth as f32 * 14.0).min(140.0));
-                    if row.fork {
-                        if ui
-                            .small_button(if collapsed.contains(&row.id) {
-                                "+"
-                            } else {
-                                "−"
-                            })
-                            .on_hover_text("Expand or collapse branch")
-                            .clicked()
-                        {
-                            if !collapsed.remove(&row.id) {
-                                collapsed.insert(row.id);
-                            }
-                        }
-                        ui.weak(format!("Branch {}", row.id));
-                    }
-                    let prefix = if current { "Now · " } else { "" };
-                    let label = format!("{prefix}{}", row.title);
-                    let text = egui::RichText::new(label.clone());
-                    let text = if current {
-                        text.strong()
-                    } else if row.id == 0 || selected.contains(&row.id) {
-                        text
-                    } else {
-                        text.weak()
-                    };
-                    let response = ui
-                        .selectable_label(current, text)
-                        .on_hover_text(format!("State {} · {}", row.id, row.title));
-                    if response.clicked() {
-                        action = Some(row.id);
-                    }
-                    if row.id == document.history_tip() {
-                        ui.weak("Selected tip");
-                    }
-                });
-            });
-        }
-    });
+    scroll.show_rows(
+        ui,
+        28.0,
+        visible
+            .as_ref()
+            .map_or(cached.rows.len(), |indices| indices.len()),
+        |ui, range| {
+            for index in range {
+                let row = &cached.rows[visible.as_ref().map_or(index, |indices| indices[index])];
+                if show_row(ui, buffer, row, &mut collapsed) {
+                    action = Some(row.id);
+                }
+            }
+        },
+    );
     ui.ctx()
         .data_mut(|d| d.insert_temp(collapsed_key, collapsed));
+    ui.ctx().data_mut(|d| d.insert_temp(key, Some(cached)));
     action
+}
+
+fn show_row(
+    ui: &mut egui::Ui,
+    buffer: &BufferState,
+    row: &Row,
+    collapsed: &mut HashSet<u64>,
+) -> bool {
+    let document = buffer.document();
+    let mut clicked = false;
+    let title = if row.id == 0 {
+        "Empty document"
+    } else {
+        let Ok(i) = document
+            .history_entries()
+            .binary_search_by_key(&row.id, |entry| entry.id)
+        else {
+            return false;
+        };
+        &document.history_entries()[i].summary
+    };
+    let current = row.id == document.history_now();
+    crate::app::ui::widget_ids::scope(ui, (buffer.id, row.id), |ui| {
+        ui.horizontal(|ui| {
+            ui.add_space((row.depth as f32 * 14.0).min(140.0));
+            if row.fork {
+                if ui
+                    .small_button(if collapsed.contains(&row.id) {
+                        "+"
+                    } else {
+                        "−"
+                    })
+                    .on_hover_text("Expand or collapse branch")
+                    .clicked()
+                    && !collapsed.remove(&row.id)
+                {
+                    collapsed.insert(row.id);
+                }
+                ui.weak(format!("Branch {}", row.id));
+            }
+            let prefix = if current { "Now · " } else { "" };
+            let label = format!("{prefix}{title}");
+            let text = egui::RichText::new(label.clone());
+            let text = if current {
+                text.strong()
+            } else if row.id == 0 || document.is_on_history_route(row.id) {
+                text
+            } else {
+                text.weak()
+            };
+            let response = ui
+                .selectable_label(current, text)
+                .on_hover_text(format!("State {} · {title}", row.id));
+            if response.clicked() {
+                clicked = true;
+            }
+            if row.id == document.history_tip() {
+                ui.weak("Selected tip");
+            }
+        });
+    });
+    clicked
 }

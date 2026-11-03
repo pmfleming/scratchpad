@@ -11,6 +11,12 @@ Session rows describe tabs, views, and document identities. `history` stores the
 edits; `document_history` stores Now, selected tip, and edit recency. Current text
 caches use deduplicated blobs. Everything is local; there is no remote Turso URL.
 
+Memory limits evict loaded immutable text chunks, not edits. Cold chunks use
+private temporary backing while the application runs, and are reconstructed from
+the database on restart. The limits exclude tree metadata and the active editable
+chunk. Temporary backing is released on process exit; Forget history removes the
+durable tree without promising immediate reclamation of that temporary space.
+
 Schema 10 starts a fresh session when opening a recognized older Scratchpad
 schema. Previous session/history data is discarded; files and settings remain.
 An ownership lock protects replacement. Unknown future versions, foreign databases,

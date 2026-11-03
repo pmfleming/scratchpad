@@ -81,3 +81,92 @@ fn replay_across_a_barrier_is_atomic_in_both_directions() {
     assert_eq!(document.extract_text(), "");
     assert!(document.history_entries().iter().all(|e| e.is_undone()));
 }
+
+#[test]
+fn large_branches_survive_cache_eviction_and_replay_does_not_append_payloads() {
+    let mut document = TextDocument::new(String::new());
+    let mut tips = Vec::new();
+    for index in 0..20 {
+        document.navigate_history(0).unwrap();
+        let text = format!("branch-{index}: λ\r\n🦀").repeat(32_768);
+        document.replace_exact_with_history(&text);
+        tips.push((document.history_now(), text));
+    }
+    let allocated = document.piece_tree().add_storage_bytes();
+    for _ in 0..2 {
+        for (id, text) in &tips {
+            document.navigate_history(*id).unwrap();
+            assert_eq!(&document.extract_text(), text);
+        }
+    }
+    assert_eq!(document.piece_tree().add_storage_bytes(), allocated);
+    assert_eq!(document.history_entries().len(), tips.len());
+}
+
+#[test]
+fn failed_history_import_preserves_original_text_and_all_original_spans() {
+    let mut original = TextDocument::new("keep λ".into());
+    super::helpers::insert_isolated_edit(&mut original, 6, "!");
+    let before = original.exported_history();
+    let now = original.history_now();
+    let mut corrupt = before.clone();
+    corrupt[0].fingerprint ^= 1;
+    assert!(!original.restore_exported_history(corrupt));
+    let mut ambiguous = before.clone();
+    ambiguous[0].current = true;
+    assert!(!original.restore_exported_history(ambiguous));
+    let mut exhausted = before.clone();
+    exhausted.last_mut().unwrap().id = u64::MAX;
+    assert!(!original.restore_exported_history(exhausted));
+    assert_eq!(original.exported_history(), before);
+    assert_eq!(original.history_now(), now);
+    original.undo_last_operation().unwrap();
+    assert_eq!(original.extract_text(), "keep λ");
+}
+
+#[test]
+#[ignore = "manual edit-tree latency profile"]
+fn profile_edit_tree_navigation_and_capture() {
+    use std::time::Instant;
+    for count in [1_000, 10_000, 100_000] {
+        let mut document = TextDocument::new(String::new());
+        let start = Instant::now();
+        for index in 0..count {
+            document.replace_exact_with_history(if index % 2 == 0 { "α" } else { "β" });
+        }
+        let build = start.elapsed();
+        let start = Instant::now();
+        for _ in 0..1_000 {
+            std::hint::black_box(document.history_snapshot());
+        }
+        let captures = start.elapsed();
+        let start = Instant::now();
+        for _ in 0..500 {
+            document.undo_last_operation().unwrap();
+            document.redo_last_operation().unwrap();
+        }
+        let nearby = start.elapsed();
+        let start = Instant::now();
+        for _ in 0..500 {
+            let capture = document.history_snapshot();
+            document.undo_last_operation().unwrap();
+            document.redo_last_operation().unwrap();
+            std::hint::black_box(capture);
+        }
+        let shared_nearby = start.elapsed();
+        let start = Instant::now();
+        document.navigate_history(0).unwrap();
+        document.navigate_history(count).unwrap();
+        let long = start.elapsed();
+        eprintln!(
+            "history nodes={count} build_ms={} capture_ns={} nearby_ns={} shared_nearby_ns={} full_roundtrip_ms={} payload_bytes={}",
+            build.as_millis(),
+            captures.as_nanos() / 1000,
+            nearby.as_nanos() / 1000,
+            shared_nearby.as_nanos() / 1000,
+            long.as_millis(),
+            document.piece_tree().add_storage_bytes()
+        );
+        assert_eq!(document.extract_text(), "β");
+    }
+}
