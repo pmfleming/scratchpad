@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 mod generation;
 mod helpers;
+mod navigation_contract;
 mod replay_model;
 use helpers::{
     assert_history_byte_usage_consistent, cursor, delete_edit, entry_record, history_record,
