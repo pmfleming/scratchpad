@@ -1,5 +1,6 @@
 mod analysis;
 mod document;
+pub mod edit_tree;
 mod history;
 mod piece_tree;
 mod snapshot;
