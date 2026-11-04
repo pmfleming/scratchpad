@@ -10,6 +10,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Redesigned History with newest-first branch lanes, a searchable file picker, local edit times, readable whitespace labels, and a scroll-to-Now control. All files uses one scrolling list, includes only files with recorded history, and stays open when selecting a file.
+- Redesigned the scrubber as a square, stable-width card with a wider live track, branch markers, step/start/end controls, and Open in History. Escape and resumed editing still dismiss it; history navigation and undo/redo behaviour are unchanged.
 - Undo, redo, History clicks, and the selected-branch scrubber share the same persisted position. Hover leaves text unchanged.
 - Removed saved-version snapshots and automatic history expiry. Forget history is explicit and per file.
 - Incompatible session versions now show a warning with a **Start new session** action. The old database moves to temporary backup storage before a fresh session is created and saving resumes; files and settings are preserved.

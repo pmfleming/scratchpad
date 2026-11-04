@@ -170,8 +170,13 @@ edit to select the text after it; hovering does not change text. Escape or click
 outside keeps the selected state. Undo moves to the parent; redo follows the selected
 branch. Editing after undo keeps the old branch available in History.
 
-The scrubber shows one selected file and branch. History's recently edited list
-helps find both open and closed files. Viewing old edits does not change that order.
+The scrubber shows one selected file and branch, with start/end and previous/next
+buttons alongside the live track. Open in History shows the full tree. History
+lists newer edits first, draws connected branch lanes, and has a searchable file
+picker. **All files** includes only open or closed files with recorded history;
+selecting a file keeps that view open. Returning Now to the empty root does not
+hide its file. Viewing old edits does not change file recency. The **Now** button
+scrolls to the selected state without changing the text.
 All branches survive closing and restarting. **Forget history** requires confirmation
 and replaces a file's tree with its current contents; it does not change the source
 file. There are no separate snapshots or automatic expiry settings.

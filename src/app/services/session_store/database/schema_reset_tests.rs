@@ -225,3 +225,49 @@ fn profile_edit_tree_database_growth_and_restart() {
         );
     }
 }
+
+#[test]
+fn recent_closed_files_report_history_even_at_root_or_without_edit_timestamps() {
+    use crate::app::services::session_store::{CapturedClosedTab, SessionPersistRequest};
+    let root = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(root.path().to_owned());
+    let mut initial = tab("initial contents");
+    initial.active_buffer_mut().name = "initial".into();
+    let mut undone = tab("undo to root");
+    undone.active_buffer_mut().name = "undone".into();
+    undone
+        .active_buffer_mut()
+        .undo_last_text_operation()
+        .unwrap();
+    let mut empty = tab("");
+    empty.active_buffer_mut().name = "empty".into();
+    let mut save = SessionPersistRequest::capture(&[], 0, 16.0, false);
+    for tab in [initial, undone, empty] {
+        save.closed_tabs
+            .push(CapturedClosedTab::capture(&tab, None));
+    }
+    store.persist_request(save).unwrap();
+    let files = store.recent_history_files().unwrap();
+    assert_eq!(files.len(), 3);
+    assert!(
+        files
+            .iter()
+            .find(|file| file.label == "initial")
+            .unwrap()
+            .has_history
+    );
+    assert!(
+        files
+            .iter()
+            .find(|file| file.label == "undone")
+            .unwrap()
+            .has_history
+    );
+    assert!(
+        !files
+            .iter()
+            .find(|file| file.label == "empty")
+            .unwrap()
+            .has_history
+    );
+}

@@ -1,4 +1,4 @@
-use super::super::common::{HISTORY_DIALOG_SIZE, history_dialog_header};
+use super::{HistoryUi, style};
 use crate::app::{
     app_state::{ScratchpadApp, workspace::accessors},
     theme,
@@ -6,10 +6,13 @@ use crate::app::{
 };
 use eframe::egui;
 
+const HISTORY_DIALOG_SIZE: egui::Vec2 = egui::vec2(440.0, 580.0);
+
 pub(super) fn show(
     ctx: &egui::Context,
     app: &mut ScratchpadApp,
-    add_contents: impl FnOnce(&mut egui::Ui, &mut ScratchpadApp),
+    state: &mut HistoryUi,
+    add_contents: impl FnOnce(&mut egui::Ui, &mut ScratchpadApp, &mut HistoryUi),
 ) -> bool {
     let screen = ctx.content_rect();
     let dismissible = super::dismissible_history(app);
@@ -31,6 +34,7 @@ pub(super) fn show(
         .resizable(true)
         .default_size(HISTORY_DIALOG_SIZE)
         .min_size(egui::vec2(320.0, 240.0))
+        .max_size((screen.size() - egui::vec2(24.0, 24.0)).max(egui::vec2(320.0, 240.0)))
         .frame(frame)
         .default_pos(egui::pos2(
             (screen.right() - HISTORY_DIALOG_SIZE.x - 24.0).max(screen.left()),
@@ -40,24 +44,36 @@ pub(super) fn show(
             widget_ids::feature_scope(ui, "text_history_dialog", |ui| {
                 settings::apply_dialog_typography(ui);
                 callout::apply_spacing(ui);
+                style::apply(ui);
                 ui.visuals_mut().panel_fill = frame.fill;
                 ui.visuals_mut().window_fill = frame.fill;
-                if dismissible {
+                ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new("History")
-                            .size(18.0)
+                            .size(14.0)
+                            .strong()
                             .color(callout::text(ui)),
                     );
-                } else {
-                    close = history_dialog_header(
-                        ui,
-                        "text_history.header",
-                        "Close history",
-                        "History",
-                        18.0,
-                    );
-                }
-                add_contents(ui, app);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if !dismissible {
+                            close = style::icon_button(
+                                ui,
+                                "history.close",
+                                egui_phosphor::regular::X,
+                                "Close history",
+                                true,
+                            )
+                            .clicked();
+                        }
+                        let old_scope = state.all_files;
+                        ui.selectable_value(&mut state.all_files, true, "All files");
+                        ui.selectable_value(&mut state.all_files, false, "This file");
+                        if old_scope != state.all_files {
+                            state.search.clear();
+                        }
+                    });
+                });
+                add_contents(ui, app, state);
             });
         });
     if let Some(response) = response {

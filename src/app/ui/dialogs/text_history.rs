@@ -1,7 +1,10 @@
 //! A file's History and scrubber share the document's explicit Now and selected route.
+mod list;
 mod panel;
+mod presentation;
 mod recent;
 mod scrubber;
+mod style;
 #[cfg(test)]
 mod tests;
 mod tree_list;
@@ -24,6 +27,9 @@ struct HistoryUi {
     selected: Option<u64>,
     search: String,
     forget: Option<u64>,
+    expanded: std::collections::HashSet<u64>,
+    picker_index: usize,
+    file_picked: bool,
 }
 fn state_key() -> egui::Id {
     egui::Id::unique("history.tree.ui")
@@ -209,6 +215,7 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
 
 fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let mut state = ctx.data_mut(|d| d.get_temp_mut_or_default::<HistoryUi>(state_key()).clone());
+    state.file_picked = false;
     let old_selected = state.selected;
     let first = !state.opened;
     state.opened = true;
@@ -221,54 +228,32 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     {
         state.selected = active_buffer(app);
     }
+    if first && let Some(id) = state.selected {
+        state.expanded.insert(id);
+    }
     let mut action = None;
     let mut forgotten = None;
     let mut reopen = None;
     let mut focus = false;
-    let should_close = panel::show(ctx, app, |ui, app| {
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut state.all_files, false, "Selected file");
-            ui.selectable_value(&mut state.all_files, true, "All files");
-        });
-        ui.add(
-            egui::TextEdit::singleline(&mut state.search)
-                .hint_text("Find recently edited files")
-                .id_salt("history.file_search"),
-        );
-        reopen = recent::show(ui, app, &mut state);
-        ui.separator();
-        let mut files: Vec<_> = app
-            .tab_manager
-            .tabs
-            .as_slice()
-            .iter()
-            .flat_map(|t| t.buffers())
-            .filter(|b| state.all_files || state.selected == Some(b.id))
-            .collect();
-        files.sort_by_key(|b| std::cmp::Reverse(b.document().last_edit()));
-        for buffer in files {
-            if state.all_files && !recent::matches(buffer, &state.search) {
-                continue;
-            }
-            let label = crate::app::text_history::buffer_label(buffer);
-            egui::CollapsingHeader::new(label).id_salt(("history.file", buffer.id))
-                .default_open(state.selected == Some(buffer.id)).show(ui, |ui| {
-                    if let Some(node) = tree_list::show(ui, buffer) {
-                        state.selected = Some(buffer.id); action = Some((buffer.id, node)); focus = true;
-                    }
-                    if ui.small_button("Forget history…").clicked() { state.forget = Some(buffer.id); }
-                    if state.forget == Some(buffer.id) {
-                        ui.label("Forget every branch for this file? Current text is kept. This cannot be undone.");
-                        ui.horizontal(|ui| {
-                            if ui.button("Cancel").clicked() { state.forget = None; }
-                            if ui.button("Forget this file's history").clicked() { forgotten = Some(buffer.id); state.forget = None; }
-                        });
-                    }
-                });
+    let should_close = panel::show(ctx, app, &mut state, |ui, app, state| {
+        if state.all_files {
+            recent::search(ui, state);
+        } else {
+            reopen = recent::picker(ui, app, state);
         }
+        let footer_height = if state.forget.is_some() { 112.0 } else { 42.0 };
+        let height = (ui.available_height() - footer_height).max(30.0);
+        let outcome = list::show(ui, app, state, height);
+        action = outcome.navigate;
+        reopen = outcome.reopen.or(reopen.take());
+        focus = outcome.focus;
+        if state.forget.is_some_and(|id| state.selected != Some(id)) {
+            state.forget = None;
+        }
+        forgotten = footer(ui, app, state);
         history_focus(ui, ctx, app, focus, first);
     });
-    if action.is_none() && old_selected != state.selected && !first {
+    if action.is_none() && (state.file_picked || old_selected != state.selected) && !first {
         action = state.selected.and_then(|id| {
             app.tab_manager
                 .tabs
@@ -289,6 +274,11 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
         crate::app::app_state::workspace::lifecycle::reopen_archived_tab(app, &token);
         ctx.data_mut(|d| {
             d.get_temp_mut_or_default::<HistoryUi>(state_key()).selected = active_buffer(app);
+            if let Some(id) = active_buffer(app) {
+                d.get_temp_mut_or_default::<HistoryUi>(state_key())
+                    .expanded
+                    .insert(id);
+            }
         });
     }
     if should_close {
@@ -302,6 +292,73 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     {
         accessors::consume_focus_request(app, view);
     }
+}
+
+fn footer(ui: &mut egui::Ui, app: &ScratchpadApp, state: &mut HistoryUi) -> Option<u64> {
+    ui.separator();
+    if let Some(id) = state.forget {
+        ui.label("Forget every branch for this file? Current text is kept. This cannot be undone.");
+        let mut forgotten = None;
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Cancel").clicked() {
+                state.forget = None;
+            }
+            if ui
+                .button(
+                    egui::RichText::new("Forget this file's history")
+                        .color(ui.visuals().error_fg_color),
+                )
+                .clicked()
+            {
+                forgotten = Some(id);
+                state.forget = None;
+            }
+        });
+        return forgotten;
+    }
+    let selected = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .find_map(|tab| state.selected.and_then(|id| tab.buffer_by_id(id)))
+        .filter(|b| recent::has_history(b));
+    ui.horizontal(|ui| {
+        if ui.available_width() > 380.0 {
+            ui.label(
+                egui::RichText::new("↑ ↓ Move   Home End Jump   Esc Close")
+                    .size(11.0)
+                    .weak(),
+            );
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if let Some(buffer) = selected {
+                let muted = crate::app::theme::text_muted(ui);
+                let danger = crate::app::theme::diff_del(ui);
+                let button = ui
+                    .scope(|ui| {
+                        ui.visuals_mut().widgets.inactive.fg_stroke.color = muted;
+                        ui.visuals_mut().widgets.hovered.fg_stroke.color = danger;
+                        ui.visuals_mut().widgets.hovered.weak_bg_fill = danger.gamma_multiply(0.12);
+                        ui.add(
+                            egui::Button::new(egui::RichText::new("Forget history…").size(12.0))
+                                .frame(false),
+                        )
+                    })
+                    .inner;
+                if button
+                    .on_hover_text(format!(
+                        "Forget history for {}",
+                        crate::app::text_history::buffer_label(buffer)
+                    ))
+                    .clicked()
+                {
+                    state.forget = Some(buffer.id);
+                }
+            }
+        });
+    });
+    None
 }
 
 fn history_focus(

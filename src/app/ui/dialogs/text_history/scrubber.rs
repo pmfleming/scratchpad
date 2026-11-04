@@ -1,8 +1,10 @@
-use super::{active_buffer, navigate};
+mod card;
+mod track;
+use super::{active_buffer, navigate, style};
 use crate::app::{
     app_state::{ScratchpadApp, workspace::accessors},
-    domain::buffer::HistoryToken,
-    ui::callout,
+    domain::{BufferState, buffer::HistoryToken},
+    ui::{callout, widget_ids},
 };
 use eframe::egui;
 
@@ -36,6 +38,7 @@ pub(crate) fn history_scrubbing(ctx: &egui::Context, app: &ScratchpadApp) -> boo
                     })
             })
 }
+
 pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if !app.state.dialogs.history_scrubber.is_open() {
         ctx.data_mut(|d| d.remove::<Drag>(drag_key()));
@@ -45,96 +48,103 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
         return;
     };
     let screen = ctx.content_rect();
+    let width = (screen.width() - 24.0).clamp(160.0, 480.0);
     let mut target = None;
-    callout::show_floating(
-        ctx,
-        "history_scrubber_window",
-        "Scrubber",
-        egui::pos2(
-            (screen.right() - 510.0).max(0.0),
-            (screen.bottom() - 150.0).max(0.0),
-        ),
-        480.0,
-        |ui| {
-            let Some(tab) = app.tab_manager.active_tab() else {
-                return;
-            };
-            let buffer = tab.active_buffer();
-            let document = buffer.document();
-            let route = document.history_route();
-            ui.label(&buffer.name);
-            ui.label(format!(
-                "Now · {} of {} changes",
-                document.operation_undo_depth(),
-                route.len()
-            ));
-            let mut position = document.operation_undo_depth();
-            let token = document.history_token();
-            let mut drag = ctx.data(|d| d.get_temp::<Drag>(drag_key()));
-            if let Some(drag) = &mut drag {
-                drag.cancelled |= drag.buffer != id || drag.token != token;
-            }
-            let enabled = drag.as_ref().is_none_or(|d| !d.cancelled);
-            let response = ui.add_enabled(
-                enabled,
-                egui::Slider::new(&mut position, 0..=route.len())
-                    .text("Now")
-                    .show_value(false),
-            );
-            let focus = crate::app::ui::widget_ids::interact(
-                ui,
-                response.rect,
-                focus_id(),
-                egui::Sense::focusable_noninteractive(),
-                "history-focus",
-            );
-            if response.drag_started() || response.clicked() {
-                focus.request_focus();
-            }
-            if focus.has_focus() {
-                super::lock_navigation_focus(ctx, focus_id());
-            }
-            if response.changed() && enabled {
-                target = Some(position.checked_sub(1).map_or(0, |i| route[i]));
-                if ctx.input(|i| i.pointer.any_down()) {
-                    drag = Some(Drag {
-                        buffer: id,
-                        token,
-                        cancelled: false,
-                    });
-                }
-            }
-            let pointer_down = ctx.input(|i| i.pointer.any_down());
-            ctx.data_mut(|d| {
-                if pointer_down {
-                    if let Some(drag) = drag {
-                        d.insert_temp(drag_key(), drag);
-                    }
-                } else {
-                    d.remove::<Drag>(drag_key());
-                }
+    let mut open_history = false;
+    widget_ids::area("history_scrubber_window")
+        .accessible_name("Scrubber")
+        .role(egui::Role::Dialog)
+        .order(egui::Order::Foreground)
+        .constrain(true)
+        .movable(true)
+        .default_size(egui::vec2(width, 104.0))
+        .default_pos(egui::pos2(
+            (screen.right() - width - 24.0).max(screen.left()),
+            (screen.bottom() - 150.0).max(screen.top()),
+        ))
+        .show(ctx, |ui| {
+            style::apply(ui);
+            let frame = callout::frame(ui).corner_radius(egui::CornerRadius::ZERO);
+            let inner = frame.show(ui, |ui| {
+                ui.set_width((width - 24.0).max(1.0));
+                ui.set_min_width((width - 24.0).max(1.0));
+                ui.set_max_width((width - 24.0).max(1.0));
+                let Some(tab) = app.tab_manager.active_tab() else {
+                    return;
+                };
+                let buffer = tab.active_buffer();
+                open_history = card::header(ui, buffer);
+                target = transport(ui, buffer);
+                card::caption(ui, buffer);
             });
-            let entries = document.history_entries();
-            let label = entries
-                .binary_search_by_key(&document.history_now(), |entry| entry.id)
-                .ok()
-                .map_or("Empty document", |index| entries[index].summary.as_str());
-            ui.label(label);
-        },
-    );
+            callout::mark_scroll_blocker_if_hovered(ctx, &inner.response);
+        });
     if let Some(node) = target {
-        let applied = navigate(ctx, app, id, node);
-        if let Some(buffer) = app.tab_manager.active_tab().map(|t| t.active_buffer()) {
-            ctx.data_mut(|d| {
-                if let Some(mut drag) = d.get_temp::<Drag>(drag_key()) {
-                    if applied && drag.buffer == buffer.id {
-                        drag.token = buffer.document().history_token();
-                    } else {
-                        drag.cancelled = true;
-                    }
-                    d.insert_temp(drag_key(), drag);
-                }
-            });
+        apply_target(ctx, app, id, node);
+    }
+    if open_history {
+        close(ctx, app);
+        app.state.dialogs.text_history.open();
+    }
+}
+
+fn transport(ui: &mut egui::Ui, buffer: &BufferState) -> Option<u64> {
+    let ctx = ui.ctx().clone();
+    let document = buffer.document();
+    let route = document.history_route();
+    let token = document.history_token();
+    let mut drag = ctx.data(|d| d.get_temp::<Drag>(drag_key()));
+    if let Some(drag) = &mut drag {
+        drag.cancelled |= drag.buffer != buffer.id || drag.token != token;
+    }
+    let enabled = drag.as_ref().is_none_or(|d| !d.cancelled);
+    let mut position = document.operation_undo_depth();
+    let (response, stepped) = ui
+        .add_enabled_ui(enabled, |ui| card::transport(ui, buffer, &mut position))
+        .inner;
+    if response.has_focus() {
+        super::lock_navigation_focus(&ctx, focus_id());
+    }
+    if stepped {
+        ctx.memory_mut(|m| m.request_focus(focus_id()));
+    }
+    let changed = (response.changed() || stepped) && enabled;
+    let pointer_down = ctx.input(|i| i.pointer.any_down());
+    if enabled
+        && pointer_down
+        && (response.is_pointer_button_down_on() || changed)
+        && drag.is_none()
+    {
+        drag = Some(Drag {
+            buffer: buffer.id,
+            token,
+            cancelled: false,
+        });
+    }
+    ctx.data_mut(|d| {
+        if pointer_down {
+            if let Some(drag) = drag {
+                d.insert_temp(drag_key(), drag);
+            }
+        } else {
+            d.remove::<Drag>(drag_key());
         }
+    });
+    changed.then(|| position.checked_sub(1).map_or(0, |i| route[i]))
+}
+
+fn apply_target(ctx: &egui::Context, app: &mut ScratchpadApp, id: u64, node: u64) {
+    let applied = navigate(ctx, app, id, node);
+    if let Some(buffer) = app.tab_manager.active_tab().map(|t| t.active_buffer()) {
+        ctx.data_mut(|d| {
+            if let Some(mut drag) = d.get_temp::<Drag>(drag_key()) {
+                if applied && drag.buffer == buffer.id {
+                    drag.token = buffer.document().history_token();
+                } else {
+                    drag.cancelled = true;
+                }
+                d.insert_temp(drag_key(), drag);
+            }
+        });
     }
 }

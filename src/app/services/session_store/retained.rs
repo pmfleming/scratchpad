@@ -9,6 +9,7 @@ pub(crate) struct RecentHistoryFile {
     pub label: String,
     pub edited_at: u64,
     pub edit_seq: u64,
+    pub has_history: bool,
 }
 
 #[derive(Clone, Debug)]
