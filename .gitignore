@@ -6,6 +6,7 @@
 /target-tests/
 /target_test/
 /dist/
+/design/
 /docs/
 /result
 /check_output.txt
