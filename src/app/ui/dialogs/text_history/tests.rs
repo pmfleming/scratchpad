@@ -160,7 +160,7 @@ fn forget_requires_confirmation_and_keeps_current_text_as_a_new_initial_edit() {
     let root = tempfile::tempdir().unwrap();
     let mut h = harness(app(root.path()));
     h.run_steps(3);
-    h.get_by_label("Forget history…").click();
+    h.get_by_label("Forget history for note.txt").click();
     h.run_steps(2);
     assert_eq!(text(h.state()), "two");
     assert_eq!(
@@ -581,4 +581,276 @@ fn collapsed_branch_is_display_only_and_reveals_now_when_navigated_into() {
     h.run_steps(5);
     assert_eq!(text(h.state()), "two");
     assert!(h.query_by_label("Now · Replace match").is_some());
+}
+
+#[test]
+fn picker_escape_and_outside_dismissal_keep_history_and_restore_navigation() {
+    let root = tempfile::tempdir().unwrap();
+    let mut h = harness(app(root.path()));
+    h.run_steps(3);
+    for escape in [true, false] {
+        h.get_by_label("Choose history file").click();
+        h.run_steps(3);
+        h.event(egui::Event::Text("missing file".into()));
+        h.run_steps(3);
+        if escape {
+            h.key_press(egui::Key::Escape);
+        } else {
+            let panel = h
+                .ctx
+                .data(|d| d.get_temp::<egui::Rect>(rect_key()))
+                .unwrap();
+            let at = panel.left_top() + egui::vec2(8.0, 8.0);
+            h.hover_at(at);
+            h.drag_at(at);
+            h.run_steps(1);
+            h.drop_at(at);
+        }
+        h.run_steps(3);
+        assert!(h.state().state.dialogs.text_history.is_open());
+        assert!(!egui::Popup::is_any_open(&h.ctx));
+        assert!(
+            h.ctx
+                .data(|d| d.get_temp::<HistoryUi>(state_key()))
+                .unwrap()
+                .search
+                .is_empty()
+        );
+        assert!(h.ctx.memory(|m| m.has_focus(focus_id())));
+        h.key_press(egui::Key::Home);
+        h.run_steps(3);
+        assert_eq!(text(h.state()), "");
+    }
+}
+
+#[test]
+fn selecting_current_file_keeps_caret_and_visible_row_click_does_not_recenter() {
+    use crate::app::domain::CharCursor;
+    let root = tempfile::tempdir().unwrap();
+    let mut h = harness(app(root.path()));
+    h.run_steps(3);
+    h.get_by_label("All files").click();
+    h.run_steps(3);
+    let tab = h.state_mut().tab_manager.active_tab_mut().unwrap();
+    let view_id = tab.layout.active_view_id();
+    let (buffer, view) = tab.buffer_and_view_mut(view_id).unwrap();
+    let selection = CursorRange::one(CharCursor::new(3));
+    view.set_cursor_range_anchored(buffer, selection);
+    view.set_pending_cursor_range_anchored(buffer, selection);
+    h.run_steps(3);
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "note.txt")
+        .click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .layout
+            .active_view()
+            .unwrap()
+            .cursor_range,
+        Some(selection)
+    );
+    h.get_by_label("This file").click();
+    h.run_steps(3);
+    let row = h.get_by_label("Empty document").rect();
+    h.get_by_label("Empty document").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.get_by_label("Now · Empty document").rect().top(),
+        row.top()
+    );
+}
+
+#[test]
+fn forget_is_named_per_visible_file_and_is_reset_by_filter_or_close() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app(root.path());
+    let original = app.tab_manager.active_tab().unwrap().clone();
+    let original_id = original.active_buffer().id;
+    app.tab_manager.set_tabs(
+        vec![
+            original,
+            WorkspaceTab::new(BufferState::new("other.txt".into(), "other".into(), None)),
+        ],
+        0,
+    );
+    let mut h = harness(app);
+    h.run_steps(3);
+    h.get_by_label("All files").click();
+    h.run_steps(3);
+    h.get_by_label("Forget history for note.txt").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Forget history for note.txt?").is_some());
+    h.ctx
+        .data_mut(|d| d.get_temp_mut_or_default::<HistoryUi>(state_key()).search = "other".into());
+    h.run_steps(3);
+    assert!(h.query_by_label("Forget this file's history").is_none());
+    assert!(h.query_by_label("Forget history for note.txt").is_none());
+    assert!(
+        h.ctx
+            .data(|d| d.get_temp::<HistoryUi>(state_key()))
+            .unwrap()
+            .forget
+            .is_none()
+    );
+    let original = h
+        .state()
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .find_map(|t| t.buffer_by_id(original_id))
+        .unwrap();
+    assert_eq!(original.document().history_entries().len(), 3);
+    h.ctx.data_mut(|d| {
+        d.get_temp_mut_or_default::<HistoryUi>(state_key())
+            .search
+            .clear();
+    });
+    h.run_steps(3);
+    h.get_by_label("Forget history for note.txt").click();
+    h.run_steps(3);
+    let before = h
+        .ctx
+        .data(|d| d.get_temp::<egui::Rect>(rect_key()))
+        .unwrap()
+        .height();
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    h.state_mut().state.dialogs.text_history.open();
+    h.run_steps(3);
+    assert!(h.query_by_label("Forget this file's history").is_none());
+    assert!(
+        (h.ctx
+            .data(|d| d.get_temp::<egui::Rect>(rect_key()))
+            .unwrap()
+            .height()
+            - before)
+            .abs()
+            < 2.0
+    );
+}
+
+#[test]
+fn reopening_a_split_archive_selects_the_requested_file() {
+    use crate::app::{
+        domain::SplitAxis,
+        services::session_store::{CapturedClosedTab, SessionPersistRequest},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let app = app(root.path());
+    let mut archived = WorkspaceTab::new(BufferState::new(
+        "first-closed.txt".into(),
+        "first closed".into(),
+        None,
+    ));
+    let requested = archived.active_buffer().temp_id.clone();
+    archived
+        .open_buffer_as_split(
+            BufferState::new("second-closed.txt".into(), "second closed".into(), None),
+            SplitAxis::Vertical,
+            true,
+            0.5,
+        )
+        .unwrap();
+    let mut save = SessionPersistRequest::capture(app.tab_manager.tabs.as_slice(), 0, 16.0, false);
+    save.closed_tabs
+        .push(CapturedClosedTab::capture(&archived, None));
+    app.state
+        .persistence
+        .session_store
+        .persist_request(save)
+        .unwrap();
+    let mut h = harness(app);
+    h.run_steps(3);
+    h.get_by_label("All files").click();
+    for _ in 0..100 {
+        h.run_steps(1);
+        if h.query_by_role_and_label(egui::accesskit::Role::Button, "first-closed.txt")
+            .is_some()
+        {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "first-closed.txt")
+        .click();
+    h.run_steps(5);
+    assert_eq!(
+        h.state()
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .temp_id,
+        requested
+    );
+    assert_eq!(text(h.state()), "first closed");
+    assert!(
+        h.ctx
+            .data(|d| d.get_temp::<HistoryUi>(state_key()))
+            .unwrap()
+            .all_files
+    );
+}
+
+#[test]
+fn old_edit_dates_and_operation_icons_preserve_meaning_without_wrapper_quotes() {
+    use chrono::TimeZone;
+    let now = chrono::Local
+        .with_ymd_and_hms(2026, 11, 4, 12, 0, 0)
+        .single()
+        .unwrap();
+    let earlier = chrono::Local
+        .with_ymd_and_hms(2026, 11, 3, 11, 36, 0)
+        .single()
+        .unwrap();
+    assert_eq!(
+        presentation::clock_at(earlier.timestamp() as u64, now),
+        "Nov 3"
+    );
+    assert_eq!(presentation::clock_at(now.timestamp() as u64, now), "12:00");
+    let root = tempfile::tempdir().unwrap();
+    let mut h = harness(app(root.path()));
+    h.run_steps(3);
+    h.event(egui::Event::Paste("quoted \"text\"".into()));
+    h.run_steps(3);
+    let buffer = h.state().tab_manager.active_tab().unwrap().active_buffer();
+    h.ctx
+        .run_ui(egui::RawInput::default(), |ui| {
+            let change = presentation::change(ui, buffer, buffer.document().history_now());
+            assert_eq!(change.icon, egui_phosphor::regular::CLIPBOARD_TEXT);
+            assert_eq!(change.display_title(), "quoted \"text\"");
+        })
+        .drop_without_applying_deltas();
+}
+
+#[test]
+fn confirmation_resizes_its_footer_without_resizing_history_or_leaving_a_gap() {
+    let root = tempfile::tempdir().unwrap();
+    let mut h = harness(app(root.path()));
+    h.run_steps(3);
+    let key = egui::Id::unique("history.footer.height");
+    let normal = h.ctx.data(|d| d.get_temp::<f32>(key)).unwrap();
+    let window = h
+        .ctx
+        .data(|d| d.get_temp::<egui::Rect>(rect_key()))
+        .unwrap();
+    h.get_by_label("Forget history for note.txt").click();
+    h.run_steps(3);
+    assert!(h.ctx.data(|d| d.get_temp::<f32>(key)).unwrap() > normal);
+    assert!(
+        (h.ctx
+            .data(|d| d.get_temp::<egui::Rect>(rect_key()))
+            .unwrap()
+            .height()
+            - window.height())
+        .abs()
+            < 1.0
+    );
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    assert!((h.ctx.data(|d| d.get_temp::<f32>(key)).unwrap() - normal).abs() < 1.0);
 }

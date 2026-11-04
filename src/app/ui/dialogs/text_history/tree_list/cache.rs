@@ -85,10 +85,12 @@ fn build(buffer: &BufferState) -> TreeRows {
         rows,
         positions,
         max_lane: lanes - 1,
-        forks: children
-            .into_iter()
-            .filter_map(|(id, children)| (children.len() > 1).then_some(id))
-            .collect(),
+        forks: Arc::new(
+            children
+                .into_iter()
+                .filter_map(|(id, children)| (children.len() > 1).then_some(id))
+                .collect(),
+        ),
     }
 }
 

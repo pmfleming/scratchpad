@@ -4,6 +4,66 @@ use std::hash::Hash;
 
 pub(super) const ROW_HEIGHT: f32 = 30.0;
 
+pub(super) fn on_accent(ui: &egui::Ui) -> egui::Color32 {
+    if ui.visuals().dark_mode {
+        egui::Color32::BLACK
+    } else {
+        egui::Color32::WHITE
+    }
+}
+
+pub(super) fn text_end(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    label: &str,
+    size: f32,
+    color: egui::Color32,
+) {
+    let fits = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font(ui, size), color)
+            .size()
+            .x
+            <= rect.width()
+    };
+    if fits(label) {
+        text(ui, rect, label, size, color);
+        return;
+    }
+    let starts: Vec<_> = label
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain(std::iter::once(label.len()))
+        .collect();
+    let index = starts.partition_point(|&start| !fits(&format!("…{}", &label[start..])));
+    let suffix = starts.get(index).copied().unwrap_or(label.len());
+    text(ui, rect, &format!("…{}", &label[suffix..]), size, color);
+}
+
+pub(super) fn text_right(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    label: &str,
+    size: f32,
+    color: egui::Color32,
+) {
+    let width = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font(ui, size), color)
+        .size()
+        .x;
+    text(
+        ui,
+        egui::Rect::from_min_max(
+            egui::pos2((rect.right() - width).max(rect.left()), rect.top()),
+            rect.max,
+        ),
+        label,
+        size,
+        color,
+    );
+}
+
 pub(super) fn apply(ui: &mut egui::Ui) {
     let accent = theme::tab_selected_accent(ui);
     let selected = theme::tab_selected_bg(ui);

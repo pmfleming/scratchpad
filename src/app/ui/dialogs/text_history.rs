@@ -1,9 +1,11 @@
 //! A file's History and scrubber share the document's explicit Now and selected route.
+mod footer;
 mod list;
 mod panel;
 mod presentation;
 mod recent;
 mod scrubber;
+mod selection;
 mod style;
 #[cfg(test)]
 mod tests;
@@ -30,6 +32,7 @@ struct HistoryUi {
     expanded: std::collections::HashSet<u64>,
     picker_index: usize,
     file_picked: bool,
+    restore_focus: bool,
 }
 fn state_key() -> egui::Id {
     egui::Id::unique("history.tree.ui")
@@ -66,7 +69,14 @@ fn lock_navigation_focus(ctx: &egui::Context, id: egui::Id) {
 }
 fn close(ctx: &egui::Context, app: &mut ScratchpadApp) {
     app.state.dialogs.text_history.close();
-    ctx.data_mut(|d| d.get_temp_mut_or_default::<HistoryUi>(state_key()).opened = false);
+    ctx.data_mut(|d| {
+        let state = d.get_temp_mut_or_default::<HistoryUi>(state_key());
+        state.opened = false;
+        state.forget = None;
+        state.restore_focus = false;
+        state.search.clear();
+    });
+    egui::Popup::close_id(ctx, recent::picker_id());
     accessors::request_focus_for_active_view(app);
 }
 
@@ -218,6 +228,11 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     state.file_picked = false;
     let old_selected = state.selected;
     let first = !state.opened;
+    if first {
+        state.forget = None;
+        state.restore_focus = false;
+        state.search.clear();
+    }
     state.opened = true;
     if first
         || !app.tab_manager.tabs.as_slice().iter().any(|tab| {
@@ -241,27 +256,21 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
         } else {
             reopen = recent::picker(ui, app, state);
         }
-        let footer_height = if state.forget.is_some() { 112.0 } else { 42.0 };
-        let height = (ui.available_height() - footer_height).max(30.0);
+        footer::validate(app, state);
+        forgotten = footer::panel(ui, app, state);
+        let height = ui.available_height().max(30.0);
         let outcome = list::show(ui, app, state, height);
         action = outcome.navigate;
         reopen = outcome.reopen.or(reopen.take());
-        focus = outcome.focus;
-        if state.forget.is_some_and(|id| state.selected != Some(id)) {
-            state.forget = None;
-        }
-        forgotten = footer(ui, app, state);
+        focus = outcome.focus || std::mem::take(&mut state.restore_focus);
         history_focus(ui, ctx, app, focus, first);
     });
-    if action.is_none() && (state.file_picked || old_selected != state.selected) && !first {
-        action = state.selected.and_then(|id| {
-            app.tab_manager
-                .tabs
-                .as_slice()
-                .iter()
-                .find_map(|t| t.buffer_by_id(id))
-                .map(|b| (id, b.document().history_now()))
-        });
+    if action.is_none()
+        && (state.file_picked || old_selected != state.selected)
+        && !first
+        && let Some(id) = state.selected
+    {
+        selection::activate(ctx, app, id);
     }
     ctx.data_mut(|d| d.insert_temp(state_key(), state));
     if let Some((buffer, node)) = action {
@@ -270,11 +279,12 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if let Some(id) = forgotten {
         mutation::clear_text_history(app, &[id]);
     }
-    if let Some(token) = reopen {
-        crate::app::app_state::workspace::lifecycle::reopen_archived_tab(app, &token);
+    if let Some(file) = reopen {
+        let selected = selection::reopen(ctx, app, file);
         ctx.data_mut(|d| {
-            d.get_temp_mut_or_default::<HistoryUi>(state_key()).selected = active_buffer(app);
-            if let Some(id) = active_buffer(app) {
+            d.get_temp_mut_or_default::<HistoryUi>(state_key()).selected =
+                selected.or_else(|| active_buffer(app));
+            if let Some(id) = selected {
                 d.get_temp_mut_or_default::<HistoryUi>(state_key())
                     .expanded
                     .insert(id);
@@ -292,73 +302,6 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     {
         accessors::consume_focus_request(app, view);
     }
-}
-
-fn footer(ui: &mut egui::Ui, app: &ScratchpadApp, state: &mut HistoryUi) -> Option<u64> {
-    ui.separator();
-    if let Some(id) = state.forget {
-        ui.label("Forget every branch for this file? Current text is kept. This cannot be undone.");
-        let mut forgotten = None;
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("Cancel").clicked() {
-                state.forget = None;
-            }
-            if ui
-                .button(
-                    egui::RichText::new("Forget this file's history")
-                        .color(ui.visuals().error_fg_color),
-                )
-                .clicked()
-            {
-                forgotten = Some(id);
-                state.forget = None;
-            }
-        });
-        return forgotten;
-    }
-    let selected = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .find_map(|tab| state.selected.and_then(|id| tab.buffer_by_id(id)))
-        .filter(|b| recent::has_history(b));
-    ui.horizontal(|ui| {
-        if ui.available_width() > 380.0 {
-            ui.label(
-                egui::RichText::new("↑ ↓ Move   Home End Jump   Esc Close")
-                    .size(11.0)
-                    .weak(),
-            );
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if let Some(buffer) = selected {
-                let muted = crate::app::theme::text_muted(ui);
-                let danger = crate::app::theme::diff_del(ui);
-                let button = ui
-                    .scope(|ui| {
-                        ui.visuals_mut().widgets.inactive.fg_stroke.color = muted;
-                        ui.visuals_mut().widgets.hovered.fg_stroke.color = danger;
-                        ui.visuals_mut().widgets.hovered.weak_bg_fill = danger.gamma_multiply(0.12);
-                        ui.add(
-                            egui::Button::new(egui::RichText::new("Forget history…").size(12.0))
-                                .frame(false),
-                        )
-                    })
-                    .inner;
-                if button
-                    .on_hover_text(format!(
-                        "Forget history for {}",
-                        crate::app::text_history::buffer_label(buffer)
-                    ))
-                    .clicked()
-                {
-                    state.forget = Some(buffer.id);
-                }
-            }
-        });
-    });
-    None
 }
 
 fn history_focus(

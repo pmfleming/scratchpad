@@ -25,7 +25,7 @@ struct TreeRows {
     rows: Vec<Row>,
     positions: HashMap<u64, usize>,
     max_lane: usize,
-    forks: HashSet<u64>,
+    forks: Arc<HashSet<u64>>,
 }
 #[derive(Clone)]
 struct Edge {
@@ -88,19 +88,7 @@ pub(super) fn prepare(ctx: &egui::Context, buffer: &BufferState) -> Prepared {
 }
 
 pub(super) fn forks(ctx: &egui::Context, buffer: &BufferState) -> Arc<HashSet<u64>> {
-    let tree = cache::tree(ctx, buffer);
-    let key = egui::Id::unique(("history.fork_ticks", buffer.id));
-    ctx.data_mut(|data| {
-        if let Some((structure, forks)) =
-            data.get_temp::<((u64, usize, u64), Arc<HashSet<u64>>)>(key)
-            && structure == tree.structure
-        {
-            return forks;
-        }
-        let forks = Arc::new(tree.forks.clone());
-        data.insert_temp(key, (tree.structure, forks.clone()));
-        forks
-    })
+    cache::tree(ctx, buffer).forks.clone()
 }
 
 pub(super) fn show_row(
@@ -214,11 +202,17 @@ fn metadata(
         );
         right -= 44.0;
     } else if !time.is_empty() {
-        if response.hovered() || previous_time.is_none_or(|at| at / 60 != edited_at / 60) {
+        let width = ui
+            .painter()
+            .layout_no_wrap(time.clone(), style::font(ui, 11.0), theme::text_muted(ui))
+            .size()
+            .x
+            + 2.0;
+        if response.hovered() || previous_time.is_none_or(|at| presentation::clock(at) != time) {
             style::text(
                 ui,
                 egui::Rect::from_min_max(
-                    egui::pos2(right - 38.0, rect.top()),
+                    egui::pos2(right - width, rect.top()),
                     egui::pos2(right, rect.bottom()),
                 ),
                 &time,
@@ -226,7 +220,7 @@ fn metadata(
                 theme::text_muted(ui),
             );
         }
-        right -= 44.0;
+        right -= width + 6.0;
     }
     if row.id == document.history_tip() && !current {
         let flag = egui::Rect::from_min_size(
@@ -240,6 +234,16 @@ fn metadata(
             12.0,
             theme::text_muted(ui),
         );
+        let label = "End of this branch. Redo stops here.";
+        let response = widget_ids::interact(
+            ui,
+            flag,
+            egui::Id::unique(("history.tip", buffer.id, row.id)),
+            egui::Sense::hover(),
+            "history-tip",
+        );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, label));
+        response.on_hover_text(label);
         right -= 20.0;
     }
     right

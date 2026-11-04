@@ -1,4 +1,4 @@
-use super::{HistoryUi, presentation, style};
+use super::{HistoryUi, presentation, selection::ArchivedFile, style};
 use crate::app::{
     app_state::ScratchpadApp,
     domain::BufferState,
@@ -10,7 +10,7 @@ use egui_phosphor::regular as icons;
 
 pub(super) struct File {
     pub id: Option<u64>,
-    pub token: Option<String>,
+    pub token: Option<ArchivedFile>,
     pub label: String,
     pub name: String,
     pub folder: String,
@@ -21,7 +21,7 @@ impl File {
     fn new(
         label: String,
         id: Option<u64>,
-        token: Option<String>,
+        token: Option<ArchivedFile>,
         edited: (u64, u64),
         position: Option<(usize, usize)>,
     ) -> Self {
@@ -29,9 +29,7 @@ impl File {
         let name = path
             .file_name()
             .map_or_else(|| label.clone(), |name| name.to_string_lossy().into_owned());
-        let folder = path
-            .parent()
-            .map_or_else(String::new, |path| path.display().to_string());
+        let folder = path.parent().map_or_else(String::new, short_folder);
         Self {
             id,
             token,
@@ -91,7 +89,10 @@ pub(super) fn collect(
                     files.push(File::new(
                         file.label.clone(),
                         None,
-                        Some(file.token.clone()),
+                        Some(ArchivedFile {
+                            token: file.token.clone(),
+                            temp_id: file.temp_id.clone(),
+                        }),
                         (file.edited_at, file.edit_seq),
                         None,
                     ));
@@ -132,6 +133,7 @@ pub(super) fn row(
     file: &File,
     selected: bool,
     expanded: Option<bool>,
+    highlighted: bool,
 ) -> FileResponse {
     let rect =
         widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), style::ROW_HEIGHT));
@@ -144,7 +146,7 @@ pub(super) fn row(
     );
     response
         .widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, &file.name));
-    if response.hovered() || selected {
+    if response.hovered() || highlighted || selected {
         ui.painter().rect_filled(
             rect,
             0,
@@ -220,12 +222,25 @@ fn paint_labels(
         if hovered {
             "Reopen".into()
         } else {
-            "Closed".into()
+            presentation::age(file.edited.0)
         }
     } else {
         presentation::age(file.edited.0)
     };
-    let right = rect.right() - 8.0;
+    let mut right = rect.right() - 8.0;
+    if selected {
+        style::text(
+            ui,
+            egui::Rect::from_min_max(
+                egui::pos2(right - 16.0, rect.top()),
+                egui::pos2(right, rect.bottom()),
+            ),
+            icons::CHECK,
+            13.0,
+            theme::tab_selected_accent(ui),
+        );
+        right -= 22.0;
+    }
     let metadata_width = if let Some((position, count)) = file.position {
         style::text(
             ui,
@@ -273,7 +288,7 @@ fn paint_labels(
             theme::text_primary(ui)
         },
     );
-    style::text(
+    style::text_end(
         ui,
         egui::Rect::from_min_max(
             egui::pos2(left + name_width + 6.0, rect.top()),
@@ -289,51 +304,149 @@ fn paint_labels(
     }
 }
 
+fn short_folder(path: &std::path::Path) -> String {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    if let Some(home) = home
+        && let Ok(relative) = path.strip_prefix(std::path::Path::new(&home))
+    {
+        return if relative.as_os_str().is_empty() {
+            "~".into()
+        } else {
+            format!("~{}{}", std::path::MAIN_SEPARATOR, relative.display())
+        };
+    }
+    path.display().to_string()
+}
+
+fn selector(ui: &mut egui::Ui, buffer: Option<&BufferState>) -> egui::Response {
+    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 34.0));
+    let response = widget_ids::interact(
+        ui,
+        rect,
+        egui::Id::unique("history.file.selector"),
+        egui::Sense::click(),
+        "history-file-selector",
+    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Choose history file"));
+    ui.painter().rect_filled(
+        rect,
+        0,
+        if response.hovered() {
+            theme::action_hover_bg(ui)
+        } else {
+            theme::action_bg(ui)
+        },
+    );
+    let content = rect.shrink2(egui::vec2(10.0, 0.0));
+    style::text(ui, content, icons::FILE_TEXT, 14.0, theme::text_muted(ui));
+    style::text(
+        ui,
+        egui::Rect::from_min_max(
+            egui::pos2(content.right() - 14.0, content.top()),
+            content.max,
+        ),
+        icons::CARET_UP_DOWN,
+        13.0,
+        theme::text_muted(ui),
+    );
+    let count = buffer.map_or_else(String::new, |b| {
+        format!(
+            "{} of {}",
+            b.document().operation_undo_depth(),
+            b.document().history_route().len()
+        )
+    });
+    let count_width = ui
+        .painter()
+        .layout_no_wrap(count.clone(), style::font(ui, 12.0), theme::text_muted(ui))
+        .size()
+        .x
+        .min(content.width() * 0.4);
+    let right = content.right() - 24.0;
+    style::text_right(
+        ui,
+        egui::Rect::from_min_max(
+            egui::pos2(right - count_width, rect.top()),
+            egui::pos2(right, rect.bottom()),
+        ),
+        &count,
+        12.0,
+        theme::text_muted(ui),
+    );
+    let name = buffer.map_or("Choose a file", |b| b.name.as_str());
+    let available = (right - count_width - content.left() - 34.0).max(0.0);
+    let folder = buffer
+        .and_then(|b| b.path.as_ref())
+        .and_then(|p| p.parent())
+        .map_or_else(String::new, short_folder);
+    let name_width = if folder.is_empty() {
+        available
+    } else {
+        (ui.painter()
+            .layout_no_wrap(name.into(), style::font(ui, 13.0), theme::text_primary(ui))
+            .size()
+            .x
+            + 4.0)
+            .min(available * 0.72)
+    };
+    let left = content.left() + 24.0;
+    style::text(
+        ui,
+        egui::Rect::from_min_size(
+            egui::pos2(left, rect.top()),
+            egui::vec2(name_width, rect.height()),
+        ),
+        name,
+        13.0,
+        theme::text_primary(ui),
+    );
+    style::text_end(
+        ui,
+        egui::Rect::from_min_max(
+            egui::pos2(left + name_width + 6.0, rect.top()),
+            egui::pos2(right - count_width - 10.0, rect.bottom()),
+        ),
+        &folder,
+        11.0,
+        theme::text_muted(ui),
+    );
+    response
+}
+
 pub(super) fn picker(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
     state: &mut HistoryUi,
-) -> Option<String> {
+) -> Option<ArchivedFile> {
     let buffer = app
         .tab_manager
         .tabs
         .as_slice()
         .iter()
         .find_map(|tab| state.selected.and_then(|id| tab.buffer_by_id(id)));
-    let caption = buffer.map_or_else(
-        || "Choose a file".into(),
-        |b| {
-            format!(
-                "{}  ·  {} of {}",
-                b.name,
-                b.document().operation_undo_depth(),
-                b.document().history_route().len()
-            )
-        },
-    );
-    let mut caption = style::icon_label(ui, icons::FILE_TEXT, &caption, 13.0);
-    caption.append(
-        icons::CARET_UP_DOWN,
-        10.0,
-        egui::TextFormat::simple(egui_phosphor::font_id(13.0), theme::text_muted(ui)),
-    );
-    let button = ui.add_sized(
-        [ui.available_width(), 34.0],
-        egui::Button::new(caption)
-            .fill(theme::action_bg(ui))
-            .truncate(),
-    );
-    button
-        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Choose history file"));
+    let button = selector(ui, buffer);
     let button = button
         .on_hover_text(buffer.map_or_else(String::new, crate::app::text_history::buffer_label));
+    let was_open = egui::Popup::is_id_open(ui.ctx(), picker_id());
+    if was_open && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        egui::Popup::close_id(ui.ctx(), picker_id());
+        reset_picker(ui.ctx(), state);
+        return None;
+    }
     let mut reopen = None;
     egui::Popup::menu(&button)
+        .id(picker_id())
+        .frame(egui::Frame::popup(ui.style()).corner_radius(egui::CornerRadius::ZERO))
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .width(button.rect.width())
         .show(|ui| {
             reopen = picker_contents(ui, app, state, button.clicked());
         });
+    if was_open && !egui::Popup::is_id_open(ui.ctx(), picker_id()) {
+        reset_picker(ui.ctx(), state);
+    }
     reopen
 }
 
@@ -342,7 +455,7 @@ fn picker_contents(
     app: &ScratchpadApp,
     state: &mut HistoryUi,
     opening: bool,
-) -> Option<String> {
+) -> Option<ArchivedFile> {
     style::apply(ui);
     let search = search(ui, state);
     if opening {
@@ -352,6 +465,12 @@ fn picker_contents(
         state.picker_index = 0;
     }
     let (files, error) = collect(ui, app, &state.search, false);
+    if opening {
+        state.picker_index = files
+            .iter()
+            .position(|file| file.id.is_some() && file.id == state.selected)
+            .unwrap_or(0);
+    }
     if let Some(error) = error {
         ui.colored_label(ui.visuals().error_fg_color, error);
     }
@@ -386,12 +505,16 @@ fn picker_contents(
     scroll.show_rows(ui, style::ROW_HEIGHT, files.len(), |ui, range| {
         for i in range {
             let file = &files[i];
-            let selected = if search.has_focus() {
-                i == state.picker_index
-            } else {
-                state.selected == file.id && file.id.is_some()
-            };
-            if row(ui, file, selected, None).selected {
+            let selected = state.selected == file.id && file.id.is_some();
+            if row(
+                ui,
+                file,
+                selected,
+                None,
+                search.has_focus() && i == state.picker_index,
+            )
+            .selected
+            {
                 pick = Some(i);
             }
         }
@@ -409,4 +532,15 @@ fn picker_contents(
         ui.ctx().memory_mut(|m| m.request_focus(super::focus_id()));
     }
     reopen
+}
+
+pub(super) fn picker_id() -> egui::Id {
+    egui::Id::unique("history.file.picker")
+}
+
+fn reset_picker(ctx: &egui::Context, state: &mut HistoryUi) {
+    state.restore_focus = true;
+    state.search.clear();
+    state.picker_index = 0;
+    ctx.memory_mut(|memory| memory.request_focus(super::focus_id()));
 }

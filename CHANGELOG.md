@@ -10,6 +10,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Made History's Forget actions file-specific with a named confirmation, and fixed picker dismissal, caret preservation when selecting files, and selection of files reopened from split tabs.
+- Refined History labels, dates, operation icons, folder paths, selection indicators and contrast; kept visible rows stationary during navigation and sized confirmations without resizing the window.
 - Redesigned History with newest-first branch lanes, a searchable file picker, local edit times, readable whitespace labels, and a scroll-to-Now control. All files uses one scrolling list, includes only files with recorded history, and stays open when selecting a file.
 - Redesigned the scrubber as a square, stable-width card with a wider live track, branch markers, step/start/end controls, and Open in History. Escape and resumed editing still dismiss it; history navigation and undo/redo behaviour are unchanged.
 - Undo, redo, History clicks, and the selected-branch scrubber share the same persisted position. Hover leaves text unchanged.

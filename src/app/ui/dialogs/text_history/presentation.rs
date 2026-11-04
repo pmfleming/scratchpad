@@ -16,11 +16,18 @@ pub(super) struct Change {
 }
 
 impl Change {
-    pub(super) fn paint_title(&self, ui: &egui::Ui, rect: egui::Rect, color: egui::Color32) {
-        let title = ["Insert ", "Delete ", "Paste ", "Cut ", "Replace with "]
+    pub(super) fn display_title(&self) -> &str {
+        ["Insert ", "Delete ", "Paste ", "Cut ", "Replace with "]
             .iter()
             .find_map(|prefix| self.title.strip_prefix(prefix))
-            .unwrap_or(&self.title);
+            .map_or(self.title.as_str(), |text| {
+                text.strip_prefix('"')
+                    .and_then(|text| text.strip_suffix('"'))
+                    .unwrap_or(text)
+            })
+    }
+    pub(super) fn paint_title(&self, ui: &egui::Ui, rect: egui::Rect, color: egui::Color32) {
+        let title = self.display_title();
         if self.whitespace {
             let width = ui
                 .painter()
@@ -57,6 +64,12 @@ pub(super) fn change(ui: &egui::Ui, buffer: &BufferState, id: u64) -> Change {
     };
     let (icon, color) = if entry.summary == "Initial contents" {
         (icons::FILE_TEXT, theme::text_muted(ui))
+    } else if entry.source == PieceSource::Paste {
+        (icons::CLIPBOARD_TEXT, theme::diff_add(ui))
+    } else if entry.source == PieceSource::Cut {
+        (icons::SCISSORS, theme::diff_del(ui))
+    } else if entry.source == PieceSource::SearchReplace {
+        (icons::MAGNIFYING_GLASS, theme::tab_selected_accent(ui))
     } else if entry.edits.len() == 1 && entry.edits[0].deleted_spans().is_empty() {
         (icons::PLUS, theme::diff_add(ui))
     } else if entry.edits.len() == 1 && entry.edits[0].inserted_span().is_none() {
@@ -78,7 +91,11 @@ pub(super) fn change(ui: &egui::Ui, buffer: &BufferState, id: u64) -> Change {
         {
             let payload = buffer.document().piece_tree().text_for_span(span);
             if let Some(token) = whitespace(&payload) {
-                let verb = if edit.inserted_span().is_some() {
+                let verb = if entry.source == PieceSource::Paste {
+                    "Paste"
+                } else if entry.source == PieceSource::Cut {
+                    "Cut"
+                } else if edit.inserted_span().is_some() {
                     "Insert"
                 } else {
                     "Delete"
@@ -116,7 +133,7 @@ fn whitespace(text: &str) -> Option<String> {
 
 pub(super) fn age(seconds: u64) -> String {
     if seconds == 0 {
-        return String::new();
+        return "Not edited".into();
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -134,10 +151,21 @@ pub(super) fn clock(seconds: u64) -> String {
     if seconds == 0 {
         return String::new();
     }
+    clock_at(seconds, chrono::Local::now())
+}
+
+pub(super) fn clock_at(seconds: u64, now: chrono::DateTime<chrono::Local>) -> String {
+    use chrono::Datelike;
     chrono::DateTime::from_timestamp(seconds as i64, 0).map_or_else(String::new, |date| {
-        date.with_timezone(&chrono::Local)
-            .format("%H:%M")
-            .to_string()
+        let date = date.with_timezone(&chrono::Local);
+        date.format(if date.date_naive() == now.date_naive() {
+            "%H:%M"
+        } else if date.year() == now.year() {
+            "%b %-d"
+        } else {
+            "%b %-d %Y"
+        })
+        .to_string()
     })
 }
 

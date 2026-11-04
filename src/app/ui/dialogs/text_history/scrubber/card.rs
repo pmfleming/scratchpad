@@ -37,7 +37,13 @@ pub(super) fn header(ui: &mut egui::Ui, buffer: &BufferState) -> bool {
         .frame(false),
     );
     button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Open in History"));
-    button.on_hover_text("Open in History (Ctrl+H)").clicked()
+    button
+        .on_hover_text(crate::app::shortcut_tooltips::action(
+            ui.ctx(),
+            crate::app::shortcut_keymap::ShortcutAction::OpenTextHistory,
+            "Open in History",
+        ))
+        .clicked()
 }
 
 pub(super) fn caption(ui: &mut egui::Ui, buffer: &BufferState) {
@@ -60,7 +66,17 @@ pub(super) fn caption(ui: &mut egui::Ui, buffer: &BufferState) {
             format!(" · {time}")
         }
     );
-    let position_width = (caption.width() * 0.55).min(220.0);
+    let caption = caption.shrink2(egui::vec2(59.0, 0.0));
+    let position_width = ui
+        .painter()
+        .layout_no_wrap(
+            display.clone(),
+            style::font(ui, 12.0),
+            theme::text_muted(ui),
+        )
+        .size()
+        .x
+        .min(caption.width());
     let file_rect = egui::Rect::from_min_max(
         caption.min,
         egui::pos2(caption.right() - position_width - 8.0, caption.bottom()),
@@ -78,7 +94,7 @@ pub(super) fn caption(ui: &mut egui::Ui, buffer: &BufferState) {
         egui::pos2(caption.right() - position_width, caption.top()),
         caption.max,
     );
-    style::text(ui, label_rect, &display, 12.0, theme::text_muted(ui));
+    style::text_right(ui, label_rect, &display, 12.0, theme::text_muted(ui));
     widget_ids::interact(
         ui,
         label_rect,

@@ -11,7 +11,7 @@ use std::ops::Range;
 #[derive(Default)]
 pub(super) struct Action {
     pub navigate: Option<(u64, u64)>,
-    pub reopen: Option<String>,
+    pub reopen: Option<super::selection::ArchivedFile>,
     pub focus: bool,
 }
 struct Section<'a> {
@@ -55,7 +55,7 @@ fn sections<'a>(
             let tree = buffer
                 .filter(|b| state.expanded.contains(&b.id))
                 .map(|b| tree_list::prepare(ctx, b));
-            let count = 1 + tree.as_ref().map_or(0, Prepared::len);
+            let count = 1 + tree.as_ref().map_or(0, |tree| tree.len() + 1);
             sections.push(Section {
                 file: Some(file),
                 buffer,
@@ -86,6 +86,7 @@ fn file_action(ui: &mut egui::Ui, file: &File, state: &mut HistoryUi, action: &m
         file,
         state.selected == file.id && file.id.is_some(),
         expanded,
+        false,
     );
     if let Some(id) = file.id {
         action.focus |= response.toggled;
@@ -117,6 +118,10 @@ fn paint_section(
         {
             file_action(ui, file, state, action);
         } else if let (Some(buffer), Some(tree)) = (section.buffer, &section.tree) {
+            if section.file.is_some() && index == section.start + section.count - 1 {
+                super::footer::file_row(ui, buffer, state);
+                continue;
+            }
             let offset = section.start + usize::from(section.file.is_some());
             let local_range =
                 visible.start.saturating_sub(offset)..visible.end.saturating_sub(offset);
@@ -166,6 +171,10 @@ fn jump_button(
         "Now",
         12.0,
     );
+    let mut label = label;
+    for part in &mut label.sections {
+        part.format.color = style::on_accent(ui);
+    }
     let rect = egui::Rect::from_center_size(
         egui::pos2(
             output.inner_rect.center().x,
@@ -249,9 +258,12 @@ pub(super) fn show(
     if (changed || selection_changed || jump)
         && let Some(now) = now
     {
-        scroll = scroll.vertical_scroll_offset(
-            (now as f32 * style::ROW_HEIGHT - height * 0.5 + 15.0).max(0.0),
-        );
+        let previous = ui
+            .ctx()
+            .data(|d| d.get_temp::<(f32, f32)>(scroll_key.with("viewport")));
+        if let Some(offset) = follow_offset(now, height, previous, jump || selection_changed) {
+            scroll = scroll.vertical_scroll_offset(offset);
+        }
     }
     let output = ui
         .scope(|ui| {
@@ -275,6 +287,12 @@ pub(super) fn show(
             })
         })
         .inner;
+    ui.ctx().data_mut(|d| {
+        d.insert_temp(
+            scroll_key.with("viewport"),
+            (output.state.clamped_offset().y, output.inner_rect.height()),
+        )
+    });
     if let Some(now) = now
         && jump_button(ui, &output, now, scroll_key, hidden)
     {
@@ -290,4 +308,23 @@ pub(super) fn show(
         }
     }
     action
+}
+
+fn follow_offset(
+    now: usize,
+    height: f32,
+    previous: Option<(f32, f32)>,
+    center: bool,
+) -> Option<f32> {
+    let top = now as f32 * style::ROW_HEIGHT;
+    if !center && let Some((offset, visible_height)) = previous {
+        if top < offset {
+            return Some(top);
+        }
+        if top + style::ROW_HEIGHT > offset + visible_height {
+            return Some((top + style::ROW_HEIGHT - visible_height).max(0.0));
+        }
+        return None;
+    }
+    Some((top - height * 0.5 + style::ROW_HEIGHT * 0.5).max(0.0))
 }

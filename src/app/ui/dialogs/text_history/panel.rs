@@ -70,6 +70,9 @@ pub(super) fn show(
                         ui.selectable_value(&mut state.all_files, false, "This file");
                         if old_scope != state.all_files {
                             state.search.clear();
+                            state.forget = None;
+                            state.restore_focus = true;
+                            egui::Popup::close_id(ctx, super::recent::picker_id());
                         }
                     });
                 });
