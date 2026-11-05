@@ -3,6 +3,29 @@ use super::{LineEndingCounts, LineEndingStyle, TextArtifactSummary};
 
 mod parallel;
 
+pub(in crate::app::domain::buffer::analysis) struct StreamingInspectionState {
+    state: InspectionState,
+    digest: blake3::Hasher,
+}
+impl StreamingInspectionState {
+    pub(in crate::app::domain::buffer::analysis) fn new() -> Self {
+        Self {
+            state: InspectionState::new(),
+            digest: blake3::Hasher::new(),
+        }
+    }
+    pub(in crate::app::domain::buffer::analysis) fn observe(&mut self, text: &str) {
+        self.state.observe_text(text);
+        self.digest.update(text.as_bytes());
+    }
+    pub(in crate::app::domain::buffer::analysis) fn finish(self) -> (TextInspection, String) {
+        (
+            self.state.finish_summary().into_inspection(None),
+            self.digest.finalize().to_hex().to_string(),
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(in crate::app::domain::buffer::analysis) struct TextInspection {
     pub(in crate::app::domain::buffer::analysis) line_count: usize,

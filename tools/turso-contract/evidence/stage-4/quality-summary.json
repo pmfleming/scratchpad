@@ -1,0 +1,330 @@
+{
+  "schema_version": 1,
+  "source_revision": "cbe7fba0128c65c1427ec0ccc3820cce0a5c1fa6",
+  "source_blake3_before": "0852bad1aa3ca31243bbeb9038f7cd9b80309e19c69154f914f039258b593879",
+  "source_blake3_after": "0852bad1aa3ca31243bbeb9038f7cd9b80309e19c69154f914f039258b593879",
+  "tool_blake3": "e787f452a76ccce3b00f21f7ef5f3619abd0e7ef74ba07b9b346e370dd421b46",
+  "tool_unchanged": true,
+  "passed": false,
+  "required_evidence_complete": false,
+  "commands": {
+    "audit-tool": {
+      "status": "passed"
+    },
+    "cargo": {
+      "status": "passed"
+    },
+    "check": {
+      "exit_code": 1,
+      "status": "failed"
+    },
+    "coverage-tool": {
+      "status": "passed"
+    },
+    "feature-tool": {
+      "status": "passed"
+    },
+    "measure": {
+      "status": "passed"
+    },
+    "rqlens-version": {
+      "status": "passed"
+    },
+    "rustc": {
+      "status": "passed"
+    },
+    "verify": {
+      "status": "passed"
+    }
+  },
+  "failed_policies": [
+    "configured-rules",
+    "partial",
+    "reliability-finding",
+    "test-failure"
+  ],
+  "policy_rule_violations": [
+    {
+      "counting_unit": "unmet-required-human-review-obligation",
+      "evaluation_complete": true,
+      "excess": 3,
+      "excluded": 0,
+      "level": "error",
+      "maximum": 0,
+      "observed": 3,
+      "observed_findings": 3,
+      "reason": null,
+      "rule_id": "rust.design.required-review",
+      "status": "exceeded"
+    }
+  ],
+  "threshold_violations": [
+    {
+      "maximum": 600,
+      "module": "scratchpad::capacity_probe::bin::capacity_probe",
+      "score": 789.98
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::resource_probe::bin::resource_probe",
+      "score": 828.56
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app",
+      "score": 630.83
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state",
+      "score": 687.29
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::background_io",
+      "score": 857.48
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::background_io::queue",
+      "score": 617.99
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::background_io::tests",
+      "score": 683.36
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::frame",
+      "score": 1036.89
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::api",
+      "score": 627.25
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::helpers",
+      "score": 795.72
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::replace",
+      "score": 949.04
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::runtime",
+      "score": 682.1
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::visual",
+      "score": 643.85
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::worker",
+      "score": 621.28
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::settings_state",
+      "score": 722.28
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::settings_state::mutators",
+      "score": 915.46
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::settings_state::tab_order",
+      "score": 727.35
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::workspace::editing",
+      "score": 608.95
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::workspace::lifecycle",
+      "score": 799.07
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::workspace::mutation",
+      "score": 911.63
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::commands::file",
+      "score": 703.53
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::commands::search",
+      "score": 651.1
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::commands::workspace",
+      "score": 708.7
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::domain::buffer::state",
+      "score": 708.99
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::domain::view",
+      "score": 638.25
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::file_controller::open::tests",
+      "score": 608.47
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::session_store",
+      "score": 736.29
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::session_store::database::persist",
+      "score": 605.83
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::ui::dialogs::text_history",
+      "score": 621.41
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::ui::editor_content::native_editor",
+      "score": 727.57
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::ui::tab_strip::actions::vertical",
+      "score": 635.28
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::profile",
+      "score": 676.47
+    }
+  ],
+  "practice_failures": [],
+  "test_failures": [],
+  "input_failures": [
+    {
+      "artifact": "hotspots.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "clones.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "rust_escape_hatches.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "reliability_findings.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "architecture_rules.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "api_health.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "semantic_api.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "type_health.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "correctness_review.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "test_quality.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "locality_metrics.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "leverage_metrics.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "module_cohesion.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "map.json",
+      "policy": "partial",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "correctness_review.json",
+      "policy": "test-failure",
+      "reason": null,
+      "status": "partial"
+    },
+    {
+      "artifact": "correctness_review.json",
+      "policy": "test-failure",
+      "reason": "test execution must be observed and all test statuses known",
+      "status": "partial"
+    },
+    {
+      "artifact": "reliability_findings.json",
+      "policy": "reliability-finding",
+      "reason": null,
+      "status": "partial"
+    }
+  ],
+  "reliability_findings": []
+}

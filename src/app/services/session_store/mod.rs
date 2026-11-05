@@ -278,7 +278,7 @@ impl SessionStore {
             .worker()?
             .call(move |db| block_on(db.hydrate(SessionTab::from(tab))))?;
         if reopened {
-            let mut tab = reopen::restore_reopened(tab, contents, &[])?;
+            let mut tab = reopen::restore_reopened(tab, contents, &[], self.opened_chunk_store())?;
             self.bind_tab(&mut tab)?;
             return Ok((tab, None));
         }

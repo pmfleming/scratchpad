@@ -112,6 +112,23 @@ impl Default for TextDocumentHistoryState {
 }
 
 impl TextDocument {
+    pub(crate) fn import_utf8_file(
+        path: &Path,
+        offset: u64,
+        context: &crate::app::services::chunk_store::ImportContext,
+    ) -> io::Result<(Self, super::StreamedTextInspection)> {
+        let (piece_tree, inspection) = PieceTreeLite::import_utf8_file(path, offset, context)?;
+        let mut document = Self {
+            identity: next_document_identity(),
+            content: TextDocumentContentState {
+                piece_tree: Arc::new(piece_tree),
+                preferred_line_ending: platform_default_line_ending(),
+            },
+            history: TextDocumentHistoryState::default(),
+        };
+        document.record_initial_content();
+        Ok((document, inspection))
+    }
     pub fn bind_store(
         &mut self,
         store: crate::app::services::chunk_store::ChunkStoreHandle,
@@ -141,23 +158,18 @@ impl TextDocument {
         document
     }
 
+    #[cfg(test)]
     pub(crate) fn from_utf8_file(
         path: &Path,
         file_offset: u64,
-        sample_limit: usize,
+        _sample_limit: usize,
     ) -> io::Result<(Self, String, usize)> {
-        let (piece_tree, sample, line_count) =
-            PieceTreeLite::from_utf8_file(path, file_offset, sample_limit)?;
-        let mut document = Self {
-            identity: next_document_identity(),
-            content: TextDocumentContentState {
-                piece_tree: Arc::new(piece_tree),
-                preferred_line_ending: platform_default_line_ending(),
-            },
-            history: TextDocumentHistoryState::default(),
-        };
-        document.record_initial_content();
-        Ok((document, sample, line_count))
+        let (document, inspection) = Self::import_utf8_file(
+            path,
+            file_offset,
+            &crate::app::services::chunk_store::ImportContext::default(),
+        )?;
+        Ok((document, String::new(), inspection.line_count()))
     }
 
     /// Extract the full text content as a new String from the piece tree.
@@ -457,9 +469,8 @@ impl TextDocument {
     pub fn byte_spans_for_range(&self, char_range: Range<usize>) -> Vec<ByteSpan> {
         self.content
             .piece_tree
-            .spans_for_range(char_range)
-            .map(|span| span.byte_span)
-            .collect()
+            .reference_spans(char_range)
+            .expect("text ranges must be preflighted before mutation")
     }
 
     /// Delete a char range directly via piece tree.

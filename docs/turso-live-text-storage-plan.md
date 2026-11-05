@@ -1,6 +1,6 @@
 # Turso-backed live text storage
 
-Status: stages 0–4 implemented on Linux, based on commit `087e045`. Native Windows
+Status: stages 0–5 implemented on Linux, based on commit `087e045`. Native Windows
 runtime validation remains pending under the user's authorization. The user
 approved standard WAL on both platforms on 2026-11-05, with
 multiprocess WAL to be revisited on later Turso versions. Historical source
@@ -913,6 +913,11 @@ history row or snapshot holds a text payload. Save cost no longer scales with to
 text. Restore reads no chunk bodies until text is needed.
 
 ### 5. Large-file import
+
+Implemented on Linux. See [stage 5 evidence](../tools/turso-contract/STAGE-5.md).
+Production large UTF-8 imports stream into explicit store chunks, with one-pass
+inspection/digest and metadata-only initial history. Temporary backing/cache is
+removed. Degraded RAM admission and lifecycle cancellation follow in stage 6.
 
 Stream imports into chunks on the path lane, with backpressure, per-chunk metadata, and
 `OriginalTextStorage::Chunked` replacing `FileBacked`. Remove the `is_file_backed`

@@ -6,13 +6,13 @@ use super::{
 };
 use std::time::Instant;
 
-fn insert(buffer: &mut BufferState, at: usize, text: &str) {
+pub(super) fn insert(buffer: &mut BufferState, at: usize, text: &str) {
     let document = buffer.document_mut();
     document.insert_direct_with_source(at, text, PieceSource::Paste);
     document.push_edit_operation_with_source(
         OperationRecord {
             previous_cursor: CursorRange::one(CharCursor::new(at)),
-            next_cursor: CursorRange::one(CharCursor::new(at + text.len())),
+            next_cursor: CursorRange::one(CharCursor::new(at + text.chars().count())),
             edits: vec![EditOperation {
                 start_char: at,
                 deleted_text: String::new(),

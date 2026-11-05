@@ -10,7 +10,7 @@ fn failed_scan_faults_document_and_refuses_edits_before_mutation() {
     let (mut tree, _, _) = PieceTreeLite::from_utf8_file(file.path(), 0, 0).unwrap();
     let before = tree.metrics();
     let generation = tree.generation();
-    tree.truncate_backing_for_test().unwrap();
+    tree.inject_read_failure_for_test();
     assert!(
         tree.try_spans_for_range(0..tree.len_chars())
             .next()
@@ -132,8 +132,21 @@ fn file_backed_chunk_cache_is_bounded_without_invalidating_active_text() {
     }
     file.flush().expect("flush fixture");
 
-    let (tree, _, _) =
-        PieceTreeLite::from_utf8_file(file.path(), 0, 0).expect("construct file-backed tree");
+    let root = tempfile::tempdir().unwrap();
+    let session = crate::app::services::session_store::SessionStore::new(root.path().to_owned());
+    let store = session.chunk_store_handle().unwrap();
+    let (tree, _) = PieceTreeLite::import_utf8_file(
+        file.path(),
+        0,
+        &crate::app::services::chunk_store::ImportContext {
+            store: Some(store.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    session.flush_text_chunks().unwrap();
+    store.set_limits(0, 0);
+    store.set_limits(16 * 1024 * 1024, 4 * 1024 * 1024);
     let pinned = tree.borrow_range(0..1).expect("borrow first chunk");
     for chunk_index in 1..40 {
         let offset = chunk_index * CHUNK_BYTES;
@@ -146,7 +159,7 @@ fn file_backed_chunk_cache_is_bounded_without_invalidating_active_text() {
     }
 
     assert_eq!(pinned.as_ref(), "a");
-    assert!(tree.loaded_file_chunk_count() <= tree.file_chunk_cache_limit());
+    assert!(store.cached_bytes() <= 4 * 1024 * 1024);
     // Originals now share the configured per-owner/aggregate cache budget.
 }
 

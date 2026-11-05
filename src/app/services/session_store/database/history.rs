@@ -240,7 +240,7 @@ impl Database {
         let mut rows=self.query_collect("SELECT seq,parent_id,edited_at,global_seq,source,summary,replayable,previous_primary,previous_primary_next,previous_secondary,previous_secondary_next,next_primary,next_primary_next,next_secondary,next_secondary_next,packed_spans FROM history WHERE temp_id=? ORDER BY seq",[id],|r| {
             let num=|i|super::document_rows::unsigned(r.get::<i64>(i).map_err(error)?);
             let selection=|base|->io::Result<CursorRange>{Ok(CursorRange {primary:CharCursor {index:usize::try_from(num(base)?).map_err(invalid)?,prefer_next_row:bool_field(num(base+1)?)?},secondary:CharCursor {index:usize::try_from(num(base+2)?).map_err(invalid)?,prefer_next_row:bool_field(num(base+3)?)?}})};
-            let entry=PieceHistoryEntry {id:num(0)?,parent_id:num(1)?,edited_at:num(2)?,global_seq:num(3)?,source:super::document_rows::parse_enum(r.get::<String>(4).map_err(error)?)?,summary:r.get(5).map_err(error)?,flags:PieceHistoryFlags {replayable:bool_field(num(6)?)?,undone:false},previous_selection:selection(7)?,next_selection:selection(11)?,edits:crate::app::domain::buffer::PieceHistoryEdits::new(),fingerprint:0};
+            let entry=PieceHistoryEntry {id:num(0)?,parent_id:num(1)?,edited_at:num(2)?,global_seq:num(3)?,source:super::document_rows::parse_enum(r.get::<String>(4).map_err(error)?)?,summary:r.get(5).map_err(error)?,flags:PieceHistoryFlags {replayable:bool_field(num(6)?)?,undone:false},previous_selection:selection(7)?,next_selection:selection(11)?,edits:crate::app::domain::buffer::PieceHistoryEdits::new()};
             Ok((entry,r.get::<Option<Vec<u8>>>(15).map_err(error)?))
         }).await.map_err(|e|damaged(id,e))?;
         let mut spans: HashMap<u64, Vec<Span>> = HashMap::new();

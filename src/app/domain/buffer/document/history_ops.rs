@@ -102,7 +102,6 @@ impl TextDocument {
                 self.history_edit_from_operation_edit(edit, source, span)
             })
             .collect::<PieceHistoryEdits>();
-        let fingerprint = self.fingerprint_for_history_edits(&edits);
         self.history.latest_update_at = Some(Instant::now());
         let entry = PieceHistoryEntry {
             id: self.history.next_id,
@@ -114,7 +113,6 @@ impl TextDocument {
             global_seq: next_text_history_global_seq(),
             source,
 
-            fingerprint,
             summary: operation_summary(source, &record),
             edits,
             flags: PieceHistoryFlags {
@@ -269,7 +267,6 @@ impl TextDocument {
                 self.history_edit_from_operation_edit(edit, source, span)
             })
             .collect::<PieceHistoryEdits>();
-        let fingerprint = self.fingerprint_for_history_edits(&edits);
 
         let old_cost = self.history.entries[latest_index].byte_cost();
         let latest = &mut self.history.entries[latest_index];
@@ -281,7 +278,6 @@ impl TextDocument {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        latest.fingerprint = fingerprint;
         latest.summary = operation_summary(latest.source, merged_record);
         let new_cost = latest.byte_cost();
         self.history.byte_usage = self

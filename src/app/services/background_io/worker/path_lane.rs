@@ -200,6 +200,15 @@ fn load_paths(requests: Vec<PathLoadRequest>) -> Vec<LoadedPathResult> {
 }
 
 fn load_one(request: PathLoadRequest) -> LoadedPathResult {
+    load_one_with_context(
+        request,
+        crate::app::services::chunk_store::ImportContext::default(),
+    )
+}
+fn load_one_with_context(
+    request: PathLoadRequest,
+    mut context: crate::app::services::chunk_store::ImportContext,
+) -> LoadedPathResult {
     match request {
         PathLoadRequest::Reconcile {
             base,
@@ -207,7 +216,7 @@ fn load_one(request: PathLoadRequest) -> LoadedPathResult {
             materialized_only,
             request,
         } => {
-            let mut loaded = load_one(*request);
+            let mut loaded = load_one_with_context(*request, context);
             loaded.result = loaded.result.and_then(|loaded| {
                 if materialized_only && loaded.loaded_replacement_text.is_none() {
                     Ok(loaded)
@@ -219,7 +228,8 @@ fn load_one(request: PathLoadRequest) -> LoadedPathResult {
             loaded
         }
         PathLoadRequest::Bound { store, request } => {
-            let mut loaded = load_one(*request);
+            context.store = Some(store.clone());
+            let mut loaded = load_one_with_context(*request, context);
             if let Ok(buffer) = &mut loaded.result
                 && let Err(cause) = buffer.document_mut().bind_store(store.clone())
             {
@@ -238,37 +248,46 @@ fn load_one(request: PathLoadRequest) -> LoadedPathResult {
             path,
             materialize,
             observed_digest,
-        } => load_observed(path, materialize, observed_digest.as_deref()),
+        } => load_observed(path, materialize, observed_digest.as_deref(), &context),
         PathLoadRequest::Retained {
             path,
             session_store,
             claimed,
-        } => match session_store.reopen_path_with_claimed(&path, &claimed) {
-            Ok(Some(tab)) => LoadedPathResult {
-                missing: false,
-                path,
-                disk_state: tab.active_buffer().disk_state.clone(),
-                result: Ok(tab.active_buffer().clone()),
-                retained_tab: Some(tab),
-            },
-            Ok(None) => load_path_result(path, FileService::read_file),
-            Err(_) if session_store.writes_blocked() => {
-                load_path_result(path, FileService::read_file)
+        } => {
+            if context.store.is_none() {
+                context.store = session_store.chunk_store_handle().ok();
             }
-            Err(error) => LoadedPathResult {
-                missing: error.kind() == io::ErrorKind::NotFound,
-                path,
-                disk_state: None,
-                result: Err(error.to_string()),
-                retained_tab: None,
-            },
-        },
-        PathLoadRequest::Standard(path) => load_path_result(path, FileService::read_file),
+            match session_store.reopen_path_with_claimed(&path, &claimed) {
+                Ok(Some(tab)) => LoadedPathResult {
+                    missing: false,
+                    path,
+                    disk_state: tab.active_buffer().disk_state.clone(),
+                    result: Ok(tab.active_buffer().clone()),
+                    retained_tab: Some(tab),
+                },
+                Ok(None) => load_path_result(path, |path| {
+                    FileService::read_file_with_context(path, &context)
+                }),
+                Err(_) if session_store.writes_blocked() => load_path_result(path, |path| {
+                    FileService::read_file_with_context(path, &context)
+                }),
+                Err(error) => LoadedPathResult {
+                    missing: error.kind() == io::ErrorKind::NotFound,
+                    path,
+                    disk_state: None,
+                    result: Err(error.to_string()),
+                    retained_tab: None,
+                },
+            }
+        }
+        PathLoadRequest::Standard(path) => load_path_result(path, |path| {
+            FileService::read_file_with_context(path, &context)
+        }),
         PathLoadRequest::WithEncoding {
             path,
             encoding_name,
         } => load_path_result(path, |path| {
-            FileService::read_file_with_encoding(path, &encoding_name)
+            FileService::read_file_with_encoding_context(path, &encoding_name, &context)
         }),
     }
 }
@@ -333,8 +352,14 @@ fn save_path(
     }
 }
 
-fn load_observed(path: PathBuf, materialize: bool, known_digest: Option<&str>) -> LoadedPathResult {
-    match FileService::read_observed_buffer(&path, materialize, known_digest) {
+fn load_observed(
+    path: PathBuf,
+    materialize: bool,
+    known_digest: Option<&str>,
+    context: &crate::app::services::chunk_store::ImportContext,
+) -> LoadedPathResult {
+    match FileService::read_observed_buffer_with_context(&path, materialize, known_digest, context)
+    {
         Ok(buffer) => {
             let state = buffer.disk_state.clone();
             LoadedPathResult {

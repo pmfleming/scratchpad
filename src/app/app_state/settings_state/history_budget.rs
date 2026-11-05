@@ -24,15 +24,5 @@ impl ScratchpadApp {
                 budget.per_file_byte_budget as usize,
             );
         }
-        crate::app::domain::buffer::text_cache::set_limits(
-            budget.aggregate_byte_budget as usize,
-            budget.per_file_byte_budget as usize,
-        );
-        if let Some(message) = crate::app::domain::buffer::text_cache::take_error() {
-            self.state.status.set_warning_status_in_domain(
-                crate::app::app_state::StatusDomain::History,
-                message,
-            );
-        }
     }
 }

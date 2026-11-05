@@ -71,7 +71,7 @@ Stage 3's frozen RQL producer/verifier passed with stable source hashes. Its str
 gate remains failed for partial evidence and required human reviews; its
 `test-failure` policy also reports partial execution evidence, with no reported
 test failures. The compact report is in `evidence/stage-3/quality-summary.json`.
-Stage 4 receives a fresh frozen RQL run after its commit. Native Windows runtime
+Stage 4’s fresh frozen producer/verifier passed with stable source hashes; the strict gate remains failed for the same partial evidence and three required reviews. Its compact report is `evidence/stage-4/quality-summary.json`. Native Windows runtime
 validation remains pending under the user's authorization. Large-file originals
 retain the temporary importer until stage 5; failure RAM limits, status, replacement,
 and shutdown integration remain stage 6.

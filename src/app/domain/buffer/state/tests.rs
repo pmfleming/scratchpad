@@ -12,11 +12,7 @@ fn unreadable_reload_preserves_dirty_metadata_and_history() {
     buffer.is_dirty = true;
     let before = buffer.document.history_token();
     let metrics = buffer.document.piece_tree().metrics();
-    buffer
-        .document
-        .piece_tree()
-        .truncate_backing_for_test()
-        .unwrap();
+    buffer.document.piece_tree().inject_read_failure_for_test();
     let loaded = BufferState::new("loaded".into(), "replacement".into(), Some(path));
     assert!(!buffer.replace_from_loaded_buffer(loaded));
     assert!(buffer.is_dirty);

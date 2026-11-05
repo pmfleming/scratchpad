@@ -5,6 +5,55 @@ use super::{
 use crate::app::services::chunk_store::ChunkStoreHandle;
 
 impl PieceTreeLite {
+    pub(crate) fn reference_spans(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> io::Result<Vec<ByteSpan>> {
+        let mut position = 0;
+        let mut spans = Vec::new();
+        for piece in self
+            .root
+            .nodes
+            .iter()
+            .flat_map(|n| &n.leaves)
+            .flat_map(|l| &l.pieces)
+        {
+            let end = position + piece.char_len;
+            let lo = range.start.max(position);
+            let hi = range.end.min(end);
+            if lo < hi {
+                let (start, bytes) = if lo == position && hi == end {
+                    (piece.start_byte, piece.byte_len)
+                } else {
+                    let text = self.storage.try_text_for_span(
+                        ByteSpan {
+                            buffer: piece.buffer,
+                            start_byte: piece.start_byte as u64,
+                            byte_len: piece.byte_len as u64,
+                            char_len: piece.char_len as u64,
+                        },
+                        false,
+                    )?;
+                    let boundary = |n| text.char_indices().nth(n).map_or(text.len(), |(b, _)| b);
+                    let a = boundary(lo - position);
+                    let b = boundary(hi - position);
+                    (piece.start_byte + a, b - a)
+                };
+                spans.push(ByteSpan {
+                    buffer: piece.buffer,
+                    start_byte: start as u64,
+                    byte_len: bytes as u64,
+                    char_len: (hi - lo) as u64,
+                });
+            }
+            position = end;
+            if position >= range.end {
+                break;
+            }
+        }
+        Ok(spans)
+    }
+
     pub(crate) fn display_line_count(&self) -> usize {
         if self.len_chars() == 0 {
             return 0;

@@ -47,7 +47,9 @@ const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
 const FRAGMENT_UNIT: &str = "hay needle café 東京\n";
 
 fn main() {
-    if std::env::args().any(|arg| arg == "--live-text-stage-three") {
+    if std::env::args().any(|arg| arg == "--live-text-stage-five") {
+        live_text::imports();
+    } else if std::env::args().any(|arg| arg == "--live-text-stage-three") {
         println!(
             "{}",
             scratchpad::profile::run_live_text_bulk_profile(64 * MB)
@@ -116,8 +118,8 @@ fn run_file_backed_cache_traversal_cycle(document: &TextDocument) -> StepOutcome
         .map(|span| black_box(span.text.len()))
         .sum();
     StepOutcome::file_chunks(
-        tree.loaded_file_chunk_count(),
-        tree.file_chunk_cache_limit(),
+        tree.loaded_chunk_count(),
+        tree.chunk_cache_limit(),
         visited_bytes,
     )
 }
@@ -138,8 +140,8 @@ fn run_file_backed_random_window_cycle(document: &TextDocument) -> StepOutcome {
     }
     samples.sort_unstable();
     let mut outcome = StepOutcome::file_chunks(
-        tree.loaded_file_chunk_count(),
-        tree.file_chunk_cache_limit(),
+        tree.loaded_chunk_count(),
+        tree.chunk_cache_limit(),
         visited_bytes,
     );
     outcome.phase_elapsed_ns = serde_json::json!({

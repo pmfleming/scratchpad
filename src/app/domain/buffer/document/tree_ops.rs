@@ -47,23 +47,19 @@ impl TextDocument {
     }
 
     pub(super) fn record_initial_content(&mut self) {
-        let (edits, fingerprint) = self.piece_tree().initial_file_history().unwrap_or_else(|| {
-            let mut start = 0;
-            let edits: PieceHistoryEdits = self
-                .byte_spans_for_range(0..self.piece_tree().len_chars())
-                .into_iter()
-                .map(|span| {
-                    let edit = PieceHistoryEdit::Inserted {
-                        start_char: start,
-                        span,
-                    };
-                    start += self.piece_tree().text_for_span(span).chars().count() as u64;
-                    edit
-                })
-                .collect();
-            let fingerprint = self.fingerprint_for_history_edits(&edits);
-            (edits, fingerprint)
-        });
+        let mut start = 0;
+        let edits: PieceHistoryEdits = self
+            .byte_spans_for_range(0..self.piece_tree().len_chars())
+            .into_iter()
+            .map(|span| {
+                let edit = PieceHistoryEdit::Inserted {
+                    start_char: start,
+                    span,
+                };
+                start += span.char_len;
+                edit
+            })
+            .collect();
         if edits.is_empty() {
             return;
         }
@@ -74,7 +70,6 @@ impl TextDocument {
             global_seq: next_text_history_global_seq(),
             source: PieceSource::Load,
 
-            fingerprint,
             summary: "Initial contents".into(),
             edits,
             flags: PieceHistoryFlags {

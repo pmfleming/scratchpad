@@ -10,7 +10,7 @@ fn unreadable_snapshot_save_preserves_the_existing_destination() {
     std::fs::write(&source, "aλ\r\n".repeat(128)).unwrap();
     std::fs::write(&target, "keep this exact destination").unwrap();
     let (document, _, _) = TextDocument::from_utf8_file(&source, 0, 0).unwrap();
-    document.piece_tree().truncate_backing_for_test().unwrap();
+    document.piece_tree().inject_read_failure_for_test();
     assert!(FileService::write_snapshot_utf8(&target, &document.snapshot()).is_err());
     assert_eq!(
         std::fs::read_to_string(&target).unwrap(),
@@ -19,23 +19,30 @@ fn unreadable_snapshot_save_preserves_the_existing_destination() {
 }
 
 #[test]
-fn large_utf8_file_uses_lazy_file_backed_piece_tree_chunks() {
+fn large_utf8_import_uses_durable_lazy_chunks_and_survives_source_replacement() {
     const MB: usize = 1024 * 1024;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("file-backed.txt");
     let text = "alpha café 東京\n".repeat((17 * MB) / "alpha café 東京\n".len() + 1);
     std::fs::write(&path, text.as_bytes()).unwrap();
 
-    let content = FileService::read_file(&path).unwrap();
+    let session =
+        crate::app::services::session_store::SessionStore::new(directory.path().join("session"));
+    let store = session.chunk_store_handle().unwrap();
+    let content = FileService::read_file_in_store(&path, store.clone()).unwrap();
+    session.flush_text_chunks().unwrap();
+    store.set_limits(0, 0);
+    store.set_limits(16 * MB, 4 * MB);
+    std::fs::write(&path, "replaced source").unwrap();
     let tree = content.document.piece_tree();
 
-    assert!(tree.is_file_backed());
-    assert_eq!(tree.loaded_file_chunk_count(), 0);
+    assert!(tree.is_chunked());
+    assert_eq!(tree.loaded_chunk_count(), 0);
     assert_eq!(tree.borrow_range(0..5).as_deref(), Some("alpha"));
-    assert_eq!(tree.loaded_file_chunk_count(), 1);
+    assert_eq!(tree.loaded_chunk_count(), 1);
     let tail = tree.len_chars().saturating_sub(5)..tree.len_chars();
     assert_eq!(tree.extract_range(tail).chars().count(), 5);
-    assert_eq!(tree.loaded_file_chunk_count(), 2);
+    assert_eq!(tree.loaded_chunk_count(), 2);
 
     let mut document = content.document;
     document.insert_direct(5, " lazy");

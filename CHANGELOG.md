@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Large UTF-8 files stream into session chunks with bounded pending memory. Their text stays stable if the source changes, and unchanged disk observations write no text.
+
 - Session recovery stores text and undo as shared chunk references. Restoring a document loads its text on demand, and disk changes are checked in the background after restore.
 - Large pastes and replacements prepare in the background while the editor stays responsive. Sealed inserted text uses the session chunk store with bounded caching and background reads.
 - Session saves keep unaffected layouts untouched when closing or moving tabs. Cursor changes update only the affected view.

@@ -1,15 +1,14 @@
-use super::{FileContent, FileVisibleWindow, STAGED_METADATA_SAMPLE_BYTES};
-use crate::app::domain::buffer::{
-    BufferTextMetadata, accumulate_line_count, detected_text_format_and_metadata,
-};
+use super::{FileContent, FileVisibleWindow};
+use crate::app::domain::buffer::{StreamedTextInspection, StreamingTextInspector};
 use crate::app::domain::{EncodingSource, TextDocument};
+use crate::app::services::chunk_store::ImportContext;
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::Encoding;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
-const FILE_BACKED_UTF8_MIN_BYTES: u64 = 16 * 1024 * 1024;
+const CHUNKED_UTF8_MIN_BYTES: u64 = 16 * 1024 * 1024;
 
 pub(super) struct PrefixInspection {
     pub(super) encoding: &'static Encoding,
@@ -19,46 +18,35 @@ pub(super) struct PrefixInspection {
 
 struct LoadedDocument {
     document: TextDocument,
-    sample: String,
-    line_count: usize,
+    inspection: StreamedTextInspection,
     has_decoding_warnings: bool,
 }
-
-#[derive(Default)]
 struct StagedDocument {
     content: String,
-    sample: String,
-    line_count: usize,
-    line_count_pending_cr: bool,
+    inspector: StreamingTextInspector,
     has_decoding_warnings: bool,
 }
-
 impl StagedDocument {
     fn with_capacity(capacity: usize) -> Self {
         Self {
             content: String::with_capacity(capacity),
-            line_count: 1,
-            ..Self::default()
+            inspector: StreamingTextInspector::new(),
+            has_decoding_warnings: false,
         }
     }
-
     fn append(&mut self, text: &str, had_errors: bool) -> io::Result<()> {
         self.has_decoding_warnings |= had_errors;
         if text.contains('\0') {
             return Err(binary_file_error());
         }
+        self.inspector.observe(text);
         self.content.push_str(text);
-        append_staged_metadata_sample(&mut self.sample, text);
-        self.line_count =
-            accumulate_line_count(text, self.line_count, &mut self.line_count_pending_cr);
         Ok(())
     }
-
     fn finish(self) -> LoadedDocument {
         LoadedDocument {
             document: TextDocument::new(self.content),
-            sample: self.sample,
-            line_count: self.line_count,
+            inspection: self.inspector.finish(),
             has_decoding_warnings: self.has_decoding_warnings,
         }
     }
@@ -96,17 +84,29 @@ pub(super) fn read_file_content(
     encoding: &'static Encoding,
     has_bom: bool,
     encoding_source: EncodingSource,
+    context: &ImportContext,
 ) -> io::Result<FileContent> {
-    let loaded = read_document_with_encoding(path, encoding, has_bom)?;
-    Ok(build_file_content(
-        loaded.document,
-        loaded.sample,
-        loaded.line_count,
-        loaded.has_decoding_warnings,
-        encoding.name().to_string(),
+    let loaded = read_document_with_encoding(path, encoding, has_bom, context)?;
+    let (format, text_metadata, digest) = loaded.inspection.into_metadata(
+        encoding.name().to_owned(),
         has_bom,
         encoding_source,
-    ))
+        loaded.has_decoding_warnings,
+    );
+    let mut document = loaded.document;
+    document.set_preferred_line_ending(text_metadata.preferred_line_ending);
+    let metadata_exact = !loaded.has_decoding_warnings
+        || encoding == encoding_rs::UTF_8
+        || encoding == encoding_rs::UTF_16LE
+        || encoding == encoding_rs::UTF_16BE;
+    Ok(FileContent {
+        document,
+        artifact_summary: text_metadata.artifact_summary.clone(),
+        format,
+        text_metadata,
+        decoded_digest: Some(digest),
+        metadata_exact,
+    })
 }
 
 pub(super) fn read_first_visible_window(
@@ -174,54 +174,25 @@ fn binary_file_error() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "Binary files are not supported")
 }
 
-fn build_file_content(
-    document: TextDocument,
-    sample: String,
-    line_count: usize,
-    has_decoding_warnings: bool,
-    encoding_name: String,
-    has_bom: bool,
-    encoding_source: EncodingSource,
-) -> FileContent {
-    let (mut format, sample_metadata) = detected_text_format_and_metadata(
-        &sample,
-        encoding_name,
-        has_bom,
-        encoding_source,
-        has_decoding_warnings,
-    );
-    format.is_ascii_subset = false;
-    let artifact_summary = sample_metadata.artifact_summary;
-    let text_metadata = BufferTextMetadata {
-        line_count,
-        artifact_summary: artifact_summary.clone(),
-        preferred_line_ending: format.preferred_line_ending_style(),
-        has_non_compliant_characters: false,
-    };
-    FileContent {
-        document,
-        format,
-        artifact_summary,
-        text_metadata,
-    }
-}
-
 fn read_document_with_encoding(
     path: &Path,
     encoding: &'static Encoding,
     has_bom: bool,
+    context: &ImportContext,
 ) -> io::Result<LoadedDocument> {
     const RAW_READ_BYTES: usize = 16 * 1024;
     const DECODED_CHUNK_BYTES: usize = 32 * 1024;
 
     if encoding == encoding_rs::UTF_8
-        && File::open(path)?.metadata()?.len() >= FILE_BACKED_UTF8_MIN_BYTES
+        && File::open(path)?.metadata()?.len() >= CHUNKED_UTF8_MIN_BYTES
     {
-        match read_utf8_document_file_backed(path, has_bom) {
-            Ok(loaded) => return Ok(loaded),
-            Err(error) if error.kind() == io::ErrorKind::InvalidData => {}
-            Err(error) => return Err(error),
-        }
+        let (document, inspection) =
+            TextDocument::import_utf8_file(path, if has_bom { 3 } else { 0 }, context)?;
+        return Ok(LoadedDocument {
+            document,
+            inspection,
+            has_decoding_warnings: false,
+        });
     }
 
     if encoding == encoding_rs::UTF_8
@@ -247,6 +218,7 @@ fn read_document_with_encoding(
     let mut decoded = [0u8; DECODED_CHUNK_BYTES];
 
     loop {
+        context.check()?;
         let read = file.read(&mut raw)?;
         let eof = read == 0;
         pending.extend_from_slice(&raw[..read]);
@@ -283,18 +255,6 @@ fn decode_pending(
     }
 }
 
-fn read_utf8_document_file_backed(path: &Path, has_bom: bool) -> io::Result<LoadedDocument> {
-    let file_offset = if has_bom { 3 } else { 0 };
-    let (document, sample, line_count) =
-        TextDocument::from_utf8_file(path, file_offset, STAGED_METADATA_SAMPLE_BYTES)?;
-    Ok(LoadedDocument {
-        document,
-        sample,
-        line_count,
-        has_decoding_warnings: false,
-    })
-}
-
 fn read_utf8_document_fast_path(path: &Path, has_bom: bool) -> io::Result<Option<LoadedDocument>> {
     const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
@@ -314,35 +274,13 @@ fn read_utf8_document_fast_path(path: &Path, has_bom: bool) -> io::Result<Option
         return Err(binary_file_error());
     }
 
-    let mut sample = String::new();
-    append_staged_metadata_sample(&mut sample, &content);
-    let mut line_count_pending_cr = false;
-    let line_count = accumulate_line_count(&content, 1, &mut line_count_pending_cr);
-
+    let mut inspector = StreamingTextInspector::new();
+    inspector.observe(&content);
     Ok(Some(LoadedDocument {
         document: TextDocument::new(content),
-        sample,
-        line_count,
+        inspection: inspector.finish(),
         has_decoding_warnings: false,
     }))
-}
-
-fn append_staged_metadata_sample(sample: &mut String, chunk: &str) {
-    if sample.len() >= STAGED_METADATA_SAMPLE_BYTES {
-        return;
-    }
-
-    let remaining = STAGED_METADATA_SAMPLE_BYTES - sample.len();
-    if chunk.len() <= remaining {
-        sample.push_str(chunk);
-        return;
-    }
-
-    let mut end = remaining;
-    while end > 0 && !chunk.is_char_boundary(end) {
-        end -= 1;
-    }
-    sample.push_str(&chunk[..end]);
 }
 
 fn is_probably_binary(prefix: &[u8], has_bom: bool) -> bool {

@@ -5,6 +5,7 @@ mod scan;
 #[cfg(test)]
 mod tests;
 
+pub(super) use scan::StreamingInspectionState;
 pub(super) use scan::TextInspection;
 #[cfg(test)]
 use scan::TextScanSummary;

@@ -1,8 +1,7 @@
 //! Storage addressing captured without flattening the visible document.
 use super::{
-    ADD_TAIL_BYTES, AddTextChunk, AddTextStorage, Arc, ByteSpan, ChunkText, FILE_CHUNK_BYTES,
-    FileBackedChunk, FileBackedOriginal, OriginalTextStorage, PathBuf, PieceBuffer,
-    PieceTreeStorage, io,
+    ADD_TAIL_BYTES, AddTextChunk, AddTextStorage, Arc, ByteSpan, ChunkText, ChunkedOriginal,
+    OriginalChunk, OriginalTextStorage, PathBuf, PieceBuffer, PieceTreeStorage, io,
 };
 use crate::app::services::chunk_store::{Chunk, ChunkStoreHandle};
 
@@ -23,10 +22,8 @@ impl PieceTreeStorage {
         }
         let start = span.start_byte as usize;
         let end = span.byte_end() as usize;
-        if let (
-            OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original),
-            PieceBuffer::Original,
-        ) = (&self.original, span.buffer)
+        if let (OriginalTextStorage::Chunked(original), PieceBuffer::Original) =
+            (&self.original, span.buffer)
         {
             let mut total = 0;
             for chunk in original
@@ -86,10 +83,7 @@ impl PieceTreeStorage {
                     .chars()
                     .count() as u64);
             }
-            (
-                OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original),
-                PieceBuffer::Original,
-            ) => {
+            (OriginalTextStorage::Chunked(original), PieceBuffer::Original) => {
                 for chunk in &original.chunks {
                     if chunk.logical_start < end && chunk.logical_start + chunk.byte_len > start {
                         visit(chunk.logical_start, &chunk.text)?;
@@ -128,24 +122,19 @@ impl PieceTreeStorage {
             match &self.original {
                 OriginalTextStorage::Owned(text) => {
                     let mut start = 0;
-                    while start < text.len() {
-                        let mut end = (start + FILE_CHUNK_BYTES).min(text.len());
-                        while !text.is_char_boundary(end) {
-                            end -= 1;
-                        }
+                    for body in crate::app::services::chunk_store::Utf8Chunks::new(text.as_bytes())
+                    {
+                        let body = body?;
+                        let end = start + body.len();
                         if self.original_reachable.as_ref().is_none_or(|ranges| {
                             ranges.iter().any(|r| r.start < end && r.end > start)
                         }) {
-                            chunks.push((
-                                start,
-                                store.seal(Arc::new(text[start..end].to_owned()), self.add.owner),
-                            ));
+                            chunks.push((start, store.seal(Arc::new(body), self.add.owner)));
                         }
                         start = end;
                     }
                 }
-                OriginalTextStorage::FileBacked(original)
-                | OriginalTextStorage::Chunked(original) => {
+                OriginalTextStorage::Chunked(original) => {
                     for chunk in &original.chunks {
                         if matches!(chunk.text, ChunkText::Missing(_)) {
                             continue;
@@ -220,7 +209,7 @@ impl PieceTreeStorage {
             match block.buffer {
                 PieceBuffer::Original => {
                     if block.start > original_len {
-                        original.push(FileBackedChunk {
+                        original.push(OriginalChunk {
                             logical_start: original_len,
                             text: ChunkText::Missing(block.start - original_len),
                             byte_len: block.start - original_len,
@@ -236,7 +225,7 @@ impl PieceTreeStorage {
                         .reference()
                         .ok_or_else(|| io::Error::other("missing chunk reference"))?
                         .metadata;
-                    original.push(FileBackedChunk {
+                    original.push(OriginalChunk {
                         logical_start: block.start,
                         byte_len: metadata.byte_len,
                         char_len: usize::try_from(metadata.char_len).map_err(io::Error::other)?,
@@ -266,7 +255,7 @@ impl PieceTreeStorage {
             return Err(io::Error::other("stored mappings exceed address space"));
         }
         if original_len < original_length {
-            original.push(FileBackedChunk {
+            original.push(OriginalChunk {
                 logical_start: original_len,
                 text: ChunkText::Missing(original_length - original_len),
                 byte_len: original_length - original_len,
@@ -274,11 +263,10 @@ impl PieceTreeStorage {
             });
         }
         Ok(Self {
-            original: OriginalTextStorage::Chunked(Arc::new(FileBackedOriginal {
+            original: OriginalTextStorage::Chunked(Arc::new(ChunkedOriginal {
                 path: PathBuf::new(),
                 chunks: original,
                 byte_len: original_length,
-                fingerprint: 0,
             })),
             add,
             fault: Arc::default(),
@@ -314,7 +302,7 @@ impl PieceTreeStorage {
                         .collect(),
                 ));
             }
-            OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original) => {
+            OriginalTextStorage::Chunked(original) => {
                 for chunk in &mut Arc::make_mut(original).chunks {
                     if !used(PieceBuffer::Original, chunk.logical_start, chunk.byte_len) {
                         chunk.text = ChunkText::Missing(chunk.byte_len);
@@ -350,10 +338,7 @@ impl PieceTreeStorage {
         };
         match (&self.original, span.buffer) {
             (OriginalTextStorage::Owned(_), PieceBuffer::Original) => true,
-            (
-                OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original),
-                PieceBuffer::Original,
-            ) => {
+            (OriginalTextStorage::Chunked(original), PieceBuffer::Original) => {
                 !original
                     .chunks
                     .iter()

@@ -1,13 +1,11 @@
+mod import;
 mod persistence;
-use super::text_cache::{self, Backing, ChunkText};
+use super::text_cache::{self, ChunkText};
 use super::{ByteSpan, Piece, PieceBuffer, PieceSource, PieceTreeText};
 use crate::app::domain::buffer::PersistentVector;
-use crate::app::domain::buffer::accumulate_line_count;
 pub(crate) use persistence::{StorageBlock, StorageCapture};
-use std::fs::File;
-use std::hash::{Hash, Hasher};
-use std::io::{self, BufReader, Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 const FILE_CHUNK_BYTES: usize = 256 * 1024;
@@ -39,20 +37,18 @@ impl TextPin {
 #[derive(Clone, Debug)]
 enum OriginalTextStorage {
     Owned(Arc<str>),
-    FileBacked(Arc<FileBackedOriginal>),
-    Chunked(Arc<FileBackedOriginal>),
+    Chunked(Arc<ChunkedOriginal>),
 }
 
 #[derive(Clone, Debug)]
-struct FileBackedOriginal {
+struct ChunkedOriginal {
     path: PathBuf,
-    chunks: Vec<FileBackedChunk>,
+    chunks: Vec<OriginalChunk>,
     byte_len: usize,
-    fingerprint: u64,
 }
 
 #[derive(Clone, Debug)]
-struct FileBackedChunk {
+struct OriginalChunk {
     logical_start: usize,
     text: ChunkText,
     byte_len: usize,
@@ -107,7 +103,25 @@ impl AddTextSpan {
 
 impl PieceTreeStorage {
     pub(super) fn prefetch_span(&self, span: ByteSpan) {
-        if span.buffer != PieceBuffer::Add {
+        if span.buffer == PieceBuffer::Original {
+            if let OriginalTextStorage::Chunked(original) = &self.original {
+                let start = span.start_byte as usize;
+                let end = start.saturating_add(span.byte_len as usize);
+                for chunk in original
+                    .chunks
+                    .iter()
+                    .skip(
+                        original
+                            .chunks
+                            .partition_point(|c| c.logical_start + c.byte_len <= start),
+                    )
+                    .take_while(|c| c.logical_start < end)
+                {
+                    if let ChunkText::Stored(chunk) = &chunk.text {
+                        chunk.prefetch();
+                    }
+                }
+            }
             return;
         }
         let start = span.start_byte as usize;
@@ -141,6 +155,14 @@ impl PieceTreeStorage {
                 ))
             };
         }
+        if let OriginalTextStorage::Chunked(original) = &mut self.original {
+            for chunk in &mut Arc::make_mut(original).chunks {
+                if self.add.bulk_intake {
+                    let _ = store.wait_for_capacity();
+                }
+                chunk.text.bind_store(self.add.owner, &store);
+            }
+        }
         for index in 0..self.add.chunks.len() {
             if self.add.bulk_intake {
                 let _ = store.wait_for_capacity();
@@ -159,18 +181,8 @@ impl PieceTreeStorage {
         self.add.bulk_intake = enabled;
     }
     #[cfg(test)]
-    pub(super) fn truncate_backing_for_test(&self) -> io::Result<()> {
-        let (OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original)) =
-            &self.original
-        else {
-            return Err(io::Error::other("original not file-backed"));
-        };
-        original
-            .chunks
-            .first()
-            .ok_or_else(|| io::Error::other("empty backing"))?
-            .text
-            .truncate_backing_for_test()
+    pub(super) fn inject_read_failure_for_test(&self) {
+        *self.fault.lock().unwrap() = Some("injected unreadable text".into());
     }
     pub(super) fn from_original(text: String) -> Self {
         Self {
@@ -182,135 +194,41 @@ impl PieceTreeStorage {
         }
     }
 
-    pub(super) fn from_utf8_file(
-        path: &Path,
-        file_offset: u64,
-        sample_limit: usize,
-    ) -> io::Result<(Self, Vec<Piece>, String, usize)> {
-        let mut reader = BufReader::new(File::open(path)?);
-        reader.seek(SeekFrom::Start(file_offset))?;
-        let immutable = Backing::new(tempfile::tempfile()?);
-        let add = AddTextStorage::default();
-        let mut fingerprint = rustc_hash::FxHasher::default();
-        let mut carry = Vec::new();
-        let mut chunks = Vec::new();
-        let mut pieces = Vec::new();
-        let mut sample = String::new();
-        let mut logical_start = 0usize;
-        let mut line_count = 1usize;
-        let mut pending_cr = false;
-
-        while let Some(bytes) = read_utf8_chunk(&mut reader, &mut carry, logical_start)? {
-            let text = std::str::from_utf8(&bytes).map_err(|error| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid UTF-8 in {}: {error}", path.display()),
-                )
-            })?;
-            // Pin exact decoded bytes. External file writes cannot change an old node.
-            let offset = immutable.append(&bytes)?;
-            text.hash(&mut fingerprint);
-            0xff_u8.hash(&mut fingerprint);
-            pieces.push(Piece::from_slice(
-                PieceBuffer::Original,
-                logical_start,
-                text,
-            ));
-            append_sample(&mut sample, text, sample_limit);
-            line_count = accumulate_line_count(text, line_count, &mut pending_cr);
-            chunks.push(FileBackedChunk {
-                logical_start,
-                text: ChunkText::from_file(
-                    immutable.clone(),
-                    offset,
-                    bytes.len(),
-                    add.owner,
-                    blake3::hash(&bytes),
-                ),
-                char_len: text.chars().count(),
-                byte_len: bytes.len(),
-            });
-            logical_start += bytes.len();
-        }
-
-        let original = FileBackedOriginal {
-            path: path.to_path_buf(),
-            chunks,
-            byte_len: logical_start,
-            fingerprint: fingerprint.finish(),
-        };
-        Ok((
-            Self {
-                original: OriginalTextStorage::FileBacked(Arc::new(original)),
-                add,
-                fault: Arc::default(),
-                original_reachable: None,
-                durable_original: Arc::default(),
-            },
-            pieces,
-            sample,
-            line_count,
-        ))
-    }
-
-    pub(super) fn initial_file_history(&self) -> Option<(super::super::PieceHistoryEdits, u64)> {
-        let (OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original)) =
-            &self.original
-        else {
-            return None;
-        };
-        let mut start = 0;
-        let edits = original
-            .chunks
-            .iter()
-            .map(|chunk| {
-                let edit = super::super::PieceHistoryEdit::Inserted {
-                    start_char: start as u64,
-                    span: ByteSpan {
-                        buffer: PieceBuffer::Original,
-                        start_byte: chunk.logical_start as u64,
-                        byte_len: chunk.byte_len as u64,
-                        char_len: chunk.char_len as u64,
-                    },
-                };
-                start += chunk.char_len;
-                edit
-            })
-            .collect();
-        Some((edits, original.fingerprint))
-    }
-
     pub(super) fn owned_original_text(&self) -> Option<&str> {
         match &self.original {
             OriginalTextStorage::Owned(text) => Some(text),
-            OriginalTextStorage::FileBacked(_) | OriginalTextStorage::Chunked(_) => None,
+            OriginalTextStorage::Chunked(_) => None,
         }
     }
 
     pub(super) fn original_len(&self) -> usize {
         match &self.original {
             OriginalTextStorage::Owned(text) => text.len(),
-            OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original) => {
-                original.byte_len
-            }
+            OriginalTextStorage::Chunked(original) => original.byte_len,
         }
     }
 
-    pub(super) fn is_file_backed(&self) -> bool {
-        matches!(self.original, OriginalTextStorage::FileBacked(_))
+    pub(super) fn is_chunked(&self) -> bool {
+        matches!(self.original, OriginalTextStorage::Chunked(_))
     }
 
-    pub(super) fn loaded_file_chunk_count(&self) -> usize {
-        if self.is_file_backed() {
-            text_cache::owner_loaded(self.add.owner)
+    pub(super) fn loaded_chunk_count(&self) -> usize {
+        if self.is_chunked() {
+            self.add
+                .store
+                .as_ref()
+                .map_or(0, |store| store.owner_loaded(self.add.owner))
         } else {
             0
         }
     }
 
-    pub(super) fn file_chunk_cache_limit(&self) -> usize {
-        if self.is_file_backed() {
-            text_cache::file_chunk_limit(FILE_CHUNK_BYTES)
+    pub(super) fn chunk_cache_limit(&self) -> usize {
+        if self.is_chunked() {
+            self.add
+                .store
+                .as_ref()
+                .map_or(0, |store| store.owner_cache_limit() / FILE_CHUNK_BYTES)
         } else {
             0
         }
@@ -322,7 +240,7 @@ impl PieceTreeStorage {
             (OriginalTextStorage::Owned(left), OriginalTextStorage::Owned(right)) => {
                 Arc::ptr_eq(left, right)
             }
-            (OriginalTextStorage::FileBacked(left), OriginalTextStorage::FileBacked(right)) => {
+            (OriginalTextStorage::Chunked(left), OriginalTextStorage::Chunked(right)) => {
                 Arc::ptr_eq(left, right)
             }
             _ => false,
@@ -341,7 +259,11 @@ impl PieceTreeStorage {
     }
 
     pub(super) fn pin_span(&self, span: ByteSpan, retain: bool) -> io::Result<TextPin> {
-        let result = self.pin_span_inner(span, retain);
+        let result = if let Some(cause) = self.read_fault() {
+            Err(io::Error::other(cause))
+        } else {
+            self.pin_span_inner(span, retain)
+        };
         if let Err(error) = &result {
             let mut fault = self
                 .fault
@@ -372,9 +294,7 @@ impl PieceTreeStorage {
                 text.get(start..end).ok_or_else(invalid)?;
                 return Ok(pin);
             }
-            OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original)
-                if span.buffer == PieceBuffer::Original =>
-            {
+            OriginalTextStorage::Chunked(original) if span.buffer == PieceBuffer::Original => {
                 if end > original.byte_len {
                     return Err(invalid());
                 }
@@ -445,10 +365,7 @@ impl PieceTreeStorage {
             (OriginalTextStorage::Owned(text), PieceBuffer::Original) => {
                 return Ok(PieceTreeText::borrowed(&text[start..end]));
             }
-            (
-                OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original),
-                PieceBuffer::Original,
-            ) => {
+            (OriginalTextStorage::Chunked(original), PieceBuffer::Original) => {
                 let index = original
                     .chunks
                     .partition_point(|c| c.logical_start + c.byte_len <= start);
@@ -509,9 +426,7 @@ impl PieceTreeStorage {
             OriginalTextStorage::Owned(text) => {
                 PieceTreeText::borrowed(&text[start_byte..start_byte + byte_len])
             }
-            OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original) => {
-                original.text_for_range(start_byte, byte_len)
-            }
+            OriginalTextStorage::Chunked(original) => original.text_for_range(start_byte, byte_len),
         }
     }
 
@@ -554,10 +469,7 @@ impl AddTextStorage {
                 .last()
                 .and_then(|tail| match &tail.text {
                     ChunkText::Inline(text) => Some(ADD_TAIL_BYTES.saturating_sub(text.len())),
-                    ChunkText::Sealed(_)
-                    | ChunkText::Memory(_)
-                    | ChunkText::Stored(_)
-                    | ChunkText::Missing(_) => None,
+                    ChunkText::Memory(_) | ChunkText::Stored(_) | ChunkText::Missing(_) => None,
                 })
                 .unwrap_or(0);
             let mut take = remaining.len().min(capacity);
@@ -627,7 +539,7 @@ impl AddTextStorage {
     }
 }
 
-impl FileBackedOriginal {
+impl ChunkedOriginal {
     fn text_for_range(&self, start_byte: usize, byte_len: usize) -> PieceTreeText<'static> {
         let chunk_index = self
             .chunks
@@ -656,67 +568,9 @@ impl FileBackedOriginal {
         PieceTreeText::shared(text, relative_start..relative_start + byte_len)
     }
 
-    fn cached_chunk(&self, _chunk_index: usize, chunk: &FileBackedChunk) -> Arc<String> {
+    fn cached_chunk(&self, _chunk_index: usize, chunk: &OriginalChunk) -> Arc<String> {
         chunk.text.load()
     }
-}
-
-fn read_utf8_chunk(
-    reader: &mut impl Read,
-    carry: &mut Vec<u8>,
-    logical_start: usize,
-) -> io::Result<Option<Vec<u8>>> {
-    let mut bytes = std::mem::take(carry);
-    let existing = bytes.len();
-    bytes.resize(FILE_CHUNK_BYTES, 0);
-    let mut filled = existing;
-    while filled < FILE_CHUNK_BYTES {
-        let read = reader.read(&mut bytes[filled..])?;
-        if read == 0 {
-            break;
-        }
-        filled += read;
-    }
-    bytes.truncate(filled);
-    if bytes.is_empty() {
-        return Ok(None);
-    }
-
-    let valid_len = match std::str::from_utf8(&bytes) {
-        Ok(_) => bytes.len(),
-        Err(error) if error.error_len().is_none() => error.valid_up_to(),
-        Err(error) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Invalid UTF-8 at byte {}",
-                    logical_start + error.valid_up_to()
-                ),
-            ));
-        }
-    };
-    if valid_len < bytes.len() {
-        *carry = bytes.split_off(valid_len);
-    }
-    bytes.truncate(valid_len);
-    if filled < FILE_CHUNK_BYTES && !carry.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Incomplete UTF-8 sequence at end of file",
-        ));
-    }
-    Ok(Some(bytes))
-}
-
-fn append_sample(sample: &mut String, text: &str, sample_limit: usize) {
-    if sample.len() >= sample_limit {
-        return;
-    }
-    let mut end = (sample_limit - sample.len()).min(text.len());
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    sample.push_str(&text[..end]);
 }
 
 pub(super) fn add_byte_span(start_byte: usize, byte_len: usize) -> ByteSpan {

@@ -27,7 +27,6 @@ impl TextDocument {
             edited_at: persisted.edited_at,
             global_seq: persisted.global_seq,
             source: persisted.source,
-            fingerprint: persisted.fingerprint,
             summary: persisted.summary,
             edits,
             flags,

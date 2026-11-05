@@ -6,7 +6,6 @@ pub(crate) use incremental::{
 };
 pub(crate) use inspection::normalize_inserted_text_line_endings;
 use inspection::{TextInspection, line_ending_style};
-pub(crate) use line_endings::accumulate_line_count;
 mod line_endings;
 
 mod incremental;
@@ -34,6 +33,48 @@ pub(crate) struct BufferTextMetadata {
     pub(crate) artifact_summary: TextArtifactSummary,
     pub(crate) preferred_line_ending: LineEndingStyle,
     pub(crate) has_non_compliant_characters: bool,
+}
+
+/// Inspects imported UTF-8 incrementally without retaining or rereading bodies.
+pub(crate) struct StreamingTextInspector(inspection::StreamingInspectionState);
+impl StreamingTextInspector {
+    pub(crate) fn new() -> Self {
+        Self(inspection::StreamingInspectionState::new())
+    }
+    pub(crate) fn observe(&mut self, text: &str) {
+        self.0.observe(text);
+    }
+    pub(crate) fn finish(self) -> StreamedTextInspection {
+        let (inspection, digest) = self.0.finish();
+        StreamedTextInspection { inspection, digest }
+    }
+}
+pub(crate) struct StreamedTextInspection {
+    inspection: TextInspection,
+    pub(crate) digest: String,
+}
+impl StreamedTextInspection {
+    pub(crate) fn into_metadata(
+        self,
+        encoding_name: String,
+        has_bom: bool,
+        source: EncodingSource,
+        warnings: bool,
+    ) -> (TextFormatMetadata, BufferTextMetadata, String) {
+        let format = TextFormatMetadata::from_inspection(
+            self.inspection.clone(),
+            encoding_name,
+            has_bom,
+            source,
+            warnings,
+        );
+        let metadata = build_buffer_text_metadata(self.inspection, &format, false);
+        (format, metadata, self.digest)
+    }
+    #[cfg(test)]
+    pub(crate) fn line_count(&self) -> usize {
+        self.inspection.line_count
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

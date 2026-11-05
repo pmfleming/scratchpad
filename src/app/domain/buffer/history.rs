@@ -57,7 +57,6 @@ pub struct PieceHistoryEntry {
     pub edited_at: u64,
     pub global_seq: u64,
     pub source: PieceSource,
-    pub fingerprint: u64,
     pub summary: String,
     pub edits: PieceHistoryEdits,
     pub flags: PieceHistoryFlags,

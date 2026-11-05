@@ -14,8 +14,7 @@ fn viewport_preflight_reports_unreadable_text_before_building_a_galley() {
     buffer
         .document()
         .piece_tree()
-        .truncate_backing_for_test()
-        .unwrap();
+        .inject_read_failure_for_test();
     let result = viewport_text_slice(
         &buffer,
         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 400.)),

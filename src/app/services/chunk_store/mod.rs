@@ -1,5 +1,7 @@
 //! Immutable text handles shared by domain clones and the single database writer.
+mod import;
 mod readers;
+pub(crate) use import::{ImportContext, Utf8Chunks};
 pub use readers::ReadEpoch;
 use std::{
     collections::{HashMap, VecDeque},
@@ -230,6 +232,23 @@ impl ChunkStoreHandle {
             .bytes
     }
 
+    pub(crate) fn owner_loaded(&self, owner: u64) -> usize {
+        self.0
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .loaded
+            .values()
+            .filter(|(id, _)| *id == owner)
+            .count()
+    }
+    pub(crate) fn owner_cache_limit(&self) -> usize {
+        self.0
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .per_owner
+    }
     /// High-water mark for pending sealed bodies in this store epoch.
     #[must_use]
     pub fn peak_pending_bytes(&self) -> usize {
@@ -272,12 +291,21 @@ impl ChunkStoreHandle {
     }
     /// Bulk callers only; typing/paint must never wait for the writer.
     pub fn wait_for_capacity(&self) -> io::Result<()> {
+        self.wait_for_capacity_while(|| true)
+    }
+    pub(crate) fn wait_for_capacity_while(&self, active: impl Fn() -> bool) -> io::Result<()> {
         let mut pending = self
             .0
             .pending
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         while self.pending_bytes() >= BULK_PENDING_BYTES {
+            if !active() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "Text import was cancelled",
+                ));
+            }
             if !matches!(self.health(), Health::Healthy) {
                 return Err(failed(
                     "chunk store is not saving; bulk intake must use the failure RAM budget",

@@ -69,8 +69,6 @@ pub const COMMON_TEXT_ENCODINGS: &[EncodingOption] = &[
     },
 ];
 
-const STAGED_METADATA_SAMPLE_BYTES: usize = 64 * 1024;
-
 pub struct FileService;
 
 pub struct FileContent {
@@ -78,6 +76,8 @@ pub struct FileContent {
     pub format: TextFormatMetadata,
     pub artifact_summary: TextArtifactSummary,
     pub(crate) text_metadata: BufferTextMetadata,
+    pub(crate) decoded_digest: Option<String>,
+    pub(crate) metadata_exact: bool,
 }
 
 /// A bounded, decoded prefix used to make the first editor viewport available
@@ -118,6 +118,26 @@ impl FileService {
     }
 
     pub fn read_file(path: &Path) -> io::Result<FileContent> {
+        Self::read_file_with_context(path, &super::chunk_store::ImportContext::default())
+    }
+    /// Stream a large UTF-8 file into its owning store with bounded pending text.
+    pub fn read_file_in_store(
+        path: &Path,
+        store: super::chunk_store::ChunkStoreHandle,
+    ) -> io::Result<FileContent> {
+        Self::read_file_with_context(
+            path,
+            &super::chunk_store::ImportContext {
+                store: Some(store),
+                cancelled: None,
+            },
+        )
+    }
+    pub(crate) fn read_file_with_context(
+        path: &Path,
+        context: &super::chunk_store::ImportContext,
+    ) -> io::Result<FileContent> {
+        context.check()?;
         let prefix = read::inspect_file_prefix(path).inspect_err(|error| {
             diagnostics::record_io_error(
                 "read_file",
@@ -131,6 +151,7 @@ impl FileService {
             prefix.encoding,
             prefix.has_bom,
             prefix.encoding_source,
+            context,
         )
         .inspect_err(|error| {
             diagnostics::record_io_error(
@@ -154,6 +175,17 @@ impl FileService {
     }
 
     pub fn read_file_with_encoding(path: &Path, encoding_name: &str) -> io::Result<FileContent> {
+        Self::read_file_with_encoding_context(
+            path,
+            encoding_name,
+            &super::chunk_store::ImportContext::default(),
+        )
+    }
+    pub(crate) fn read_file_with_encoding_context(
+        path: &Path,
+        encoding_name: &str,
+        context: &super::chunk_store::ImportContext,
+    ) -> io::Result<FileContent> {
         let prefix = read::inspect_file_prefix(path).inspect_err(|error| {
             diagnostics::record_io_error_with_details(
                 "read_file_with_encoding",
@@ -168,6 +200,7 @@ impl FileService {
             resolve_encoding(encoding_name)?,
             prefix.has_bom,
             EncodingSource::ExplicitUserChoice,
+            context,
         )
         .inspect_err(|error| {
             diagnostics::record_io_error_with_details(
@@ -203,9 +236,11 @@ impl FileService {
         file_content: FileContent,
         disk_state: Option<DiskFileState>,
     ) -> BufferState {
-        let digest = disk_state
-            .as_ref()
-            .and_then(|_| file_content.document.try_content_digest().ok());
+        let digest = file_content.decoded_digest.clone().or_else(|| {
+            disk_state
+                .as_ref()
+                .and_then(|_| file_content.document.try_content_digest().ok())
+        });
         Self::build_buffer_with_digest(path, file_content, disk_state, digest)
     }
 
@@ -223,6 +258,7 @@ impl FileService {
             document,
             format,
             text_metadata,
+            metadata_exact,
             ..
         } = file_content;
         let mut buffer = BufferState::with_document_text_metadata_refresh_state(
@@ -231,7 +267,7 @@ impl FileService {
             Some(path.to_path_buf()),
             format,
             text_metadata,
-            true,
+            !metadata_exact,
         );
         buffer.disk_state = disk_state;
         buffer.disk_content_digest.clone_from(&digest);

@@ -1,0 +1,10 @@
+[0mdirenv: loading ~/Projects/scratchpad/.envrc
+[0mdirenv: using flake
+[0mdirenv: nix-direnv: Using cached dev shell
+Scratchpad dev shell
+Try: cargo check
+   Compiling scratchpad v0.4.2 (/home/laufan/Projects/scratchpad)
+    Finished `release` profile [optimized] target(s) in 4.07s
+     Running `target/release/resource_probe --live-text-stage-five`
+{"bytes":67108864,"cached_bytes":262144,"edit_save_ns":4611390,"first_paint_ns":4131678,"first_paint_result":199006,"import_ns":178755173,"new_body_bytes_hashed_after_edit":0,"peak_pending_bytes":524287,"read_max_ns":897918,"read_p99_ns":679838,"scenario":"store_import"}
+{"bytes":2147483648,"cached_bytes":262144,"edit_save_ns":11562859,"first_paint_ns":2865658,"first_paint_result":199006,"import_ns":6032158917,"new_body_bytes_hashed_after_edit":0,"peak_pending_bytes":1572863,"read_max_ns":858945,"read_p99_ns":548751,"scenario":"store_import"}
