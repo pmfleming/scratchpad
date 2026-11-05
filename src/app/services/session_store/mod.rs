@@ -281,12 +281,11 @@ impl SessionStore {
         if !on_started(session.active_tab_index, session.active_surface) {
             return Err(receiver_closed());
         }
-        let mut restorer = Restorer::new();
-        let tabs = restorer.restore_tabs_active_first(
+        let tabs = Restorer::restore_tabs_active_first(
             stored.manifest.tabs,
             session.active_tab_index,
             &stored.quarantined,
-        );
+        )?;
         if tabs.is_empty() {
             return Ok(None);
         }
@@ -335,7 +334,7 @@ impl SessionStore {
             self.bind_tab(&mut tab)?;
             return Ok((tab, None));
         }
-        let (mut tab, summary) = Restorer::new().restore_tab_with_summary(tab);
+        let (mut tab, summary) = Restorer::restore_tab_with_summary(tab)?;
         self.bind_tab(&mut tab)?;
         Ok((tab, summary.into_status()))
     }
@@ -418,7 +417,7 @@ impl SessionStore {
 fn restore_session(stored: StoredSession) -> io::Result<Option<RestoredSession>> {
     let mut session = restored_metadata(&stored.manifest);
     let mut summary = restore::RestoreSummary::default();
-    for (tab, tab_summary) in Restorer::new().restore_tabs_ordered(stored.manifest.tabs)? {
+    for (tab, tab_summary) in Restorer::restore_tabs_ordered(stored.manifest.tabs)? {
         summary.merge(tab_summary);
         session.tabs.push(tab);
     }

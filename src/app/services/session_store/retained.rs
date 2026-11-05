@@ -66,7 +66,7 @@ impl SessionStore {
         let tab = self
             .worker()?
             .call(move |db| block_on(db.read_closed_tab(&token)))?;
-        let mut tab = Restorer::new().restore_tab_with_summary(tab).0;
+        let mut tab = Restorer::restore_tab_with_summary(tab)?.0;
         self.bind_tab(&mut tab)?;
         Ok(tab)
     }

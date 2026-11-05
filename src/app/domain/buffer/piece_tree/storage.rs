@@ -2,6 +2,7 @@ mod adopt;
 mod import;
 mod metrics;
 mod persistence;
+mod ranges;
 use super::text_cache::{self, ChunkText};
 use super::{ByteSpan, Piece, PieceBuffer, PieceSource, PieceTreeText};
 use crate::app::domain::buffer::PersistentVector;

@@ -1,92 +1,32 @@
-use super::super::{
-    SessionActiveSurface, SessionPersistRequest, SessionStore, model::SessionBuffer,
-};
-use super::{RestoreSummary, Restorer};
+use super::super::{SessionActiveSurface, SessionPersistRequest, SessionStore};
+use super::RestoreSummary;
 use crate::app::domain::{BufferFreshness, BufferState, WorkspaceTab};
-use crate::app::services::file_service::FileService;
-use std::{collections::HashMap, fs, io};
+use std::{collections::HashMap, io};
 
 #[test]
-fn disk_reconciliation_preserves_dirty_edits_but_reloads_clean_files() {
-    use BufferFreshness::{ConflictOnDisk, InSync, MissingOnDisk};
-    for (session, disk, dirty, known_disk, expected_text, expected_dirty, freshness) in [
-        ("same", Some("same"), true, false, "same", false, InSync),
-        ("session", Some("disk"), true, true, "session", true, InSync),
+fn restore_status_reports_real_freshness_and_aggregates_batches() {
+    for (conflicts, missing, expected) in [
+        (0, 0, None),
         (
-            "session",
-            Some("disk"),
-            true,
-            false,
-            "session",
-            true,
-            ConflictOnDisk,
-        ),
-        ("session", Some("disk"), false, false, "disk", false, InSync),
-        ("session", None, true, false, "session", true, MissingOnDisk),
-    ] {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("note.txt");
-        if let Some(text) = disk {
-            fs::write(&path, text).unwrap();
-        }
-        let mut live = BufferState::new("note.txt".into(), session.into(), Some(path.clone()));
-        live.is_dirty = dirty;
-        if known_disk {
-            live.sync_to_disk_state(Some(FileService::read_disk_state(&path).unwrap()));
-        }
-        let mut buffer = SessionBuffer::from(&live);
-        buffer.is_dirty = dirty;
-        let mut restorer =
-            Restorer::with_contents(HashMap::from([(buffer.temp_id.clone(), session.into())]));
-        let restored = restorer.restore_buffer_content(&mut buffer);
-        assert_eq!(
-            restored.document.extract_text(),
-            expected_text,
-            "{session}/{disk:?}"
-        );
-        assert_eq!(
-            (restored.is_dirty, restored.freshness),
-            (expected_dirty, freshness),
-            "{session}/{disk:?}"
-        );
-    }
-}
-
-#[test]
-fn restore_status_reports_counts_and_prioritizes_warnings() {
-    for (reloaded, conflicts, missing, expected) in [
-        (0, 0, 0, None),
-        (
-            0,
             1,
             2,
             Some("Session restore found 1 disk conflict and 2 missing files."),
         ),
         (
-            3,
             2,
             1,
             Some("Session restore found 2 disk conflicts and 1 missing file."),
         ),
-        (
-            1,
-            0,
-            0,
-            Some("Reloaded 1 clean file from disk during session restore."),
-        ),
-        (
-            2,
-            0,
-            0,
-            Some("Reloaded 2 clean files from disk during session restore."),
-        ),
     ] {
-        let summary = RestoreSummary {
-            invalid_histories: 0,
-            reloaded_clean_buffers: reloaded,
-            conflicted_buffers: conflicts,
+        let mut summary = RestoreSummary::default();
+        for _ in 0..conflicts {
+            summary.record(BufferFreshness::ConflictOnDisk);
+        }
+        let other = RestoreSummary {
+            conflicted_buffers: 0,
             missing_buffers: missing,
         };
+        summary.merge(other);
         assert_eq!(
             summary.into_status().map(|status| status.message),
             expected.map(str::to_owned)
@@ -175,4 +115,61 @@ fn streaming_restores_active_first_preserves_cold_payloads_and_honors_cancellati
         assert_eq!(callbacks, usize::from(!cancel_at_start));
     }
     assert_eq!(store.load().unwrap().unwrap().tabs.len(), 2);
+}
+
+#[test]
+fn reference_restore_preserves_committed_text_and_rejects_missing_documents() {
+    use super::buffer_content::RestoredBufferContent;
+    use crate::app::services::session_store::model::SessionBuffer;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("source.txt");
+    let buffer = BufferState::new(
+        "source.txt".into(),
+        "saved λ\r\n".into(),
+        Some(path.clone()),
+    );
+    for (missing, conflict, dirty) in [
+        (false, false, false),
+        (false, true, true),
+        (true, false, false),
+    ] {
+        std::fs::write(&path, "external change").unwrap();
+        if missing {
+            std::fs::remove_file(&path).unwrap();
+        }
+        let mut metadata = SessionBuffer::capture(&buffer);
+        metadata.is_dirty = dirty;
+        metadata.disk_len = Some(10);
+        metadata.disk_content_digest = Some("saved digest".into());
+        metadata.observed_disk_digest = Some(
+            if conflict {
+                "changed digest"
+            } else {
+                "saved digest"
+            }
+            .into(),
+        );
+        metadata.history_document = Some(buffer.document().clone());
+        let restored = RestoredBufferContent::from_references(&mut metadata).unwrap();
+        assert_eq!(restored.document.extract_text(), "saved λ\r\n");
+        assert_eq!(restored.is_dirty, dirty || missing);
+        assert_eq!(
+            restored.freshness,
+            if missing {
+                BufferFreshness::MissingOnDisk
+            } else if conflict {
+                BufferFreshness::ConflictOnDisk
+            } else {
+                BufferFreshness::InSync
+            }
+        );
+        assert_eq!(metadata.pending_disk_observation, missing);
+        assert_eq!(
+            RestoredBufferContent::from_references(&mut metadata)
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
 }

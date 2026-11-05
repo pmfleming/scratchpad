@@ -449,24 +449,62 @@ fn large_prepared_paste_publishes_atomically_and_undo_keeps_the_original_text() 
 }
 
 #[test]
-fn raw_bulk_input_is_left_with_a_focused_non_editor_widget() {
+fn raw_bulk_input_respects_focus_shortcuts_and_pointer_target_changes() {
+    use eframe::egui::{Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput};
     let mut app = app_with_buffer(BufferState::new("paste".into(), "base".into(), None));
-    let ctx = eframe::egui::Context::default();
-    let other = crate::app::ui::widget_ids::ctx_key("search-query-test");
-    ctx.memory_mut(|memory| memory.request_focus(other));
-    let mut input = eframe::egui::RawInput {
-        events: vec![eframe::egui::Event::Paste("x".repeat(300_000))],
-        ..Default::default()
-    };
-    eframe::App::raw_input_hook(&mut app, &ctx, &mut input);
-    assert_eq!(input.events.len(), 1);
-    assert!(
-        !app.tab_manager
-            .active_tab()
-            .unwrap()
-            .active_buffer()
-            .is_preparing_text()
+    let ctx = Context::default();
+    crate::app::shortcut_tooltips::sync_context(
+        &ctx,
+        crate::app::platform::PlatformProfile::LinuxGeneric,
+        &crate::app::services::settings_store::ShortcutSettings::default(),
     );
+    let tab = app.tab_manager.active_tab().unwrap();
+    let view_id = tab.layout.active_view_id();
+    let editor = crate::app::ui::widget_ids::surface_role(
+        ("native_editor", view_id),
+        crate::app::ui::widget_ids::WidgetRole::TextEdit,
+    );
+    let other = crate::app::ui::widget_ids::ctx_key("search-query-test");
+    let key = |key, modifiers| Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    for (focus, event, intercepted) in [
+        (other, Event::Copy, false),
+        (editor, key(Key::O, Modifiers::CTRL), false),
+        (
+            editor,
+            Event::PointerButton {
+                pos: Pos2::ZERO,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+            false,
+        ),
+        (editor, key(Key::V, Modifiers::CTRL), true),
+        (editor, key(Key::Insert, Modifiers::SHIFT), true),
+    ] {
+        ctx.memory_mut(|memory| memory.request_focus(focus));
+        let mut input = RawInput {
+            events: vec![event, Event::Paste("x".repeat(300_000))],
+            ..Default::default()
+        };
+        app.intercept_bulk_text_input(&ctx, &mut input);
+        assert_eq!(input.events.is_empty(), intercepted);
+        let tab = app.tab_manager.active_tab_mut().unwrap();
+        let (buffer, view) = tab.buffer_and_view_mut(view_id).unwrap();
+        assert_eq!(
+            view.deferred_editor_events.len(),
+            if intercepted { 2 } else { 0 }
+        );
+        view.deferred_editor_events.clear();
+        assert_eq!(buffer.text(), "base");
+        assert!(!buffer.is_preparing_text());
+    }
 }
 
 #[test]

@@ -134,7 +134,7 @@ fn backup_session_files(root: &Path, temporary_root: &Path) -> io::Result<PathBu
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{SESSION_FILES, backup_session_files, error, fs};
 
     #[test]
     fn moves_database_and_sidecars_but_leaves_other_files() {
@@ -267,7 +267,7 @@ mod tests {
 
 #[cfg(test)]
 mod live_text_tests {
-    use super::*;
+    use super::fs;
     use crate::app::domain::{BufferState, CursorRange, WorkspaceTab};
     use crate::app::services::session_store::{SessionPersistRequest, SessionStore};
     #[test]
@@ -332,7 +332,7 @@ mod live_text_tests {
 
 #[cfg(test)]
 mod retry_tests {
-    use super::*;
+    use super::fs;
     use crate::app::domain::{BufferState, WorkspaceTab};
     use crate::app::services::session_store::{SessionPersistRequest, SessionStore};
     #[test]

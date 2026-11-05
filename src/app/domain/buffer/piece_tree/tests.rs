@@ -313,6 +313,11 @@ fn assert_spans_match(tree: &PieceTreeLite, text: &str, range: std::ops::Range<u
     let expected: String = text.chars().skip(start).take(end - start).collect();
     let mut actual = String::new();
     let mut offset = start;
+    for limit in [0, 1, 2, expected.chars().count(), len + 1] {
+        let (bounded, truncated) = tree.extract_range_bounded(range.clone(), limit);
+        assert_eq!(bounded, expected.chars().take(limit).collect::<String>());
+        assert_eq!(truncated, expected.chars().count() > limit);
+    }
     let mut spans = tree.spans_for_range(range);
     for span in spans.by_ref() {
         assert_eq!(span.char_start, offset);

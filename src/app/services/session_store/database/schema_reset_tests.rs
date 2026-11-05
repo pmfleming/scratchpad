@@ -14,23 +14,6 @@ fn fresh_database_has_no_reset_warning() {
 }
 
 #[test]
-fn foreign_database_is_never_reset() {
-    block_on(async {
-        let (root, db) = database().await;
-        db.conn
-            .execute_batch("PRAGMA application_id=123; PRAGMA user_version=9;")
-            .await
-            .unwrap();
-        db.checkpoint().await.unwrap();
-        drop(db);
-        let path = root.path().join("session.db");
-        let before = std::fs::read(&path).unwrap();
-        assert!(Database::open(root.path()).await.is_err());
-        assert_eq!(std::fs::read(path).unwrap(), before);
-    });
-}
-
-#[test]
 fn tree_rows_and_positions_round_trip_transactionally() {
     block_on(async {
         let (root, mut db) = database().await;
@@ -73,54 +56,6 @@ fn tree_rows_and_positions_round_trip_transactionally() {
         document.navigate_history(3).unwrap();
         assert_eq!(document.extract_text(), "abc");
         assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 13);
-    });
-}
-
-#[test]
-fn malformed_database_is_not_a_schema_reset() {
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("session.db");
-    let contents = b"not a database";
-    std::fs::write(&path, contents).unwrap();
-    assert!(block_on(Database::open(root.path())).is_err());
-    assert_eq!(std::fs::read(path).unwrap(), contents);
-}
-
-#[test]
-fn recovery_export_does_not_reset_an_unsupported_source() {
-    block_on(async {
-        let (root, mut db) = database().await;
-        db.persist(request(&[tab("keep for export")]), 1)
-            .await
-            .unwrap();
-        db.conn
-            .execute("PRAGMA user_version=999", ())
-            .await
-            .unwrap();
-        db.checkpoint().await.unwrap();
-        drop(db);
-        let path = root.path().join("session.db");
-        let before = std::fs::read(&path).unwrap();
-        let store = SessionStore::new(root.path().to_owned());
-        assert!(store.export_recovery(&root.path().join("export")).is_err());
-        drop(store);
-        assert_eq!(std::fs::read(path).unwrap(), before);
-    });
-}
-
-#[test]
-fn lazy_queries_do_not_silently_reset_an_incompatible_session() {
-    block_on(async {
-        let (root, db) = database().await;
-        db.conn.execute("PRAGMA user_version=9", ()).await.unwrap();
-        drop(db);
-        let store = SessionStore::new(root.path().to_owned());
-        let clone = store.clone();
-        assert!(store.take_notices().is_empty());
-        assert!(clone.closed_tabs().is_err());
-        assert!(clone.writes_blocked());
-        assert!(store.take_notices().is_empty());
-        assert!(clone.take_notices().is_empty());
     });
 }
 
@@ -280,4 +215,46 @@ fn recent_closed_files_report_history_even_at_root_or_without_edit_timestamps() 
             .unwrap()
             .has_history
     );
+}
+
+#[test]
+fn rejected_databases_preserve_bytes_across_open_lazy_queries_and_recovery() {
+    block_on(async {
+        for pragma in [
+            Some("PRAGMA application_id=123; PRAGMA user_version=9;"),
+            Some("PRAGMA user_version=9;"),
+            Some("PRAGMA user_version=999;"),
+            None,
+        ] {
+            let (root, mut db) = database().await;
+            db.persist(request(&[tab("keep for recovery")]), 1)
+                .await
+                .unwrap();
+            if let Some(pragma) = pragma {
+                db.conn.execute_batch(pragma).await.unwrap();
+            }
+            db.checkpoint().await.unwrap();
+            drop(db);
+            let path = root.path().join("session.db");
+            if pragma.is_none() {
+                std::fs::write(&path, b"not a database").unwrap();
+            }
+            let before = std::fs::read(&path).unwrap();
+            assert!(Database::open(root.path()).await.is_err(), "{pragma:?}");
+            let store = SessionStore::new(root.path().to_owned());
+            let clone = store.clone();
+            assert!(clone.closed_tabs().is_err(), "{pragma:?}");
+            assert!(store.load().is_err(), "{pragma:?}");
+            assert!(
+                store.export_recovery(&root.path().join("export")).is_err(),
+                "{pragma:?}"
+            );
+            assert!(clone.writes_blocked());
+            assert!(store.take_notices().is_empty());
+            assert!(clone.take_notices().is_empty());
+            drop(clone);
+            drop(store);
+            assert_eq!(std::fs::read(path).unwrap(), before, "{pragma:?}");
+        }
+    });
 }

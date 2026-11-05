@@ -94,13 +94,23 @@ fn check_turso_locks(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+// Resolve at runtime: a shared Cargo target directory can reuse this binary
+// across worktrees, so a compiled-in manifest path may name another checkout.
+fn project_root(start: &Path) -> Result<&Path, String> {
+    start
+        .ancestors()
+        .find(|path| path.join("xtask/Cargo.toml").is_file() && path.join("rqlens.toml").is_file())
+        .ok_or_else(|| format!("No Scratchpad project root above {}", start.display()))
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args_os().skip(1).collect();
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let working = env::current_dir().map_err(|error| error.to_string())?;
+    let root = project_root(&working)?;
     match args.as_slice() {
-        [command] if command == "check-turso-locks" => check_turso_locks(&root),
+        [command] if command == "check-turso-locks" => check_turso_locks(root),
         [command, tool, output] if command == "quality" =>
-            quality::run(&root, Path::new(tool), Path::new(output)).map_err(|error| error.to_string()),
+            quality::run(root, Path::new(tool), Path::new(output)).map_err(|error| error.to_string()),
         _ => Err("Usage: cargo xtask check-turso-locks | cargo xtask quality <rqlens-executable> <new-output-directory>".into()),
     }
 }
@@ -117,7 +127,24 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{EXPECTED, Identity, engine_identity, fs, matching_identities, project_root};
+    use std::path::Path;
+
+    #[test]
+    fn root_discovery_follows_the_invocation_checkout_and_rejects_unrelated_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(project_root(directory.path()).is_err());
+        for name in ["first", "second"] {
+            let root = directory.path().join(name);
+            let nested = root.join("xtask/src");
+            fs::create_dir_all(&nested).unwrap();
+            fs::write(root.join("xtask/Cargo.toml"), "").unwrap();
+            fs::write(root.join("rqlens.toml"), "").unwrap();
+            for start in [&root, &nested] {
+                assert_eq!(project_root(start).unwrap(), root);
+            }
+        }
+    }
 
     fn fixture() -> String {
         let mut contents = "version = 4\n".to_owned();

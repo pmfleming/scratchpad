@@ -46,88 +46,12 @@ impl PieceTreeStorage {
     }
 
     pub(crate) fn span_char_len(&self, span: ByteSpan) -> io::Result<u64> {
-        if !self.contains_span(span) {
-            return Err(io::Error::other("history span exceeds storage"));
-        }
-        let start = span.start_byte as usize;
-        let end = span.byte_end() as usize;
-        if let (OriginalTextStorage::Chunked(original), PieceBuffer::Original) =
-            (&self.original, span.buffer)
-        {
-            let mut total = 0;
-            for chunk in original
-                .chunks
-                .iter()
-                .skip(
-                    original
-                        .chunks
-                        .partition_point(|c| c.logical_start + c.byte_len <= start),
-                )
-                .take_while(|c| c.logical_start < end)
-            {
-                let lo = start.saturating_sub(chunk.logical_start);
-                let hi = (end - chunk.logical_start).min(chunk.byte_len);
-                total += if lo == 0 && hi == chunk.byte_len {
-                    chunk.char_len as u64
-                } else {
-                    chunk
-                        .text
-                        .try_load_for_scan(false)?
-                        .get(lo..hi)
-                        .ok_or_else(|| io::Error::other("history span splits UTF-8"))?
-                        .chars()
-                        .count() as u64
-                };
-            }
-            return Ok(total);
-        }
-        let mut count = 0;
-        let mut visit = |base: usize, text: &ChunkText| -> io::Result<()> {
-            let lo = start.saturating_sub(base);
-            let hi = end.saturating_sub(base).min(text.len());
-            if hi <= lo {
-                return Ok(());
-            }
-            if lo == 0
-                && hi == text.len()
-                && let ChunkText::Stored(chunk) = text
-                && let Some(reference) = chunk.reference()
-            {
-                count += reference.metadata.char_len;
-                return Ok(());
-            }
-            count += text
-                .try_load_for_scan(false)?
-                .get(lo..hi)
-                .ok_or_else(|| io::Error::other("history span splits UTF-8"))?
-                .chars()
-                .count() as u64;
+        let mut chars = 0;
+        self.visit_span_blocks(span, |block| {
+            chars += block.char_len(span.buffer)?;
             Ok(())
-        };
-        match (&self.original, span.buffer) {
-            (OriginalTextStorage::Owned(text), PieceBuffer::Original) => {
-                return Ok(text
-                    .get(start..end)
-                    .ok_or_else(|| io::Error::other("history span splits UTF-8"))?
-                    .chars()
-                    .count() as u64);
-            }
-            (OriginalTextStorage::Chunked(original), PieceBuffer::Original) => {
-                for chunk in &original.chunks {
-                    if chunk.logical_start < end && chunk.logical_start + chunk.byte_len > start {
-                        visit(chunk.logical_start, &chunk.text)?;
-                    }
-                }
-            }
-            (_, PieceBuffer::Add) => {
-                for chunk in self.add.chunks.iter() {
-                    if chunk.start_byte < end && chunk.start_byte + chunk.text.len() > start {
-                        visit(chunk.start_byte, &chunk.text)?;
-                    }
-                }
-            }
-        }
-        Ok(count)
+        })?;
+        Ok(chars)
     }
     /// Worker-only: owned originals are chunked once for durability. Mutable add
     /// tails remain tails; captures never seal them.
@@ -447,62 +371,15 @@ impl PieceTreeStorage {
         span: ByteSpan,
         mut visit: impl FnMut(&str) -> io::Result<()>,
     ) -> io::Result<()> {
-        if !self.contains_span(span) {
-            return Err(io::Error::other("history range exceeds storage"));
-        }
-        let start = span.start_byte as usize;
-        let end = span.byte_end() as usize;
-        let mut body = |base: usize, text: &str| -> io::Result<()> {
-            let lo = start.saturating_sub(base);
-            let hi = end.saturating_sub(base).min(text.len());
-            if lo >= hi {
-                return Ok(());
-            }
-            let mut text = text
-                .get(lo..hi)
-                .ok_or_else(|| io::Error::other("history range splits UTF-8"))?;
-            while !text.is_empty() {
-                let mut cut = text.len().min(256 * 1024);
-                while !text.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                visit(&text[..cut])?;
-                text = &text[cut..];
+        self.visit_span_blocks(span, |block| {
+            let text = block.read()?;
+            let mut remaining = text.as_ref();
+            while !remaining.is_empty() {
+                let cut = remaining.floor_char_boundary(remaining.len().min(ADD_TAIL_BYTES));
+                visit(&remaining[..cut])?;
+                remaining = &remaining[cut..];
             }
             Ok(())
-        };
-        match (&self.original, span.buffer) {
-            (OriginalTextStorage::Owned(text), PieceBuffer::Original) => body(0, text)?,
-            (OriginalTextStorage::Chunked(original), PieceBuffer::Original) => {
-                for chunk in original
-                    .chunks
-                    .iter()
-                    .skip(
-                        original
-                            .chunks
-                            .partition_point(|c| c.logical_start + c.byte_len <= start),
-                    )
-                    .take_while(|c| c.logical_start < end)
-                {
-                    body(chunk.logical_start, &chunk.text.try_load_for_scan(false)?)?;
-                }
-            }
-            (_, PieceBuffer::Add) => {
-                for chunk in self
-                    .add
-                    .chunks
-                    .iter()
-                    .skip(
-                        self.add
-                            .chunks
-                            .partition_point(|c| c.start_byte + c.text.len() <= start),
-                    )
-                    .take_while(|c| c.start_byte < end)
-                {
-                    body(chunk.start_byte, &chunk.text.try_load_for_scan(false)?)?;
-                }
-            }
-        }
-        Ok(())
+        })
     }
 }

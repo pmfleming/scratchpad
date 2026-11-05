@@ -30,19 +30,26 @@ fn restore_reopened_with_context(
     context: &crate::app::services::chunk_store::ImportContext,
 ) -> io::Result<WorkspaceTab> {
     context.check()?;
-    let originals = tab.buffers.clone();
-    for buffer in &mut tab.buffers {
-        buffer.path = None;
-    }
-    let mut restored = Restorer::new().restore_tab_with_summary(tab).0;
-    for original in originals {
-        let Some(buffer) = restored
-            .buffers_mut()
-            .find(|b| b.temp_id == original.temp_id)
-        else {
-            continue;
-        };
-        let Some(path) = original.path else {
+    let paths: Vec<_> = tab
+        .buffers
+        .iter_mut()
+        .filter_map(|buffer| {
+            buffer.path.take().map(|path| {
+                (
+                    buffer.id,
+                    path,
+                    (
+                        buffer.show_control_chars,
+                        buffer.right_to_left_reading_order,
+                        buffer.is_settings_file,
+                    ),
+                )
+            })
+        })
+        .collect();
+    let mut restored = Restorer::restore_tab_with_summary(tab)?.0;
+    for (id, path, preferences) in paths {
+        let Some(buffer) = restored.buffer_by_id_mut(id) else {
             continue;
         };
         let key = CanonicalPathKey::from_path(&path);
@@ -52,22 +59,18 @@ fn restore_reopened_with_context(
         }
         match FileService::observe_decoded_digest_with_context(&path, context) {
             Ok((state, mut digest)) => {
-                let baseline = original
+                let changed = match buffer
                     .observed_disk_digest
-                    .as_ref()
-                    .or(original.disk_content_digest.as_ref())
-                    .cloned()
-                    .map_or_else(|| buffer.document().try_content_digest(), Ok)?;
-                buffer.set_path(Some(path.clone()));
-                buffer
-                    .disk_content_digest
-                    .clone_from(&original.disk_content_digest);
+                    .as_deref()
+                    .or(buffer.disk_content_digest.as_deref())
+                {
+                    Some(baseline) => digest != baseline,
+                    None => digest != buffer.document().try_content_digest()?,
+                };
                 buffer.disk_state = Some(state);
-                buffer.is_dirty = original.is_dirty;
-                if digest != baseline {
+                if changed {
                     let observed = FileService::read_observed_file_with_context(&path, context)?;
                     digest.clone_from(&observed.digest);
-                    buffer.disk_state = Some(observed.state.clone());
                     let original_document = Box::new(buffer.document().clone());
                     let previous = buffer.document().history_now();
                     let loaded = FileService::buffer_from_observed(&path, observed);
@@ -81,10 +84,13 @@ fn restore_reopened_with_context(
                         buffer.pending_reopen_external = Some(buffer.document().history_now());
                         buffer.pending_reopen_original = Some(original_document);
                     }
-                    buffer.show_control_chars = original.show_control_chars;
-                    buffer.right_to_left_reading_order = original.right_to_left_reading_order;
-                    buffer.is_settings_file = original.is_settings_file;
+                    (
+                        buffer.show_control_chars,
+                        buffer.right_to_left_reading_order,
+                        buffer.is_settings_file,
+                    ) = preferences;
                 }
+                buffer.set_path(Some(path));
                 buffer.observed_disk_digest = Some(digest);
                 buffer.observed_disk_missing = false;
             }

@@ -13,10 +13,16 @@ fn disk_tab(path: &std::path::Path, text: &str) -> WorkspaceTab {
     ))
 }
 
-fn assert_buffer_slots(manager: &TabManager, expected: &[(BufferId, Option<usize>)]) {
-    for (buffer_id, tab_index) in expected {
-        assert_eq!(manager.tab_index_for_buffer(*buffer_id), *tab_index);
+fn assert_buffer_slots(manager: &TabManager, expected: &[Vec<BufferId>]) {
+    for (index, ids) in expected.iter().enumerate() {
+        for id in ids {
+            assert_eq!(manager.tab_index_for_buffer(*id), Some(index));
+        }
     }
+    assert_eq!(
+        manager.buffer_tab_index.len(),
+        expected.iter().map(Vec::len).sum::<usize>()
+    );
 }
 
 #[test]
@@ -34,84 +40,34 @@ fn buffer_tab_index_tracks_tab_mutations() {
 
     let mut manager = TabManager::new();
     manager.set_tabs(vec![first, second], 0);
-    assert_buffer_slots(
-        &manager,
-        &[
-            (first_id, Some(0)),
-            (second_id, Some(1)),
-            (split_id, Some(1)),
-        ],
-    );
+    let mut expected = vec![vec![first_id], vec![second_id, split_id]];
+    assert_buffer_slots(&manager, &expected);
 
     let restored = tab("restored.txt");
-    let restored_id = restored.active_buffer().id;
+    expected.push(vec![restored.active_buffer().id]);
     manager.append_restored_tab(restored);
     assert_eq!(manager.active_tab_index, 0);
-    assert_buffer_slots(
-        &manager,
-        &[
-            (first_id, Some(0)),
-            (second_id, Some(1)),
-            (split_id, Some(1)),
-            (restored_id, Some(2)),
-        ],
-    );
+    assert_buffer_slots(&manager, &expected);
 
     let appended = tab("appended.txt");
-    let appended_id = appended.active_buffer().id;
+    expected.push(vec![appended.active_buffer().id]);
     manager.append_tab(appended);
     assert_eq!(manager.active_tab_index, 3);
-    assert_buffer_slots(
-        &manager,
-        &[
-            (first_id, Some(0)),
-            (second_id, Some(1)),
-            (split_id, Some(1)),
-            (restored_id, Some(2)),
-            (appended_id, Some(3)),
-        ],
-    );
+    assert_buffer_slots(&manager, &expected);
 
     let inserted = tab("inserted.txt");
-    let inserted_id = inserted.active_buffer().id;
+    expected.insert(1, vec![inserted.active_buffer().id]);
     manager.insert_tab(1, inserted);
-    assert_buffer_slots(
-        &manager,
-        &[
-            (first_id, Some(0)),
-            (inserted_id, Some(1)),
-            (second_id, Some(2)),
-            (split_id, Some(2)),
-            (restored_id, Some(3)),
-            (appended_id, Some(4)),
-        ],
-    );
+    assert_buffer_slots(&manager, &expected);
 
     assert!(manager.reorder_tab(2, 0));
-    assert_buffer_slots(
-        &manager,
-        &[
-            (second_id, Some(0)),
-            (split_id, Some(0)),
-            (first_id, Some(1)),
-            (inserted_id, Some(2)),
-            (restored_id, Some(3)),
-            (appended_id, Some(4)),
-        ],
-    );
+    let moved = expected.remove(2);
+    expected.insert(0, moved);
+    assert_buffer_slots(&manager, &expected);
 
     manager.close_tab_internal(0);
-    assert_buffer_slots(
-        &manager,
-        &[
-            (second_id, None),
-            (split_id, None),
-            (first_id, Some(0)),
-            (inserted_id, Some(1)),
-            (restored_id, Some(2)),
-            (appended_id, Some(3)),
-        ],
-    );
+    expected.remove(0);
+    assert_buffer_slots(&manager, &expected);
 }
 
 #[test]

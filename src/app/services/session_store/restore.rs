@@ -3,36 +3,28 @@ use super::parallel;
 use super::{RestoreStatus, RestoreStatusLevel};
 use crate::app::domain::{BufferFreshness, BufferState, RestoredBufferState, WorkspaceTab};
 use crate::app::utils::pluralize;
-#[cfg(test)]
-use std::collections::HashMap;
 use std::io;
 
 mod buffer_content;
 mod tab_build;
-use buffer_content::{cold_buffer_shell, session_disk_state};
+use buffer_content::{RestoredBufferContent, cold_buffer_shell};
 use tab_build::workspace_tab_from_restored_buffers;
 #[cfg(test)]
 mod tests;
 
 /// An owned, coherent database read. Reconstruction never performs database I/O.
-pub(super) struct Restorer {
-    #[cfg(test)]
-    contents: HashMap<String, String>,
-}
+pub(super) struct Restorer;
+type StartupTab = (usize, WorkspaceTab, Option<SessionTabParts>, RestoreSummary);
 
 #[derive(Default)]
 pub(super) struct RestoreSummary {
-    pub(super) reloaded_clean_buffers: usize,
     conflicted_buffers: usize,
     missing_buffers: usize,
-    invalid_histories: usize,
 }
 impl RestoreSummary {
     pub(super) fn merge(&mut self, other: Self) {
-        self.reloaded_clean_buffers += other.reloaded_clean_buffers;
         self.conflicted_buffers += other.conflicted_buffers;
         self.missing_buffers += other.missing_buffers;
-        self.invalid_histories += other.invalid_histories;
     }
     pub(super) fn record(&mut self, freshness: BufferFreshness) {
         match freshness {
@@ -42,15 +34,6 @@ impl RestoreSummary {
         }
     }
     pub(super) fn into_status(self) -> Option<RestoreStatus> {
-        if self.invalid_histories > 0 {
-            return Some(RestoreStatus {
-                level: RestoreStatusLevel::Warning,
-                message: format!(
-                    "Could not replay history for {} files. Retained their current text.",
-                    self.invalid_histories
-                ),
-            });
-        }
         if self.conflicted_buffers > 0 || self.missing_buffers > 0 {
             return Some(RestoreStatus {
                 level: RestoreStatusLevel::Warning,
@@ -61,60 +44,42 @@ impl RestoreSummary {
                 ),
             });
         }
-        (self.reloaded_clean_buffers > 0).then(|| RestoreStatus {
-            level: RestoreStatusLevel::Info,
-            message: format!(
-                "Reloaded {} from disk during session restore.",
-                pluralize(self.reloaded_clean_buffers, "clean file")
-            ),
-        })
+        None
     }
 }
 impl Restorer {
-    pub(super) fn new() -> Self {
-        Self {
-            #[cfg(test)]
-            contents: HashMap::new(),
-        }
-    }
-    #[cfg(test)]
-    pub(super) fn with_contents(contents: HashMap<String, String>) -> Self {
-        Self { contents }
-    }
     pub(super) fn restore_tabs_ordered(
-        &mut self,
         tabs: Vec<SessionTab>,
     ) -> io::Result<Vec<(WorkspaceTab, RestoreSummary)>> {
         let workers = parallel::worker_count(16);
         if tabs.len() < 512 || workers == 1 {
-            return Ok(self.restore_sequential(tabs));
+            return Self::restore_sequential(tabs);
         }
         let total = tabs.len();
         let chunk_size = total.div_ceil(workers);
         let mut tabs = tabs.into_iter();
         let jobs = (0..workers).map(|_| tabs.by_ref().take(chunk_size).collect::<Vec<_>>());
-        let batches = parallel::ordered("session-reconstruct", jobs, |tabs| {
-            Ok(Restorer::new().restore_sequential(tabs))
-        })?;
+        let batches = parallel::ordered("session-reconstruct", jobs, Self::restore_sequential)?;
         let mut restored = Vec::with_capacity(total);
         for batch in batches {
             restored.extend(batch);
         }
         Ok(restored)
     }
-    fn restore_sequential(&mut self, tabs: Vec<SessionTab>) -> Vec<(WorkspaceTab, RestoreSummary)> {
+    fn restore_sequential(
+        tabs: Vec<SessionTab>,
+    ) -> io::Result<Vec<(WorkspaceTab, RestoreSummary)>> {
         tabs.into_iter()
-            .map(|tab| self.restore_tab_with_summary(tab))
+            .map(Self::restore_tab_with_summary)
             .collect()
     }
     pub(super) fn restore_tabs_active_first(
-        &mut self,
         tabs: Vec<SessionTab>,
         active: usize,
         quarantined: &std::collections::HashSet<String>,
-    ) -> Vec<(usize, WorkspaceTab, Option<SessionTabParts>, RestoreSummary)> {
+    ) -> io::Result<Vec<StartupTab>> {
         if tabs.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let active = active.min(tabs.len() - 1);
         let mut tabs = tabs
@@ -131,69 +96,46 @@ impl Restorer {
                         .iter()
                         .any(|buffer| quarantined.contains(&buffer.temp_id))
                 {
-                    let (tab, summary) = self.restore_tab_parts_with_summary(tab);
-                    (index, tab, None, summary)
+                    let (tab, summary) = Self::restore_tab_parts_with_summary(tab)?;
+                    Ok((index, tab, None, summary))
                 } else {
-                    (
+                    Ok((
                         index,
                         Self::cold_tab_shell(&tab),
                         Some(tab),
                         RestoreSummary::default(),
-                    )
+                    ))
                 }
             })
             .collect()
     }
     pub(super) fn restore_tab_with_summary(
-        &mut self,
         tab: SessionTab,
-    ) -> (WorkspaceTab, RestoreSummary) {
-        self.restore_tab_parts_with_summary(tab.into_parts())
+    ) -> io::Result<(WorkspaceTab, RestoreSummary)> {
+        Self::restore_tab_parts_with_summary(tab.into_parts())
     }
     fn restore_tab_parts_with_summary(
-        &mut self,
         tab: SessionTabParts,
-    ) -> (WorkspaceTab, RestoreSummary) {
+    ) -> io::Result<(WorkspaceTab, RestoreSummary)> {
         let mut summary = RestoreSummary::default();
-        let mut buffers = self.restore_buffers(tab.buffers, &mut summary);
-        (
+        let mut buffers = Self::restore_buffers(tab.buffers, &mut summary)?;
+        Ok((
             workspace_tab_from_restored_buffers(tab.shell, &mut buffers),
             summary,
-        )
+        ))
     }
     pub(super) fn cold_tab_shell(tab: &SessionTabParts) -> WorkspaceTab {
         let mut buffers = tab.buffers.iter().map(cold_buffer_shell).collect();
         workspace_tab_from_restored_buffers(tab.shell.clone(), &mut buffers)
     }
     fn restore_buffers(
-        &mut self,
         buffers: Vec<SessionBuffer>,
         summary: &mut RestoreSummary,
-    ) -> Vec<BufferState> {
+    ) -> io::Result<Vec<BufferState>> {
         buffers
             .into_iter()
             .map(|mut buffer| {
-                let mut restored = self.restore_buffer_content(&mut buffer);
-                // Hydrated history is streamed through the bounded text cache.
-                if let Some(mut document) = buffer.history_document.take() {
-                    document
-                        .set_preferred_line_ending(restored.text_metadata.preferred_line_ending);
-                    restored.document = document;
-                }
-                if !buffer.text_history.is_empty()
-                    && !restored
-                        .document
-                        .restore_exported_history(std::mem::take(&mut buffer.text_history))
-                {
-                    summary.invalid_histories += 1;
-                }
-                if !buffer.is_dirty
-                    && restored.freshness == BufferFreshness::InSync
-                    && restored.disk_state.is_some()
-                    && restored.disk_state != session_disk_state(&buffer)
-                {
-                    summary.reloaded_clean_buffers += 1;
-                }
+                let restored = RestoredBufferContent::from_references(&mut buffer)?;
                 summary.record(restored.freshness);
                 let mut state = BufferState::restored_with_document_text_metadata(
                     RestoredBufferState {
@@ -219,7 +161,7 @@ impl Restorer {
                 state.observed_disk_digest = buffer.observed_disk_digest;
                 state.observed_disk_missing = buffer.observed_disk_missing;
                 state.pending_disk_observation = buffer.pending_disk_observation;
-                state
+                Ok(state)
             })
             .collect()
     }
