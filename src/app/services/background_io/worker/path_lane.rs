@@ -200,6 +200,9 @@ fn load_one(request: PathLoadRequest) -> LoadedPathResult {
                 retained_tab: Some(tab),
             },
             Ok(None) => load_path_result(path, FileService::read_file),
+            Err(_) if session_store.writes_blocked() => {
+                load_path_result(path, FileService::read_file)
+            }
             Err(error) => LoadedPathResult {
                 missing: error.kind() == io::ErrorKind::NotFound,
                 path,

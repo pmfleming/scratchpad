@@ -221,7 +221,10 @@ impl FileController {
             return;
         }
 
-        if pending_paths.len() >= LAZY_OPEN_BATCH_THRESHOLD {
+        if pending_paths.len() >= LAZY_OPEN_BATCH_THRESHOLD
+            && !app.state.persistence.session_restore_failed
+            && !app.state.persistence.session_store.writes_blocked()
+        {
             Self::open_selected_paths_as_cold_tabs(app, pending_paths, duplicate_count);
             return;
         }

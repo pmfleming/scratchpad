@@ -325,3 +325,37 @@ fn persisting_large_file_preview_keeps_retained_identity_and_history() {
         id
     );
 }
+
+#[test]
+fn unavailable_store_opens_single_files_and_large_batches_from_disk() {
+    for restore_failed in [false, true] {
+        for count in [1, super::LAZY_OPEN_BATCH_THRESHOLD] {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(root.path().join("session"), "unavailable").unwrap();
+            let paths: Vec<_> = (0..count)
+                .map(|i| {
+                    let path = root.path().join(format!("file_{i}.txt"));
+                    std::fs::write(&path, format!("body {i}")).unwrap();
+                    path
+                })
+                .collect();
+            let mut app = test_app(root.path(), vec![WorkspaceTab::untitled()]);
+            assert!(app.state.persistence.session_store.writes_blocked());
+            app.state.persistence.session_restore_failed = restore_failed;
+            FileController::open_selected_paths_async(&mut app, paths.clone());
+            wait_for_background_io(&mut app);
+            assert!(app.tab_manager.cold_session_tabs().is_empty());
+            for (i, path) in paths.iter().enumerate() {
+                let (index, view) = app.tab_manager.find_tab_by_path(path).unwrap();
+                assert_eq!(
+                    app.tab_manager.tabs.as_slice()[index]
+                        .buffer_for_view(view)
+                        .unwrap()
+                        .text(),
+                    format!("body {i}")
+                );
+            }
+            assert!(app.state.pending_open_file_paths.is_empty());
+        }
+    }
+}

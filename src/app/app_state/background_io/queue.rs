@@ -121,7 +121,8 @@ impl ScratchpadApp {
             && matches!(
                 action,
                 PendingBackgroundAction::OpenTabs(_) | PendingBackgroundAction::OpenHere(_)
-            );
+            )
+            && !self.state.persistence.session_store.writes_blocked();
         let claimed: Vec<_> = self
             .tab_manager
             .tabs
