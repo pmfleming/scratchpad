@@ -281,7 +281,7 @@ impl CapturedSessionTab {
     fn capture(tab: &WorkspaceTab) -> Self {
         let mut buffers = Vec::new();
         let mut buffer_snapshots = Vec::new();
-        for buffer in tab.buffers() {
+        for buffer in tab.buffers().filter(|buffer| !buffer.is_loading_preview) {
             buffers.push(SessionBuffer::capture(buffer));
             if !buffer.is_loading_preview
                 && (buffer.path.is_none()
@@ -296,12 +296,27 @@ impl CapturedSessionTab {
             }
         }
 
+        let views: Vec<_> = tab
+            .layout
+            .views()
+            .iter()
+            .filter(|view| buffers.iter().any(|buffer| buffer.id == view.buffer_id))
+            .map(SessionView::from)
+            .collect();
+        let view_ids = views.iter().map(|view| view.id).collect();
+        let mut pane = tab.layout.root_pane().clone();
+        pane.retain_views(&view_ids);
+        let active_view_id = views
+            .iter()
+            .find(|view| view.id == tab.layout.active_view_id())
+            .or(views.first())
+            .map_or(tab.layout.active_view_id(), |view| view.id);
         Self {
             session_tab: SessionTab {
                 buffers,
-                active_view_id: tab.layout.active_view_id(),
-                views: tab.layout.views().iter().map(SessionView::from).collect(),
-                root_pane: SessionPaneNode::from(tab.layout.root_pane()),
+                active_view_id,
+                views,
+                root_pane: SessionPaneNode::from(&pane),
             },
             buffer_snapshots,
             preserve_existing: false,

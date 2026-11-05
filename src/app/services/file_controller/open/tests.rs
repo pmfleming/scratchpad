@@ -265,3 +265,63 @@ fn open_results_preserve_identity_release_reservations_and_handle_failures() {
         }
     }
 }
+
+#[test]
+fn persisting_large_file_preview_keeps_retained_identity_and_history() {
+    use crate::app::services::session_manager;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("large.txt");
+    let text = "first visible then fully hydrated";
+    std::fs::write(&path, text).unwrap();
+    let mut app = test_app(
+        root.path(),
+        vec![WorkspaceTab::new(disk_buffer(&path, text))],
+    );
+    let id = app
+        .tab_manager
+        .active_tab()
+        .unwrap()
+        .active_buffer()
+        .temp_id
+        .clone();
+    let store = app.state.persistence.session_store.clone();
+    session_manager::persist_session_now(&mut app).unwrap();
+    app.tab_manager.set_tabs(vec![], 0);
+    session_manager::persist_session_now(&mut app).unwrap();
+    FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
+    let preview_id = app
+        .tab_manager
+        .active_tab()
+        .unwrap()
+        .active_buffer()
+        .temp_id
+        .clone();
+    session_manager::persist_session_now(&mut app).unwrap();
+    let retained = store.reopen_path_with_claimed(&path, &[]).unwrap().unwrap();
+    assert_eq!(retained.active_buffer().temp_id, id);
+    assert_eq!(retained.active_buffer().name, "large.txt");
+    assert!(
+        !retained
+            .active_buffer()
+            .document()
+            .history_entries()
+            .is_empty()
+    );
+    assert!(
+        store
+            .reopen_target(
+                crate::app::services::session_store::RetainedTarget::Document(preview_id),
+                &[]
+            )
+            .is_err()
+    );
+    wait_for_background_io(&mut app);
+    assert_eq!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .temp_id,
+        id
+    );
+}

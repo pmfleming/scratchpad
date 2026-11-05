@@ -43,9 +43,23 @@ struct Prepared {
 }
 impl Prepared {
     fn new(
-        request: SessionPersistRequest,
+        mut request: SessionPersistRequest,
         old_closed: Vec<super::closed::ClosedRow>,
     ) -> io::Result<Self> {
+        // Loading previews have no durable identity or content. Keep their
+        // positions in captures for close operations, then omit them here.
+        let active = request.active_tab_index;
+        let mut position = 0;
+        let mut removed_before_active = 0;
+        request.tabs.retain(|tab| {
+            let keep = !tab.session_tab.buffers.is_empty();
+            if !keep && position < active {
+                removed_before_active += 1;
+            }
+            position += 1;
+            keep
+        });
+        request.active_tab_index = active.saturating_sub(removed_before_active);
         let tab_count = request.tabs.len();
         let manifest = SessionManifest {
             version: super::super::SESSION_VERSION,
