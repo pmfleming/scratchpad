@@ -47,6 +47,9 @@ impl Database {
         result
     }
     async fn read_session(&mut self, scope: ReadScope) -> io::Result<Option<StoredSession>> {
+        if self.integer("SELECT count(*) FROM parts LEFT JOIN snapshots ON parts.temp_id=snapshots.id WHERE snapshots.id IS NULL").await? != 0 {
+            return Err(invalid("orphan recovery chunk"));
+        }
         let Some(mut manifest) = self.read_manifest().await? else {
             return Ok(None);
         };
@@ -120,7 +123,7 @@ impl Database {
             .map_err(error)?;
         let Some(row) = rows.next().await.map_err(error)? else {
             drop(rows);
-            if self.integer("SELECT (SELECT count(*) FROM tabs)+(SELECT count(*) FROM snapshots)+(SELECT count(*) FROM parts)+(SELECT count(*) FROM blobs)+(SELECT count(*) FROM history)+(SELECT count(*) FROM buffer_ids)+(SELECT count(*) FROM quarantine)+(SELECT count(*) FROM closed_tabs)+(SELECT count(*) FROM document_history)").await? != 0 {
+            if self.integer("SELECT (SELECT count(*) FROM tabs)+(SELECT count(*) FROM snapshots)+(SELECT count(*) FROM parts)+(SELECT count(*) FROM blobs)+(SELECT count(*) FROM history)+(SELECT count(*) FROM documents)+(SELECT count(*) FROM quarantine)+(SELECT count(*) FROM closed_tabs)+(SELECT count(*) FROM document_history)").await? != 0 {
                 return Err(invalid("missing session commit marker"));
             }
             return Ok(None);
@@ -158,7 +161,9 @@ impl Database {
             if row.get::<i64>(0).map_err(error)? != position as i64 {
                 return Err(invalid("noncontiguous session tab order"));
             }
-            let tab: SessionTab = decode(&row.get::<Vec<u8>>(1).map_err(error)?)?;
+            let tab = self
+                .read_stored_tab(&row.get::<Vec<u8>>(1).map_err(error)?)
+                .await?;
             validation::validate_tab(&tab)?;
             manifest.tabs.push(tab);
         }

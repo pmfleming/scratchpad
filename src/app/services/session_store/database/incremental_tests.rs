@@ -112,7 +112,7 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             ("session_state", "INSERT"),
             ("closed_tabs", "INSERT"),
             ("snapshots", "DELETE"),
-            ("buffer_ids", "DELETE"),
+            ("documents", "DELETE"),
             ("blobs", "DELETE"),
         ] {
             let (_root, mut db) = database().await;
@@ -123,7 +123,7 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             let original = db.read_history(&id).await.unwrap();
             let contents = db.read_all_contents().await.unwrap();
             db.conn.execute_batch(&format!("CREATE TRIGGER fail_write BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'injected'); END;")).await.unwrap();
-            tabs.pop();
+            let removed_id = tabs.pop().unwrap().active_buffer().temp_id.clone();
             insert(&mut tabs[0], 0, "b");
             tabs[0].buffers.buffer.name = "edited".into();
             let archived = (table == "closed_tabs").then(|| {
@@ -134,6 +134,9 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             });
             let mut changed = request(&tabs);
             changed.font_size = 24.0;
+            changed.removed_documents.push(removed_id.clone());
+            changed.tabs[0].session_tab.views[0].show_line_numbers =
+                !changed.tabs[0].session_tab.views[0].show_line_numbers;
             changed.closed_tabs.extend(archived.clone());
             assert!(db.persist(changed, 2).await.is_err(), "{table}");
             assert!(db.conn.is_autocommit().unwrap());
@@ -166,6 +169,9 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
                 .unwrap();
             let mut retry = request(&tabs);
             retry.font_size = 24.0;
+            retry.removed_documents.push(removed_id);
+            retry.tabs[0].session_tab.views[0].show_line_numbers =
+                !retry.tabs[0].session_tab.views[0].show_line_numbers;
             retry.closed_tabs.extend(archived.clone());
             db.persist(retry, 2).await.unwrap();
             assert_eq!(db.latest_request, 2);
@@ -228,8 +234,8 @@ fn cold_history_is_lazy_and_survives_metadata_saves_and_quarantine() {
         assert!(db.hydrate(cold).await.is_err());
         assert!(db.quarantined.contains_key(&id));
         db.persist(request(&[]), 3).await.unwrap();
-        assert_eq!(db.integer("SELECT count(*) FROM history").await.unwrap(), 2);
-        assert_eq!(db.integer("SELECT count(*) FROM parts").await.unwrap(), 1);
+        assert_eq!(db.integer("SELECT count(*) FROM history").await.unwrap(), 3);
+        assert_eq!(db.integer("SELECT count(*) FROM parts").await.unwrap(), 2);
     });
 }
 
@@ -284,14 +290,20 @@ fn cdc_reuses_bodies_after_front_middle_end_edits_and_across_tabs() {
         captured.font_size += 1.0;
         db.persist(captured, 5).await.unwrap();
         assert_eq!(count(&db, "blob").await, 0);
-        tabs.remove(0);
-        db.persist(request(&tabs), 6).await.unwrap();
+        let removed = tabs.remove(0);
+        let mut save = request(&tabs);
+        save.removed_documents
+            .push(removed.active_buffer().temp_id.clone());
+        db.persist(save, 6).await.unwrap();
         assert_eq!(
             db.integer("SELECT count(*) FROM parts").await.unwrap(),
             db.integer("SELECT count(*) FROM blobs").await.unwrap()
         );
-        db.persist(request(&[]), 7).await.unwrap();
-        for table in ["parts", "blobs", "history", "buffer_ids", "snapshots"] {
+        let mut save = request(&[]);
+        save.removed_documents
+            .extend(tabs.iter().map(|t| t.active_buffer().temp_id.clone()));
+        db.persist(save, 7).await.unwrap();
+        for table in ["parts", "blobs", "history", "documents", "snapshots"] {
             assert_eq!(
                 db.integer(&format!("SELECT count(*) FROM {table}"))
                     .await
@@ -342,10 +354,13 @@ fn cdc_boundaries_ignore_piece_segmentation_and_truncation_removes_stale_parts()
         tabs.push(fragmented);
         db.persist(request(&tabs), 2).await.unwrap();
         assert_eq!(count(&db, "blob").await, 0);
-        tabs.remove(0);
+        let removed = tabs.remove(0);
         for value in ["short λ🦀", ""] {
             tabs[0].buffers.buffer.replace_text(value.into());
-            db.persist(request(&tabs), 3).await.unwrap();
+            let mut save = request(&tabs);
+            save.removed_documents
+                .push(removed.active_buffer().temp_id.clone());
+            db.persist(save, 3).await.unwrap();
             assert_eq!(
                 db.read_all_contents()
                     .await
@@ -394,17 +409,17 @@ fn strict_types_and_foreign_keys_are_enforced_by_turso() {
                 .is_err()
         );
         db.conn
-            .execute("INSERT INTO buffer_ids VALUES(?)", params!["clean"])
+            .execute("INSERT INTO documents(id) VALUES(?)", params!["clean"])
             .await
             .unwrap();
         db.conn
             .execute(
-                "INSERT INTO history(temp_id, seq, parent_id, edited_at, global_seq, entry) VALUES('clean', 1, 0, 0, 1, x'00')",
+                "INSERT INTO history(temp_id, seq, parent_id, edited_at, global_seq, entry, source, summary) VALUES('clean', 1, 0, 0, 1, x'00', 'load', '')",
                 (),
             )
             .await
             .unwrap();
-        db.conn.execute("DELETE FROM buffer_ids", ()).await.unwrap();
+        db.conn.execute("DELETE FROM documents", ()).await.unwrap();
         assert_eq!(db.integer("SELECT count(*) FROM history").await.unwrap(), 0);
     });
 }

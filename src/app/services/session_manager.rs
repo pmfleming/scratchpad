@@ -96,6 +96,32 @@ fn capture_session(app: &ScratchpadApp) -> SessionPersistRequest {
     request
 }
 
+/// Retain a final view's document and the remaining layout in the same commit.
+pub(crate) fn persist_view_close(
+    app: &mut ScratchpadApp,
+    view: crate::app::domain::ViewId,
+) -> std::io::Result<()> {
+    if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
+        return Err(std::io::Error::other(
+            "session recovery is not ready; view was not closed",
+        ));
+    }
+    let mut request = capture_session(app);
+    if !request.close_view(
+        app.tab_manager.tabs.as_slice(),
+        app.tab_manager.active_tab_index,
+        view,
+    ) {
+        return Err(std::io::Error::other("view is no longer open"));
+    }
+    app.state
+        .persistence
+        .session_store
+        .persist_request(request)?;
+    app.state.persistence.pending_closed_tabs.clear();
+    Ok(())
+}
+
 pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettings> {
     let result = app.state.persistence.session_store.load();
     report_database_notices(app);

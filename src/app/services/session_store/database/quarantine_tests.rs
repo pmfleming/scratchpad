@@ -3,7 +3,7 @@ use super::{
     tests::{database, insert, request, tab},
 };
 use futures_lite::future::block_on;
-use std::{collections::HashMap, io};
+use std::collections::HashMap;
 use turso::params;
 
 async fn damage(db: &Database, id: &str) {
@@ -179,17 +179,15 @@ fn damaged_active_tab_stays_cold_while_other_tabs_restore_and_save() {
 }
 
 #[test]
-fn stale_hydration_of_a_closed_tab_does_not_create_a_quarantine() {
+fn closed_documents_remain_hydratable_without_a_workspace_root() {
     block_on(async {
         let (_root, mut db) = database().await;
         let tabs = vec![tab("healthy"), tab("closed")];
         db.persist(request(&tabs), 1).await.unwrap();
         let queued = request(&tabs).tabs.pop().unwrap().session_tab;
         db.persist(request(&tabs[..1]), 2).await.unwrap();
-        assert_eq!(
-            db.hydrate(queued).await.err().unwrap().kind(),
-            io::ErrorKind::NotFound
-        );
+        let (_, contents) = db.hydrate(queued).await.unwrap();
+        assert_eq!(contents.into_values().collect::<Vec<_>>(), ["closed"]);
         assert!(db.blocked.is_none());
         assert!(db.quarantined.is_empty());
         db.persist(request(&tabs[..1]), 3).await.unwrap();

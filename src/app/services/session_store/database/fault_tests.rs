@@ -86,14 +86,8 @@ fn disk_full_rolls_back_content_metadata_and_cleanup() {
         db.integer("PRAGMA max_page_count=1000000").await.unwrap();
         db.persist(request(&changed), 3).await.unwrap();
         assert_eq!(
-            db.load(ReadScope::All)
-                .await
-                .unwrap()
-                .unwrap()
-                .contents
-                .into_values()
-                .next()
-                .unwrap()
+            db.load(ReadScope::All).await.unwrap().unwrap().contents
+                [&changed[0].active_buffer().temp_id]
                 .len(),
             2 * 1024 * 1024
         );

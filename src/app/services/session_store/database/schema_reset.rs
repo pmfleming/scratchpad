@@ -10,7 +10,7 @@ impl fmt::Display for UnsupportedSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Session format version {} is incompatible with this build (expected version 10; application ID {:#x}).",
+            "Session format version {} is incompatible with this build (expected version 11; application ID {:#x}).",
             self.version, self.application
         )
     }

@@ -214,6 +214,67 @@ fn failed_reset_keeps_saving_paused_and_can_be_retried() {
 }
 
 #[test]
+fn final_split_view_close_retains_latest_text_and_rolls_back_before_removing_the_view() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = crate::app::app_state::test_support::test_app(root.path());
+    let mut tab = WorkspaceTab::new(BufferState::new("first".into(), "first".into(), None));
+    let view = tab
+        .open_buffer_as_split(
+            BufferState::new("second".into(), "latest unsaved".into(), None),
+            crate::app::domain::SplitAxis::Vertical,
+            true,
+            0.5,
+        )
+        .unwrap();
+    let id = tab.buffer_for_view(view).unwrap().temp_id.clone();
+    app.tab_manager.set_tabs(vec![tab], 0);
+    let store = app.state.persistence.session_store.clone();
+    store.worker().unwrap().call(|db| block_on(async {
+        db.conn.execute_batch("CREATE TRIGGER refuse_view_archive BEFORE INSERT ON closed_tabs BEGIN SELECT RAISE(ABORT,'transient failure'); END;").await.map_err(database::error)
+    })).unwrap();
+    crate::app::commands::perform_close_view(&mut app, view);
+    assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 2);
+    assert_eq!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .buffer_for_view(view)
+            .unwrap()
+            .text(),
+        "latest unsaved"
+    );
+    store
+        .worker()
+        .unwrap()
+        .call(|db| {
+            block_on(async {
+                db.conn
+                    .execute("DROP TRIGGER refuse_view_archive", ())
+                    .await
+                    .map_err(database::error)?;
+                Ok(())
+            })
+        })
+        .unwrap();
+    crate::app::commands::perform_close_view(&mut app, view);
+    assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 1);
+    drop(app);
+    drop(store);
+    let store = SessionStore::new(root.path().join("session"));
+    let archive = store.closed_tabs().unwrap().remove(0);
+    let restored = store.restore_closed_tab(&archive.token).unwrap();
+    assert_eq!(restored.active_buffer().temp_id, id);
+    assert_eq!(restored.active_buffer().text(), "latest unsaved");
+    assert!(
+        !restored
+            .active_buffer()
+            .document()
+            .history_entries()
+            .is_empty()
+    );
+}
+
+#[test]
 fn failed_archive_commit_leaves_the_live_tab_open() {
     let root = tempfile::tempdir().unwrap();
     let mut app = crate::app::app_state::test_support::test_app(root.path());

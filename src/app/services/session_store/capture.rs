@@ -15,6 +15,7 @@ pub(crate) struct SessionPersistRequest {
     pub(super) word_wrap: bool,
     pub(super) tabs: Vec<CapturedSessionTab>,
     pub(crate) closed_tabs: Vec<CapturedClosedTab>,
+    pub(super) removed_documents: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -39,6 +40,31 @@ pub(super) struct CapturedSessionBuffer {
 }
 
 impl SessionPersistRequest {
+    pub(crate) fn close_view(
+        &mut self,
+        tabs: &[WorkspaceTab],
+        index: usize,
+        view: crate::app::domain::ViewId,
+    ) -> bool {
+        let Some(original) = tabs.get(index) else {
+            return false;
+        };
+        let removed = original
+            .buffer_for_view(view)
+            .filter(|_| original.is_last_view_for_buffer(view) == Some(true))
+            .cloned();
+        let mut remaining = original.clone();
+        if !remaining.close_view(view) {
+            return false;
+        }
+        self.tabs[index] = CapturedSessionTab::capture(&remaining);
+        if let Some(buffer) = removed {
+            self.closed_tabs
+                .push(CapturedClosedTab::capture(&WorkspaceTab::new(buffer), None));
+        }
+        true
+    }
+
     pub(crate) fn close_tab(&mut self, index: usize, closed: CapturedClosedTab) {
         self.tabs.remove(index);
         self.active_tab_index = self
@@ -62,6 +88,7 @@ impl SessionPersistRequest {
             word_wrap,
             tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
             closed_tabs: Vec::new(),
+            removed_documents: Vec::new(),
         }
     }
 
@@ -80,6 +107,7 @@ impl SessionPersistRequest {
             font_size,
             word_wrap,
             closed_tabs: Vec::new(),
+            removed_documents: Vec::new(),
             tabs: tabs
                 .iter()
                 .enumerate()

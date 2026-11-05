@@ -8,7 +8,7 @@ async fn assert_inventory(db: &Database) {
     let inventory = db.inventory.as_ref().unwrap();
     assert_eq!(
         inventory.buffers,
-        db.string_set("SELECT id FROM buffer_ids").await.unwrap()
+        db.string_set("SELECT id FROM documents").await.unwrap()
     );
     assert_eq!(
         inventory.snapshots,
@@ -32,7 +32,7 @@ fn navigation_preserves_inventory_without_hiding_unknown_writes() {
             .unwrap();
         assert_inventory(&db).await;
         db.conn
-            .execute("INSERT INTO buffer_ids VALUES('unexpected')", ())
+            .execute("INSERT INTO documents(id) VALUES('unexpected')", ())
             .await
             .unwrap();
         db.persist(request(std::slice::from_ref(&live)), 3)
@@ -40,7 +40,7 @@ fn navigation_preserves_inventory_without_hiding_unknown_writes() {
             .unwrap();
         assert_inventory(&db).await;
         assert!(
-            !db.inventory
+            db.inventory
                 .as_ref()
                 .unwrap()
                 .buffers
@@ -50,7 +50,7 @@ fn navigation_preserves_inventory_without_hiding_unknown_writes() {
 }
 
 #[test]
-fn warm_and_reopened_saves_do_not_even_attempt_to_reinsert_known_buffer_ids() {
+fn warm_and_reopened_saves_do_not_even_attempt_to_reinsert_known_documents() {
     block_on(async {
         let (root, mut db) = database().await;
         let mut tabs = vec![tab("one"), tab("two")];
@@ -58,8 +58,8 @@ fn warm_and_reopened_saves_do_not_even_attempt_to_reinsert_known_buffer_ids() {
         // BEFORE INSERT observes redundant ON CONFLICT DO NOTHING attempts too.
         db.conn
             .execute_batch(
-                "CREATE TRIGGER reject_redundant_buffer_insert BEFORE INSERT ON buffer_ids
-            WHEN EXISTS(SELECT 1 FROM buffer_ids WHERE id=new.id)
+                "CREATE TRIGGER reject_redundant_buffer_insert BEFORE INSERT ON documents
+            WHEN EXISTS(SELECT 1 FROM documents WHERE id=new.id)
             BEGIN SELECT RAISE(ABORT, 'redundant buffer insert'); END;",
             )
             .await
@@ -86,13 +86,19 @@ fn targeted_collection_preserves_shared_and_new_references_then_collects_last_re
             tab("old unique body"),
         ];
         db.persist(request(&tabs), 1).await.unwrap();
-        tabs.remove(0);
-        db.persist(request(&tabs), 2).await.unwrap();
+        let removed = tabs.remove(0);
+        let mut save = request(&tabs);
+        save.removed_documents
+            .push(removed.active_buffer().temp_id.clone());
+        db.persist(save, 2).await.unwrap();
         assert_eq!(db.integer("SELECT count(*) FROM blobs").await.unwrap(), 2);
         // Remove the last old reference while creating a new one in this transaction.
-        tabs.remove(0);
+        let removed = tabs.remove(0);
         tabs[0].buffers.buffer.replace_text("shared body".into());
-        db.persist(request(&tabs), 3).await.unwrap();
+        let mut save = request(&tabs);
+        save.removed_documents
+            .push(removed.active_buffer().temp_id.clone());
+        db.persist(save, 3).await.unwrap();
         assert_eq!(db.integer("SELECT count(*) FROM blobs").await.unwrap(), 1);
         assert_eq!(
             db.read_all_contents()
@@ -104,8 +110,10 @@ fn targeted_collection_preserves_shared_and_new_references_then_collects_last_re
             "shared body"
         );
         assert_inventory(&db).await;
-        tabs.clear();
-        db.persist(request(&tabs), 4).await.unwrap();
+        let mut save = request(&[]);
+        save.removed_documents
+            .extend(tabs.iter().map(|t| t.active_buffer().temp_id.clone()));
+        db.persist(save, 4).await.unwrap();
         assert_eq!(db.integer("SELECT count(*) FROM blobs").await.unwrap(), 0);
         assert_inventory(&db).await;
     });
@@ -125,7 +133,10 @@ fn failed_cleanup_invalidates_inventory_and_retry_rebuilds_it_from_committed_row
             .await
             .unwrap();
         let replacement = vec![tab("new buffer")];
-        assert!(db.persist(request(&replacement), 2).await.is_err());
+        let mut save = request(&replacement);
+        save.removed_documents
+            .push(original[0].active_buffer().temp_id.clone());
+        assert!(db.persist(save, 2).await.is_err());
         assert!(db.inventory.is_none());
         assert_eq!(
             db.read_all_contents()
@@ -140,7 +151,10 @@ fn failed_cleanup_invalidates_inventory_and_retry_rebuilds_it_from_committed_row
             .execute("DROP TRIGGER fail_cleanup", ())
             .await
             .unwrap();
-        db.persist(request(&replacement), 3).await.unwrap();
+        let mut save = request(&replacement);
+        save.removed_documents
+            .push(original[0].active_buffer().temp_id.clone());
+        db.persist(save, 3).await.unwrap();
         assert_inventory(&db).await;
         assert_eq!(db.integer("SELECT count(*) FROM blobs").await.unwrap(), 1);
         assert_eq!(

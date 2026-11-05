@@ -3,7 +3,7 @@ use crate::app::services::settings_store::{AppSettings, default_font_size, defau
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const SESSION_VERSION: u32 = 8;
+pub const SESSION_VERSION: u32 = 9;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -10,6 +10,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Session documents now retain their text and edit trees independently of open tabs and closed split layouts. Closing a file's final split view commits its retained state before removing the view. The new storage format requires the existing explicit fresh-session reset for older sessions.
 - Made History's Forget actions file-specific with a named confirmation, and fixed picker dismissal, caret preservation when selecting files, and selection of files reopened from split tabs.
 - Refined History labels, dates, operation icons, folder paths, selection indicators and contrast; kept visible rows stationary during navigation and sized confirmations without resizing the window.
 - Redesigned History with newest-first branch lanes, a searchable file picker, local edit times, readable whitespace labels, and a scroll-to-Now control. All files uses one scrolling list, includes only files with recorded history, and stays open when selecting a file.

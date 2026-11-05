@@ -1,32 +1,17 @@
 //! Closed workspaces are bounded recovery roots, not a second copy of their text.
-use super::{Database, decode, error, invalid};
-use crate::app::services::session_store::{
-    capture::{CapturedClosedTab, CapturedSessionTab, SessionPersistRequest},
-    model::SessionTab,
-};
+use super::{Database, error, invalid};
+use crate::app::services::session_store::{capture::SessionPersistRequest, model::SessionTab};
 use std::{collections::HashSet, io};
 use turso::params;
 
-pub(super) const SCHEMA: &str = "CREATE TABLE closed_tabs(sequence INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE, closed_at INTEGER NOT NULL, payload BLOB NOT NULL) STRICT;";
+pub(super) const SCHEMA: &str = "CREATE TABLE closed_tabs(sequence INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE, closed_at INTEGER NOT NULL, payload BLOB NOT NULL) STRICT;
+CREATE TABLE closed_documents(token TEXT NOT NULL REFERENCES closed_tabs(token) ON DELETE CASCADE, document_id TEXT NOT NULL REFERENCES documents(id), PRIMARY KEY(token,document_id)) STRICT;";
 
 pub(in crate::app::services::session_store) struct ClosedRow {
     pub token: String,
     pub closed_at: i64,
     pub payload: Vec<u8>,
     pub tab: SessionTab,
-}
-
-impl ClosedRow {
-    pub(super) fn new(token: String, closed_at: i64, payload: Vec<u8>) -> io::Result<Self> {
-        let tab: SessionTab = decode(&payload)?;
-        super::super::validation::validate_tab(&tab)?;
-        Ok(Self {
-            token,
-            closed_at,
-            payload,
-            tab,
-        })
-    }
 }
 
 impl PartialEq for ClosedRow {
@@ -43,7 +28,7 @@ impl Database {
         &self,
     ) -> io::Result<Vec<super::super::retained::RecentHistoryFile>> {
         self.query_collect(
-            "SELECT c.token, json_extract(b.value,'$.temp_id'), coalesce(json_extract(b.value,'$.path'),json_extract(b.value,'$.name')), coalesce(h.edited_at,0), coalesce(h.edit_seq,0), EXISTS(SELECT 1 FROM history e WHERE e.temp_id=json_extract(b.value,'$.temp_id')) FROM closed_tabs c, json_each(CAST(c.payload AS TEXT),'$.buffers') b LEFT JOIN document_history h ON h.temp_id=json_extract(b.value,'$.temp_id') ORDER BY h.edited_at DESC,h.edit_seq DESC",
+            "SELECT c.token, json_extract(b.value,'$.temp_id'), coalesce(d.path,d.name), coalesce(h.edited_at,0), coalesce(h.edit_seq,0), EXISTS(SELECT 1 FROM history e WHERE e.temp_id=json_extract(b.value,'$.temp_id')) FROM closed_tabs c, json_each(CAST(c.payload AS TEXT),'$.buffers') b JOIN documents d ON d.id=json_extract(b.value,'$.temp_id') LEFT JOIN document_history h ON h.temp_id=json_extract(b.value,'$.temp_id') ORDER BY h.edited_at DESC,h.edit_seq DESC",
             (), |row| Ok(super::super::retained::RecentHistoryFile {
                 token: row.get(0).map_err(error)?,
                 temp_id: row.get(1).map_err(error)?,
@@ -57,69 +42,37 @@ impl Database {
     pub(in crate::app::services::session_store) async fn closed_rows(
         &self,
     ) -> io::Result<Vec<ClosedRow>> {
-        self.query_collect(
-            "SELECT token, closed_at, payload FROM closed_tabs ORDER BY sequence",
-            (),
-            |row| {
-                ClosedRow::new(
-                    row.get(0).map_err(error)?,
-                    row.get(1).map_err(error)?,
-                    row.get(2).map_err(error)?,
-                )
-            },
-        )
-        .await
+        let rows = self
+            .query_collect(
+                "SELECT token, closed_at, payload FROM closed_tabs ORDER BY sequence",
+                (),
+                |row| {
+                    Ok((
+                        row.get::<String>(0).map_err(error)?,
+                        row.get::<i64>(1).map_err(error)?,
+                        row.get::<Vec<u8>>(2).map_err(error)?,
+                    ))
+                },
+            )
+            .await?;
+        let mut result = Vec::with_capacity(rows.len());
+        for (token, closed_at, payload) in rows {
+            let tab = self.read_stored_tab(&payload).await?;
+            result.push(ClosedRow {
+                token,
+                closed_at,
+                payload,
+                tab,
+            });
+        }
+        Ok(result)
     }
 
     pub(super) async fn prepare_closed(
         &mut self,
-        request: &mut SessionPersistRequest,
+        _request: &mut SessionPersistRequest,
     ) -> io::Result<Vec<ClosedRow>> {
-        let old = self.closed_rows().await?;
-        let live: HashSet<_> = request
-            .tabs
-            .iter()
-            .flat_map(|tab| &tab.session_tab.buffers)
-            .map(|buffer| buffer.temp_id.as_str())
-            .collect();
-        let pending: HashSet<_> = request
-            .closed_tabs
-            .iter()
-            .map(|tab| tab.token.as_str())
-            .collect();
-        let mut retained = Vec::new();
-        for row in &old {
-            let tab = &row.tab;
-            if !pending.contains(row.token.as_str())
-                && !tab
-                    .buffers
-                    .iter()
-                    .any(|buffer| live.contains(buffer.temp_id.as_str()))
-            {
-                retained.push(CapturedClosedTab {
-                    token: row.token.clone(),
-                    closed_at: row.closed_at,
-                    tab: CapturedSessionTab {
-                        session_tab: tab.clone(),
-                        buffer_snapshots: Vec::new(),
-                        preserve_existing: true,
-                        discard_history: false,
-                    },
-                });
-            }
-        }
-        retained.append(&mut request.closed_tabs);
-        retained.retain(|closed| {
-            !closed
-                .tab
-                .session_tab
-                .buffers
-                .iter()
-                .any(|buffer| live.contains(buffer.temp_id.as_str()))
-        });
-
-        request.closed_tabs = retained;
-        Ok(old)
+        self.closed_rows().await
     }
 
     pub(super) async fn write_closed(
@@ -178,6 +131,22 @@ impl Database {
             )
             .await?;
         }
+        for row in rows {
+            if !old.iter().any(|previous| previous == row) {
+                self.execute_cached(
+                    "DELETE FROM closed_documents WHERE token=?",
+                    [row.token.as_str()],
+                )
+                .await?;
+                for buffer in &row.tab.buffers {
+                    self.execute_cached(
+                        "INSERT INTO closed_documents VALUES(?,?)",
+                        params![row.token.as_str(), buffer.temp_id.as_str()],
+                    )
+                    .await?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -200,22 +169,16 @@ impl Database {
         &mut self,
         token: &str,
     ) -> io::Result<(SessionTab, std::collections::HashMap<String, String>)> {
-        let row = self
+        let payload = self
             .query_collect(
-                "SELECT token, closed_at, payload FROM closed_tabs WHERE token=?",
+                "SELECT payload FROM closed_tabs WHERE token=?",
                 [token],
-                |row| {
-                    ClosedRow::new(
-                        row.get(0).map_err(error)?,
-                        row.get(1).map_err(error)?,
-                        row.get(2).map_err(error)?,
-                    )
-                },
+                |row| row.get::<Vec<u8>>(0).map_err(error),
             )
             .await?
             .pop()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "closed tab expired"))?;
-        let mut tab = row.tab;
+        let mut tab = self.read_stored_tab(&payload).await?;
         let contents = match self.read_tab_contents(std::slice::from_ref(&tab)).await {
             Ok(contents) => contents,
             Err(cause) => {

@@ -81,12 +81,12 @@ fn archive_diff_failure_rolls_back_removed_and_changed_rows() {
         }
         db.persist(save, 1).await.unwrap();
         let old = db.closed_rows().await.unwrap();
-        let changed = ClosedRow::new(
-            old[1].token.clone(),
-            old[1].closed_at + 1,
-            old[1].payload.clone(),
-        )
-        .unwrap();
+        let changed = ClosedRow {
+            token: old[1].token.clone(),
+            closed_at: old[1].closed_at + 1,
+            payload: old[1].payload.clone(),
+            tab: old[1].tab.clone(),
+        };
         db.conn.execute_batch("CREATE TRIGGER fail_update BEFORE UPDATE ON closed_tabs BEGIN SELECT RAISE(ABORT, 'injected'); END; BEGIN IMMEDIATE;").await.unwrap();
         let result = db.write_closed(&[changed], &old).await;
         assert!(db.finish_transaction(result).await.is_err());

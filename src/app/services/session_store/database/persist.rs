@@ -13,8 +13,11 @@ use std::time::Instant;
 use turso::params;
 
 struct RecoveryBuffer {
+    metadata: Vec<u8>,
+    name: String,
+    path: Option<String>,
+    path_key: Option<String>,
     required: bool,
-    retain: bool,
     // None means cold or quarantined: preserve the committed history.
     history: Option<HistoryRows>,
     history_fingerprints: Option<Vec<super::history::HistoryFingerprint>>,
@@ -26,6 +29,7 @@ struct Prepared {
     tabs: Vec<Vec<u8>>,
     snapshots: Vec<CapturedSessionBuffer>,
     buffers: HashMap<String, RecoveryBuffer>,
+    removed_documents: Vec<String>,
     full_cleanup: bool,
     closed: Vec<super::closed::ClosedRow>,
     closed_changed: bool,
@@ -49,13 +53,49 @@ impl Prepared {
         };
         let mut prepared = Self {
             state: serde_json::to_vec(&manifest).map_err(invalid)?,
+            removed_documents: request.removed_documents,
             ..Self::default()
         };
         for tab in request.tabs {
             let (payload, _) = prepared.push_tab(tab)?;
             prepared.tabs.push(payload);
         }
+        let live: HashSet<_> = prepared.buffers.keys().cloned().collect();
+        if live
+            .iter()
+            .any(|id| prepared.removed_documents.contains(id))
+        {
+            return Err(invalid("cannot remove a live document"));
+        }
+        let pending: HashSet<_> = request
+            .closed_tabs
+            .iter()
+            .map(|c| c.token.as_str())
+            .collect();
+        for old in &old_closed {
+            if !pending.contains(old.token.as_str())
+                && !old.tab.buffers.iter().any(|b| {
+                    live.contains(&b.temp_id) || prepared.removed_documents.contains(&b.temp_id)
+                })
+            {
+                prepared.closed.push(super::closed::ClosedRow {
+                    token: old.token.clone(),
+                    closed_at: old.closed_at,
+                    payload: old.payload.clone(),
+                    tab: old.tab.clone(),
+                });
+            }
+        }
         for closed in request.closed_tabs {
+            if closed
+                .tab
+                .session_tab
+                .buffers
+                .iter()
+                .any(|b| live.contains(&b.temp_id))
+            {
+                continue;
+            }
             let (payload, tab) = prepared.push_tab(closed.tab)?;
             prepared.closed.push(super::closed::ClosedRow {
                 token: closed.token,
@@ -82,8 +122,18 @@ impl Prepared {
             }
             let required = validation::needs_snapshot(buffer);
             let policy = RecoveryBuffer {
+                metadata: serde_json::to_vec(buffer).map_err(invalid)?,
+                name: buffer.name.clone(),
+                path: buffer
+                    .path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned()),
+                path_key: buffer.path.as_ref().map(|p| {
+                    crate::app::CanonicalPathKey::from_path(p)
+                        .as_str()
+                        .to_owned()
+                }),
                 required,
-                retain: tab.preserve_existing || required || buffer.disk_len.is_none(),
                 history_fingerprints: history
                     .as_ref()
                     .map(super::history::fingerprints)
@@ -98,19 +148,16 @@ impl Prepared {
                 return Err(invalid("duplicate recovery content identity across tabs"));
             }
         }
-        let payload = serde_json::to_vec(&tab.session_tab).map_err(invalid)?;
+        let payload = serde_json::to_vec(&super::documents::StoredTab::capture(&tab.session_tab))
+            .map_err(invalid)?;
         // Supplied snapshots are authoritative, independently of capture policy.
         for snapshot in tab.buffer_snapshots {
-            self.buffers
-                .get_mut(&snapshot.temp_id)
-                .ok_or_else(|| invalid("snapshot has no buffer metadata"))?
-                .retain = true;
+            if !self.buffers.contains_key(&snapshot.temp_id) {
+                return Err(invalid("snapshot has no buffer metadata"));
+            }
             self.snapshots.push(snapshot);
         }
         Ok((payload, tab.session_tab))
-    }
-    fn retains(&self, id: &str) -> bool {
-        self.buffers.get(id).is_some_and(|buffer| buffer.retain)
     }
     fn profile(&self) -> SessionPersistProfile {
         SessionPersistProfile {
@@ -145,6 +192,13 @@ impl Database {
                 self.blocked = Some(cause.to_string());
             })?;
         self.freeze_quarantined(&mut request);
+        if request
+            .removed_documents
+            .iter()
+            .any(|id| self.quarantined.contains_key(id))
+        {
+            return Err(invalid("cannot remove a quarantined document"));
+        }
         let mut prepared = Prepared::new(request, old_closed)?;
         self.prepare_changes(&mut prepared).await?;
         let mut profile = prepared.profile();
@@ -203,7 +257,7 @@ impl Database {
         }
         if self.inventory.is_none() {
             self.inventory = Some(ContentInventory {
-                buffers: self.string_set("SELECT id FROM buffer_ids").await?,
+                buffers: self.string_set("SELECT id FROM documents").await?,
                 snapshots: self.string_set("SELECT id FROM snapshots").await?,
                 full_cleanup_pending: true,
                 connection_changes: Some(connection_changes),
@@ -214,6 +268,18 @@ impl Database {
 
     async fn prepare_history_changes(&mut self, prepared: &mut Prepared) -> io::Result<()> {
         for (id, buffer) in &mut prepared.buffers {
+            if !self.document_cache.contains_key(id)
+                && let Some(payload) = self
+                    .query_collect(
+                        "SELECT payload FROM documents WHERE id=?",
+                        [id.as_str()],
+                        |row| row.get::<Vec<u8>>(0).map_err(error),
+                    )
+                    .await?
+                    .pop()
+            {
+                self.document_cache.insert(id.clone(), payload);
+            }
             if self.quarantined.contains_key(id) {
                 buffer.history = None;
                 buffer.history_fingerprints = None;
@@ -231,24 +297,17 @@ impl Database {
 
     fn has_changes(&self, prepared: &Prepared) -> bool {
         prepared.full_cleanup
+            || !prepared.removed_documents.is_empty()
             || prepared.closed_changed
             || !prepared.snapshots.is_empty()
             || self.state_cache != prepared.state
             || self.tab_cache != prepared.tabs
-            || self.inventory.as_ref().is_some_and(|inventory| {
-                inventory
-                    .snapshots
-                    .iter()
-                    .any(|id| !prepared.retains(id) && !self.quarantined.contains_key(id))
-                    || inventory.buffers.iter().any(|id| {
-                        !prepared.buffers.contains_key(id) && !self.quarantined.contains_key(id)
-                    })
-            })
             || prepared.buffers.iter().any(|(id, buffer)| {
-                buffer
-                    .history_fingerprints
-                    .as_ref()
-                    .is_some_and(|entries| self.history_cache.get(id) != Some(entries))
+                self.document_cache.get(id) != Some(&buffer.metadata)
+                    || buffer
+                        .history_fingerprints
+                        .as_ref()
+                        .is_some_and(|entries| self.history_cache.get(id) != Some(entries))
             })
     }
     fn accept_prepared(
@@ -258,42 +317,51 @@ impl Database {
         connection_changes: Option<i64>,
     ) {
         // Only after COMMIT. A failed attempt must be fully retryable.
-        inventory
-            .snapshots
-            .retain(|id| prepared.retains(id) || self.quarantined.contains_key(id));
         inventory.snapshots.extend(
             prepared
                 .snapshots
                 .iter()
                 .map(|buffer| buffer.temp_id.clone()),
         );
-        inventory
-            .buffers
-            .retain(|id| prepared.buffers.contains_key(id) || self.quarantined.contains_key(id));
-        for id in prepared.buffers.keys() {
-            if !inventory.buffers.contains(id) {
-                inventory.buffers.insert(id.clone());
-            }
+        inventory.buffers.extend(prepared.buffers.keys().cloned());
+        for id in &prepared.removed_documents {
+            inventory.buffers.remove(id);
+            inventory.snapshots.remove(id);
+            self.revisions.remove(id);
+            self.chunk_cache.remove(id);
+            self.history_cache.remove(id);
+            self.document_cache.remove(id);
         }
         inventory.full_cleanup_pending = false;
         inventory.connection_changes = connection_changes;
         self.inventory = Some(inventory);
-        self.chunk_cache.retain(|id, _| prepared.retains(id));
-        self.chunk_cache.extend(prepared.chunk_checkpoints);
+        // Retention is durable; comparison caches only need the current capture.
+        self.chunk_cache
+            .retain(|id, _| prepared.buffers.contains_key(id));
         self.revisions
-            .retain(|id, _| prepared.buffers.get(id).is_some_and(|buffer| buffer.retain));
+            .retain(|id, _| prepared.buffers.contains_key(id));
+        self.history_cache
+            .retain(|id, _| prepared.buffers.contains_key(id));
+        self.document_cache
+            .retain(|id, _| prepared.buffers.contains_key(id));
+        self.chunk_cache.extend(prepared.chunk_checkpoints);
         self.revisions.extend(
             prepared
                 .snapshots
                 .into_iter()
-                .map(|buffer| (buffer.temp_id, buffer.snapshot.revision_key())),
+                .map(|b| (b.temp_id, b.snapshot.revision_key())),
         );
-        self.history_cache
-            .retain(|id, _| prepared.buffers.contains_key(id));
+        self.document_cache.extend(
+            prepared
+                .buffers
+                .iter()
+                .map(|(id, b)| (id.clone(), b.metadata.clone())),
+        );
         self.history_cache.extend(
-            prepared.buffers.into_iter().filter_map(|(id, buffer)| {
-                buffer.history_fingerprints.map(|entries| (id, entries))
-            }),
+            prepared
+                .buffers
+                .into_iter()
+                .filter_map(|(id, b)| b.history_fingerprints.map(|h| (id, h))),
         );
         self.state_cache = prepared.state;
         self.tab_cache = prepared.tabs;
@@ -327,10 +395,21 @@ impl Database {
         inventory: &ContentInventory,
     ) -> io::Result<()> {
         for (id, buffer) in &prepared.buffers {
-            if !inventory.buffers.contains(id) {
+            if self.document_cache.get(id) != Some(&buffer.metadata) {
+                let sql = if inventory.buffers.contains(id) {
+                    "UPDATE documents SET name=?2,path=?3,path_key=?4,payload=?5 WHERE id=?1"
+                } else {
+                    "INSERT INTO documents(id,name,path,path_key,payload) VALUES(?1,?2,?3,?4,?5)"
+                };
                 self.execute_cached(
-                    "INSERT INTO buffer_ids VALUES(?) ON CONFLICT(id) DO NOTHING",
-                    [id.as_str()],
+                    sql,
+                    params![
+                        id.as_str(),
+                        buffer.name.as_str(),
+                        buffer.path.clone(),
+                        buffer.path_key.clone(),
+                        buffer.metadata.as_slice()
+                    ],
                 )
                 .await?;
             }
@@ -368,6 +447,19 @@ impl Database {
                     .execute(params![position as i64, bytes.as_slice()])
                     .await
                     .map_err(error)?;
+                self.execute_cached(
+                    "DELETE FROM tab_documents WHERE position=?",
+                    [position as i64],
+                )
+                .await?;
+                let stored: super::documents::StoredTab = super::decode(bytes)?;
+                for doc in stored.buffers {
+                    self.execute_cached(
+                        "INSERT INTO tab_documents VALUES(?,?)",
+                        params![position as i64, doc.temp_id],
+                    )
+                    .await?;
+                }
             }
         }
         self.execute_cached(
@@ -402,26 +494,14 @@ impl Database {
         }) {
             return Err(damaged(id, "refusing to commit missing recovery content"));
         }
-        for id in inventory
-            .snapshots
-            .iter()
-            .filter(|id| !prepared.retains(id) && !self.quarantined.contains_key(*id))
-        {
+        for id in &prepared.removed_documents {
             self.collect_digests(
                 "SELECT digest FROM parts WHERE temp_id=?",
                 [id.as_str()],
                 &mut removed_digests,
             )
             .await?;
-            self.execute_cached("DELETE FROM snapshots WHERE id=?", [id.as_str()])
-                .await?;
-        }
-        for id in inventory
-            .buffers
-            .iter()
-            .filter(|id| !prepared.buffers.contains_key(*id) && !self.quarantined.contains_key(*id))
-        {
-            self.execute_cached("DELETE FROM buffer_ids WHERE id=?", [id.as_str()])
+            self.execute_cached("DELETE FROM documents WHERE id=?", [id.as_str()])
                 .await?;
         }
         // Quarantined and shared parts remain GC roots even after live tabs close.

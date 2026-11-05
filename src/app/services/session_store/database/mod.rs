@@ -6,6 +6,9 @@ pub(super) mod closed;
 #[cfg(test)]
 mod closed_tests;
 mod content;
+mod documents;
+#[cfg(test)]
+mod documents_tests;
 #[cfg(test)]
 mod fault_tests;
 mod history;
@@ -51,17 +54,26 @@ const APPLICATION_ID: i64 = 0x5350_4350;
 const SCHEMA: &str = "
 CREATE TABLE session_state(id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL) STRICT;
 CREATE TABLE tabs(position INTEGER PRIMARY KEY, payload BLOB NOT NULL) STRICT;
-CREATE TABLE buffer_ids(id TEXT PRIMARY KEY) STRICT;
-CREATE TABLE history(temp_id TEXT NOT NULL REFERENCES buffer_ids(id) ON DELETE CASCADE,
+CREATE TABLE documents(id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', path TEXT, path_key TEXT,
+    payload BLOB NOT NULL DEFAULT x'7b7d', observed_digest TEXT, observed_missing INTEGER NOT NULL DEFAULT 0 CHECK(observed_missing IN (0,1))) STRICT;
+CREATE INDEX documents_path ON documents(path_key);
+CREATE TABLE activity(global_seq INTEGER PRIMARY KEY CHECK(global_seq>0), observed_at INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('created','opened','closed','disk_conflict','missing')),
+    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, name TEXT NOT NULL, path TEXT) STRICT;
+CREATE INDEX activity_document_sequence ON activity(document_id,global_seq);
+CREATE TABLE tab_documents(position INTEGER NOT NULL REFERENCES tabs(position) ON DELETE CASCADE,
+    document_id TEXT NOT NULL REFERENCES documents(id), PRIMARY KEY(position,document_id)) STRICT;
+CREATE TABLE history(temp_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
                      seq INTEGER NOT NULL, parent_id INTEGER NOT NULL CHECK(parent_id>=0 AND parent_id<seq), edited_at INTEGER NOT NULL, global_seq INTEGER NOT NULL CHECK(global_seq>0),
-                     entry BLOB NOT NULL, bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0), PRIMARY KEY(temp_id, seq)) STRICT;
-CREATE TABLE document_history(temp_id TEXT PRIMARY KEY REFERENCES buffer_ids(id) ON DELETE CASCADE,
-    now_id INTEGER NOT NULL, tip_id INTEGER NOT NULL, edited_at INTEGER NOT NULL, edit_seq INTEGER NOT NULL) STRICT;
+                     source TEXT NOT NULL CHECK(source IN ('load','edit','paste','cut','search_replace','external')), summary TEXT NOT NULL, entry BLOB NOT NULL, bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0), PRIMARY KEY(temp_id, seq)) STRICT;
+CREATE TABLE document_history(temp_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    now_id INTEGER NOT NULL CHECK(now_id>=0), tip_id INTEGER NOT NULL CHECK(tip_id>=0), edited_at INTEGER NOT NULL, edit_seq INTEGER NOT NULL) STRICT;
 CREATE INDEX document_recency ON document_history(edited_at DESC, edit_seq DESC);
 CREATE INDEX history_parent ON history(temp_id, parent_id);
 CREATE INDEX history_global_seq ON history(global_seq);
+CREATE INDEX history_document_sequence ON history(temp_id,global_seq,seq);
 CREATE INDEX history_sizes ON history(temp_id, bytes);
-CREATE TABLE snapshots(id TEXT PRIMARY KEY REFERENCES buffer_ids(id) ON DELETE CASCADE,
+CREATE TABLE snapshots(id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
                        bytes INTEGER NOT NULL, digest BLOB NOT NULL) STRICT;
 CREATE TABLE blobs(digest BLOB PRIMARY KEY, body BLOB NOT NULL, bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0)) STRICT;
 CREATE INDEX blob_sizes ON blobs(bytes, digest);
@@ -93,6 +105,7 @@ pub(super) struct Database {
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
     chunk_cache: HashMap<String, chunking::ChunkCheckpoint>,
     history_cache: HashMap<String, Vec<history::HistoryFingerprint>>,
+    document_cache: HashMap<String, Vec<u8>>,
     // Complete committed IDs, including cold/quarantined content; revisions alone
     // only describe snapshots written by this process. None requires a fresh scan.
     inventory: Option<ContentInventory>,
@@ -116,7 +129,7 @@ impl Database {
         db.load_quarantine().await?;
         // Reserve sequences from cold tabs and parked branches without reading payloads.
         let maximum = db
-            .integer("SELECT coalesce(max(global_seq),0) FROM history")
+            .integer("SELECT max(value) FROM (SELECT coalesce(max(global_seq),0) AS value FROM history UNION ALL SELECT coalesce(max(global_seq),0) FROM activity)")
             .await?;
         crate::app::domain::buffer::register_text_history_global_seq(maximum as u64);
         Ok(db)
@@ -148,6 +161,7 @@ impl Database {
             revisions: HashMap::new(),
             chunk_cache: HashMap::new(),
             history_cache: HashMap::new(),
+            document_cache: HashMap::new(),
             inventory: None,
             latest_request: 0,
             blocked: None,
@@ -158,7 +172,7 @@ impl Database {
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID && version == 10 {
+        if application == APPLICATION_ID && version == 11 {
             return Ok(());
         }
         if version != 0
@@ -177,7 +191,7 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=10;",
+            "{SCHEMA} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=11;",
             quarantine::SCHEMA,
             closed::SCHEMA
         ))
@@ -294,6 +308,7 @@ impl Database {
             self.revisions.clear();
             self.chunk_cache.clear();
             self.history_cache.clear();
+            self.document_cache.clear();
             self.inventory = None;
             // SQLITE_FULL and rollback triggers can already end the transaction.
             if !self.conn.is_autocommit().unwrap_or(false) {

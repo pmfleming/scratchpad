@@ -54,6 +54,8 @@ pub(super) fn validate(entries: &[PersistedHistoryEntry]) -> io::Result<()> {
     if current.len() > 1 || tips.len() > 1 || (!entries.is_empty() && tips.is_empty()) {
         return Err(invalid("invalid history cursor"));
     }
+    // Reference contract: node 0 is the implicit empty root, never a history row.
+    // Every other parent, Now and tip must refer to a node in this document.
     crate::app::domain::buffer::edit_tree::EditTree::restore(
         entries.iter().map(|e| (e.id, e.parent_id)),
         current.first().map_or(0, |e| e.id),
@@ -70,6 +72,11 @@ fn history_entry(row: &turso::Row, previous: &mut i64) -> io::Result<PersistedHi
         || entry.global_seq as i64 != row.get::<i64>(2).map_err(error)?
         || entry.parent_id as i64 != row.get::<i64>(3).map_err(error)?
         || entry.edited_at as i64 != row.get::<i64>(4).map_err(error)?
+        || serde_json::to_value(entry.source)
+            .map_err(invalid)?
+            .as_str()
+            != Some(row.get::<String>(5).map_err(error)?.as_str())
+        || entry.summary != row.get::<String>(6).map_err(error)?
     {
         return Err(invalid("history key does not match entry ID"));
     }
@@ -105,7 +112,7 @@ impl Database {
         );
         if positions.is_empty() && entries.is_empty() {
             let known = self
-                .query_collect("SELECT id FROM buffer_ids WHERE id=?", [id], |row| {
+                .query_collect("SELECT id FROM documents WHERE id=?", [id], |row| {
                     row.get::<String>(0).map_err(error)
                 })
                 .await?;
@@ -133,7 +140,7 @@ impl Database {
     ) -> io::Result<Vec<T>> {
         let mut previous = 0;
         self.query_collect(
-            "SELECT seq, entry, global_seq, parent_id, edited_at FROM history WHERE temp_id=? ORDER BY seq",
+            "SELECT seq, entry, global_seq, parent_id, edited_at, source, summary FROM history WHERE temp_id=? ORDER BY seq",
             [id],
             |row| {
                 history_entry(row, &mut previous)
@@ -163,7 +170,7 @@ impl Database {
         let Some(&(now, tip)) = positions.first() else {
             // An untracked cold shell can hydrate directly from its source file.
             let known = self
-                .query_collect("SELECT id FROM buffer_ids WHERE id=?", [id], |row| {
+                .query_collect("SELECT id FROM documents WHERE id=?", [id], |row| {
                     row.get::<String>(0).map_err(error)
                 })
                 .await?;
@@ -174,7 +181,7 @@ impl Database {
             };
         };
         let mut document = crate::app::domain::TextDocument::new(String::new());
-        let mut rows = self.conn.query("SELECT seq,entry,global_seq,parent_id,edited_at FROM history WHERE temp_id=? ORDER BY seq", [id]).await.map_err(error)?;
+        let mut rows = self.conn.query("SELECT seq,entry,global_seq,parent_id,edited_at,source,summary FROM history WHERE temp_id=? ORDER BY seq", [id]).await.map_err(error)?;
         let mut previous = 0;
         let (mut marked_now, mut marked_tip) = (0, 0);
         while let Some(row) = rows.next().await.map_err(error)? {
@@ -266,8 +273,8 @@ impl Database {
             }
             let entry = entries.entry(index);
             let bytes = serde_json::to_vec(&entry).map_err(invalid)?;
-            self.execute_cached("INSERT INTO history(temp_id, seq, global_seq, entry, bytes, parent_id, edited_at) VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(temp_id, seq) DO UPDATE SET global_seq=excluded.global_seq, entry=excluded.entry, bytes=excluded.bytes, parent_id=excluded.parent_id, edited_at=excluded.edited_at",
-                params![id, entry.id as i64, entry.global_seq as i64, bytes.as_slice(), bytes.len() as i64, entry.parent_id as i64, entry.edited_at as i64]).await?;
+            self.execute_cached("INSERT INTO history(temp_id, seq, global_seq, entry, bytes, parent_id, edited_at, source, summary) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(temp_id, seq) DO UPDATE SET global_seq=excluded.global_seq, entry=excluded.entry, bytes=excluded.bytes, parent_id=excluded.parent_id, edited_at=excluded.edited_at,source=excluded.source,summary=excluded.summary",
+                params![id, entry.id as i64, entry.global_seq as i64, bytes.as_slice(), bytes.len() as i64, entry.parent_id as i64, entry.edited_at as i64, serde_json::to_value(entry.source).map_err(invalid)?.as_str().ok_or_else(|| invalid("invalid history source"))?, entry.summary.as_str()]).await?;
         }
         Ok(())
     }

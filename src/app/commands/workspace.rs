@@ -130,6 +130,15 @@ fn close_view_command(app: &mut ScratchpadApp, view_id: ViewId) -> bool {
 pub(crate) fn perform_close_view(app: &mut ScratchpadApp, view_id: ViewId) {
     app.reload_settings_if_closing_view(view_id);
 
+    if !app.startup_restore_pending()
+        && !app.state.persistence.session_restore_failed
+        && !app.state.persistence.session_store.writes_blocked()
+        && let Err(error) = crate::app::services::session_manager::persist_view_close(app, view_id)
+    {
+        app.state.status.report_session_save_failed(error);
+        return;
+    }
+
     let index = app.tab_manager.active_tab_index;
     let open_buffer_ids_before = app
         .tab_manager
