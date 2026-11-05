@@ -1,0 +1,783 @@
+{
+  "baseline": {
+    "run": "refactor-before",
+    "functions": {
+      "functions": 5209,
+      "cognitive": 7977,
+      "cyclomatic": 13519,
+      "effort": 55221782,
+      "sloc": 86442
+    },
+    "test_functions": {
+      "functions": 786,
+      "cognitive": 698,
+      "cyclomatic": 1219,
+      "effort": 12458609,
+      "sloc": 18408
+    },
+    "clones": {
+      "ast_record_count": 38,
+      "duplicated_line_count": 7288,
+      "duplication_model_version": 2,
+      "duplication_percent": 7.25,
+      "record_count": 537,
+      "source_nonblank_line_count": 100499,
+      "token_record_count": 482
+    },
+    "coverage": {
+      "branches": {
+        "available": false,
+        "count": 0,
+        "covered": 0,
+        "percent": null
+      },
+      "file_count": 392,
+      "functions": {
+        "available": true,
+        "count": 7010,
+        "covered": 5410,
+        "percent": 77.18
+      },
+      "lines": {
+        "available": true,
+        "count": 64425,
+        "covered": 48353,
+        "percent": 75.05
+      },
+      "regions": {
+        "available": true,
+        "count": 91715,
+        "covered": 68548,
+        "percent": 74.74
+      }
+    },
+    "test_quality": {
+      "assertionless_test_count": 4,
+      "finding_count": 13,
+      "ignored_test_count": 9,
+      "test_count": 786
+    },
+    "function_risk": {
+      "coverage_attributed_count": 4494,
+      "function_count": 5209,
+      "high_crap_count": 66
+    },
+    "escape_hatches": {
+      "unsafe_block": 8,
+      "unsafe_fn": 4,
+      "unsafe_impl": 1,
+      "extern_block": 1,
+      "extern_fn": 4,
+      "glob_import": 40,
+      "deref_impl": 1,
+      "clippy_suppression": 2,
+      "lint_suppression": 2
+    },
+    "analysis_confidence": {
+      "hotspots": {
+        "complete": false,
+        "partial": true,
+        "missing_input": []
+      },
+      "leverage_metrics": {
+        "complete": false,
+        "partial": true,
+        "missing_input": [
+          "semantic identity is incomplete: 6722 dependency references were not resolved"
+        ]
+      },
+      "locality_metrics": {
+        "complete": false,
+        "partial": true,
+        "missing_input": [
+          "semantic identity is incomplete: 6722 dependency references were not resolved"
+        ]
+      },
+      "coverage": {
+        "complete": true,
+        "partial": false,
+        "missing_input": []
+      }
+    },
+    "key_function_coverage": {
+      "app::app_state::background_io::preparation::ScratchpadApp::intercept_bulk_text_input": {
+        "coverage_percent": 30.56,
+        "covered_lines": 22,
+        "executable_lines": 72,
+        "crap": 331.41
+      },
+      "app::domain::buffer::piece_tree::storage::persistence::PieceTreeStorage::span_char_len": {
+        "coverage_percent": 80.3,
+        "covered_lines": 53,
+        "executable_lines": 66,
+        "crap": 32.57
+      },
+      "app::domain::buffer::piece_tree::storage::persistence::PieceTreeStorage::visit_span": {
+        "coverage_percent": 95.0,
+        "covered_lines": 38,
+        "executable_lines": 40,
+        "crap": 17.04
+      },
+      "app::domain::buffer::piece_tree::storage::metrics::PieceTreeStorage::pieces_for_span": {
+        "coverage_percent": 94.92,
+        "covered_lines": 56,
+        "executable_lines": 59,
+        "crap": 20.05
+      }
+    },
+    "changed_files": {
+      "src/app/app_state/background_io/preparation.rs": {
+        "functions": 4,
+        "cognitive": 68,
+        "cyclomatic": 53,
+        "effort": 412432,
+        "sloc": 270
+      },
+      "src/app/domain/buffer/piece_tree/storage/metrics.rs": {
+        "functions": 1,
+        "cognitive": 13,
+        "cyclomatic": 20,
+        "effort": 183162,
+        "sloc": 81
+      },
+      "src/app/domain/buffer/piece_tree/storage/persistence.rs": {
+        "functions": 9,
+        "cognitive": 134,
+        "cyclomatic": 126,
+        "effort": 862205,
+        "sloc": 477
+      },
+      "src/app/domain/buffer/piece_tree/storage/ranges.rs": {
+        "functions": 0,
+        "cognitive": 0,
+        "cyclomatic": 0,
+        "effort": 0,
+        "sloc": 0
+      },
+      "src/app/services/session_store/restore.rs": {
+        "functions": 12,
+        "cognitive": 20,
+        "cyclomatic": 32,
+        "effort": 117744,
+        "sloc": 192
+      },
+      "src/app/services/session_store/restore/buffer_content.rs": {
+        "functions": 9,
+        "cognitive": 32,
+        "cyclomatic": 40,
+        "effort": 145238,
+        "sloc": 223
+      },
+      "src/app/services/session_store/reopen.rs": {
+        "functions": 8,
+        "cognitive": 19,
+        "cyclomatic": 38,
+        "effort": 159634,
+        "sloc": 168
+      }
+    },
+    "changed_file_totals": {
+      "functions": 43,
+      "cognitive": 286,
+      "cyclomatic": 309,
+      "effort": 1880415,
+      "sloc": 1411
+    },
+    "changed_file_coverage": {
+      "src/app/app_state/background_io/preparation.rs": {
+        "available": true,
+        "count": 225,
+        "covered": 114,
+        "percent": 50.67
+      },
+      "src/app/domain/buffer/piece_tree/storage/metrics.rs": {
+        "available": true,
+        "count": 73,
+        "covered": 68,
+        "percent": 93.15
+      },
+      "src/app/domain/buffer/piece_tree/storage/persistence.rs": {
+        "available": true,
+        "count": 439,
+        "covered": 354,
+        "percent": 80.64
+      },
+      "src/app/services/session_store/reopen.rs": {
+        "available": true,
+        "count": 166,
+        "covered": 163,
+        "percent": 98.19
+      },
+      "src/app/services/session_store/restore.rs": {
+        "available": true,
+        "count": 191,
+        "covered": 172,
+        "percent": 90.05
+      },
+      "src/app/services/session_store/restore/buffer_content.rs": {
+        "available": true,
+        "count": 204,
+        "covered": 175,
+        "percent": 85.78
+      }
+    },
+    "key_functions": {
+      "src/app/app_state/background_io/preparation.rs::intercept_bulk_text_input": {
+        "cognitive_complexity": 33,
+        "cyclomatic_complexity": 30,
+        "halstead_effort": 251087.68059862417,
+        "sloc": 105
+      },
+      "src/app/domain/buffer/piece_tree/storage/persistence.rs::span_char_len": {
+        "cognitive_complexity": 27,
+        "cyclomatic_complexity": 27,
+        "halstead_effort": 201433.06541222316,
+        "sloc": 84
+      },
+      "src/app/domain/buffer/piece_tree/storage/metrics.rs::pieces_for_span": {
+        "cognitive_complexity": 13,
+        "cyclomatic_complexity": 20,
+        "halstead_effort": 183161.86759152045,
+        "sloc": 81
+      },
+      "src/app/domain/buffer/piece_tree/storage/persistence.rs::visit_span": {
+        "cognitive_complexity": 13,
+        "cyclomatic_complexity": 17,
+        "halstead_effort": 112582.59142004338,
+        "sloc": 63
+      }
+    },
+    "leverage_metrics": {
+      "mean_score": 11.0338,
+      "changed_files": {
+        "src/app/app_state/background_io/preparation.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 16
+        },
+        "src/app/domain/buffer/piece_tree/storage/metrics.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/domain/buffer/piece_tree/storage/persistence.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/reopen.rs": {
+          "leverage_score": 30.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/restore.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/restore/buffer_content.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 0
+        }
+      }
+    },
+    "locality_metrics": {
+      "mean_score": 96.4781,
+      "changed_files": {
+        "src/app/app_state/background_io/preparation.rs": {
+          "locality_score": 67.0,
+          "outbound_dependencies": 16
+        },
+        "src/app/domain/buffer/piece_tree/storage/metrics.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/domain/buffer/piece_tree/storage/persistence.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/reopen.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/restore.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/restore/buffer_content.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        }
+      }
+    },
+    "correctness": {
+      "benchmark_count": 0,
+      "binary_count": 1,
+      "compile_failed": false,
+      "coverage_module_count": 350,
+      "example_count": 0,
+      "failed": 0,
+      "inline_count": 735,
+      "integration_count": 50,
+      "layers": 4,
+      "run_failed": false,
+      "test_count": 786,
+      "unknown": 19
+    },
+    "validation": {
+      "source_revision": "86ad24d2da886cdd8f22e3a3868a6dd53abd278a",
+      "source_stable": true,
+      "source_blake3": "91a6a3addde798e1e07076abf7743e91652d2c97ed36af9673e48aa701a95d2e",
+      "tool_blake3": "01b45353fb3ac26e402ac8d8aa3770513f48510435b8b70f8f24dc56177cba3f",
+      "passed": false,
+      "commands": {
+        "audit-tool": {
+          "status": "passed"
+        },
+        "cargo": {
+          "status": "passed"
+        },
+        "check": {
+          "exit_code": 1,
+          "status": "failed"
+        },
+        "coverage-tool": {
+          "status": "passed"
+        },
+        "feature-tool": {
+          "status": "passed"
+        },
+        "measure": {
+          "status": "passed"
+        },
+        "rqlens-version": {
+          "status": "passed"
+        },
+        "rustc": {
+          "status": "passed"
+        },
+        "verify": {
+          "status": "passed"
+        }
+      },
+      "gate_counts": {
+        "partial_artifacts": 14,
+        "test_failures": 0,
+        "practice_failures": 0,
+        "reliability_findings": 0,
+        "design_review_findings": 3,
+        "threshold_violations": 38,
+        "operational_failures": 0
+      }
+    }
+  },
+  "refactored": {
+    "run": "refactor-complete",
+    "functions": {
+      "functions": 5203,
+      "cognitive": 7918,
+      "cyclomatic": 13477,
+      "effort": 54825538,
+      "sloc": 86198
+    },
+    "test_functions": {
+      "functions": 777,
+      "cognitive": 720,
+      "cyclomatic": 1223,
+      "effort": 12718350,
+      "sloc": 18407
+    },
+    "clones": {
+      "ast_record_count": 38,
+      "duplicated_line_count": 7075,
+      "duplication_model_version": 2,
+      "duplication_percent": 7.06,
+      "record_count": 523,
+      "source_nonblank_line_count": 100260,
+      "token_record_count": 468
+    },
+    "coverage": {
+      "branches": {
+        "available": false,
+        "count": 0,
+        "covered": 0,
+        "percent": null
+      },
+      "file_count": 393,
+      "functions": {
+        "available": true,
+        "count": 6996,
+        "covered": 5404,
+        "percent": 77.24
+      },
+      "lines": {
+        "available": true,
+        "count": 64250,
+        "covered": 48297,
+        "percent": 75.17
+      },
+      "regions": {
+        "available": true,
+        "count": 91475,
+        "covered": 68458,
+        "percent": 74.84
+      }
+    },
+    "test_quality": {
+      "assertionless_test_count": 4,
+      "finding_count": 13,
+      "ignored_test_count": 9,
+      "test_count": 777
+    },
+    "function_risk": {
+      "coverage_attributed_count": 4497,
+      "function_count": 5203,
+      "high_crap_count": 64
+    },
+    "escape_hatches": {
+      "unsafe_block": 8,
+      "unsafe_fn": 4,
+      "unsafe_impl": 1,
+      "extern_block": 1,
+      "extern_fn": 4,
+      "glob_import": 35,
+      "deref_impl": 1,
+      "clippy_suppression": 2,
+      "lint_suppression": 2
+    },
+    "analysis_confidence": {
+      "hotspots": {
+        "complete": false,
+        "partial": true,
+        "missing_input": []
+      },
+      "leverage_metrics": {
+        "complete": false,
+        "partial": true,
+        "missing_input": [
+          "semantic identity is incomplete: 6896 dependency references were not resolved"
+        ]
+      },
+      "locality_metrics": {
+        "complete": false,
+        "partial": true,
+        "missing_input": [
+          "semantic identity is incomplete: 6896 dependency references were not resolved"
+        ]
+      },
+      "coverage": {
+        "complete": true,
+        "partial": false,
+        "missing_input": []
+      }
+    },
+    "key_function_coverage": {
+      "app::app_state::background_io::preparation::ScratchpadApp::intercept_bulk_text_input": {
+        "coverage_percent": 89.29,
+        "covered_lines": 25,
+        "executable_lines": 28,
+        "crap": 9.1
+      },
+      "app::domain::buffer::piece_tree::storage::ranges::PieceTreeStorage::visit_span_blocks": {
+        "coverage_percent": 92.31,
+        "covered_lines": 36,
+        "executable_lines": 39,
+        "crap": 10.05
+      },
+      "app::domain::buffer::piece_tree::storage::persistence::PieceTreeStorage::span_char_len": {
+        "coverage_percent": 100.0,
+        "covered_lines": 8,
+        "executable_lines": 8,
+        "crap": 3.0
+      },
+      "app::domain::buffer::piece_tree::storage::persistence::PieceTreeStorage::visit_span": {
+        "coverage_percent": 100.0,
+        "covered_lines": 11,
+        "executable_lines": 11,
+        "crap": 4.0
+      },
+      "app::domain::buffer::piece_tree::storage::metrics::PieceTreeStorage::pieces_for_span": {
+        "coverage_percent": 87.5,
+        "covered_lines": 7,
+        "executable_lines": 8,
+        "crap": 3.02
+      }
+    },
+    "changed_files": {
+      "src/app/app_state/background_io/preparation.rs": {
+        "functions": 9,
+        "cognitive": 52,
+        "cyclomatic": 58,
+        "effort": 281409,
+        "sloc": 327
+      },
+      "src/app/domain/buffer/piece_tree/storage/metrics.rs": {
+        "functions": 1,
+        "cognitive": 1,
+        "cyclomatic": 3,
+        "effort": 8199,
+        "sloc": 8
+      },
+      "src/app/domain/buffer/piece_tree/storage/persistence.rs": {
+        "functions": 9,
+        "cognitive": 96,
+        "cyclomatic": 89,
+        "effort": 562305,
+        "sloc": 354
+      },
+      "src/app/domain/buffer/piece_tree/storage/ranges.rs": {
+        "functions": 5,
+        "cognitive": 17,
+        "cyclomatic": 31,
+        "effort": 141564,
+        "sloc": 130
+      },
+      "src/app/services/session_store/restore.rs": {
+        "functions": 10,
+        "cognitive": 11,
+        "cyclomatic": 25,
+        "effort": 76374,
+        "sloc": 141
+      },
+      "src/app/services/session_store/restore/buffer_content.rs": {
+        "functions": 4,
+        "cognitive": 7,
+        "cyclomatic": 12,
+        "effort": 41532,
+        "sloc": 76
+      },
+      "src/app/services/session_store/reopen.rs": {
+        "functions": 8,
+        "cognitive": 21,
+        "cyclomatic": 40,
+        "effort": 142139,
+        "sloc": 174
+      }
+    },
+    "changed_file_totals": {
+      "functions": 46,
+      "cognitive": 205,
+      "cyclomatic": 258,
+      "effort": 1253521,
+      "sloc": 1210
+    },
+    "changed_file_coverage": {
+      "src/app/app_state/background_io/preparation.rs": {
+        "available": true,
+        "count": 280,
+        "covered": 221,
+        "percent": 78.93
+      },
+      "src/app/domain/buffer/piece_tree/storage/metrics.rs": {
+        "available": true,
+        "count": 10,
+        "covered": 9,
+        "percent": 90.0
+      },
+      "src/app/domain/buffer/piece_tree/storage/persistence.rs": {
+        "available": true,
+        "count": 331,
+        "covered": 277,
+        "percent": 83.69
+      },
+      "src/app/domain/buffer/piece_tree/storage/ranges.rs": {
+        "available": true,
+        "count": 117,
+        "covered": 112,
+        "percent": 95.73
+      },
+      "src/app/services/session_store/reopen.rs": {
+        "available": true,
+        "count": 172,
+        "covered": 169,
+        "percent": 98.26
+      },
+      "src/app/services/session_store/restore.rs": {
+        "available": true,
+        "count": 140,
+        "covered": 139,
+        "percent": 99.29
+      },
+      "src/app/services/session_store/restore/buffer_content.rs": {
+        "available": true,
+        "count": 73,
+        "covered": 69,
+        "percent": 94.52
+      }
+    },
+    "key_functions": {
+      "src/app/domain/buffer/piece_tree/storage/ranges.rs::visit_span_blocks": {
+        "cognitive_complexity": 7,
+        "cyclomatic_complexity": 10,
+        "halstead_effort": 94142.73343431036,
+        "sloc": 67
+      },
+      "src/app/app_state/background_io/preparation.rs::intercept_bulk_text_input": {
+        "cognitive_complexity": 4,
+        "cyclomatic_complexity": 9,
+        "halstead_effort": 31131.718819258444,
+        "sloc": 39
+      },
+      "src/app/domain/buffer/piece_tree/storage/persistence.rs::visit_span": {
+        "cognitive_complexity": 2,
+        "cyclomatic_complexity": 4,
+        "halstead_effort": 10604.94591920295,
+        "sloc": 16
+      },
+      "src/app/domain/buffer/piece_tree/storage/metrics.rs::pieces_for_span": {
+        "cognitive_complexity": 1,
+        "cyclomatic_complexity": 3,
+        "halstead_effort": 8198.512540136304,
+        "sloc": 8
+      },
+      "src/app/domain/buffer/piece_tree/storage/persistence.rs::span_char_len": {
+        "cognitive_complexity": 0,
+        "cyclomatic_complexity": 3,
+        "halstead_effort": 3510.0,
+        "sloc": 8
+      }
+    },
+    "leverage_metrics": {
+      "mean_score": 10.5952,
+      "changed_files": {
+        "src/app/app_state/background_io/preparation.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 18
+        },
+        "src/app/domain/buffer/piece_tree/storage/metrics.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/domain/buffer/piece_tree/storage/persistence.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/domain/buffer/piece_tree/storage/ranges.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/reopen.rs": {
+          "leverage_score": 20.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/restore.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/restore/buffer_content.rs": {
+          "leverage_score": 0.0,
+          "outbound_dependencies": 0
+        }
+      }
+    },
+    "locality_metrics": {
+      "mean_score": 96.8318,
+      "changed_files": {
+        "src/app/app_state/background_io/preparation.rs": {
+          "locality_score": 61.0,
+          "outbound_dependencies": 18
+        },
+        "src/app/domain/buffer/piece_tree/storage/metrics.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/domain/buffer/piece_tree/storage/persistence.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/domain/buffer/piece_tree/storage/ranges.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/reopen.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/restore.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        },
+        "src/app/services/session_store/restore/buffer_content.rs": {
+          "locality_score": 100.0,
+          "outbound_dependencies": 0
+        }
+      }
+    },
+    "correctness": {
+      "benchmark_count": 0,
+      "binary_count": 1,
+      "compile_failed": false,
+      "coverage_module_count": 351,
+      "example_count": 0,
+      "failed": 0,
+      "inline_count": 726,
+      "integration_count": 50,
+      "layers": 4,
+      "run_failed": false,
+      "test_count": 777,
+      "unknown": 20
+    },
+    "validation": {
+      "source_revision": "09f9cf2df874a96f14e67847c2c02ce8208d0df5",
+      "source_stable": true,
+      "source_blake3": "4069642ba869adc25156cf508c85978a6eb8b632b0b0ec4e27d121488117a374",
+      "tool_blake3": "01b45353fb3ac26e402ac8d8aa3770513f48510435b8b70f8f24dc56177cba3f",
+      "passed": false,
+      "commands": {
+        "audit-tool": {
+          "status": "passed"
+        },
+        "cargo": {
+          "status": "passed"
+        },
+        "check": {
+          "exit_code": 1,
+          "status": "failed"
+        },
+        "coverage-tool": {
+          "status": "passed"
+        },
+        "feature-tool": {
+          "status": "passed"
+        },
+        "measure": {
+          "status": "passed"
+        },
+        "rqlens-version": {
+          "status": "passed"
+        },
+        "rustc": {
+          "status": "passed"
+        },
+        "verify": {
+          "status": "passed"
+        }
+      },
+      "gate_counts": {
+        "partial_artifacts": 14,
+        "test_failures": 0,
+        "practice_failures": 0,
+        "reliability_findings": 0,
+        "design_review_findings": 3,
+        "threshold_violations": 33,
+        "operational_failures": 0
+      }
+    }
+  },
+  "notes": {
+    "baseline_revision": "86ad24d2da886cdd8f22e3a3868a6dd53abd278a",
+    "implementation_commit": "09f9cf2",
+    "module_scope": [
+      "src/app/app_state/background_io/preparation.rs",
+      "src/app/domain/buffer/piece_tree/storage/metrics.rs",
+      "src/app/domain/buffer/piece_tree/storage/persistence.rs",
+      "src/app/domain/buffer/piece_tree/storage/ranges.rs",
+      "src/app/services/session_store/restore.rs",
+      "src/app/services/session_store/restore/buffer_content.rs",
+      "src/app/services/session_store/reopen.rs"
+    ],
+    "test_sloc_scope": "Function SLOC matched to the RustQualityLens test catalog; shared test helpers are counted in overall function SLOC.",
+    "clone_operation_sites": {
+      "scope": "restore_reopened_with_context; lexical .clone(), .cloned() and .clone_from() calls",
+      "before": 7,
+      "after": 2
+    },
+    "rejected_run": "refactor-after analysed the baseline checkout through a reused xtask binary. Its results are excluded. Runtime project-root discovery now prevents this.",
+    "native_windows_validation": "pending, as previously authorized"
+  }
+}

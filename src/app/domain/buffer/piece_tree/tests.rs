@@ -178,41 +178,6 @@ fn byte_spans_preserve_offsets_beyond_four_gibibytes() {
 }
 
 #[test]
-fn unicode_insert_delete_and_extract_use_char_offsets() {
-    let mut tree = PieceTreeLite::from_string("a😀c".to_owned());
-
-    tree.insert_with_source(2, "β", PieceSource::Edit);
-    tree.remove_char_range(1..2);
-
-    assert_eq!(tree.extract_text(), "aβc");
-    assert_eq!(super::query::char_position(&tree, 2).column_index, 2);
-    assert_eq!(tree.extract_range(1..3), "βc");
-}
-
-#[test]
-fn bounded_extraction_reports_truncation_without_splitting_characters() {
-    let tree = PieceTreeLite::from_string("a😀βc".to_owned());
-
-    let (text, truncated) = tree.extract_range_bounded(0..4, 2);
-
-    assert_eq!(text, "a😀");
-    assert!(truncated);
-}
-
-#[test]
-fn line_lookup_tracks_mixed_edits() {
-    let mut tree = PieceTreeLite::from_string("one\ntwo\nfour".to_owned());
-
-    tree.insert_with_source(8, "three\n", PieceSource::Edit);
-    tree.remove_char_range(0..4);
-
-    assert_eq!(tree.extract_text(), "two\nthree\nfour");
-    assert_eq!(tree.line_info(1).start_char, 4);
-    assert_eq!(tree.line_info(1).char_len, 5);
-    assert_eq!(tree.line_index_at_offset(8), 1);
-}
-
-#[test]
 fn lookups_and_spans_cross_leaves_nodes_and_sampled_unicode_lines() {
     for mut text in [
         format!("{}\n{}\ntail", "a".repeat(300_000), "β".repeat(150_000)),
@@ -245,8 +210,14 @@ fn assert_line_lookup_matches(tree: &PieceTreeLite, text: &str) {
     for (index, line) in text.split('\n').enumerate() {
         let len = line.chars().count();
         assert_eq!(tree.line_lookup(index), (start, len), "line {index}");
+        let info = tree.line_info(index);
+        assert_eq!((info.start_char, info.char_len), (start, len));
         for offset in [start, start + len / 2, start + len] {
             assert_eq!(tree.line_index_at_offset(offset), index, "offset {offset}");
+            assert_eq!(
+                super::query::char_position(tree, offset).column_index,
+                offset - start
+            );
         }
         last = (start, len);
         start += len + 1;
@@ -311,6 +282,7 @@ fn assert_spans_match(tree: &PieceTreeLite, text: &str, range: std::ops::Range<u
     let start = range.start.min(range.end).min(len);
     let end = range.start.max(range.end).min(len);
     let expected: String = text.chars().skip(start).take(end - start).collect();
+    assert_eq!(tree.extract_range(range.clone()), expected);
     let mut actual = String::new();
     let mut offset = start;
     for limit in [0, 1, 2, expected.chars().count(), len + 1] {

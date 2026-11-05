@@ -12,7 +12,7 @@ use tab_build::workspace_tab_from_restored_buffers;
 #[cfg(test)]
 mod tests;
 
-/// An owned, coherent database read. Reconstruction never performs database I/O.
+/// Reconstructs tabs from a coherent database read without further database I/O.
 pub(super) struct Restorer;
 type StartupTab = (usize, WorkspaceTab, Option<SessionTabParts>, RestoreSummary);
 
