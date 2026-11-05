@@ -74,9 +74,22 @@ impl SessionPersistRequest {
         if !remaining.close_view(view) {
             return false;
         }
-        self.tabs[index] = CapturedSessionTab::capture(&remaining);
+        let cold = self.tabs[index]
+            .preserve_existing
+            .then(|| self.tabs[index].session_tab.clone().into_parts());
+        self.tabs[index] = if let Some(mut cold) = cold.clone() {
+            cold.retain_workspace_layout(&remaining);
+            CapturedSessionTab::capture_cold(cold)
+        } else {
+            CapturedSessionTab::capture(&remaining)
+        };
         if let Some(buffer) = removed {
-            self.add_close(CapturedClosedTab::capture(&WorkspaceTab::new(buffer), None));
+            let closed = WorkspaceTab::new(buffer);
+            let cold = cold.map(|mut cold| {
+                cold.retain_workspace_layout(&closed);
+                cold
+            });
+            self.add_close(CapturedClosedTab::capture(&closed, cold.as_ref()));
         }
         true
     }

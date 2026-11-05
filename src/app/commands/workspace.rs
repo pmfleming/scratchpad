@@ -174,6 +174,10 @@ pub(crate) fn perform_close_view(app: &mut ScratchpadApp, view_id: ViewId) {
         next_active_view = Some(tab.layout.active_view_id());
     }
     if let Some(next_active_view) = next_active_view {
+        if let Some(mut cold) = app.tab_manager.take_cold_session_tab(index) {
+            cold.retain_workspace_layout(&app.tab_manager.tabs.as_slice()[index]);
+            app.tab_manager.set_cold_session_tab(index, cold);
+        }
         let open_buffer_ids_after = app
             .tab_manager
             .tabs

@@ -362,3 +362,43 @@ fn retryable_session_save_failure_keeps_window_open_and_does_not_loop() {
     let _ = logic(&mut app, &ctx, &close_input());
     assert!(app.state.window.close_in_progress);
 }
+
+#[test]
+fn closing_cold_split_retains_both_documents_and_remaining_layout() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = crate::app::app_state::test_support::test_app(root.path());
+    let mut tab = WorkspaceTab::new(BufferState::new(
+        "first".into(),
+        "first unsaved".into(),
+        None,
+    ));
+    let view = tab
+        .open_buffer_as_split(
+            BufferState::new("second".into(), "second unsaved".into(), None),
+            crate::app::domain::SplitAxis::Vertical,
+            true,
+            0.5,
+        )
+        .unwrap();
+    let cold = super::super::cold_tab_from_workspace_tab(&tab);
+    let store = app.state.persistence.session_store.clone();
+    store.persist(&[tab], 0, 14.0, false).unwrap();
+    let shell = super::super::Restorer::cold_tab_shell(&cold);
+    app.tab_manager.set_tabs(vec![shell], 0);
+    app.tab_manager.set_cold_session_tab(0, cold);
+    crate::app::commands::perform_close_view(&mut app, view);
+    assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 1);
+    session_manager::persist_session_now(&mut app).unwrap();
+    let restored = store.load().unwrap().unwrap();
+    assert_eq!(restored.tabs[0].active_buffer().text(), "first unsaved");
+    assert_eq!(restored.tabs[0].layout.leaf_count(), 1);
+    let archive = store.closed_tabs().unwrap().remove(0);
+    assert_eq!(
+        store
+            .restore_closed_tab(&archive.token)
+            .unwrap()
+            .active_buffer()
+            .text(),
+        "second unsaved"
+    );
+}

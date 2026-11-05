@@ -96,6 +96,15 @@ impl From<SessionTabParts> for SessionTab {
 }
 
 impl SessionTabParts {
+    /// Keep unloaded document metadata while updating the workspace layout.
+    pub(crate) fn retain_workspace_layout(&mut self, tab: &crate::app::domain::WorkspaceTab) {
+        self.buffers
+            .retain(|buffer| tab.buffer_by_id(buffer.id).is_some());
+        self.shell.active_view_id = tab.layout.active_view_id();
+        self.shell.views = tab.layout.views().iter().map(SessionView::from).collect();
+        self.shell.root_pane = SessionPaneNode::from(tab.layout.root_pane());
+    }
+
     pub(crate) fn buffer_ids(&self) -> impl Iterator<Item = u64> + '_ {
         self.buffers.iter().map(|buffer| buffer.id)
     }
