@@ -52,7 +52,7 @@ impl Prepared {
         let mut position = 0;
         let mut removed_before_active = 0;
         request.tabs.retain(|tab| {
-            let keep = !tab.session_tab.buffers.is_empty();
+            let keep = !tab.loading_preview_only;
             if !keep && position < active {
                 removed_before_active += 1;
             }

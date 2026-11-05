@@ -37,6 +37,7 @@ pub(crate) struct CapturedClosedTab {
 
 #[derive(Clone)]
 pub(super) struct CapturedSessionTab {
+    pub(super) loading_preview_only: bool,
     pub(super) session_tab: SessionTab,
     pub(super) buffer_snapshots: Vec<CapturedSessionBuffer>,
     pub(super) preserve_existing: bool,
@@ -271,6 +272,7 @@ pub(crate) fn cold_tab_from_workspace_tab(tab: &WorkspaceTab) -> ColdSessionTab 
 impl CapturedSessionTab {
     fn capture_cold(session_tab: ColdSessionTab) -> Self {
         Self {
+            loading_preview_only: false,
             session_tab: SessionTab::from(session_tab),
             buffer_snapshots: Vec::new(),
             preserve_existing: true,
@@ -312,6 +314,7 @@ impl CapturedSessionTab {
             .or(views.first())
             .map_or(tab.layout.active_view_id(), |view| view.id);
         Self {
+            loading_preview_only: tab.buffers().all(|buffer| buffer.is_loading_preview),
             session_tab: SessionTab {
                 buffers,
                 active_view_id,
