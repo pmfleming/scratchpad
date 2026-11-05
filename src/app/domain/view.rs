@@ -592,7 +592,7 @@ pub fn next_view_id() -> ViewId {
     NEXT_VIEW_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-fn register_existing_view_id(id: ViewId) {
+pub(crate) fn register_existing_view_id(id: ViewId) {
     let next_id = id.saturating_add(1);
     let mut current = NEXT_VIEW_ID.load(Ordering::Relaxed);
 

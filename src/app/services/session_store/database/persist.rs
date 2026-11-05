@@ -17,6 +17,8 @@ struct RecoveryBuffer {
     name: String,
     path: Option<String>,
     path_key: Option<String>,
+    observed_digest: Option<String>,
+    observed_missing: bool,
     required: bool,
     // None means cold or quarantined: preserve the committed history.
     history: Option<HistoryRows>,
@@ -133,6 +135,8 @@ impl Prepared {
                         .as_str()
                         .to_owned()
                 }),
+                observed_digest: buffer.observed_disk_digest.clone(),
+                observed_missing: buffer.observed_disk_missing,
                 required,
                 history_fingerprints: history
                     .as_ref()
@@ -397,9 +401,9 @@ impl Database {
         for (id, buffer) in &prepared.buffers {
             if self.document_cache.get(id) != Some(&buffer.metadata) {
                 let sql = if inventory.buffers.contains(id) {
-                    "UPDATE documents SET name=?2,path=?3,path_key=?4,payload=?5 WHERE id=?1"
+                    "UPDATE documents SET name=?2,path=?3,path_key=?4,payload=?5,observed_digest=?6,observed_missing=?7 WHERE id=?1"
                 } else {
-                    "INSERT INTO documents(id,name,path,path_key,payload) VALUES(?1,?2,?3,?4,?5)"
+                    "INSERT INTO documents(id,name,path,path_key,payload,observed_digest,observed_missing) VALUES(?1,?2,?3,?4,?5,?6,?7)"
                 };
                 self.execute_cached(
                     sql,
@@ -408,7 +412,9 @@ impl Database {
                         buffer.name.as_str(),
                         buffer.path.clone(),
                         buffer.path_key.clone(),
-                        buffer.metadata.as_slice()
+                        buffer.metadata.as_slice(),
+                        buffer.observed_digest.clone(),
+                        i64::from(buffer.observed_missing)
                     ],
                 )
                 .await?;
@@ -417,6 +423,12 @@ impl Database {
                 (&buffer.history, &buffer.history_fingerprints)
             {
                 self.write_history(id, entries, fingerprints).await?;
+            } else if !inventory.buffers.contains(id) {
+                self.execute_cached(
+                    "INSERT INTO document_history VALUES(?,0,0,0,0)",
+                    [id.as_str()],
+                )
+                .await?;
             }
         }
         Ok(())

@@ -43,26 +43,28 @@ fn ordinary_open_restores_archived_unsaved_text_and_undo_history() {
 }
 
 #[test]
-fn startup_external_changes_keep_historical_undo_separate_without_a_prompt() {
-    use crate::app::{domain::BufferFreshness, services::file_service::FileService};
-    for (missing, open_disk) in [(false, true), (false, false), (true, true)] {
+fn startup_external_changes_keep_one_document_and_dirty_conflicts_keep_the_path() {
+    use crate::app::{
+        domain::{BufferFreshness, buffer::PieceSource},
+        services::file_service::FileService,
+    };
+    for (missing, dirty) in [(false, false), (false, true), (true, true)] {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("note.txt");
         std::fs::write(&path, "saved edit").unwrap();
         let mut app = test_app(root.path());
-        let mut policy = app.state.app_settings.history.recovery.clone();
-        policy.open_changed_disk_files = open_disk;
-        crate::app::app_state::settings_controller::set_recovery_settings(&mut app, policy);
         let mut buffer = BufferState::new("note.txt".into(), "original".into(), Some(path.clone()));
         buffer
             .document_mut()
-            .replace_char_ranges_with_undo(
-                &[(0..8, "saved edit".into())],
-                CursorRange::default(),
-                CursorRange::default(),
-            )
-            .unwrap();
+            .replace_exact_with_history("saved edit");
         buffer.sync_to_disk_state(Some(FileService::read_disk_state(&path).unwrap()));
+        if dirty {
+            buffer
+                .document_mut()
+                .replace_exact_with_history("unsaved local");
+            buffer.is_dirty = true;
+        }
+        let id = buffer.temp_id.clone();
         app.tab_manager.set_tabs(vec![WorkspaceTab::new(buffer)], 0);
         session_manager::persist_session_now(&mut app).unwrap();
         drop(app);
@@ -74,29 +76,27 @@ fn startup_external_changes_keep_historical_undo_separate_without_a_prompt() {
         let mut app = test_app(root.path());
         crate::app::app_state::test_support::wait_for_background_io(&mut app);
         assert!(!app.state.dialogs.any_modal_open());
-        let buffers: Vec<_> = app
-            .tab_manager
-            .tabs
-            .as_slice()
-            .iter()
-            .flat_map(WorkspaceTab::buffers)
-            .collect();
-        let disk = buffers
-            .iter()
-            .find(|buffer| buffer.path.as_ref() == Some(&path));
-        assert_eq!(disk.is_some(), !missing && open_disk);
-        if let Some(disk) = disk {
-            assert_eq!(disk.text(), "external");
-            assert_eq!(disk.document().history_entries().len(), 1);
+        assert_eq!(app.tab_manager.tabs.len(), 1);
+        let buffer = app.tab_manager.active_tab().unwrap().active_buffer();
+        assert_eq!(buffer.temp_id, id);
+        if missing {
+            assert!(buffer.path.is_none());
+            assert_eq!(buffer.text(), "unsaved local");
+        } else if dirty {
+            assert_eq!(buffer.path.as_ref(), Some(&path));
+            assert_eq!(buffer.text(), "unsaved local");
+            assert_eq!(buffer.freshness, BufferFreshness::ConflictOnDisk);
+        } else {
+            assert_eq!(buffer.path.as_ref(), Some(&path));
+            assert_eq!(buffer.text(), "external");
+            assert_eq!(
+                buffer.document().history_entries().last().unwrap().source,
+                PieceSource::External
+            );
+            let mut document = buffer.document().clone();
+            document.undo_last_operation().unwrap();
+            assert_eq!(document.extract_text(), "saved edit");
         }
-        let recovered = buffers.iter().find(|buffer| buffer.path.is_none()).unwrap();
-        assert_eq!(recovered.text(), "saved edit");
-        assert_eq!(recovered.document().operation_undo_depth(), 2);
-        assert_eq!(recovered.freshness, BufferFreshness::InSync);
-        assert!(recovered.disk_state.is_none());
-        assert!(recovered.disk_content_digest.is_none());
-        assert!(!recovered.is_settings_file);
-        assert_eq!(path.exists(), !missing);
         if !missing {
             assert_eq!(std::fs::read_to_string(&path).unwrap(), "external");
         }
@@ -144,8 +144,8 @@ fn retained_workspace_reopens_with_undo_and_recovers_versions_without_overwritin
     let index = app.tab_manager.active_tab_index;
     let reopened = app.tab_manager.active_tab().unwrap().active_buffer();
     assert_eq!(reopened.temp_id, id);
-    assert_eq!(reopened.text(), "before after");
-    assert!(reopened.is_dirty);
+    assert_eq!(reopened.text(), "external change");
+    assert!(!reopened.is_dirty);
     assert!(store.closed_tabs().unwrap().is_empty());
     let count = app.tab_manager.tabs.len();
     workspace_controller::reopen_archived_tab(&mut app, token);
@@ -156,6 +156,8 @@ fn retained_workspace_reopens_with_undo_and_recovers_versions_without_overwritin
     );
 
     let original = app.tab_manager.tabs.as_mut_slice()[index].active_buffer_mut();
+    assert_eq!(original.text(), "external change");
+    original.document_mut().undo_last_operation().unwrap();
     assert_eq!(original.text(), "before after");
     original.document_mut().undo_last_operation().unwrap();
     assert_eq!(original.text(), "before");

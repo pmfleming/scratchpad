@@ -6,10 +6,8 @@ use std::path::{Path, PathBuf};
 
 mod model;
 mod recently_closed;
-mod recovery;
 mod shortcut_reference;
 pub use recently_closed::RecentlyClosedFile;
-pub use recovery::RecoverySettings;
 
 pub use model::{
     AppSettings, AppThemeMode, DEFAULT_AUTO_HIDE_TAB_LIST, DEFAULT_EDITOR_BACKGROUND_COLOR,

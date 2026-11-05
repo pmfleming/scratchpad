@@ -3,6 +3,7 @@ use crate::app::{
     domain::{BufferState, WorkspaceTab},
     services::session_store::{CapturedClosedTab, SessionPersistRequest},
 };
+use std::path::PathBuf;
 
 fn archived(dirty: bool) -> (tempfile::TempDir, SessionStore, PathBuf, String) {
     let root = tempfile::tempdir().unwrap();
@@ -34,8 +35,7 @@ fn archived(dirty: bool) -> (tempfile::TempDir, SessionStore, PathBuf, String) {
 fn unchanged_disk_restores_unsaved_text_and_undo() {
     let (_root, store, path, token) = archived(true);
     let reopened = store.reopen_archive(&token).unwrap();
-    assert!(reopened.disk_paths.is_empty());
-    let mut tab = reopened.tab.unwrap();
+    let mut tab = reopened;
     assert_eq!(tab.active_buffer().text(), "unsaved");
     assert_eq!(tab.active_buffer().path.as_ref(), Some(&path));
     tab.active_buffer_mut()
@@ -47,15 +47,28 @@ fn unchanged_disk_restores_unsaved_text_and_undo() {
 }
 
 #[test]
-fn external_change_preserves_both_without_attaching_old_undo() {
+fn external_change_preserves_unsaved_text_as_the_preceding_state() {
     let (_root, store, path, token) = archived(true);
     // Same length: metadata-only comparison would not be sufficient.
     std::fs::write(&path, "external").unwrap();
     let reopened = store.reopen_archive(&token).unwrap();
-    assert_eq!(reopened.disk_paths, vec![path.clone()]);
-    let tab = reopened.tab.unwrap();
+    let mut tab = reopened;
+    assert_eq!(tab.active_buffer().text(), "external");
+    assert_eq!(tab.active_buffer().path.as_ref(), Some(&path));
+    assert_eq!(
+        tab.active_buffer()
+            .document()
+            .history_entries()
+            .last()
+            .unwrap()
+            .source,
+        crate::app::domain::buffer::PieceSource::External
+    );
+    tab.active_buffer_mut()
+        .document_mut()
+        .undo_last_operation()
+        .unwrap();
     assert_eq!(tab.active_buffer().text(), "unsaved");
-    assert!(tab.active_buffer().path.is_none());
     assert_eq!(std::fs::read_to_string(path).unwrap(), "external");
     assert_eq!(
         store.closed_tabs().unwrap().len(),
@@ -65,7 +78,7 @@ fn external_change_preserves_both_without_attaching_old_undo() {
 }
 
 #[test]
-fn changed_clean_buffer_in_a_mixed_split_uses_disk_and_forks_the_entire_archive() {
+fn reopened_split_keeps_identities_and_retains_changed_files_previous_states() {
     use crate::app::domain::{CursorRange, SplitAxis};
     for missing_other in [false, true] {
         let root = tempfile::tempdir().unwrap();
@@ -107,15 +120,11 @@ fn changed_clean_buffer_in_a_mixed_split_uses_disk_and_forks_the_entire_archive(
             std::fs::remove_file(&other_path).unwrap();
         }
         let reopened = store.reopen_archive(&token).unwrap();
-        assert!(
-            reopened.disk_paths.is_empty(),
-            "disk file is already in the restored split"
-        );
-        let tab = reopened.tab.unwrap();
+        let tab = reopened;
         assert_eq!(tab.layout.views().len(), 2);
         assert!(
             tab.buffers()
-                .all(|buffer| !original_ids.contains(&buffer.temp_id))
+                .all(|buffer| original_ids.contains(&buffer.temp_id))
         );
         let clean = tab
             .buffers()
@@ -141,29 +150,103 @@ fn changed_clean_buffer_in_a_mixed_split_uses_disk_and_forks_the_entire_archive(
             assert_eq!(other.document().operation_undo_depth(), 2);
         }
         store.persist(&[tab], 0, 14.0, false).unwrap();
-        assert_eq!(store.closed_tabs().unwrap()[0].token, token);
-        let archived = store.restore_closed_tab(&token).unwrap();
-        assert_eq!(
-            archived
-                .buffers()
-                .find(|buffer| buffer.name == "clean.txt")
-                .unwrap()
-                .text(),
-            "original clean"
-        );
+        assert!(store.closed_tabs().unwrap().is_empty());
     }
 }
 
 #[test]
-fn clean_external_change_keeps_archive_and_missing_file_recovers_untitled() {
+fn clean_external_change_keeps_identity_and_missing_file_recovers_untitled() {
     let (_root, store, path, token) = archived(false);
     std::fs::write(&path, "external").unwrap();
     let reopened = store.reopen_archive(&token).unwrap();
-    assert!(reopened.tab.is_none());
-    assert_eq!(reopened.disk_paths, vec![path.clone()]);
+    assert_eq!(reopened.active_buffer().text(), "external");
+    assert_eq!(reopened.active_buffer().path.as_ref(), Some(&path));
     assert_eq!(store.closed_tabs().unwrap().len(), 1);
     std::fs::remove_file(path).unwrap();
-    let tab = store.reopen_archive(&token).unwrap().tab.unwrap();
+    let tab = store.reopen_archive(&token).unwrap();
     assert!(tab.active_buffer().path.is_none());
     assert_eq!(tab.active_buffer().text(), "original");
+}
+
+#[test]
+fn previously_observed_conflict_is_not_loaded_again_on_reopen() {
+    let (_root, store, path, token) = archived(true);
+    let live = store.reopen_archive(&token).unwrap();
+    let id = live.active_buffer().temp_id.clone();
+    store.persist(&[live], 0, 14.0, false).unwrap();
+    std::fs::write(&path, "conflict version").unwrap();
+    let restored = store.load().unwrap().unwrap();
+    let buffer = restored.tabs[0].active_buffer();
+    assert_eq!(buffer.text(), "unsaved");
+    assert_eq!(
+        buffer.freshness,
+        crate::app::domain::BufferFreshness::ConflictOnDisk
+    );
+    assert!(buffer.pending_disk_observation);
+    let closed = CapturedClosedTab::capture(&restored.tabs[0], None);
+    let token = closed.token.clone();
+    let mut save = SessionPersistRequest::capture(&[], 0, 14.0, false);
+    save.closed_tabs.push(closed);
+    store.persist_request(save).unwrap();
+    let reopened = store.reopen_archive(&token).unwrap();
+    assert_eq!(reopened.active_buffer().temp_id, id);
+    assert_eq!(reopened.active_buffer().text(), "unsaved");
+    assert!(reopened.active_buffer().is_dirty);
+    // Returning to an older disk version is still an external edit relative to
+    // the most recently observed version, even when it matches the saved baseline.
+    std::fs::write(&path, "original").unwrap();
+    let reopened = store.reopen_archive(&token).unwrap();
+    assert_eq!(reopened.active_buffer().text(), "original");
+    assert_eq!(
+        reopened
+            .active_buffer()
+            .document()
+            .history_entries()
+            .last()
+            .unwrap()
+            .source,
+        crate::app::domain::buffer::PieceSource::External
+    );
+}
+
+#[test]
+fn path_claimed_by_a_live_document_recovers_without_an_external_edit() {
+    let (_root, store, path, token) = archived(true);
+    std::fs::write(&path, "external").unwrap();
+    let reopened = store
+        .reopen_archive_with_claimed(&token, &[CanonicalPathKey::from_path(&path)])
+        .unwrap();
+    let buffer = reopened.active_buffer();
+    assert!(buffer.path.is_none());
+    assert_eq!(buffer.text(), "unsaved");
+    assert!(
+        !buffer
+            .document()
+            .history_entries()
+            .iter()
+            .any(|e| e.source == crate::app::domain::buffer::PieceSource::External)
+    );
+}
+
+#[test]
+fn cold_reopen_preserves_identity_and_applies_disk_changes_when_hydrated() {
+    let (_root, store, path, token) = archived(true);
+    let id = store
+        .reopen_archive(&token)
+        .unwrap()
+        .active_buffer()
+        .temp_id
+        .clone();
+    let (shell, cold) = store.cold_tab_for_path(&path).unwrap().unwrap();
+    assert_eq!(shell.active_buffer().temp_id, id);
+    assert_eq!(shell.active_buffer().text(), "");
+    std::fs::write(&path, "new disk version").unwrap();
+    let (mut tab, _) = store.restore_cold_session_tab(cold).unwrap();
+    assert_eq!(tab.active_buffer().temp_id, id);
+    assert_eq!(tab.active_buffer().text(), "new disk version");
+    tab.active_buffer_mut()
+        .document_mut()
+        .undo_last_operation()
+        .unwrap();
+    assert_eq!(tab.active_buffer().text(), "unsaved");
 }

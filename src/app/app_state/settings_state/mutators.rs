@@ -248,19 +248,6 @@ pub(crate) fn set_history_budget(app: &mut ScratchpadApp, budget: TextHistoryBud
     apply_setting_effects(app, changed, SettingEffects::HISTORY_BUDGET);
 }
 
-pub(crate) fn set_recovery_settings(
-    app: &mut ScratchpadApp,
-    settings: crate::app::services::settings_store::RecoverySettings,
-) {
-    let settings = settings.sanitized();
-    let changed = app.state.app_settings.history.recovery != settings;
-    app.state.app_settings.history.recovery = settings;
-    if changed {
-        app.tab_manager.mark_session_dirty();
-    }
-    apply_setting_effects(app, changed, SettingEffects::HISTORY_BUDGET);
-}
-
 pub(crate) fn set_tab_list_width_from_layout(app: &mut ScratchpadApp, width: f32) {
     let next = width.clamp(
         ScratchpadApp::VERTICAL_TAB_LIST_MIN_WIDTH,

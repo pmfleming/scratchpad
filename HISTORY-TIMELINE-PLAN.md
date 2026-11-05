@@ -4,7 +4,12 @@ Status: implementation in progress. Stage 1 is complete: fresh schema 11/session
 version 9, document-owned metadata, reference-only workspace layouts, independent
 retention, and transactional final split-view closes. Validation: 614 library tests
 passed (6 manual/profile tests ignored), all-feature library Clippy passed, and
-formatting passed. Stages 2–6 remain.
+formatting passed. Stage 2 is complete: retained path lookup, identity-preserving
+reopen/startup reconciliation, a distinct external edit source, separate saved and
+observed disk versions, background retained-path/cold-shell loading, and removal
+of recovery identity forking and both recovery policy settings. Validation: 617
+library tests passed (6 ignored), all-feature library Clippy and formatting passed.
+Stages 3–6 remain.
 
 Replace History's **All files** view with **Timeline**, showing recorded text
 changes, file opens, file closes, and external changes discovered by Scratchpad.

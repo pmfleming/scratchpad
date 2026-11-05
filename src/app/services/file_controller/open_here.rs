@@ -34,21 +34,6 @@ impl FileController {
             .as_slice()
             .get(app.tab_manager.active_tab_index)
             .map(|tab| tab.layout.active_view_id());
-        // Archived workspaces reopen with their original layout rather than
-        // being flattened into the current split. Remaining disk-only paths
-        // still use the user's Open Here target.
-        let paths = paths
-            .into_iter()
-            .filter(|path| {
-                Self::find_existing_open_here_path(app, path).is_some()
-                    || !crate::app::app_state::workspace::lifecycle::try_reopen_archived_path(
-                        app, path,
-                    )
-            })
-            .collect::<Vec<_>>();
-        if paths.is_empty() {
-            return;
-        }
         if let Some(anchor) = anchor_view_id
             && let Some(index) = app
                 .tab_manager
@@ -140,6 +125,17 @@ impl FileController {
                 continue;
             }
 
+            if let Some(tab) = loaded.retained_tab {
+                let opened = crate::app::app_state::workspace::lifecycle::install_archive(app, tab);
+                outcomes.push(if opened {
+                    OpenHerePathOutcome::Opened {
+                        artifact_warning: None,
+                    }
+                } else {
+                    OpenHerePathOutcome::AlreadyInCurrentTab
+                });
+                continue;
+            }
             match loaded.result {
                 Ok(buffer) => {
                     let mut loaded_file = LoadedFile::from_buffer(buffer);
@@ -431,11 +427,13 @@ mod tests {
             Some(anchor_view_id),
             vec![
                 LoadedPathResult {
+                    retained_tab: None,
                     path: one.clone(),
                     disk_state: FileService::read_disk_state(&one).ok(),
                     result: Ok(disk_buffer(&one, "one")),
                 },
                 LoadedPathResult {
+                    retained_tab: None,
                     path: two.clone(),
                     disk_state: FileService::read_disk_state(&two).ok(),
                     result: Ok(disk_buffer(&two, "two")),

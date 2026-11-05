@@ -17,7 +17,6 @@ fn highlighting_requires_a_selective_query_and_matches_labels_and_aliases() {
         ("FONT size", "Size"),
         ("gutter", "Editor padding"),
         ("memory per file", "Memory per file"),
-        ("restore history", "Restore history when reopening files"),
         ("colour background", "Background"),
         ("OS", "Use appearance from"),
     ] {

@@ -57,6 +57,7 @@ pub(crate) struct SessionTabShell {
 pub(crate) struct SessionTabParts {
     pub shell: SessionTabShell,
     pub buffers: Vec<SessionBuffer>,
+    pub reopened: bool,
 }
 
 impl SessionTab {
@@ -72,6 +73,7 @@ impl SessionTab {
             root_pane,
         } = self;
         SessionTabParts {
+            reopened: false,
             shell: SessionTabShell {
                 active_view_id,
                 views,
@@ -122,6 +124,10 @@ pub(crate) struct SessionBuffer {
     pub disk_len: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_content_digest: Option<String>,
+    pub observed_disk_digest: Option<String>,
+    pub observed_disk_missing: bool,
+    #[serde(skip)]
+    pub pending_disk_observation: bool,
     // Capture/hydration transport (and explicit recovery export) only. The DB
     // writer drains this into history rows before serializing tab metadata.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -161,6 +167,9 @@ impl SessionBuffer {
                 .and_then(|state| state.modified_millis),
             disk_len: buffer.disk_state.as_ref().map(|state| state.len),
             disk_content_digest: buffer.disk_content_digest.clone(),
+            observed_disk_digest: buffer.observed_disk_digest.clone(),
+            observed_disk_missing: buffer.observed_disk_missing,
+            pending_disk_observation: false,
             text_history: Vec::new(),
             history_document: None,
             history_capture: Some(buffer.document().history_snapshot()),

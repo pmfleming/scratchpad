@@ -132,6 +132,12 @@ impl Database {
             .integer("SELECT max(value) FROM (SELECT coalesce(max(global_seq),0) AS value FROM history UNION ALL SELECT coalesce(max(global_seq),0) FROM activity)")
             .await?;
         crate::app::domain::buffer::register_text_history_global_seq(maximum as u64);
+        // Closed documents/layouts may outlive every restored tab. Reserve their
+        // runtime IDs before New or split can allocate IDs used by a later reopen.
+        let buffer_maximum = db.integer("SELECT coalesce(max(CASE WHEN json_valid(CAST(payload AS TEXT)) THEN json_extract(CAST(payload AS TEXT),'$.id') ELSE 0 END),0) FROM documents").await?;
+        crate::app::domain::buffer::register_existing_buffer_id(buffer_maximum as u64);
+        let view_maximum = db.integer("SELECT coalesce(max(json_extract(v.value,'$.id')),0) FROM (SELECT payload FROM tabs UNION ALL SELECT payload FROM closed_tabs) w, json_each(CASE WHEN json_valid(CAST(w.payload AS TEXT)) THEN CAST(w.payload AS TEXT) ELSE '{}' END,'$.views') v").await?;
+        crate::app::domain::view::register_existing_view_id(view_maximum as u64);
         Ok(db)
     }
     async fn connect(root: &Path, ownership: File) -> io::Result<Self> {

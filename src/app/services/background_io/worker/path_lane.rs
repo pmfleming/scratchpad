@@ -34,12 +34,27 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
                     })
                 }
             }
-            BackgroundIoRequest::BuildColdFileShells { request_id, paths } => {
-                LaneOutcome::result(BackgroundIoResult::ColdFileShellsBuilt {
-                    request_id,
-                    shells: paths.into_iter().map(build_cold_file_shell).collect(),
-                })
-            }
+            BackgroundIoRequest::BuildColdFileShells {
+                request_id,
+                paths,
+                session_store,
+            } => LaneOutcome::result(BackgroundIoResult::ColdFileShellsBuilt {
+                request_id,
+                shells: paths
+                    .into_iter()
+                    .map(|path| match session_store.cold_tab_for_path(&path) {
+                        Ok(Some(result)) => ColdFileShellResult {
+                            path,
+                            result: Ok(result),
+                        },
+                        Ok(None) => build_cold_file_shell(path),
+                        Err(error) => ColdFileShellResult {
+                            path,
+                            result: Err(error.to_string()),
+                        },
+                    })
+                    .collect(),
+            }),
             BackgroundIoRequest::SavePath {
                 request_id,
                 path,
@@ -155,6 +170,25 @@ fn load_paths(requests: Vec<PathLoadRequest>) -> Vec<LoadedPathResult> {
 
 fn load_one(request: PathLoadRequest) -> LoadedPathResult {
     match request {
+        PathLoadRequest::Retained {
+            path,
+            session_store,
+            claimed,
+        } => match session_store.reopen_path_with_claimed(&path, &claimed) {
+            Ok(Some(tab)) => LoadedPathResult {
+                path,
+                disk_state: tab.active_buffer().disk_state.clone(),
+                result: Ok(tab.active_buffer().clone()),
+                retained_tab: Some(tab),
+            },
+            Ok(None) => load_path_result(path, FileService::read_file),
+            Err(error) => LoadedPathResult {
+                path,
+                disk_state: None,
+                result: Err(error.to_string()),
+                retained_tab: None,
+            },
+        },
         PathLoadRequest::Standard(path) => load_path_result(path, FileService::read_file),
         PathLoadRequest::WithEncoding {
             path,
@@ -190,6 +224,7 @@ fn load_path_result(
         })
         .map_err(|error| error.to_string());
     LoadedPathResult {
+        retained_tab: None,
         path,
         disk_state,
         result,

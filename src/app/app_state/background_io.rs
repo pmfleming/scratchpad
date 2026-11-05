@@ -380,7 +380,9 @@ impl ScratchpadApp {
         };
         let Some(current_tab_index) = self.find_cold_session_tab_index(&action.expected_buffer_ids)
         else {
-            self.queue_next_progressive_session_hydration();
+            if action.progressive {
+                self.queue_next_progressive_session_hydration();
+            }
             return;
         };
 
@@ -395,7 +397,9 @@ impl ScratchpadApp {
             workspace_restore_conflict::refresh_startup_restore_conflicts(self);
             crate::app::app_state::search_runtime::mark_search_dirty(self);
         }
-        self.queue_next_progressive_session_hydration();
+        if action.progressive {
+            self.queue_next_progressive_session_hydration();
+        }
     }
 
     fn apply_session_persisted_result(&mut self, request_id: u64, result: Result<(), String>) {

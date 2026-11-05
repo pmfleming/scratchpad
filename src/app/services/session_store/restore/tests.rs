@@ -21,15 +21,7 @@ fn disk_reconciliation_preserves_dirty_edits_but_reloads_clean_files() {
             true,
             ConflictOnDisk,
         ),
-        (
-            "session",
-            Some("disk"),
-            false,
-            false,
-            "session",
-            true,
-            ConflictOnDisk,
-        ),
+        ("session", Some("disk"), false, false, "disk", false, InSync),
         ("session", None, true, false, "session", true, MissingOnDisk),
     ] {
         let root = tempfile::tempdir().unwrap();

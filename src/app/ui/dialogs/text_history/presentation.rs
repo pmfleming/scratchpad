@@ -70,6 +70,8 @@ pub(super) fn change(ui: &egui::Ui, buffer: &BufferState, id: u64) -> Change {
         (icons::SCISSORS, theme::diff_del(ui))
     } else if entry.source == PieceSource::SearchReplace {
         (icons::MAGNIFYING_GLASS, theme::tab_selected_accent(ui))
+    } else if entry.source == PieceSource::External {
+        (icons::ARROWS_CLOCKWISE, theme::tab_selected_accent(ui))
     } else if entry.edits.len() == 1 && entry.edits[0].deleted_spans().is_empty() {
         (icons::PLUS, theme::diff_add(ui))
     } else if entry.edits.len() == 1 && entry.edits[0].inserted_span().is_none() {
@@ -82,7 +84,8 @@ pub(super) fn change(ui: &egui::Ui, buffer: &BufferState, id: u64) -> Change {
     // A short, single payload can be classified without reconstructing a document
     // or allocating a potentially large paste/deletion. Larger/mixed edits retain
     // their existing summary rather than claiming a misleading whitespace token.
-    if entry.edits.len() == 1 && entry.source != PieceSource::Load {
+    if entry.edits.len() == 1 && !matches!(entry.source, PieceSource::Load | PieceSource::External)
+    {
         let edit = &entry.edits[0];
         let mut spans = edit.spans();
         if let Some(span) = spans.next()

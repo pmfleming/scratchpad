@@ -8,6 +8,7 @@ pub use persistent_vector::PersistentVector;
 pub(crate) use piece_tree::text_cache;
 mod snapshot;
 mod state;
+pub(crate) use state::register_existing_buffer_id;
 
 pub(crate) use analysis::display_line_count_from_piece_tree;
 pub(crate) use analysis::{

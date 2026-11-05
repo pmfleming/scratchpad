@@ -46,6 +46,7 @@ fn pending_loads_only_replace_the_requested_unchanged_buffer() {
                 fixture.app.tab_manager.set_tabs(Vec::new(), 0);
             }
             let result = || LoadedPathResult {
+                retained_tab: None,
                 path: if case == "wrong-path" {
                     fixture.path.with_extension("wrong")
                 } else {

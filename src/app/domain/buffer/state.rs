@@ -45,6 +45,10 @@ pub struct BufferState {
     pub disk_state: Option<DiskFileState>,
     /// Digest of decoded text at the last successful disk synchronization.
     pub disk_content_digest: Option<String>,
+    /// Last disk version actually read; differs from the saved baseline during a conflict.
+    pub(crate) observed_disk_digest: Option<String>,
+    pub(crate) observed_disk_missing: bool,
+    pub(crate) pending_disk_observation: bool,
     pub freshness: BufferFreshness,
     pub active_selection: Option<Range<usize>>,
     pub has_non_compliant_characters: bool,
@@ -319,13 +323,30 @@ impl BufferState {
     }
 
     pub fn replace_from_loaded_buffer(&mut self, loaded: BufferState) {
+        let source = if self
+            .disk_content_digest
+            .as_ref()
+            .is_some_and(|digest| *digest != loaded.document.content_digest())
+        {
+            super::PieceSource::External
+        } else {
+            super::PieceSource::Load
+        };
+        self.replace_from_loaded_buffer_source(loaded, source);
+    }
+
+    pub(crate) fn replace_from_loaded_buffer_source(
+        &mut self,
+        loaded: BufferState,
+        source: super::PieceSource,
+    ) {
         let id = self.id;
         let temp_id = self.temp_id.clone();
         let history = if self.is_loading_preview {
             None
         } else {
             self.document
-                .replace_exact_with_history(&loaded.document.extract_text());
+                .replace_exact_with_history_source(&loaded.document.extract_text(), source);
             Some(self.document.clone())
         };
         *self = loaded;
@@ -347,11 +368,6 @@ impl BufferState {
         self.is_settings_file = false;
         self.is_dirty = true;
         self.name = format!("{} ({label})", self.name);
-    }
-
-    /// Fork a restored workspace without consuming its historical archive.
-    pub(crate) fn fork_recovery_identity(&mut self) {
-        self.temp_id = next_temp_id();
     }
 
     pub fn set_path(&mut self, path: Option<PathBuf>) {
@@ -475,6 +491,9 @@ impl BufferState {
             format: state.format,
             disk_state: state.disk_state,
             disk_content_digest: None,
+            observed_disk_digest: None,
+            observed_disk_missing: false,
+            pending_disk_observation: false,
             freshness: state.freshness,
             active_selection: None,
             has_non_compliant_characters: text_metadata.has_non_compliant_characters,
@@ -492,7 +511,7 @@ fn next_buffer_id() -> BufferId {
     NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-fn register_existing_buffer_id(id: BufferId) {
+pub(crate) fn register_existing_buffer_id(id: BufferId) {
     let next_id = id.saturating_add(1);
     let mut current = NEXT_BUFFER_ID.load(Ordering::Relaxed);
 

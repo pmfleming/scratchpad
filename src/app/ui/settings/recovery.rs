@@ -1,7 +1,4 @@
-use super::{
-    ScratchpadApp, egui,
-    widgets::{group_heading, toggle_select_row},
-};
+use super::{ScratchpadApp, egui, widgets::group_heading};
 use crate::app::services::session_store::StorageUsage;
 use std::time::Duration;
 
@@ -43,26 +40,6 @@ pub(super) fn render_recovery_category(ui: &mut egui::Ui, app: &mut ScratchpadAp
 }
 
 pub(super) fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    let mut policy = app.state.app_settings.history.recovery.clone();
-    toggle_select_row(
-        ui,
-        "Restore history when reopening files",
-        None,
-        "settings.recovery.reopen_archives",
-        policy.reopen_archives,
-        |value| policy.reopen_archives = value,
-    );
-    toggle_select_row(
-        ui,
-        "Also open changed disk files",
-        Some("Keep the disk version alongside recovered text."),
-        "settings.recovery.open_changed_files",
-        policy.open_changed_disk_files,
-        |value| policy.open_changed_disk_files = value,
-    );
-    if policy != app.state.app_settings.history.recovery {
-        crate::app::app_state::settings_controller::set_recovery_settings(app, policy);
-    }
     group_heading(ui, "History memory cache");
     super::sections::text_history_budget(ui, app);
     if ui.button("Use recommended").clicked() {

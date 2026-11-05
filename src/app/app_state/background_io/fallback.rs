@@ -33,6 +33,7 @@ impl BackgroundIoFallback for BackgroundIoRequest {
                 requests
                     .into_iter()
                     .map(|request| LoadedPathResult {
+                        retained_tab: None,
                         path: request.path().clone(),
                         disk_state: None,
                         result: Err("Background file loader unavailable.".to_owned()),

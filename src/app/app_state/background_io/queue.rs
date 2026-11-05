@@ -65,14 +65,40 @@ impl ScratchpadApp {
             return;
         }
 
+        let retained = !self.state.persistence.session_restore_failed
+            && matches!(
+                action,
+                PendingBackgroundAction::OpenTabs(_) | PendingBackgroundAction::OpenHere(_)
+            );
+        let claimed: Vec<_> = self
+            .tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .flat_map(|t| t.buffers())
+            .filter(|b| !b.is_loading_preview)
+            .filter_map(|b| b.path_key.clone())
+            .collect();
         let request_id = self.state.background_io.allocate_background_request_id();
         self.state
             .background_io
             .insert_pending_background_action(request_id, action);
-
         let request = BackgroundIoRequest::LoadPaths {
             request_id,
-            requests: paths.into_iter().map(PathLoadRequest::Standard).collect(),
+            requests: paths
+                .into_iter()
+                .map(|path| {
+                    if retained {
+                        PathLoadRequest::Retained {
+                            path,
+                            session_store: self.state.persistence.session_store.clone(),
+                            claimed: claimed.clone(),
+                        }
+                    } else {
+                        PathLoadRequest::Standard(path)
+                    }
+                })
+                .collect(),
             streaming,
         };
         self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
@@ -96,7 +122,11 @@ impl ScratchpadApp {
         self.state
             .background_io
             .insert_pending_background_action(request_id, action);
-        let request = BackgroundIoRequest::BuildColdFileShells { request_id, paths };
+        let request = BackgroundIoRequest::BuildColdFileShells {
+            request_id,
+            paths,
+            session_store: self.state.persistence.session_store.clone(),
+        };
         self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
             let shells = request.into_cold_file_shell_results().unwrap_or_default();
             app.apply_background_io_result(BackgroundIoResult::ColdFileShellsBuilt {
@@ -207,11 +237,21 @@ impl ScratchpadApp {
             return;
         };
 
+        self.queue_session_tab_hydration(tab_index, cold_session_tab, true);
+    }
+
+    pub(crate) fn queue_session_tab_hydration(
+        &mut self,
+        tab_index: usize,
+        cold_session_tab: crate::app::services::session_store::ColdSessionTab,
+        progressive: bool,
+    ) {
         let expected_buffer_ids = cold_session_tab_buffer_ids(&cold_session_tab);
         let request_id = self.state.background_io.allocate_background_request_id();
         self.state.background_io.insert_pending_background_action(
             request_id,
             PendingBackgroundAction::HydrateSessionTab(PendingSessionHydrationAction {
+                progressive,
                 expected_buffer_ids,
             }),
         );

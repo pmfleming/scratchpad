@@ -134,6 +134,7 @@ fn partial_open_tabs_result_keeps_action_until_terminal_result() {
     app.apply_paths_loaded_result(
         3,
         vec![LoadedPathResult {
+            retained_tab: None,
             path,
             disk_state: None,
             result: Ok(buffer),
@@ -192,6 +193,7 @@ fn progressive_session_hydration_replaces_matching_cold_shell_after_index_shift(
     app.state.background_io.pending_background_actions.insert(
         77,
         PendingBackgroundAction::HydrateSessionTab(PendingSessionHydrationAction {
+            progressive: true,
             expected_buffer_ids: cold_session_tab_buffer_ids(&cold_payload),
         }),
     );
@@ -231,6 +233,7 @@ fn failed_hydration_keeps_cold_recovery_payload() {
     app.state.background_io.pending_background_actions.insert(
         78,
         PendingBackgroundAction::HydrateSessionTab(PendingSessionHydrationAction {
+            progressive: true,
             expected_buffer_ids,
         }),
     );

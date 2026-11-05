@@ -207,9 +207,13 @@ impl SessionStore {
         &self,
         tab: ColdSessionTab,
     ) -> io::Result<(WorkspaceTab, Option<RestoreStatus>)> {
+        let reopened = tab.reopened;
         let (tab, contents) = self
             .worker()?
             .call(move |db| block_on(db.hydrate(SessionTab::from(tab))))?;
+        if reopened {
+            return Ok((reopen::restore_reopened(tab, contents, &[]), None));
+        }
         let (tab, summary) = Restorer::new(contents).restore_tab_with_summary(tab);
         Ok((tab, summary.into_status()))
     }

@@ -162,6 +162,7 @@ pub fn source_label(source: PieceSource) -> &'static str {
         PieceSource::Paste => "Paste",
         PieceSource::Cut => "Cut",
         PieceSource::SearchReplace => "Search/replace",
+        PieceSource::External => "External changes loaded",
     }
 }
 
@@ -273,6 +274,9 @@ pub(crate) fn operation_summary(
     source: PieceSource,
     operation: &TextDocumentOperationRecord,
 ) -> String {
+    if source == PieceSource::External {
+        return "External changes loaded".to_owned();
+    }
     let edit_count = operation.edits.len();
     if source == PieceSource::SearchReplace {
         return if edit_count == 1 {

@@ -8,172 +8,92 @@ use crate::app::domain::{
     TextFormatMetadata,
 };
 use crate::app::services::file_service::{FileContent, FileService};
-use std::path::Path;
 
 impl Restorer {
     pub(super) fn restore_buffer_content(
         &mut self,
         buffer: &mut SessionBuffer,
     ) -> RestoredBufferContent {
-        let is_dirty = buffer.is_dirty;
-        let session_disk_state = session_disk_state(buffer);
-        let session_text = self.contents.remove(&buffer.temp_id);
-        let path = buffer.path.take();
-        let restored = match (path.as_deref(), session_text) {
-            (Some(path), Some(content)) => {
-                self.restore_saved_buffer(buffer, path, content, session_disk_state)
-            }
-            (Some(path), None) => self.restore_buffer_from_disk(buffer, path),
-            (None, Some(content)) => RestoredBufferContent::from_session(
+        let content = self.contents.remove(&buffer.temp_id);
+        let Some(path) = buffer.path.clone() else {
+            return RestoredBufferContent::from_session(
                 buffer,
-                content,
+                content.unwrap_or_default(),
                 None,
-                is_dirty,
+                buffer.is_dirty,
                 BufferFreshness::InSync,
-            ),
-            (None, None) => RestoredBufferContent::empty(buffer, BufferFreshness::InSync),
+            );
         };
-        buffer.path = path;
-        restored
-    }
-
-    fn restore_saved_buffer(
-        &self,
-        buffer: &mut SessionBuffer,
-        path: &Path,
-        content: String,
-        session_disk_state: Option<DiskFileState>,
-    ) -> RestoredBufferContent {
-        let is_dirty = buffer.is_dirty;
-        if is_dirty
-            && let Some(baseline) = &buffer.disk_content_digest
-            && let Ok(file) = FileService::read_file(path)
-        {
-            let disk_digest = file.document.content_digest();
-            let is_dirty = disk_digest != blake3::hash(content.as_bytes()).to_hex().as_str();
-            let freshness = if is_dirty && disk_digest != *baseline {
-                BufferFreshness::ConflictOnDisk
-            } else {
-                BufferFreshness::InSync
-            };
-            return RestoredBufferContent::from_session(
-                buffer,
-                content,
-                FileService::read_disk_state(path).ok(),
-                is_dirty,
-                freshness,
-            );
-        }
-        match FileService::read_disk_state(path).ok() {
-            Some(disk_state) if !is_dirty || Some(&disk_state) != session_disk_state.as_ref() => {
-                self.restore_changed_disk_buffer(buffer, path, content, disk_state)
-            }
-            Some(disk_state) => {
-                self.restore_unchanged_disk_buffer(buffer, path, content, disk_state)
-            }
-            None => RestoredBufferContent::from_session(
-                buffer,
-                content,
-                None,
-                true,
-                BufferFreshness::MissingOnDisk,
-            ),
-        }
-    }
-
-    fn restore_unchanged_disk_buffer(
-        &self,
-        buffer: &mut SessionBuffer,
-        path: &Path,
-        content: String,
-        disk_state: DiskFileState,
-    ) -> RestoredBufferContent {
-        let is_dirty = buffer.is_dirty && !disk_text_matches(path, &content);
-        RestoredBufferContent::from_session(
-            buffer,
-            content,
-            Some(disk_state),
-            is_dirty,
-            BufferFreshness::InSync,
-        )
-    }
-
-    fn restore_changed_disk_buffer(
-        &self,
-        buffer: &mut SessionBuffer,
-        path: &Path,
-        content: String,
-        disk_state: DiskFileState,
-    ) -> RestoredBufferContent {
-        if buffer.is_dirty {
-            let is_dirty = !disk_text_matches(path, &content);
-            let freshness = if is_dirty {
-                BufferFreshness::ConflictOnDisk
-            } else {
-                BufferFreshness::InSync
-            };
-            return RestoredBufferContent::from_session(
-                buffer,
-                content,
-                Some(disk_state),
-                is_dirty,
-                freshness,
-            );
-        }
-
-        match FileService::read_file(path) {
-            Ok(file_content) => {
-                if file_content.document.content_digest()
-                    == blake3::hash(content.as_bytes()).to_hex().as_str()
-                {
-                    RestoredBufferContent::from_session(
-                        buffer,
-                        content,
-                        Some(disk_state),
-                        false,
+        match FileService::read_file(&path) {
+            Ok(file) => {
+                let digest = file.document.content_digest();
+                let state = FileService::read_disk_state(&path).ok();
+                let same_text = content
+                    .as_ref()
+                    .is_some_and(|text| blake3::hash(text.as_bytes()).to_hex().as_str() == digest);
+                let changed = buffer.disk_content_digest.as_ref().map_or_else(
+                    || !same_text && state != session_disk_state(buffer),
+                    |baseline| *baseline != digest,
+                );
+                let conflict = buffer.is_dirty && changed;
+                buffer.pending_disk_observation = conflict
+                    && (buffer.observed_disk_missing
+                        || buffer
+                            .observed_disk_digest
+                            .as_ref()
+                            .or(buffer.disk_content_digest.as_ref())
+                            != Some(&digest));
+                buffer.observed_disk_digest = Some(digest);
+                buffer.observed_disk_missing = false;
+                match content {
+                    Some(content) => {
+                        let freshness = if conflict {
+                            BufferFreshness::ConflictOnDisk
+                        } else {
+                            BufferFreshness::InSync
+                        };
+                        let mut restored = RestoredBufferContent::from_session(
+                            buffer,
+                            content,
+                            state,
+                            buffer.is_dirty && !same_text,
+                            freshness,
+                        );
+                        if !buffer.is_dirty && !same_text {
+                            restored.document.replace_exact_with_history_source(
+                                &file.document.extract_text(),
+                                crate::app::domain::buffer::PieceSource::External,
+                            );
+                            restored.format = file.format;
+                            restored.text_metadata = file.text_metadata;
+                        }
+                        restored
+                    }
+                    None => RestoredBufferContent::from_file_content(
+                        file,
+                        state,
                         BufferFreshness::InSync,
-                    )
-                } else if !buffer.text_history.is_empty() || buffer.history_document.is_some() {
-                    // Keep this text and its undo stack together as a historical
-                    // branch. Application restore automatically detaches it and
-                    // opens the changed disk file with a fresh history.
-                    RestoredBufferContent::from_session(
-                        buffer,
-                        content,
-                        Some(disk_state),
-                        true,
-                        BufferFreshness::ConflictOnDisk,
-                    )
-                } else {
-                    RestoredBufferContent::from_file_content(
-                        file_content,
-                        Some(disk_state),
-                        BufferFreshness::InSync,
-                    )
+                    ),
                 }
             }
-            Err(_) => RestoredBufferContent::from_session(
-                buffer,
-                content,
-                Some(disk_state),
-                false,
-                BufferFreshness::StaleOnDisk,
-            ),
-        }
-    }
-
-    fn restore_buffer_from_disk(
-        &self,
-        buffer: &mut SessionBuffer,
-        path: &Path,
-    ) -> RestoredBufferContent {
-        match FileService::read_file(path) {
-            Ok(file_content) => RestoredBufferContent::from_file_content(
-                file_content,
-                FileService::read_disk_state(path).ok(),
-                BufferFreshness::InSync,
-            ),
-            Err(_) => RestoredBufferContent::empty(buffer, BufferFreshness::MissingOnDisk),
+            Err(error) => {
+                let missing = error.kind() == std::io::ErrorKind::NotFound;
+                if missing {
+                    buffer.pending_disk_observation = !buffer.observed_disk_missing;
+                    buffer.observed_disk_missing = true;
+                }
+                RestoredBufferContent::from_session(
+                    buffer,
+                    content.unwrap_or_default(),
+                    None,
+                    buffer.is_dirty || missing,
+                    if missing {
+                        BufferFreshness::MissingOnDisk
+                    } else {
+                        BufferFreshness::StaleOnDisk
+                    },
+                )
+            }
         }
     }
 }
@@ -245,16 +165,6 @@ impl RestoredBufferContent {
             freshness,
         )
     }
-
-    fn empty(buffer: &mut SessionBuffer, freshness: BufferFreshness) -> Self {
-        let is_dirty = buffer.is_dirty;
-        Self::from_session(buffer, String::new(), None, is_dirty, freshness)
-    }
-}
-
-fn disk_text_matches(path: &Path, session_text: &str) -> bool {
-    FileService::read_file(path)
-        .is_ok_and(|file_content| file_content.document.extract_text() == session_text)
 }
 
 pub(super) fn cold_buffer_shell(buffer: &SessionBuffer) -> BufferState {

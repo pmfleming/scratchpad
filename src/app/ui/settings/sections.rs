@@ -38,7 +38,7 @@ const CATEGORIES: [Category; 5] = [
         key: "history",
         title: "History",
         subtitle: "Recovery and storage",
-        search: "recovery reopening archives closed tabs changed files branches Now changes undo memory cache per-file total recommended disk usage payloads database journal settings reusable references",
+        search: "recovery retained documents closed tabs branches Now changes undo memory cache per-file total recommended disk usage payloads database journal settings reusable references",
         render: super::recovery::render_recovery_category,
     },
     Category {

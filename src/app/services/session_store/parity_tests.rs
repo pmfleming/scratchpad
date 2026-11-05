@@ -168,10 +168,14 @@ fn clean_cold_history_is_preserved_for_external_change_resolution() {
             .len(),
         1
     );
-    assert_eq!(
-        store.load().unwrap().unwrap().tabs[0].buffers.buffer.text(),
-        "backup text"
-    );
+    let mut restored = store.load().unwrap().unwrap().tabs.remove(0);
+    assert_eq!(restored.active_buffer().text(), "new disk text");
+    restored
+        .active_buffer_mut()
+        .document_mut()
+        .undo_last_operation()
+        .unwrap();
+    assert_eq!(restored.active_buffer().text(), "backup text");
     std::fs::remove_file(path).unwrap();
     assert_eq!(
         store.load().unwrap().unwrap().tabs[0].buffers.buffer.text(),

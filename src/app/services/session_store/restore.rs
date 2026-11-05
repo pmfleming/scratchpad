@@ -160,7 +160,7 @@ impl Restorer {
             summary,
         )
     }
-    fn cold_tab_shell(tab: &SessionTabParts) -> WorkspaceTab {
+    pub(super) fn cold_tab_shell(tab: &SessionTabParts) -> WorkspaceTab {
         let mut buffers = tab.buffers.iter().map(cold_buffer_shell).collect();
         workspace_tab_from_restored_buffers(tab.shell.clone(), &mut buffers)
     }
@@ -217,6 +217,9 @@ impl Restorer {
                     buffer.disk_content_digest
                 };
                 state.is_settings_file = buffer.is_settings_file;
+                state.observed_disk_digest = buffer.observed_disk_digest;
+                state.observed_disk_missing = buffer.observed_disk_missing;
+                state.pending_disk_observation = buffer.pending_disk_observation;
                 state
             })
             .collect()

@@ -72,6 +72,7 @@ pub(crate) struct ColdFileShellResult {
 }
 
 pub(crate) struct LoadedPathResult {
+    pub(crate) retained_tab: Option<WorkspaceTab>,
     pub(crate) path: PathBuf,
     pub(crate) disk_state: Option<DiskFileState>,
     pub(crate) result: Result<BufferState, String>,

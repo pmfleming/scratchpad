@@ -190,14 +190,10 @@ impl FileController {
     }
 
     pub(super) fn open_selected_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::open_selected_paths_impl(app, paths, true);
+        Self::open_selected_paths_impl(app, paths);
     }
 
-    pub(crate) fn open_disk_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::open_selected_paths_impl(app, paths, false);
-    }
-
-    fn open_selected_paths_impl(app: &mut ScratchpadApp, paths: Vec<PathBuf>, recover: bool) {
+    fn open_selected_paths_impl(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::prepare_to_open_paths(app);
         let batch = Self::prepare_open_batch(
             app,
@@ -205,14 +201,6 @@ impl FileController {
             |app, path| {
                 if Self::activate_existing_path(app, &path).is_some() {
                     OpenPathDecision::Resolved(OpenPathOutcome::AlreadyOpen)
-                } else if recover
-                    && crate::app::app_state::workspace::lifecycle::try_reopen_archived_path(
-                        app, &path,
-                    )
-                {
-                    OpenPathDecision::Resolved(OpenPathOutcome::Opened {
-                        artifact_warning: None,
-                    })
                 } else {
                     OpenPathDecision::Unresolved(path)
                 }
@@ -298,51 +286,18 @@ impl FileController {
 
     fn open_selected_paths_as_cold_tabs(
         app: &mut ScratchpadApp,
-        mut paths: Vec<PathBuf>,
+        paths: Vec<PathBuf>,
         duplicate_count: usize,
     ) {
-        let mut summary = OpenBatchSummary {
-            duplicate_count,
-            ..OpenBatchSummary::default()
-        };
-        let Some(active_path) = paths.pop() else {
-            return;
-        };
-        Self::release_pending_open_path(app, &active_path);
-
-        if Self::activate_existing_path(app, &active_path).is_some() {
-            summary.record_outcome(OpenPathOutcome::AlreadyOpen);
-        } else if let Ok(disk_state) = FileService::read_disk_state(&active_path) {
-            let mut buffer = FileService::build_cold_file_shell(&active_path, Some(disk_state));
-            Self::mark_settings_buffer(app, &mut buffer);
-            let tab = WorkspaceTab::new(buffer);
-            let cold_tab = crate::app::services::session_store::cold_tab_from_workspace_tab(&tab);
-
-            app.reload_settings_before_workspace_change();
-            crate::app::app_state::frame::begin_layout_transition(app);
-            app.tab_manager.append_tab(tab);
-            let active_index = app.tab_manager.active_tab_index;
-            app.tab_manager.set_cold_session_tab(active_index, cold_tab);
-            app.hydrate_tab_if_needed(active_index);
-            let _ = Self::refresh_active_buffer_disk_state(app);
-            Self::activate_workspace_after_staged_open(app);
-            summary.record_outcome(OpenPathOutcome::Opened {
-                artifact_warning: None,
-            });
-        } else {
-            summary.record_outcome(OpenPathOutcome::Failed);
-        }
-
-        if paths.is_empty() {
-            Self::finalize_cold_file_shell_open(app, summary);
-        } else {
-            app.queue_background_cold_file_shells(
-                paths,
-                PendingBackgroundAction::OpenTabs(PendingOpenTabsAction {
-                    accumulator: summary,
-                }),
-            );
-        }
+        app.queue_background_cold_file_shells(
+            paths,
+            PendingBackgroundAction::OpenTabs(PendingOpenTabsAction {
+                accumulator: OpenBatchSummary {
+                    duplicate_count,
+                    ..OpenBatchSummary::default()
+                },
+            }),
+        );
     }
 
     pub(crate) fn apply_async_cold_file_shells_result(
@@ -376,7 +331,16 @@ impl FileController {
                 }
             }
         }
+        let installed = !tabs.is_empty();
         app.tab_manager.append_cold_file_tabs(tabs);
+        if installed {
+            let index = app.tab_manager.tabs.len() - 1;
+            app.tab_manager.set_active_tab_index_clamped(index);
+            if let Some(cold) = app.tab_manager.cold_session_tabs().get(&index).cloned() {
+                app.queue_session_tab_hydration(index, cold, false);
+            }
+            Self::activate_workspace_after_staged_open(app);
+        }
         app.apply_current_tab_ordering();
         Self::finalize_cold_file_shell_open(app, summary);
     }
@@ -476,6 +440,20 @@ impl FileController {
                     .filter(|buffer| buffer.is_loading_preview)
                     .map(|buffer| (index, buffer.id))
             });
+        if let Some(tab) = loaded.retained_tab {
+            if let Some((index, _)) = preview {
+                app.tab_manager.close_tab_internal(index);
+            }
+            let opened = crate::app::app_state::workspace::lifecycle::install_archive(app, tab);
+            summary.record_outcome(if opened {
+                OpenPathOutcome::Opened {
+                    artifact_warning: None,
+                }
+            } else {
+                OpenPathOutcome::AlreadyOpen
+            });
+            return;
+        }
         if let Some((index, buffer_id)) = preview {
             Self::replace_staged_large_file_preview(app, summary, index, buffer_id, loaded);
             return;

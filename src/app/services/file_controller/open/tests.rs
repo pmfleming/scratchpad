@@ -67,7 +67,7 @@ fn large_file_stages_first_visible_window_before_background_hydration() {
 }
 
 #[test]
-fn large_open_batch_hydrates_most_recent_tab_before_returning() {
+fn large_open_batch_hydrates_most_recent_tab_in_background() {
     let directory = tempfile::tempdir().unwrap();
     let paths = (0..super::LAZY_OPEN_BATCH_THRESHOLD)
         .map(|index| {
@@ -80,8 +80,8 @@ fn large_open_batch_hydrates_most_recent_tab_before_returning() {
 
     FileController::open_selected_paths_async(&mut app, paths.clone());
 
-    // The selected file is hydrated synchronously, while inactive metadata-only
-    // shells are still being built on the path lane.
+    // The callback queues I/O; selected text arrives when the background load completes.
+    wait_for_background_io(&mut app);
     let active_index = app.tab_manager.active_tab_index;
     assert_eq!(
         app.tab_manager.tabs.as_slice()[active_index]
@@ -132,6 +132,7 @@ fn open_results_preserve_identity_release_reservations_and_handle_failures() {
             &mut app,
             &mut summary,
             LoadedPathResult {
+                retained_tab: None,
                 disk_state: FileService::read_disk_state(&path).ok(),
                 result: if succeeds {
                     Ok(loaded)

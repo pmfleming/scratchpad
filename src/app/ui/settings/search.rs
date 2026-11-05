@@ -40,16 +40,6 @@ const SETTINGS: &[(&str, &str, &str)] = &[
     ("workspace", "Show recent files", "recent files"),
     (
         "history",
-        "Restore history when reopening files",
-        "recovery reopen archives",
-    ),
-    (
-        "history",
-        "Also open changed disk files",
-        "disk version alongside recovered text",
-    ),
-    (
-        "history",
         "Memory per file",
         "undo RAM per file budget limits MiB",
     ),

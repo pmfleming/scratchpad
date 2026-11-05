@@ -12,6 +12,7 @@ pub enum PieceSource {
     Paste,
     Cut,
     SearchReplace,
+    External,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

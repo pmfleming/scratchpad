@@ -5,6 +5,11 @@ use std::path::PathBuf;
 
 pub(crate) enum PathLoadRequest {
     Standard(PathBuf),
+    Retained {
+        path: PathBuf,
+        session_store: SessionStore,
+        claimed: Vec<crate::app::CanonicalPathKey>,
+    },
     WithEncoding {
         path: PathBuf,
         encoding_name: String,
@@ -14,7 +19,9 @@ pub(crate) enum PathLoadRequest {
 impl PathLoadRequest {
     pub(crate) fn path(&self) -> &PathBuf {
         match self {
-            Self::Standard(path) | Self::WithEncoding { path, .. } => path,
+            Self::Standard(path)
+            | Self::WithEncoding { path, .. }
+            | Self::Retained { path, .. } => path,
         }
     }
 }
@@ -32,6 +39,7 @@ pub(crate) enum BackgroundIoRequest {
     BuildColdFileShells {
         request_id: u64,
         paths: Vec<PathBuf>,
+        session_store: SessionStore,
     },
     SavePath {
         request_id: u64,

@@ -225,6 +225,10 @@ impl TextDocument {
     }
 
     pub(crate) fn replace_exact_with_history(&mut self, text: &str) {
+        self.replace_exact_with_history_source(text, PieceSource::Load);
+    }
+
+    pub(crate) fn replace_exact_with_history_source(&mut self, text: &str, source: PieceSource) {
         let before = self.extract_text();
         if before == text {
             return;
@@ -232,7 +236,7 @@ impl TextDocument {
         self.seal_history_group();
         let deleted_spans = self.byte_spans_for_range(0..self.piece_tree().len_chars());
         self.delete_char_range_direct(0..self.piece_tree().len_chars());
-        self.insert_direct_with_source(0, text, PieceSource::Load);
+        self.insert_direct_with_source(0, text, source);
         self.push_operation_record(
             TextDocumentOperationRecord {
                 previous_selection: CursorRange::default(),
@@ -244,7 +248,7 @@ impl TextDocument {
                     deleted_spans,
                 }],
             },
-            PieceSource::Load,
+            source,
         );
         self.seal_history_group();
     }

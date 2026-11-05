@@ -19,8 +19,14 @@ pub enum BufferFreshness {
 impl BufferState {
     pub fn sync_to_disk_state(&mut self, disk_state: Option<DiskFileState>) {
         self.document.seal_history_group();
-        self.disk_content_digest =
-            (!self.is_dirty && disk_state.is_some()).then(|| self.document().content_digest());
+        if !self.is_dirty {
+            self.disk_content_digest = disk_state
+                .as_ref()
+                .map(|_| self.document().content_digest());
+            self.observed_disk_digest
+                .clone_from(&self.disk_content_digest);
+            self.observed_disk_missing = false;
+        }
         self.set_disk_state(disk_state, BufferFreshness::InSync);
     }
 
@@ -28,6 +34,9 @@ impl BufferState {
         self.disk_content_digest = disk_state
             .as_ref()
             .map(|_| self.document().content_digest());
+        self.observed_disk_digest
+            .clone_from(&self.disk_content_digest);
+        self.observed_disk_missing = false;
         self.set_disk_state(disk_state, BufferFreshness::AutoReloaded);
     }
 

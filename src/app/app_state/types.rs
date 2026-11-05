@@ -46,6 +46,7 @@ pub(crate) struct PendingStartupRestoreAction {
 }
 
 pub(crate) struct PendingSessionHydrationAction {
+    pub(crate) progressive: bool,
     pub(crate) expected_buffer_ids: Vec<BufferId>,
 }
 

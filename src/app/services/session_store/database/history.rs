@@ -200,6 +200,9 @@ impl Database {
             }
             document.import_history_row(entry);
         }
+        if previous == 0 && now == 0 && tip == 0 {
+            return Ok(None);
+        }
         if (marked_now, marked_tip) != (now, tip)
             || !document.finish_history_import(now as u64, tip as u64)
         {
