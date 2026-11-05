@@ -109,7 +109,7 @@ impl FileController {
                     action.buffer_id,
                     loaded,
                     result.disk_state,
-                    action.mode == PendingReloadMode::ObserveDiskChange,
+                    action.mode,
                 )
                 .is_some()
                 {
@@ -136,11 +136,19 @@ impl FileController {
         buffer_id: BufferId,
         loaded: BufferState,
         disk_state: Option<DiskFileState>,
-        mark_auto_reloaded: bool,
+        mode: PendingReloadMode,
     ) -> Option<()> {
         let tab = app.tab_manager.tabs.as_mut_slice().get_mut(index)?;
-        let source =
-            mark_auto_reloaded.then_some(crate::app::domain::buffer::PieceSource::External);
+        let mark_auto_reloaded = mode == PendingReloadMode::ObserveDiskChange;
+        let source = match mode {
+            PendingReloadMode::ObserveDiskChange => {
+                Some(crate::app::domain::buffer::PieceSource::External)
+            }
+            PendingReloadMode::ReopenWithEncoding => {
+                Some(crate::app::domain::buffer::PieceSource::Load)
+            }
+            PendingReloadMode::ExplicitReload => None,
+        };
         let buffer = tab.replace_buffer_from_loaded_source(buffer_id, loaded, source)?;
         buffer.is_dirty = false;
         if mark_auto_reloaded {

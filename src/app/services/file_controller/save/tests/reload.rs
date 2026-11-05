@@ -124,3 +124,42 @@ fn queued_reload_and_encoding_reopen_preserve_intervening_edits() {
         }
     }
 }
+
+#[test]
+fn reopening_unchanged_bytes_with_encoding_records_a_load_instead_of_external_changes() {
+    use crate::app::{domain::buffer::PieceSource, services::file_service::FileService};
+    let mut f = SavedBufferFixture::new("encoded.txt", "", "");
+    std::fs::write(&f.path, [b'c', b'a', b'f', 0xe9]).unwrap();
+    let content = FileService::read_file_with_encoding(&f.path, "UTF-8").unwrap();
+    let buffer = FileService::build_buffer_from_file_content(
+        &f.path,
+        content,
+        FileService::read_disk_state(&f.path).ok(),
+    );
+    f.app
+        .tab_manager
+        .set_tabs(vec![crate::app::domain::WorkspaceTab::new(buffer)], 0);
+    let previous = f
+        .app
+        .tab_manager
+        .active_tab()
+        .unwrap()
+        .active_buffer()
+        .text();
+    assert_ne!(previous, "café");
+    assert!(FileController::reopen_buffer_with_encoding(
+        &mut f.app,
+        0,
+        "windows-1252"
+    ));
+    wait_for_background_io(&mut f.app);
+    let buffer = f.app.tab_manager.active_tab().unwrap().active_buffer();
+    assert_eq!(buffer.text(), "café");
+    assert_eq!(
+        buffer.document().history_entries().last().unwrap().source,
+        PieceSource::Load
+    );
+    let mut document = buffer.document().clone();
+    document.undo_last_operation().unwrap();
+    assert_eq!(document.extract_text(), previous);
+}

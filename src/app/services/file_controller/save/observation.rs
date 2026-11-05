@@ -119,7 +119,7 @@ impl FileController {
                         action.buffer_id,
                         loaded,
                         result.disk_state,
-                        true,
+                        crate::app::app_state::PendingReloadMode::ObserveDiskChange,
                     )
                     .is_some()
                 } else {
