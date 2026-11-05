@@ -234,6 +234,13 @@ impl TextDocument {
         self.history = TextDocumentHistoryState::default();
         self.history.revision_counter = revision.wrapping_add(1);
         self.record_initial_content();
+        let spans = self
+            .history
+            .entries
+            .iter()
+            .flat_map(|e| e.edits.iter().flat_map(PieceHistoryEdit::spans))
+            .collect::<Vec<_>>();
+        self.piece_tree_mut().retain_reachable_storage(&spans);
     }
 
     #[must_use]
@@ -282,37 +289,6 @@ impl TextDocument {
         (0..snapshot.len())
             .map(|index| snapshot.entry(index))
             .collect()
-    }
-
-    /// The repository validates each row before handing it to this streaming importer.
-    pub(crate) fn import_history_row(&mut self, persisted: PersistedHistoryEntry) {
-        let entry = self.import_history_entry(persisted);
-        self.history.byte_usage += entry.byte_cost();
-        self.history.next_id = entry.id.saturating_add(1);
-        self.history.entries.push(entry);
-    }
-
-    pub(crate) fn finish_history_import(&mut self, now: u64, tip: u64) -> bool {
-        let Some(tree) = super::edit_tree::EditTree::restore(
-            self.history
-                .entries
-                .iter()
-                .map(|entry| (entry.id, entry.parent_id)),
-            0,
-            tip,
-        ) else {
-            return false;
-        };
-        if !tree.route().contains(&now) && now != 0 {
-            return false;
-        }
-        self.history.tree = tree;
-        if self.navigate_history(now).is_err() {
-            return false;
-        }
-        self.refresh_tree_flags();
-        self.seal_history_group();
-        true
     }
 
     pub fn restore_exported_history(&mut self, entries: Vec<PersistedHistoryEntry>) -> bool {

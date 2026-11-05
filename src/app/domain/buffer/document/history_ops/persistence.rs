@@ -60,9 +60,18 @@ fn export_entry(
         selected_tip: tip == entry.id,
         global_seq: entry.global_seq,
         source: entry.source,
-        visible_generation_before: 0,
-        visible_generation_after: 0,
-        fingerprint: entry.fingerprint,
+        fingerprint: super::super::super::fingerprint_parts(entry.edits.iter().flat_map(|edit| {
+            let deleted = (!edit.deleted_spans().is_empty()).then(|| {
+                edit.deleted_spans()
+                    .iter()
+                    .map(|s| tree.text_for_span(*s).to_string())
+                    .collect::<String>()
+            });
+            let inserted = edit
+                .inserted_span()
+                .map(|s| tree.text_for_span(s).to_string());
+            deleted.into_iter().chain(inserted)
+        })),
         summary: entry.summary.clone(),
         flags: entry.flags,
         previous_selection: persist_cursor_range(entry.previous_selection),
@@ -84,6 +93,12 @@ pub(crate) struct HistorySnapshot {
     last_edit: (u64, u64),
 }
 impl HistorySnapshot {
+    pub(crate) fn reference_entry(&self, index: usize) -> &PieceHistoryEntry {
+        &self.entries[index]
+    }
+    pub(crate) fn piece_tree(&self) -> &super::super::super::PieceTreeLite {
+        &self.tree
+    }
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
@@ -106,6 +121,41 @@ impl HistorySnapshot {
     }
 }
 impl TextDocument {
+    /// Repository reconstruction checks graph and storage ranges without loading
+    /// any immutable bodies or replaying the route to Now.
+    pub(crate) fn from_references(
+        piece_tree: super::super::super::PieceTreeLite,
+        entries: Vec<PieceHistoryEntry>,
+        now: u64,
+        tip: u64,
+    ) -> std::io::Result<Self> {
+        let topology = super::super::super::edit_tree::EditTree::restore(
+            entries.iter().map(|e| (e.id, e.parent_id)),
+            now,
+            tip,
+        )
+        .ok_or_else(|| std::io::Error::other("invalid history topology"))?;
+        if entries
+            .iter()
+            .flat_map(|e| &e.edits)
+            .flat_map(PieceHistoryEdit::spans)
+            .any(|s| !piece_tree.contains_history_span(s))
+        {
+            return Err(std::io::Error::other("history span exceeds stored text"));
+        }
+        let mut document = Self::new(String::new());
+        document.content.piece_tree = Arc::new(piece_tree);
+        document.history.next_id = entries.last().map_or(1, |e| e.id.saturating_add(1));
+        for entry in entries {
+            register_text_history_global_seq(entry.global_seq);
+            document.history.byte_usage += entry.byte_cost();
+            document.history.entries.push(entry);
+        }
+        document.history.tree = topology;
+        document.refresh_tree_flags();
+        document.advance_history_revision();
+        Ok(document)
+    }
     pub(crate) fn history_snapshot(&self) -> HistorySnapshot {
         HistorySnapshot {
             entries: self.history.entries.clone(),

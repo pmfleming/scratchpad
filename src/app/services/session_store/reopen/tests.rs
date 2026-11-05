@@ -170,20 +170,28 @@ fn clean_external_change_keeps_identity_and_missing_file_recovers_untitled() {
 
 #[test]
 fn previously_observed_conflict_is_not_loaded_again_on_reopen() {
-    let (_root, store, path, token) = archived(true);
+    let (root, store, path, token) = archived(true);
     let live = store.reopen_archive(&token).unwrap();
     let id = live.active_buffer().temp_id.clone();
     store.persist(&[live], 0, 14.0, false).unwrap();
     std::fs::write(&path, "conflict version").unwrap();
     let restored = store.load().unwrap().unwrap();
-    let buffer = restored.tabs[0].active_buffer();
+    let mut app = crate::app::app_state::test_support::test_app(root.path());
+    app.wait_for_background_io_idle();
+    app.state.persistence.session_store = store.clone();
+    app.tab_manager.set_tabs(restored.tabs, 0);
+    app.wait_for_background_io_idle();
+    let restored = app.tab_manager.tabs.as_slice();
+    let buffer = restored[0].active_buffer();
     assert_eq!(buffer.text(), "unsaved");
     assert_eq!(
         buffer.freshness,
         crate::app::domain::BufferFreshness::ConflictOnDisk
     );
-    assert!(buffer.pending_disk_observation);
-    let closed = CapturedClosedTab::capture(&restored.tabs[0], None);
+    assert!(app.state.persistence.pending_activity.iter().any(
+        |e| e.kind == crate::app::services::session_store::activity::ActivityKind::DiskConflict
+    ));
+    let closed = CapturedClosedTab::capture(&restored[0], None);
     let token = closed.token.clone();
     let mut save = SessionPersistRequest::capture(&[], 0, 14.0, false);
     save.closed_tabs.push(closed);

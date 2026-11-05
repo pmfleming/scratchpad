@@ -11,6 +11,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Session recovery stores text and undo as shared chunk references. Restoring a document loads its text on demand, and disk changes are checked in the background after restore.
 - Large pastes and replacements prepare in the background while the editor stays responsive. Sealed inserted text uses the session chunk store with bounded caching and background reads.
 - Session saves keep unaffected layouts untouched when closing or moving tabs. Cursor changes update only the affected view.
 - Text backing read failures now stop edits and show a read-only error in the editor. Storage-health checks no longer wait behind a session save. Startup appearance comes only from settings; deleting the settings file restores its defaults.

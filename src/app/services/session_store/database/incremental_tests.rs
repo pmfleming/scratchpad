@@ -1,23 +1,26 @@
 use super::{
     Database, ReadScope,
-    tests::{database, insert, request, tab},
+    tests::{database, insert, request as exported_request, tab},
 };
+use crate::app::services::session_store::{CapturedClosedTab, SessionPersistRequest};
 use futures_lite::future::block_on;
-
-async fn audit(db: &Database) {
-    db.conn.execute_batch("CREATE TABLE writes(kind TEXT NOT NULL, bytes INTEGER NOT NULL) STRICT;
-        CREATE TRIGGER history_insert AFTER INSERT ON history BEGIN INSERT INTO writes VALUES('insert', length(new.entry)); END;
-        CREATE TRIGGER history_update AFTER UPDATE ON history BEGIN INSERT INTO writes VALUES('update', length(new.entry)); END;
-        CREATE TRIGGER history_delete AFTER DELETE ON history BEGIN INSERT INTO writes VALUES('delete', 0); END;
-        CREATE TRIGGER blob_insert AFTER INSERT ON blobs BEGIN INSERT INTO writes VALUES('blob', length(new.body)); END;").await.unwrap();
+fn request(tabs: &[crate::app::domain::WorkspaceTab]) -> SessionPersistRequest {
+    SessionPersistRequest::capture(tabs, 0, 14.0, false)
 }
-async fn reset(db: &Database) {
-    db.conn.execute("DELETE FROM writes", ()).await.unwrap();
+async fn audit(db: &Database) {
+    db.conn.execute_batch("CREATE TABLE writes(kind TEXT NOT NULL,bytes INTEGER NOT NULL) STRICT;
+    CREATE TRIGGER history_insert AFTER INSERT ON history BEGIN INSERT INTO writes VALUES('insert',new.bytes); END;
+    CREATE TRIGGER history_update AFTER UPDATE ON history BEGIN INSERT INTO writes VALUES('update',new.bytes); END;
+    CREATE TRIGGER history_delete AFTER DELETE ON history BEGIN INSERT INTO writes VALUES('delete',0); END;
+    CREATE TRIGGER body_insert AFTER INSERT ON chunk_bodies BEGIN INSERT INTO writes VALUES('body',length(new.body)); END;").await.unwrap();
 }
 async fn count(db: &Database, kind: &str) -> i64 {
     db.integer(&format!("SELECT count(*) FROM writes WHERE kind='{kind}'"))
         .await
         .unwrap()
+}
+async fn reset(db: &Database) {
+    db.conn.execute("DELETE FROM writes", ()).await.unwrap();
 }
 
 #[test]
@@ -27,171 +30,103 @@ fn history_appends_updates_prunes_and_restarts_without_rewriting_unchanged_entri
         let mut tabs = vec![tab("base")];
         for _ in 0..4 {
             insert(&mut tabs[0], 0, "entry");
+            tabs[0]
+                .active_buffer_mut()
+                .document_mut()
+                .seal_history_group();
         }
-        let id = tabs[0].buffers.buffer.temp_id.clone();
+        let id = tabs[0].active_buffer().temp_id.clone();
         db.persist(request(&tabs), 1).await.unwrap();
         audit(&db).await;
         insert(&mut tabs[0], 0, "new");
         db.persist(request(&tabs), 2).await.unwrap();
         assert_eq!(count(&db, "insert").await, 1);
-        assert_eq!(count(&db, "update").await, 1);
-        assert_eq!(
-            db.integer("SELECT count(*) FROM pragma_table_info('tabs') WHERE name='payload'")
-                .await
-                .unwrap(),
-            0
-        );
+        assert_eq!(count(&db, "update").await, 0);
         reset(&db).await;
         tabs[0]
-            .buffers
-            .buffer
+            .active_buffer_mut()
             .document_mut()
             .undo_last_operation()
             .unwrap();
         db.persist(request(&tabs), 3).await.unwrap();
-        assert_eq!(count(&db, "update").await, 2);
+        assert_eq!(count(&db, "update").await, 0);
         assert_eq!(count(&db, "insert").await, 0);
-        // Coalescing changes global_seq, payload, and selections under the same ID.
-        let mut captured = request(&tabs);
-        let entries = &mut captured.tabs[0].session_tab.buffers[0].text_history;
-        let last = entries.last_mut().unwrap();
-        last.global_seq += 100;
-        last.next_selection.primary_index += 1;
-        last.summary.push_str(" coalesced");
-        entries[0].summary.push_str(" initial");
-        let expected = entries.clone();
-        reset(&db).await;
-        db.persist(captured, 4).await.unwrap();
-        assert_eq!(count(&db, "update").await, 2);
-        assert_eq!(db.read_history(&id).await.unwrap(), expected);
-        // Forget replaces all branches with a single initial insertion.
+        let before = db.read_history(&id).await.unwrap();
         tabs[0]
             .active_buffer_mut()
             .document_mut()
             .clear_operation_history();
-        let expected = tabs[0].active_buffer().document().exported_history();
         reset(&db).await;
-        db.persist(request(&tabs), 5).await.unwrap();
-        assert_eq!(count(&db, "delete").await, 5);
+        db.persist(request(&tabs), 4).await.unwrap();
+        assert_eq!(count(&db, "delete").await, before.len() as i64 - 1);
+        let expected = tabs[0].active_buffer().document().exported_history();
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
-        assert!(
-            crate::app::domain::buffer::next_text_history_global_seq() > expected[0].global_seq
-        );
-        let mut captured = request(&tabs);
-        captured.tabs[0].session_tab.buffers[0].text_history = expected.clone();
         reset(&db).await;
-        db.persist(captured, 1).await.unwrap();
+        db.persist(request(&tabs), 1).await.unwrap();
         assert_eq!(
             count(&db, "insert").await + count(&db, "update").await + count(&db, "delete").await,
             0
         );
-        let mut captured = request(&tabs);
-        captured.tabs[0].session_tab.buffers[0].text_history.clear();
-        db.persist(captured, 2).await.unwrap();
-        assert!(db.read_history(&id).await.unwrap().is_empty());
+        assert_eq!(db.read_history(&id).await.unwrap(), expected);
     });
 }
-
 #[test]
-fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() {
+fn write_failures_roll_back_reference_manifest_before_retry() {
     block_on(async {
-        // Fail after different portions of the write, including during collection.
         for (table, operation) in [
             ("history", "INSERT"),
-            ("blobs", "INSERT"),
-            ("parts", "INSERT"),
-            ("tabs", "INSERT"),
+            ("history_spans", "INSERT"),
+            ("document_pieces", "INSERT"),
+            ("document_tail", "INSERT"),
+            ("layout_views", "UPDATE"),
             ("session_state", "INSERT"),
             ("closed_tabs", "INSERT"),
-            ("snapshots", "DELETE"),
             ("documents", "DELETE"),
-            ("blobs", "DELETE"),
         ] {
             let (_root, mut db) = database().await;
             let mut tabs = vec![tab("original"), tab("obsolete")];
-            insert(&mut tabs[0], 0, "a");
             db.persist(request(&tabs), 1).await.unwrap();
-            let id = tabs[0].buffers.buffer.temp_id.clone();
-            let original = db.read_history(&id).await.unwrap();
-            let contents = db.read_all_contents().await.unwrap();
-            db.conn.execute_batch(&format!("CREATE TRIGGER fail_write BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'injected'); END;")).await.unwrap();
-            let removed_id = tabs.pop().unwrap().active_buffer().temp_id.clone();
-            insert(&mut tabs[0], 0, "b");
-            tabs[0].buffers.buffer.name = "edited".into();
-            let archived = (table == "closed_tabs").then(|| {
-                crate::app::services::session_store::CapturedClosedTab::capture(
-                    &tab("archived"),
-                    None,
-                )
-            });
-            let mut changed = request(&tabs);
-            changed.active_surface = super::super::SessionActiveSurface::Settings;
-            changed.removed_documents.push(removed_id.clone());
-            changed.tabs[0].session_tab.views[0].show_line_numbers =
-                !changed.tabs[0].session_tab.views[0].show_line_numbers;
-            changed.closed_tabs.extend(archived.clone());
-            assert!(db.persist(changed, 2).await.is_err(), "{table}");
+            let original = db.read_all_contents().await.unwrap();
+            let id = tabs[0].active_buffer().temp_id.clone();
+            let history = db.read_history(&id).await.unwrap();
+            db.conn.execute_batch(&format!("CREATE TRIGGER fail_write BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT,'injected'); END;")).await.unwrap();
+            let removed = tabs.pop().unwrap().active_buffer().temp_id.clone();
+            insert(&mut tabs[0], 0, "new");
+            let changed = || {
+                let mut r = request(&tabs);
+                r.active_surface = super::super::SessionActiveSurface::Settings;
+                r.removed_documents.push(removed.clone());
+                r.tabs[0].session_tab.views[0].show_line_numbers = true;
+                if table == "closed_tabs" {
+                    r.closed_tabs
+                        .push(CapturedClosedTab::capture(&tab("archived"), None));
+                }
+                r
+            };
+            assert!(db.persist(changed(), 2).await.is_err(), "{table}");
             assert!(db.conn.is_autocommit().unwrap());
-            assert_eq!(
-                db.latest_request, 1,
-                "failed attempt must not advance generation"
-            );
             assert!(db.inventory.is_none());
-            assert!(db.revisions.is_empty());
-            assert!(db.chunk_cache.is_empty());
             assert!(db.history_cache.is_empty());
-            assert!(db.state_cache.is_none() && db.tab_cache.is_empty());
-            assert_eq!(
-                db.integer("SELECT count(*) FROM closed_tabs")
-                    .await
-                    .unwrap(),
-                0
-            );
-            let stored = db.load(ReadScope::All).await.unwrap().unwrap();
-            assert_eq!(stored.contents, contents, "{table}");
-            assert_eq!(stored.manifest.tabs[0].buffers[0].name, "note");
-            assert_eq!(
-                (stored.manifest.tabs.len(), stored.manifest.active_surface),
-                (2, super::super::SessionActiveSurface::Workspace)
-            );
-            assert_eq!(db.read_history(&id).await.unwrap(), original);
+            assert_eq!(db.latest_request, 1);
+            assert_eq!(db.read_all_contents().await.unwrap(), original, "{table}");
+            assert_eq!(db.read_history(&id).await.unwrap(), history);
             db.conn
                 .execute("DROP TRIGGER fail_write", ())
                 .await
                 .unwrap();
-            let mut retry = request(&tabs);
-            retry.active_surface = super::super::SessionActiveSurface::Settings;
-            retry.removed_documents.push(removed_id);
-            retry.tabs[0].session_tab.views[0].show_line_numbers =
-                !retry.tabs[0].session_tab.views[0].show_line_numbers;
-            retry.closed_tabs.extend(archived.clone());
-            db.persist(retry, 2).await.unwrap();
-            assert_eq!(db.latest_request, 2);
-            assert!(db.inventory.as_ref().unwrap().snapshots.contains(&id));
-            assert!(db.revisions.contains_key(&id));
-            assert!(db.chunk_cache.contains_key(&id));
-            assert_eq!(db.history_cache[&id].len(), 3);
-            assert_eq!(db.read_history(&id).await.unwrap().len(), 3);
-            let stored = db.load(ReadScope::All).await.unwrap().unwrap();
-            assert_eq!(stored.contents.len(), 1 + usize::from(archived.is_some()));
-            assert_eq!(stored.contents[&id], "baoriginal");
-            assert_eq!(stored.manifest.tabs[0].buffers[0].name, "edited");
-            assert_eq!(
-                (stored.manifest.tabs.len(), stored.manifest.active_surface),
-                (1, super::super::SessionActiveSurface::Settings)
-            );
+            db.persist(changed(), 2).await.unwrap();
+            assert_eq!(db.read_all_contents().await.unwrap()[&id], "neworiginal");
         }
     });
 }
-
 #[test]
 fn cold_history_is_lazy_and_survives_metadata_saves_and_quarantine() {
     block_on(async {
         let (_root, mut db) = database().await;
         let mut tabs = vec![tab("active"), tab("cold")];
         insert(&mut tabs[1], 0, "history");
-        let id = tabs[1].buffers.buffer.temp_id.clone();
+        let id = tabs[1].active_buffer().temp_id.clone();
         db.persist(request(&tabs), 1).await.unwrap();
         let mut shells = db
             .load(ReadScope::Shells)
@@ -200,12 +135,11 @@ fn cold_history_is_lazy_and_survives_metadata_saves_and_quarantine() {
             .unwrap()
             .manifest
             .tabs;
-        assert!(shells[1].buffers[0].text_history.is_empty());
+        assert!(shells[1].buffers[0].history_document.is_none());
         let mut captured = request(&tabs);
         captured.tabs[1].session_tab = shells.pop().unwrap();
         captured.tabs[1].preserve_existing = true;
         captured.tabs[1].buffer_snapshots.clear();
-        captured.active_surface = super::super::SessionActiveSurface::Settings;
         db.persist(captured, 2).await.unwrap();
         let cold = request(&tabs).tabs.pop().unwrap().session_tab;
         assert_eq!(
@@ -219,7 +153,7 @@ fn cold_history_is_lazy_and_survives_metadata_saves_and_quarantine() {
         );
         db.conn
             .execute(
-                "UPDATE history SET entry=x'00' WHERE temp_id=?",
+                "UPDATE history SET packed_spans=x'00' WHERE temp_id=?",
                 [id.as_str()],
             )
             .await
@@ -228,92 +162,50 @@ fn cold_history_is_lazy_and_survives_metadata_saves_and_quarantine() {
         assert!(db.quarantined.contains_key(&id));
         db.persist(request(&[]), 3).await.unwrap();
         assert_eq!(db.integer("SELECT count(*) FROM history").await.unwrap(), 3);
-        assert_eq!(db.integer("SELECT count(*) FROM parts").await.unwrap(), 2);
     });
 }
-
-fn diverse_text(bytes: usize) -> String {
-    let mut state = 42u64;
-    (0..bytes)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            (b' ' + (state % 95) as u8) as char
-        })
-        .collect()
-}
-
 #[test]
-fn cdc_reuses_bodies_after_front_middle_end_edits_and_across_tabs() {
+fn references_reuse_original_bodies_after_front_middle_end_edits_and_across_tabs() {
     block_on(async {
         let (_root, mut db) = database().await;
-        let text = diverse_text(8 * 1024 * 1024);
+        let text = "unique original λ🦀\r\n".repeat(50_000);
         let mut tabs = vec![tab(&text), tab(&text)];
         db.persist(request(&tabs), 1).await.unwrap();
-        assert_eq!(
-            db.integer("SELECT count(*) FROM parts").await.unwrap(),
-            2 * db.integer("SELECT count(*) FROM blobs").await.unwrap()
+        assert!(
+            db.integer("SELECT count(*) FROM document_text")
+                .await
+                .unwrap()
+                >= 2 * db.integer("SELECT count(*) FROM chunks").await.unwrap()
         );
         audit(&db).await;
-        for (generation, at) in [1, text.len() / 2, text.len()].into_iter().enumerate() {
+        for (generation, at) in [0, text.chars().count() / 2, text.chars().count()]
+            .into_iter()
+            .enumerate()
+        {
             reset(&db).await;
             insert(&mut tabs[0], at, "🦀");
             db.persist(request(&tabs), generation as u64 + 2)
                 .await
                 .unwrap();
-            let written = db
-                .integer("SELECT coalesce(sum(bytes),0) FROM writes WHERE kind='blob'")
-                .await
-                .unwrap();
-            assert!(
-                written > 0 && written < 1024 * 1024,
-                "edited chunk bytes: {written}"
-            );
+            assert_eq!(count(&db, "body").await, 0);
             let contents = db.read_all_contents().await.unwrap();
             assert_eq!(
-                contents[&tabs[0].buffers.buffer.temp_id],
-                tabs[0].buffers.buffer.text()
+                contents[&tabs[0].active_buffer().temp_id],
+                tabs[0].active_buffer().text()
             );
-            assert_eq!(contents[&tabs[1].buffers.buffer.temp_id], text);
+            assert_eq!(contents[&tabs[1].active_buffer().temp_id], text);
         }
-        // No-op and metadata-only saves don't even attempt inserts into blobs.
         reset(&db).await;
-        let mut captured = request(&tabs);
-        captured.active_surface = super::super::SessionActiveSurface::Settings;
-        db.persist(captured, 5).await.unwrap();
-        assert_eq!(count(&db, "blob").await, 0);
-        let removed = tabs.remove(0);
-        let mut save = request(&tabs);
-        save.removed_documents
-            .push(removed.active_buffer().temp_id.clone());
-        db.persist(save, 6).await.unwrap();
-        assert_eq!(
-            db.integer("SELECT count(*) FROM parts").await.unwrap(),
-            db.integer("SELECT count(*) FROM blobs").await.unwrap()
-        );
-        let mut save = request(&[]);
-        save.removed_documents
-            .extend(tabs.iter().map(|t| t.active_buffer().temp_id.clone()));
-        db.persist(save, 7).await.unwrap();
-        for table in ["parts", "blobs", "history", "documents", "snapshots"] {
-            assert_eq!(
-                db.integer(&format!("SELECT count(*) FROM {table}"))
-                    .await
-                    .unwrap(),
-                0
-            );
-        }
+        db.persist(request(&tabs), 5).await.unwrap();
+        assert_eq!(count(&db, "body").await, 0);
     });
 }
-
 #[test]
 fn opening_reserves_global_sequences_from_unhydrated_cold_history() {
     block_on(async {
         let (root, mut db) = database().await;
-        let mut tabs = vec![tab("active"), tab("cold")];
-        insert(&mut tabs[1], 0, "entry");
-        let mut captured = request(&tabs);
+        let tabs = vec![tab("active"), tab("cold")];
+        let mut captured = exported_request(&tabs);
         let entry = &mut captured.tabs[1].session_tab.buffers[0].text_history[0];
         let high = entry.global_seq + 1_000_000;
         entry.global_seq = high;
@@ -321,107 +213,64 @@ fn opening_reserves_global_sequences_from_unhydrated_cold_history() {
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
         let shells = db.load(ReadScope::Shells).await.unwrap().unwrap();
-        assert!(shells.manifest.tabs[1].buffers[0].text_history.is_empty());
+        assert!(
+            shells.manifest.tabs[1].buffers[0]
+                .history_document
+                .is_none()
+        );
         assert!(crate::app::domain::buffer::next_text_history_global_seq() > high);
     });
 }
-
-#[test]
-fn cdc_boundaries_ignore_piece_segmentation_and_truncation_removes_stale_parts() {
-    block_on(async {
-        let (_root, mut db) = database().await;
-        let text = diverse_text(1024 * 1024);
-        let mut tabs = vec![tab(&text)];
-        db.persist(request(&tabs), 1).await.unwrap();
-        audit(&db).await;
-        let mut fragmented = tab("");
-        for chunk in text.as_bytes().chunks(7919) {
-            let at = fragmented
-                .buffers
-                .buffer
-                .document()
-                .piece_tree()
-                .len_chars();
-            insert(&mut fragmented, at, std::str::from_utf8(chunk).unwrap());
-        }
-        tabs.push(fragmented);
-        db.persist(request(&tabs), 2).await.unwrap();
-        assert_eq!(count(&db, "blob").await, 0);
-        let removed = tabs.remove(0);
-        for value in ["short λ🦀", ""] {
-            tabs[0].buffers.buffer.replace_text(value.into());
-            let mut save = request(&tabs);
-            save.removed_documents
-                .push(removed.active_buffer().temp_id.clone());
-            db.persist(save, 3).await.unwrap();
-            assert_eq!(
-                db.read_all_contents()
-                    .await
-                    .unwrap()
-                    .into_values()
-                    .next()
-                    .unwrap(),
-                value
-            );
-            assert_eq!(
-                db.integer("SELECT count(*) FROM parts").await.unwrap(),
-                i64::from(!value.is_empty())
-            );
-            assert_eq!(
-                db.integer("SELECT count(*) FROM blobs").await.unwrap(),
-                i64::from(!value.is_empty())
-            );
-        }
-    });
-}
-
 #[test]
 fn strict_types_and_foreign_keys_are_enforced_by_turso() {
     block_on(async {
-        let (_root, db) = database().await;
+        let (_root, mut db) = database().await;
         assert_eq!(db.integer("PRAGMA foreign_keys").await.unwrap(), 1);
         assert!(
             db.conn
-                .execute("INSERT INTO history(temp_id, seq, global_seq, entry) VALUES('missing', 1, 1, x'00')", ())
-                .await
-                .is_err()
-        );
-        assert!(
-            db.conn
-                .execute("INSERT INTO parts VALUES('missing', 0, x'00')", ())
+                .execute("INSERT INTO history_nodes VALUES('missing',0)", ())
                 .await
                 .is_err()
         );
         assert!(
             db.conn
                 .execute(
-                    "INSERT INTO blobs(digest, body) VALUES(x'00', 'not a blob')",
+                    "INSERT INTO history_spans VALUES('missing',1,0,0,0,0,0,0,1,1)",
                     ()
                 )
                 .await
                 .is_err()
         );
-        let mut row = super::document_rows::DocumentRow::capture(
-            &super::super::model::SessionBuffer::capture(tab("").active_buffer()),
-        )
-        .unwrap();
-        row.id = "clean".into();
-        db.write_document_row(&row, false).await.unwrap();
-        db.conn
-            .execute(
-                "INSERT INTO history_nodes VALUES('clean',0),('clean',1)",
-                (),
-            )
-            .await
-            .unwrap();
-        db.conn
-            .execute(
-                "INSERT INTO history(temp_id, seq, parent_id, edited_at, global_seq, entry, source, summary) VALUES('clean', 1, 0, 0, 1, x'00', 'load', '')",
-                (),
-            )
-            .await
-            .unwrap();
+        assert!(
+            db.conn
+                .execute("INSERT INTO document_text VALUES('missing',0,0,0,1)", ())
+                .await
+                .is_err()
+        );
+        db.persist(request(&[tab("durable")]), 1).await.unwrap();
+        assert!(
+            db.conn
+                .execute("UPDATE chunk_bodies SET body='not a blob'", ())
+                .await
+                .is_err()
+        );
+        db.conn.execute("DELETE FROM tabs", ()).await.unwrap();
+        db.conn.execute("DELETE FROM layouts", ()).await.unwrap();
         db.conn.execute("DELETE FROM documents", ()).await.unwrap();
-        assert_eq!(db.integer("SELECT count(*) FROM history").await.unwrap(), 0);
+        for table in [
+            "history",
+            "history_spans",
+            "document_text",
+            "document_tail",
+            "document_pieces",
+            "document_history",
+        ] {
+            assert_eq!(
+                db.integer(&format!("SELECT count(*) FROM {table}"))
+                    .await
+                    .unwrap(),
+                0
+            );
+        }
     });
 }

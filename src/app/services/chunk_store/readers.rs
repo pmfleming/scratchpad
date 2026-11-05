@@ -116,6 +116,7 @@ struct Readers {
 /// An epoch can be closed for Windows replacement, then reopened against its backup.
 pub struct ReadEpoch {
     pub id: u64,
+    reads: std::sync::atomic::AtomicU64,
     readers: Mutex<Option<Readers>>,
 }
 impl std::fmt::Debug for ReadEpoch {
@@ -126,6 +127,10 @@ impl std::fmt::Debug for ReadEpoch {
     }
 }
 impl ReadEpoch {
+    /// Number of body-read requests; metadata reconstruction does not increment it.
+    pub fn read_count(&self) -> u64 {
+        self.reads.load(std::sync::atomic::Ordering::Relaxed)
+    }
     #[cfg(test)]
     pub(crate) fn panic_foreground_for_test(&self) {
         let reader = self
@@ -156,6 +161,7 @@ impl ReadEpoch {
     pub(super) fn open(path: &Path, id: u64) -> io::Result<Arc<Self>> {
         let epoch = Arc::new(Self {
             id,
+            reads: std::sync::atomic::AtomicU64::new(0),
             readers: Mutex::new(None),
         });
         epoch.reopen(path)?;
@@ -188,6 +194,8 @@ impl ReadEpoch {
         reference: &ChunkReference,
         background: bool,
     ) -> io::Result<Arc<String>> {
+        self.reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let reader = {
             let readers = self
                 .readers
@@ -278,5 +286,13 @@ async fn read(
     }
     let text = String::from_utf8(body)
         .map_err(|cause| turso::Error::ConversionFailure(cause.to_string()))?;
+    if text.chars().count() as u64 != metadata.char_len
+        || text.bytes().filter(|&b| b == b'\n').count() as u64 != metadata.newline_count
+        || text.is_ascii() != metadata.is_ascii
+    {
+        return Err(turso::Error::ConversionFailure(
+            "immutable text metrics mismatch".into(),
+        ));
+    }
     Ok(Arc::new(text))
 }

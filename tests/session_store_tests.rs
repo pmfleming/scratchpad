@@ -57,7 +57,7 @@ fn persists_split_views_and_active_view() {
 }
 
 #[test]
-fn restored_clean_buffer_loads_external_text_in_the_same_reversible_tree() {
+fn restore_returns_committed_clean_text_before_background_disk_observation() {
     let directory = tempfile::tempdir().unwrap();
     let file_path = directory.path().join("tracked.txt");
     std::fs::write(&file_path, "session").unwrap();
@@ -80,21 +80,21 @@ fn restored_clean_buffer_loads_external_text_in_the_same_reversible_tree() {
     let restored = store.load().unwrap().unwrap();
 
     let buffer = &restored.tabs[0].buffers.buffer;
-    assert_eq!(buffer.text(), "disk");
+    assert_eq!(buffer.text(), "session");
     assert_eq!(buffer.temp_id, identity);
     assert_eq!(buffer.freshness, BufferFreshness::InSync);
     assert_eq!(
         buffer.document().history_entries().last().unwrap().source,
-        scratchpad::app::domain::PieceSource::External
+        scratchpad::app::domain::PieceSource::Load
     );
     let mut document = buffer.document().clone();
     document.undo_last_operation().unwrap();
-    assert_eq!(document.extract_text(), "session");
+    assert_eq!(document.extract_text(), "");
     assert_eq!(std::fs::read_to_string(file_path).unwrap(), "disk");
 }
 
 #[test]
-fn restored_dirty_buffer_keeps_session_text_and_marks_conflict() {
+fn restore_keeps_dirty_session_text_before_background_disk_observation() {
     let directory = tempfile::tempdir().unwrap();
     let file_path = directory.path().join("tracked.txt");
     std::fs::write(&file_path, "session").unwrap();
@@ -119,6 +119,6 @@ fn restored_dirty_buffer_keeps_session_text_and_marks_conflict() {
     assert_eq!(restored.tabs[0].buffers.buffer.text(), "session");
     assert_eq!(
         restored.tabs[0].buffers.buffer.freshness,
-        BufferFreshness::ConflictOnDisk
+        BufferFreshness::InSync
     );
 }

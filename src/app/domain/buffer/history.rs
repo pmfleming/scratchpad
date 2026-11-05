@@ -28,36 +28,9 @@ pub(crate) const TEXT_HISTORY_PREVIEW_MAX_CHARS: usize = 80;
 pub(crate) const TEXT_HISTORY_ROOT_CHECKPOINT_MIN_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(from = "PersistedHistoryFlags", into = "PersistedHistoryFlags")]
 pub struct PieceHistoryFlags {
     pub undone: bool,
     pub replayable: bool,
-}
-
-// Keep stage 1's existing JSON wire shape until the new schema lands. This is
-// serialization of the current format, not an old-schema reader or migration.
-#[derive(serde::Serialize, serde::Deserialize)]
-struct PersistedHistoryFlags {
-    undone: bool,
-    replayable: bool,
-    persisted: bool,
-}
-impl From<PieceHistoryFlags> for PersistedHistoryFlags {
-    fn from(flags: PieceHistoryFlags) -> Self {
-        Self {
-            undone: flags.undone,
-            replayable: flags.replayable,
-            persisted: false,
-        }
-    }
-}
-impl From<PersistedHistoryFlags> for PieceHistoryFlags {
-    fn from(flags: PersistedHistoryFlags) -> Self {
-        Self {
-            undone: flags.undone,
-            replayable: flags.replayable,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

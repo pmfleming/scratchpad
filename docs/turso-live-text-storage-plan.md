@@ -1,8 +1,8 @@
 # Turso-backed live text storage
 
-Status: implementation in progress, based on commit `087e045`. Stage 0 baseline
-and contract groundwork landed in `a00d0b6`; its remaining measurements are in
-progress. The user approved standard WAL on both platforms on 2026-11-05, with
+Status: stages 0–4 implemented on Linux, based on commit `087e045`. Native Windows
+runtime validation remains pending under the user's authorization. The user
+approved standard WAL on both platforms on 2026-11-05, with
 multiprocess WAL to be revisited on later Turso versions. Historical source
 observations below describe the baseline, not claims about later stages.
 
@@ -893,6 +893,15 @@ Replace rollover spills with sealing, and add viewport pinning, prefetch, flow c
 deadlock, or UI wait on the writer. Accepted text survives injected write failures.
 
 ### 4. Reference-based persistence and restore
+
+Implemented on 2026-11-05; see [stage 4 evidence](../tools/turso-contract/STAGE-4.md).
+The implementation keeps `(temp_id, seq)` as history's stable composite identity
+and uses composite span foreign keys. Piece metadata is split into 64 KiB parts
+with digests. Its header preserves logical address lengths when Forget history
+releases whole chunks. Typed artifact-analysis columns permit restore without
+scanning text. Startup disk observations follow installation on the background
+path lane. Export/lifecycle integration continues in stage 6, with final large
+history-navigation and resource checks in stage 7.
 
 Add typed `history` and `history_spans` rows (using the measured packed-span
 fallback for very large entries when warranted), `document_text`, tail segments, `document_pieces`, the commit

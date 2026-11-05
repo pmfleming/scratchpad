@@ -19,8 +19,6 @@ pub struct PersistedHistoryEntry {
     pub selected_tip: bool,
     pub global_seq: u64,
     pub source: PieceSource,
-    pub visible_generation_before: u32,
-    pub visible_generation_after: u32,
     pub fingerprint: u64,
     #[serde(default)]
     pub summary: String,

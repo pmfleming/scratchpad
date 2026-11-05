@@ -72,7 +72,7 @@ impl TextDocument {
             return;
         }
 
-        self.history.latest_operation_record = Some(record.clone());
+        self.history.latest_operation_record = bounded_record(record.clone());
         let entry = self.history_entry_from_operation(record, source);
         self.history.byte_usage += entry.byte_cost();
         assert!(self.history.tree.append(entry.id));
@@ -96,7 +96,11 @@ impl TextDocument {
         let edits = record
             .edits
             .iter()
-            .map(|edit| self.history_edit_from_operation_edit(edit, source))
+            .enumerate()
+            .map(|(index, edit)| {
+                let span = self.inserted_reference(&record, index);
+                self.history_edit_from_operation_edit(edit, source, span)
+            })
             .collect::<PieceHistoryEdits>();
         let fingerprint = self.fingerprint_for_history_edits(&edits);
         self.history.latest_update_at = Some(Instant::now());
@@ -124,17 +128,49 @@ impl TextDocument {
         entry
     }
 
+    fn inserted_reference(
+        &self,
+        record: &TextDocumentOperationRecord,
+        index: usize,
+    ) -> Option<ByteSpan> {
+        let edit = &record.edits[index];
+        if edit.inserted_text.is_empty() {
+            return None;
+        }
+        let mut start = edit.start_char;
+        for later in &record.edits[index + 1..] {
+            if later.start_char <= start {
+                start = start
+                    .checked_sub(later.deleted_text.chars().count())?
+                    .checked_add(later.inserted_text.chars().count())?;
+            }
+        }
+        let spans = self
+            .byte_spans_for_range(start..start.checked_add(edit.inserted_text.chars().count())?);
+        let mut merged = *spans.first()?;
+        for span in &spans[1..] {
+            if span.buffer != merged.buffer || span.start_byte != merged.byte_end() {
+                return None;
+            }
+            merged.byte_len += span.byte_len;
+            merged.char_len += span.char_len;
+        }
+        (merged.byte_len == edit.inserted_text.len() as u64).then_some(merged)
+    }
+
     fn history_edit_from_operation_edit(
         &mut self,
         edit: &TextDocumentEditOperation,
         source: PieceSource,
+        inserted: Option<ByteSpan>,
     ) -> PieceHistoryEdit {
         let tree = Arc::make_mut(&mut self.content.piece_tree);
         let start_char = edit.start_char as u64;
         match (edit.deleted_text.is_empty(), edit.inserted_text.is_empty()) {
             (true, false) => PieceHistoryEdit::Inserted {
                 start_char,
-                span: tree.append_history_text(&edit.inserted_text, source),
+                span: inserted
+                    .unwrap_or_else(|| tree.append_history_text(&edit.inserted_text, source)),
             },
             (false, true) => PieceHistoryEdit::Deleted {
                 start_char,
@@ -143,7 +179,8 @@ impl TextDocument {
             (false, false) => PieceHistoryEdit::Replaced {
                 start_char,
                 deleted: deleted_spans_or_payload(tree, edit, source),
-                inserted: tree.append_history_text(&edit.inserted_text, source),
+                inserted: inserted
+                    .unwrap_or_else(|| tree.append_history_text(&edit.inserted_text, source)),
             },
             (true, true) => {
                 debug_assert!(
@@ -156,6 +193,7 @@ impl TextDocument {
                         buffer: super::super::piece_tree::PieceBuffer::Add,
                         start_byte: 0,
                         byte_len: 0,
+                        char_len: 0,
                     },
                 }
             }
@@ -200,7 +238,7 @@ impl TextDocument {
         match coalesced {
             CoalescedEdit::Record(merged_record) => {
                 self.replace_coalesced_history_entry(latest_index, &merged_record, now);
-                self.history.latest_operation_record = Some(merged_record);
+                self.history.latest_operation_record = bounded_record(merged_record);
             }
             CoalescedEdit::Noop => {
                 let Some(removed) = self.history.entries.pop() else {
@@ -225,7 +263,11 @@ impl TextDocument {
         let edits = merged_record
             .edits
             .iter()
-            .map(|edit| self.history_edit_from_operation_edit(edit, source))
+            .enumerate()
+            .map(|(index, edit)| {
+                let span = self.inserted_reference(merged_record, index);
+                self.history_edit_from_operation_edit(edit, source, span)
+            })
             .collect::<PieceHistoryEdits>();
         let fingerprint = self.fingerprint_for_history_edits(&edits);
 
@@ -249,4 +291,15 @@ impl TextDocument {
             .saturating_add(new_cost);
         self.history.latest_update_at = Some(now);
     }
+}
+
+pub(super) fn bounded_record(
+    record: TextDocumentOperationRecord,
+) -> Option<TextDocumentOperationRecord> {
+    let bytes = record
+        .edits
+        .iter()
+        .map(|e| e.deleted_text.len().saturating_add(e.inserted_text.len()))
+        .fold(0usize, usize::saturating_add);
+    (bytes <= super::super::state::BULK_TEXT_BYTES).then_some(record)
 }

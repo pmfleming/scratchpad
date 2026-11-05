@@ -33,7 +33,10 @@ fn parallel_scan_detects_orphan_chunks_outside_all_content_ranges() {
             .await
             .unwrap();
         db.conn
-            .execute("INSERT INTO parts VALUES('zzzz_orphan', 0, x'6162')", ())
+            .execute(
+                "INSERT INTO document_tail VALUES('zzzz_orphan',0,0,x'6162',zeroblob(32))",
+                (),
+            )
             .await
             .unwrap();
         assert!(db.load(ReadScope::All).await.is_err());
@@ -59,7 +62,7 @@ fn document_replacement_with_reused_generation_is_not_skipped() {
                 .await
                 .unwrap()
                 .unwrap()
-                .contents
+                .text_contents()
                 .into_values()
                 .next()
                 .unwrap(),
@@ -81,13 +84,19 @@ fn disk_full_rolls_back_content_metadata_and_cleanup() {
         let changed = vec![tab(&"λ".repeat(1024 * 1024))];
         assert!(db.persist(request(&changed), 2).await.is_err());
         let session = db.load(ReadScope::All).await.unwrap().unwrap();
-        assert_eq!(session.contents.len(), 1);
-        assert_eq!(session.contents.into_values().next().unwrap(), "original");
+        assert_eq!(session.text_contents().len(), 1);
+        assert_eq!(
+            session.text_contents().into_values().next().unwrap(),
+            "original"
+        );
         db.integer("PRAGMA max_page_count=1000000").await.unwrap();
         db.persist(request(&changed), 3).await.unwrap();
         assert_eq!(
-            db.load(ReadScope::All).await.unwrap().unwrap().contents
-                [&changed[0].active_buffer().temp_id]
+            db.load(ReadScope::All)
+                .await
+                .unwrap()
+                .unwrap()
+                .text_contents()[&changed[0].active_buffer().temp_id]
                 .len(),
             2 * 1024 * 1024
         );
@@ -98,8 +107,8 @@ fn disk_full_rolls_back_content_metadata_and_cleanup() {
 fn missing_or_corrupt_content_is_quarantined_not_replaced_with_empty_text() {
     block_on(async {
         for (damage, retained) in [
-            ("DELETE FROM snapshots", 0),
-            ("UPDATE blobs SET body=x'00'", 1),
+            ("DELETE FROM document_pieces", 0),
+            ("UPDATE document_pieces SET body=x'00'", 1),
         ] {
             for shells_first in [true, false] {
                 let (_root, mut db) = database().await;
@@ -108,7 +117,7 @@ fn missing_or_corrupt_content_is_quarantined_not_replaced_with_empty_text() {
                 if shells_first {
                     let stored = db.load(ReadScope::Shells).await.unwrap().unwrap();
                     assert_eq!(stored.quarantined.len(), 1);
-                    assert!(stored.contents.is_empty());
+                    assert!(stored.text_contents().is_empty());
                 } else {
                     assert!(db.load(ReadScope::All).await.is_err());
                 }
@@ -120,11 +129,15 @@ fn missing_or_corrupt_content_is_quarantined_not_replaced_with_empty_text() {
                     1
                 );
                 assert_eq!(
-                    db.integer("SELECT count(*) FROM snapshots").await.unwrap(),
+                    db.integer("SELECT count(*) FROM document_pieces")
+                        .await
+                        .unwrap(),
                     retained
                 );
                 assert_eq!(
-                    db.integer("SELECT count(*) FROM blobs").await.unwrap(),
+                    db.integer("SELECT count(*) FROM document_pieces")
+                        .await
+                        .unwrap(),
                     retained
                 );
             }
@@ -146,7 +159,7 @@ fn corrupt_metadata_cannot_be_overwritten_without_first_loading() {
         assert!(reopened.persist(request(&[]), 1).await.is_err());
         assert_eq!(
             reopened
-                .integer("SELECT count(*) FROM snapshots")
+                .integer("SELECT count(*) FROM document_pieces")
                 .await
                 .unwrap(),
             1

@@ -4,7 +4,6 @@ mod activity;
 mod activity_tests;
 #[cfg(test)]
 mod app_safety_tests;
-mod chunking;
 mod chunks;
 pub(super) mod closed;
 #[cfg(test)]
@@ -27,6 +26,8 @@ mod inventory_tests;
 mod layouts;
 mod persist;
 mod profiling;
+#[cfg(test)]
+mod reference_tests;
 pub use profiling::SessionMaintenanceFixture;
 mod quarantine;
 #[cfg(test)]
@@ -69,9 +70,12 @@ CREATE TABLE history_nodes(temp_id TEXT NOT NULL REFERENCES documents(id) ON DEL
     node_id INTEGER NOT NULL CHECK(node_id>=0), PRIMARY KEY(temp_id,node_id)) STRICT;
 CREATE TABLE history(temp_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
                      seq INTEGER NOT NULL, parent_id INTEGER NOT NULL CHECK(parent_id>=0 AND parent_id<seq), edited_at INTEGER NOT NULL, global_seq INTEGER NOT NULL CHECK(global_seq>0),
-                     source TEXT NOT NULL CHECK(source IN ('load','edit','paste','cut','search_replace','external')), summary TEXT NOT NULL, entry BLOB NOT NULL, bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0), PRIMARY KEY(temp_id, seq),
+                     source TEXT NOT NULL CHECK(source IN ('load','edit','paste','cut','search_replace','external')), summary TEXT NOT NULL, replayable INTEGER NOT NULL CHECK(replayable IN (0,1)), bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0),
+                     previous_primary INTEGER NOT NULL,previous_primary_next INTEGER NOT NULL,previous_secondary INTEGER NOT NULL,previous_secondary_next INTEGER NOT NULL,
+                     next_primary INTEGER NOT NULL,next_primary_next INTEGER NOT NULL,next_secondary INTEGER NOT NULL,next_secondary_next INTEGER NOT NULL,packed_spans BLOB, PRIMARY KEY(temp_id, seq),
                      FOREIGN KEY(temp_id,seq) REFERENCES history_nodes(temp_id,node_id) ON DELETE CASCADE,
                      FOREIGN KEY(temp_id,parent_id) REFERENCES history_nodes(temp_id,node_id) ON DELETE CASCADE) STRICT;
+CREATE TABLE history_spans(temp_id TEXT NOT NULL,seq INTEGER NOT NULL,edit INTEGER NOT NULL CHECK(edit>=0),role INTEGER NOT NULL CHECK(role IN (0,1)),part INTEGER NOT NULL CHECK(part>=0),start_char INTEGER NOT NULL CHECK(start_char>=0),buffer INTEGER NOT NULL CHECK(buffer IN (0,1)),start_byte INTEGER NOT NULL CHECK(start_byte>=0),byte_len INTEGER NOT NULL CHECK(byte_len>=0),char_len INTEGER NOT NULL CHECK(char_len>=0),PRIMARY KEY(temp_id,seq,edit,role,part),FOREIGN KEY(temp_id,seq) REFERENCES history(temp_id,seq) ON DELETE CASCADE) STRICT;
 CREATE TABLE document_history(temp_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
     now_id INTEGER NOT NULL CHECK(now_id>=0), tip_id INTEGER NOT NULL CHECK(tip_id>=0), edited_at INTEGER NOT NULL, edit_seq INTEGER NOT NULL,
     FOREIGN KEY(temp_id,now_id) REFERENCES history_nodes(temp_id,node_id) ON DELETE CASCADE,
@@ -81,19 +85,30 @@ CREATE INDEX history_parent ON history(temp_id, parent_id);
 CREATE INDEX history_global_seq ON history(global_seq,temp_id,seq);
 CREATE INDEX history_document_sequence ON history(temp_id,global_seq,seq);
 CREATE INDEX history_sizes ON history(temp_id, bytes);
-CREATE TABLE snapshots(id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
-                       bytes INTEGER NOT NULL, digest BLOB NOT NULL) STRICT;
-CREATE TABLE blobs(digest BLOB PRIMARY KEY, body BLOB NOT NULL, bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0)) STRICT;
-CREATE INDEX blob_sizes ON blobs(bytes, digest);
-CREATE TABLE parts(temp_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
-                   part INTEGER NOT NULL, digest BLOB NOT NULL REFERENCES blobs(digest),
-                   PRIMARY KEY(temp_id, part)) STRICT;
-CREATE INDEX parts_digest ON parts(digest);";
+CREATE TABLE document_pieces(id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,part INTEGER NOT NULL CHECK(part>=0),bytes INTEGER NOT NULL CHECK(bytes>=0 AND (part=0 OR bytes=0)),digest BLOB NOT NULL CHECK(length(digest)=32),body BLOB NOT NULL CHECK(length(body)<=65536),PRIMARY KEY(id,part)) STRICT;
+CREATE TABLE document_text(temp_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,buffer INTEGER NOT NULL CHECK(buffer IN (0,1)),position INTEGER NOT NULL CHECK(position>=0),start_byte INTEGER NOT NULL CHECK(start_byte>=0),chunk_id INTEGER NOT NULL REFERENCES chunks(id),PRIMARY KEY(temp_id,buffer,position)) STRICT;
+CREATE INDEX document_text_chunk ON document_text(chunk_id);
+CREATE TABLE document_tail(temp_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,start_byte INTEGER NOT NULL CHECK(start_byte>=0),offset INTEGER NOT NULL CHECK(offset>=0),body BLOB NOT NULL,digest BLOB NOT NULL CHECK(length(digest)=32),PRIMARY KEY(temp_id,offset)) STRICT;";
 
 pub(super) struct StoredSession {
     pub manifest: SessionManifest,
     pub contents: HashMap<String, String>,
     pub quarantined: HashSet<String>,
+}
+#[cfg(test)]
+impl StoredSession {
+    pub(crate) fn text_contents(&self) -> HashMap<String, String> {
+        self.manifest
+            .tabs
+            .iter()
+            .flat_map(|t| &t.buffers)
+            .filter_map(|b| {
+                b.history_document
+                    .as_ref()
+                    .map(|d| (b.temp_id.clone(), d.try_extract_text().unwrap()))
+            })
+            .collect()
+    }
 }
 #[derive(Default)]
 struct ContentInventory {
@@ -113,7 +128,8 @@ pub(super) struct Database {
     layout_cache: HashMap<u64, layouts::LayoutRow>,
     state_cache: Option<layouts::StateRow>,
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
-    chunk_cache: HashMap<String, chunking::ChunkCheckpoint>,
+    tail_cache: HashMap<String, content::TailCheckpoint>,
+    history_positions: HashMap<String, (u64, u64, u64, u64)>,
     history_cache: HashMap<String, Vec<history::HistoryFingerprint>>,
     document_cache: HashMap<String, document_rows::DocumentRow>,
     // Complete committed IDs, including cold/quarantined content; revisions alone
@@ -122,6 +138,7 @@ pub(super) struct Database {
     latest_request: u64,
     pub(super) blocked: Option<String>,
     verified: bool,
+    collection_cursor: i64,
     quarantined: HashMap<String, super::model::SessionBuffer>,
 }
 impl Database {
@@ -186,13 +203,15 @@ impl Database {
             state_cache: None,
             layout_cache: HashMap::new(),
             revisions: HashMap::new(),
-            chunk_cache: HashMap::new(),
+            tail_cache: HashMap::new(),
+            history_positions: HashMap::new(),
             history_cache: HashMap::new(),
             document_cache: HashMap::new(),
             inventory: None,
             latest_request: 0,
             blocked: None,
             verified: false,
+            collection_cursor: 0,
             quarantined: HashMap::new(),
         })
     }
@@ -269,19 +288,6 @@ impl Database {
         Ok(values)
     }
 
-    async fn collect_digests(
-        &self,
-        sql: &str,
-        params: impl turso::IntoParams,
-        into: &mut HashSet<Vec<u8>>,
-    ) -> io::Result<()> {
-        let mut rows = self.conn.query(sql, params).await.map_err(error)?;
-        while let Some(row) = rows.next().await.map_err(error)? {
-            into.insert(row.get(0).map_err(error)?);
-        }
-        Ok(())
-    }
-
     async fn string_set(&self, sql: &str) -> io::Result<HashSet<String>> {
         let mut rows = self.conn.query(sql, ()).await.map_err(error)?;
         let mut values = HashSet::new();
@@ -308,14 +314,20 @@ impl Database {
         }
     }
     async fn execute_cached(&self, sql: &str, params: impl turso::IntoParams) -> io::Result<()> {
+        self.execute_count_cached(sql, params).await.map(|_| ())
+    }
+    async fn execute_count_cached(
+        &self,
+        sql: &str,
+        params: impl turso::IntoParams,
+    ) -> io::Result<u64> {
         self.conn
             .prepare_cached(sql)
             .await
             .map_err(error)?
             .execute(params)
             .await
-            .map_err(error)?;
-        Ok(())
+            .map_err(error)
     }
     // Only acknowledge our own writes: an earlier unexpected write must still
     // invalidate the inventory on the next save.
@@ -336,7 +348,8 @@ impl Database {
             self.layout_cache.clear();
             self.tab_cache.clear();
             self.revisions.clear();
-            self.chunk_cache.clear();
+            self.tail_cache.clear();
+            self.history_positions.clear();
             self.history_cache.clear();
             self.document_cache.clear();
             self.inventory = None;

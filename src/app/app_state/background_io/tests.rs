@@ -389,6 +389,7 @@ fn timeline_cold_hydration_runs_conflict_search_and_restore_status_updates() {
                 }),
             )),
         );
+        app.wait_for_background_io_idle();
         assert!(app.tab_manager.cold_session_tabs().is_empty());
         assert!(app.state.search_state.runtime.dirty);
         assert!(

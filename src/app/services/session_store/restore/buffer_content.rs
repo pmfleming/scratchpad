@@ -13,6 +13,9 @@ impl Restorer {
         buffer: &mut SessionBuffer,
     ) -> RestoredBufferContent {
         let content = self.contents.remove(&buffer.temp_id);
+        if content.is_none() && buffer.history_document.is_some() {
+            return RestoredBufferContent::from_references(buffer);
+        }
         let Some(path) = buffer.path.clone() else {
             return RestoredBufferContent::from_session(
                 buffer,
@@ -110,6 +113,36 @@ pub(super) struct RestoredBufferContent {
 }
 
 impl RestoredBufferContent {
+    fn from_references(buffer: &mut SessionBuffer) -> Self {
+        let missing = buffer.path.as_ref().is_some_and(|path| {
+            FileService::read_disk_state(path)
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        });
+        let known_conflict = buffer.is_dirty
+            && buffer
+                .observed_disk_digest
+                .as_ref()
+                .zip(buffer.disk_content_digest.as_ref())
+                .is_some_and(|(observed, baseline)| observed != baseline);
+        if missing {
+            buffer.pending_disk_observation = !buffer.observed_disk_missing;
+            buffer.observed_disk_missing = true;
+        }
+        Self::from_session(
+            buffer,
+            String::new(),
+            session_disk_state(buffer),
+            buffer.is_dirty || missing,
+            if missing {
+                BufferFreshness::MissingOnDisk
+            } else if known_conflict {
+                BufferFreshness::ConflictOnDisk
+            } else {
+                BufferFreshness::InSync
+            },
+        )
+    }
+
     fn new(
         document: TextDocument,
         format: TextFormatMetadata,
@@ -196,6 +229,9 @@ fn session_buffer_format_and_metadata(
     buffer: &SessionBuffer,
     content: &str,
 ) -> (TextFormatMetadata, BufferTextMetadata) {
+    if let Some(metadata) = &buffer.text_metadata {
+        return (buffer.format.clone(), metadata.clone());
+    }
     let mut format = buffer.format.clone();
     let text_metadata = buffer_text_metadata(content, &mut format);
     (format, text_metadata)

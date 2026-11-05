@@ -1,5 +1,6 @@
 //! Typed document metadata. No text bodies or serialized document payloads.
 use super::{Database, error, invalid};
+use crate::app::domain::buffer::BufferTextMetadata;
 use crate::app::domain::{LineEndingCounts, TextFormatMetadata};
 use crate::app::services::session_store::model::SessionBuffer;
 use std::io;
@@ -32,10 +33,10 @@ disk_modified_millis INTEGER,
 disk_len INTEGER,
 disk_content_digest TEXT,
 observed_digest TEXT,
-observed_missing INTEGER NOT NULL CHECK(observed_missing IN (0,1))) STRICT;
+observed_missing INTEGER NOT NULL CHECK(observed_missing IN (0,1)),artifact_flags INTEGER NOT NULL CHECK(artifact_flags BETWEEN 0 AND 31),other_control_count INTEGER NOT NULL CHECK(other_control_count>=0),ansi_count INTEGER,backspace_count INTEGER,unicode_format_count INTEGER,other_control_exact INTEGER) STRICT;
 CREATE INDEX documents_path ON documents(path_key);
 CREATE INDEX documents_buffer ON documents(buffer_id);";
-pub(super) const COLUMNS: &str = "id,buffer_id,name,path,path_key,search_text,is_dirty,text_is_empty,has_recorded_edits,is_settings_file,show_control_chars,right_to_left,encoding_name,has_bom,encoding_source,line_endings,preferred_line_ending,lf_count,crlf_count,cr_count,is_ascii_subset,has_decoding_warnings,line_count,disk_modified_millis,disk_len,disk_content_digest,observed_digest,observed_missing";
+pub(super) const COLUMNS: &str = "id,buffer_id,name,path,path_key,search_text,is_dirty,text_is_empty,has_recorded_edits,is_settings_file,show_control_chars,right_to_left,encoding_name,has_bom,encoding_source,line_endings,preferred_line_ending,lf_count,crlf_count,cr_count,is_ascii_subset,has_decoding_warnings,line_count,disk_modified_millis,disk_len,disk_content_digest,observed_digest,observed_missing,artifact_flags,other_control_count,ansi_count,backspace_count,unicode_format_count,other_control_exact";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct DocumentRow {
@@ -67,6 +68,7 @@ pub(super) struct DocumentRow {
     pub disk_content_digest: Option<String>,
     pub observed_digest: Option<String>,
     pub observed_missing: bool,
+    pub analysis: BufferTextMetadata,
 }
 impl DocumentRow {
     pub fn capture(b: &SessionBuffer) -> io::Result<Self> {
@@ -122,6 +124,15 @@ impl DocumentRow {
             disk_content_digest: b.disk_content_digest.clone(),
             observed_digest: b.observed_disk_digest.clone(),
             observed_missing: b.observed_disk_missing,
+            analysis: b
+                .text_metadata
+                .clone()
+                .unwrap_or_else(|| BufferTextMetadata {
+                    line_count: b.line_count,
+                    artifact_summary: crate::app::domain::TextArtifactSummary::default(),
+                    preferred_line_ending: b.format.preferred_line_ending,
+                    has_non_compliant_characters: false,
+                }),
         })
     }
     pub fn read(row: &turso::Row) -> io::Result<Self> {
@@ -162,6 +173,7 @@ impl DocumentRow {
             disk_content_digest: row.get(25).map_err(error)?,
             observed_digest: row.get(26).map_err(error)?,
             observed_missing: boolean(row.get::<i64>(27).map_err(error)?)?,
+            analysis: read_analysis(row)?,
         })
     }
     pub fn into_buffer(self) -> io::Result<SessionBuffer> {
@@ -177,6 +189,7 @@ impl DocumentRow {
             show_control_chars: self.show_control_chars,
             right_to_left_reading_order: self.right_to_left,
             line_count: usize::try_from(self.line_count).map_err(invalid)?,
+            text_metadata: Some(self.analysis),
             format: TextFormatMetadata {
                 encoding_name: self.encoding_name,
                 has_bom: self.has_bom,
@@ -211,9 +224,9 @@ impl Database {
         existing: bool,
     ) -> io::Result<()> {
         let sql = if existing {
-            "UPDATE documents SET buffer_id=?2,name=?3,path=?4,path_key=?5,search_text=?6,is_dirty=?7,text_is_empty=?8,has_recorded_edits=?9,is_settings_file=?10,show_control_chars=?11,right_to_left=?12,encoding_name=?13,has_bom=?14,encoding_source=?15,line_endings=?16,preferred_line_ending=?17,lf_count=?18,crlf_count=?19,cr_count=?20,is_ascii_subset=?21,has_decoding_warnings=?22,line_count=?23,disk_modified_millis=?24,disk_len=?25,disk_content_digest=?26,observed_digest=?27,observed_missing=?28 WHERE id=?1"
+            "UPDATE documents SET buffer_id=?2,name=?3,path=?4,path_key=?5,search_text=?6,is_dirty=?7,text_is_empty=?8,has_recorded_edits=?9,is_settings_file=?10,show_control_chars=?11,right_to_left=?12,encoding_name=?13,has_bom=?14,encoding_source=?15,line_endings=?16,preferred_line_ending=?17,lf_count=?18,crlf_count=?19,cr_count=?20,is_ascii_subset=?21,has_decoding_warnings=?22,line_count=?23,disk_modified_millis=?24,disk_len=?25,disk_content_digest=?26,observed_digest=?27,observed_missing=?28,artifact_flags=?29,other_control_count=?30,ansi_count=?31,backspace_count=?32,unicode_format_count=?33,other_control_exact=?34 WHERE id=?1"
         } else {
-            "INSERT INTO documents(id,buffer_id,name,path,path_key,search_text,is_dirty,text_is_empty,has_recorded_edits,is_settings_file,show_control_chars,right_to_left,encoding_name,has_bom,encoding_source,line_endings,preferred_line_ending,lf_count,crlf_count,cr_count,is_ascii_subset,has_decoding_warnings,line_count,disk_modified_millis,disk_len,disk_content_digest,observed_digest,observed_missing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO documents(id,buffer_id,name,path,path_key,search_text,is_dirty,text_is_empty,has_recorded_edits,is_settings_file,show_control_chars,right_to_left,encoding_name,has_bom,encoding_source,line_endings,preferred_line_ending,lf_count,crlf_count,cr_count,is_ascii_subset,has_decoding_warnings,line_count,disk_modified_millis,disk_len,disk_content_digest,observed_digest,observed_missing,artifact_flags,other_control_count,ansi_count,backspace_count,unicode_format_count,other_control_exact) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         };
         self.execute_cached(
             sql,
@@ -246,6 +259,28 @@ impl Database {
                 row.disk_content_digest.clone(),
                 row.observed_digest.clone(),
                 i64::from(row.observed_missing),
+                artifact_flags(&row.analysis),
+                signed(row.analysis.artifact_summary.other_control_count as u64)?,
+                row.analysis
+                    .artifact_summary
+                    .ansi_sequence_count
+                    .map(|n| signed(n as u64))
+                    .transpose()?,
+                row.analysis
+                    .artifact_summary
+                    .backspace_count
+                    .map(|n| signed(n as u64))
+                    .transpose()?,
+                row.analysis
+                    .artifact_summary
+                    .unicode_format_control_count
+                    .map(|n| signed(n as u64))
+                    .transpose()?,
+                row.analysis
+                    .artifact_summary
+                    .other_control_count_exact
+                    .map(|n| signed(n as u64))
+                    .transpose()?,
             ],
         )
         .await
@@ -282,4 +317,42 @@ pub(super) fn enum_name(value: impl serde::Serialize) -> io::Result<String> {
 }
 pub(super) fn parse_enum<T: serde::de::DeserializeOwned>(name: String) -> io::Result<T> {
     serde_json::from_value(serde_json::Value::String(name)).map_err(invalid)
+}
+
+fn artifact_flags(metadata: &BufferTextMetadata) -> i64 {
+    let a = &metadata.artifact_summary;
+    i64::from(a.has_ansi_sequences)
+        | (i64::from(a.has_carriage_returns) << 1)
+        | (i64::from(a.has_backspaces) << 2)
+        | (i64::from(a.has_unicode_format_controls) << 3)
+        | (i64::from(metadata.has_non_compliant_characters) << 4)
+}
+fn read_analysis(row: &turso::Row) -> io::Result<BufferTextMetadata> {
+    let flags = row.get::<i64>(28).map_err(error)?;
+    if !(0..32).contains(&flags) {
+        return Err(invalid("invalid artifact flags"));
+    }
+    let optional = |index| {
+        row.get::<Option<i64>>(index)
+            .map_err(error)?
+            .map(|n| usize::try_from(n).map_err(invalid))
+            .transpose()
+    };
+    Ok(BufferTextMetadata {
+        line_count: usize::try_from(row.get::<i64>(22).map_err(error)?).map_err(invalid)?,
+        preferred_line_ending: parse_enum(row.get(16).map_err(error)?)?,
+        has_non_compliant_characters: flags & 16 != 0,
+        artifact_summary: crate::app::domain::TextArtifactSummary {
+            has_ansi_sequences: flags & 1 != 0,
+            has_carriage_returns: flags & 2 != 0,
+            has_backspaces: flags & 4 != 0,
+            has_unicode_format_controls: flags & 8 != 0,
+            other_control_count: usize::try_from(row.get::<i64>(29).map_err(error)?)
+                .map_err(invalid)?,
+            ansi_sequence_count: optional(30)?,
+            backspace_count: optional(31)?,
+            unicode_format_control_count: optional(32)?,
+            other_control_count_exact: optional(33)?,
+        },
+    })
 }

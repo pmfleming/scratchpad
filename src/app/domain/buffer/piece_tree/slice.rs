@@ -74,6 +74,7 @@ impl PieceTreeLite {
                         buffer: piece.buffer,
                         start_byte: piece.start_byte as u64,
                         byte_len: piece.byte_len as u64,
+                        char_len: piece.char_len as u64,
                     },
                     true,
                 )?);
@@ -141,6 +142,7 @@ impl<'a> PieceTreeSlice<'a> {
                         buffer: piece.buffer,
                         start_byte: piece.start_byte as u64,
                         byte_len: piece.byte_len as u64,
+                        char_len: piece.char_len as u64,
                     },
                 }));
             }
@@ -160,6 +162,7 @@ impl<'a> PieceTreeSlice<'a> {
                     buffer: piece.buffer,
                     start_byte: start_byte as u64,
                     byte_len: byte_len as u64,
+                    char_len: (local_end - local_start) as u64,
                 },
             }));
         }
@@ -196,6 +199,7 @@ impl<'a> Iterator for TryPieceTreeSlice<'a> {
                     buffer: piece.buffer,
                     start_byte: piece.start_byte as u64,
                     byte_len: piece.byte_len as u64,
+                    char_len: piece.char_len as u64,
                 },
                 retain,
             )
@@ -236,6 +240,7 @@ impl PieceTreeLite {
                         buffer: piece.buffer,
                         start_byte: piece.start_byte as u64,
                         byte_len: piece.byte_len as u64,
+                        char_len: piece.char_len as u64,
                     },
                     true,
                 )?);
@@ -260,6 +265,7 @@ impl PieceTreeLite {
                     buffer: piece.buffer,
                     start_byte: piece.start_byte as u64,
                     byte_len: piece.byte_len as u64,
+                    char_len: piece.char_len as u64,
                 });
             }
             position += piece.char_len;

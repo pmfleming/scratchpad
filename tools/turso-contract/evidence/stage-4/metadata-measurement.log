@@ -1,0 +1,16 @@
+[0mdirenv: loading ~/Projects/scratchpad/.envrc
+[0mdirenv: using flake
+[0mdirenv: nix-direnv: Using cached dev shell
+Scratchpad dev shell
+Try: cargo check
+    Finished `release` profile [optimized] target(s) in 0.23s
+     Running unittests src/lib.rs (target/release/deps/scratchpad-84e82abd46b64b84)
+
+running 1 test
+first_profile=SessionPersistProfile { total_ns: 1707912188, snapshot_capture_ns: 0, snapshot_write_ns: 1200095619, snapshot_bytes_read: 0, snapshot_bytes_hashed: 0, stale_cleanup_ns: 3183484, manifest_serialize_ns: 157742293, manifest_write_ns: 319925195, tab_count: 10000, buffer_count: 10000, manifest_size_bytes: 1997812 }
+steady_profile=SessionPersistProfile { total_ns: 67114350, snapshot_capture_ns: 0, snapshot_write_ns: 0, snapshot_bytes_read: 0, snapshot_bytes_hashed: 0, stale_cleanup_ns: 0, manifest_serialize_ns: 59370557, manifest_write_ns: 0, tab_count: 10000, buffer_count: 10000, manifest_size_bytes: 1997812 }
+typed_metadata tabs=10000 first_ms=1734 steady_ms=84 restore_ms=109 startup_reserve_ms=2 close_first_ms=437
+test app::services::session_store::database::documents_tests::measure_real_typed_metadata_at_ten_thousand_tabs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 688 filtered out; finished in 2.89s
+

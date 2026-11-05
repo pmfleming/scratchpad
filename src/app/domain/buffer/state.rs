@@ -38,6 +38,7 @@ pub struct BufferState {
     /// True while this buffer contains only the bounded first-visible prefix of
     /// a large file and full hydration is still running.
     pub is_loading_preview: bool,
+    pub(crate) pending_source_check: bool,
     pub show_control_chars: bool,
     pub right_to_left_reading_order: bool,
     pub temp_id: String,
@@ -533,6 +534,7 @@ impl BufferState {
             is_dirty: state.is_dirty,
             is_settings_file: false,
             is_loading_preview: false,
+            pending_source_check: false,
             show_control_chars: state.show_control_chars,
             right_to_left_reading_order: state.right_to_left_reading_order,
             temp_id: state.temp_id,

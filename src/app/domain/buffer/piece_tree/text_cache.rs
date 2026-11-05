@@ -12,13 +12,14 @@ use std::{
 
 const DEFAULT_LIMIT: usize = 16 * 1024 * 1024;
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-pub(super) fn new_owner() -> u64 {
+pub(crate) fn new_owner() -> u64 {
     NEXT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 #[derive(Clone, Debug)]
 pub(super) enum ChunkText {
     Inline(Arc<String>),
+    Missing(usize),
     Sealed(Arc<Chunk>),
     Memory(Arc<String>),
     Stored(Arc<crate::app::services::chunk_store::Chunk>),
@@ -231,6 +232,7 @@ impl ChunkText {
         match self {
             Self::Inline(body) | Self::Memory(body) => body.len(),
             Self::Stored(chunk) => chunk.len(),
+            Self::Missing(len) => *len,
             Self::Sealed(chunk) => chunk.len,
         }
     }
@@ -262,6 +264,9 @@ impl ChunkText {
             Self::Inline(body) | Self::Memory(body) => Ok(body.clone()),
             Self::Stored(chunk) => chunk.load(!retain, retain),
             Self::Sealed(chunk) => chunk.load(retain),
+            Self::Missing(_) => Err(io::Error::other(
+                "text range was released after Forget history",
+            )),
         }
     }
     pub(super) fn load(&self) -> Arc<String> {
@@ -366,7 +371,10 @@ mod tests {
         let pin = chunk.try_load().unwrap();
         let chunk_id = match &chunk {
             ChunkText::Sealed(chunk) => chunk.id,
-            ChunkText::Inline(_) | ChunkText::Memory(_) | ChunkText::Stored(_) => unreachable!(),
+            ChunkText::Inline(_)
+            | ChunkText::Memory(_)
+            | ChunkText::Stored(_)
+            | ChunkText::Missing(_) => unreachable!(),
         };
         cache().lock().unwrap().remove(chunk_id);
         backing.file.set_len(0).unwrap();

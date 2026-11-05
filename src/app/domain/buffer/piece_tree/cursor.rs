@@ -109,6 +109,7 @@ impl<'a> PieceTreeCharCursor<'a> {
                     buffer: piece.buffer,
                     start_byte: piece.start_byte as u64,
                     byte_len: piece.byte_len as u64,
+                    char_len: piece.char_len as u64,
                 },
                 true,
             )

@@ -19,6 +19,7 @@ pub struct ByteSpan {
     pub buffer: PieceBuffer,
     pub start_byte: u64,
     pub byte_len: u64,
+    pub char_len: u64,
 }
 
 impl ByteSpan {
@@ -32,5 +33,6 @@ pub(crate) fn empty_byte_span() -> ByteSpan {
         buffer: PieceBuffer::Add,
         start_byte: 0,
         byte_len: 0,
+        char_len: 0,
     }
 }

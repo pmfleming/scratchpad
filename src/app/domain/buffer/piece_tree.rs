@@ -1,7 +1,6 @@
 mod anchor;
+#[cfg(test)]
 mod byte_slice;
-mod save_changes;
-pub(crate) use byte_slice::ByteSlice;
 mod cursor;
 mod edit;
 mod metrics;
@@ -11,7 +10,9 @@ mod runtime;
 mod slice;
 pub use slice::{PieceTreeSlice, TryPieceTreeSlice};
 pub use storage::TextPin;
+mod persistence;
 mod storage;
+pub(crate) use storage::{StorageBlock, StorageCapture};
 mod support;
 #[cfg(test)]
 mod tests;
@@ -176,6 +177,7 @@ struct Piece {
     char_len: usize,
     newline_count: usize,
     is_ascii: bool,
+    ends_with_lf: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -194,6 +196,7 @@ impl Piece {
             char_len: metrics.char_len,
             newline_count: metrics.newline_count,
             is_ascii: metrics.is_ascii,
+            ends_with_lf: text.ends_with('\n'),
         }
     }
 
@@ -260,6 +263,7 @@ impl PieceTreeLeaf {
             last.char_len += piece.char_len;
             last.newline_count += piece.newline_count;
             last.is_ascii &= piece.is_ascii;
+            last.ends_with_lf = piece.ends_with_lf;
             self.metrics.bytes += piece.byte_len;
             self.metrics.chars += piece.char_len;
             self.metrics.newlines += piece.newline_count;
@@ -395,7 +399,6 @@ pub struct PieceTreeLite {
     root: PieceTreeRoot,
     runtime: PieceTreeRuntime,
     anchor_state: PieceTreeAnchorState,
-    save_changes: save_changes::SaveChanges,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -416,7 +419,6 @@ impl PieceTreeLite {
         let pieces = build_chunked_pieces(PieceBuffer::Original, 0, &text);
         let mut tree = Self {
             storage: PieceTreeStorage::from_original(text),
-            save_changes: save_changes::SaveChanges::default(),
             root: build_root_from_pieces(pieces),
             runtime: PieceTreeRuntime::default(),
             anchor_state: PieceTreeAnchorState::default(),
@@ -434,7 +436,6 @@ impl PieceTreeLite {
             PieceTreeStorage::from_utf8_file(path, file_offset, sample_limit)?;
         let mut tree = Self {
             storage,
-            save_changes: save_changes::SaveChanges::default(),
             root: build_root_from_pieces(pieces),
             runtime: PieceTreeRuntime::default(),
             anchor_state: PieceTreeAnchorState::default(),
@@ -449,9 +450,11 @@ impl PieceTreeLite {
     }
 
     pub(crate) fn initial_file_history(&self) -> Option<(super::PieceHistoryEdits, u64)> {
-        (self.generation() == 0)
-            .then(|| self.storage.initial_file_history())
-            .flatten()
+        (self.generation() == 0
+            && self.storage.add_is_empty()
+            && self.len_bytes() == self.storage.original_len())
+        .then(|| self.storage.initial_file_history())
+        .flatten()
     }
 
     fn line_scan_start_for_leaf(
@@ -504,6 +507,7 @@ impl PieceTreeLite {
             buffer: piece.buffer,
             start_byte: piece.start_byte as u64,
             byte_len: piece.byte_len as u64,
+            char_len: piece.char_len as u64,
         };
         self.runtime
             .line_samples(span, || build_line_samples(piece_text, piece.is_ascii))

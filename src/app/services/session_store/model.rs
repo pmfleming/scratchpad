@@ -15,10 +15,8 @@ pub enum SessionActiveSurface {
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SessionManifest {
     pub version: u32,
-    #[serde(default)]
     pub tab_count: usize,
     pub active_tab_index: usize,
-    #[serde(default)]
     pub active_surface: SessionActiveSurface,
     pub tabs: Vec<SessionTab>,
 }
@@ -26,7 +24,6 @@ pub(crate) struct SessionManifest {
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct SessionTab {
     pub layout_id: u64,
-    #[serde(default)]
     pub buffers: Vec<SessionBuffer>,
     pub active_view_id: u64,
     pub views: Vec<SessionView>,
@@ -114,15 +111,14 @@ pub(crate) struct SessionBuffer {
     pub is_dirty: bool,
     pub text_is_empty: bool,
     pub has_recorded_edits: bool,
-    #[serde(default)]
     pub is_settings_file: bool,
-    #[serde(default)]
     pub show_control_chars: bool,
-    #[serde(default)]
     pub right_to_left_reading_order: bool,
     pub temp_id: String,
     pub format: TextFormatMetadata,
     pub line_count: usize,
+    #[serde(skip)]
+    pub text_metadata: Option<crate::app::domain::buffer::BufferTextMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_modified_millis: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -172,6 +168,12 @@ impl SessionBuffer {
             temp_id: buffer.temp_id.clone(),
             format: buffer.format.clone(),
             line_count: buffer.line_count,
+            text_metadata: Some(crate::app::domain::buffer::BufferTextMetadata {
+                line_count: buffer.line_count,
+                artifact_summary: buffer.artifact_summary.clone(),
+                preferred_line_ending: buffer.format.preferred_line_ending,
+                has_non_compliant_characters: buffer.has_non_compliant_characters,
+            }),
             disk_modified_millis: buffer
                 .disk_state
                 .as_ref()
@@ -192,10 +194,8 @@ impl SessionBuffer {
 pub(crate) struct SessionView {
     pub id: u64,
     pub buffer_id: u64,
-    #[serde(default)]
     pub selection: Option<crate::app::domain::CursorRange>,
     pub show_line_numbers: bool,
-    #[serde(default = "crate::app::domain::view::default_zoom_factor")]
     pub zoom_factor: f32,
 }
 

@@ -59,3 +59,8 @@ Native Windows runtime validation remains pending under the user's authorization
 Fresh RQL uses an immutable stage-3 checkout and the local archive
 `target/quality-runs/live-text-stage-3-frozen`; strict policy gaps are reported
 without changing limits.
+
+That run completed with stable source hashes and passing producer/verifier
+commands. The strict gate failed for partial evidence and required human reviews.
+Its `test-failure` policy names partial execution evidence, with an empty reported
+test-failures list. See `evidence/stage-3/quality-summary.json`.

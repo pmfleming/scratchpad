@@ -24,10 +24,19 @@ fn failed_blocking_restore_cannot_erase_healthy_tabs_after_quarantine() {
     let tabs = tabs();
     store.persist(&tabs, 0, 16.0, false).unwrap();
     let id = tabs[1].active_buffer().temp_id.clone();
-    store.worker().unwrap().call(move |db| block_on(async {
-        db.conn.execute("UPDATE blobs SET body=x'00' WHERE digest IN (SELECT digest FROM parts WHERE temp_id=?)", [id]).await.map_err(database::error)?;
-        Ok(())
-    })).unwrap();
+    store
+        .worker()
+        .unwrap()
+        .call(move |db| {
+            block_on(async {
+                db.conn
+                    .execute("UPDATE document_pieces SET body=x'00' WHERE id=?", [id])
+                    .await
+                    .map_err(database::error)?;
+                Ok(())
+            })
+        })
+        .unwrap();
     let mut app = ScratchpadApp::with_stores_and_startup(
         store.clone(),
         SettingsStore::new(root.path().join("settings")),
@@ -50,7 +59,7 @@ fn failed_blocking_restore_cannot_erase_healthy_tabs_after_quarantine() {
         .call(|db| {
             block_on(async {
                 assert_eq!(db.integer("SELECT count(*) FROM tabs").await?, 2);
-                assert_eq!(db.integer("SELECT count(*) FROM snapshots").await?, 2);
+                assert_eq!(db.integer("SELECT count(*) FROM document_pieces").await?, 2);
                 assert_eq!(db.integer("SELECT count(*) FROM quarantine").await?, 1);
                 Ok(())
             })

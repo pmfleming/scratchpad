@@ -1,7 +1,9 @@
+mod persistence;
 use super::text_cache::{self, Backing, ChunkText};
 use super::{ByteSpan, Piece, PieceBuffer, PieceSource, PieceTreeText};
 use crate::app::domain::buffer::PersistentVector;
 use crate::app::domain::buffer::accumulate_line_count;
+pub(crate) use persistence::{StorageBlock, StorageCapture};
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
@@ -10,11 +12,16 @@ use std::sync::{Arc, Mutex};
 
 const FILE_CHUNK_BYTES: usize = 256 * 1024;
 
+type StoredOriginalBlock = (usize, Arc<crate::app::services::chunk_store::Chunk>);
+type DurableOriginalCache = Arc<Mutex<std::collections::HashMap<u64, Vec<StoredOriginalBlock>>>>;
+
 #[derive(Clone, Debug)]
 pub(super) struct PieceTreeStorage {
     original: OriginalTextStorage,
     add: AddTextStorage,
     fault: Arc<Mutex<Option<String>>>,
+    original_reachable: Option<Arc<Vec<std::ops::Range<usize>>>>,
+    durable_original: DurableOriginalCache,
 }
 
 /// Retains verified bodies independently of cache eviction for one operation.
@@ -33,9 +40,10 @@ impl TextPin {
 enum OriginalTextStorage {
     Owned(Arc<str>),
     FileBacked(Arc<FileBackedOriginal>),
+    Chunked(Arc<FileBackedOriginal>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct FileBackedOriginal {
     path: PathBuf,
     chunks: Vec<FileBackedChunk>,
@@ -43,7 +51,7 @@ struct FileBackedOriginal {
     fingerprint: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct FileBackedChunk {
     logical_start: usize,
     text: ChunkText,
@@ -86,11 +94,14 @@ const ADD_TAIL_BYTES: usize = 256 * 1024;
 pub(super) struct AddTextSpan {
     pub(super) start_byte: usize,
     pub(super) byte_len: usize,
+    char_len: usize,
 }
 
 impl AddTextSpan {
     pub(super) fn byte_span(self) -> ByteSpan {
-        add_byte_span(self.start_byte, self.byte_len)
+        let mut span = add_byte_span(self.start_byte, self.byte_len);
+        span.char_len = self.char_len as u64;
+        span
     }
 }
 
@@ -149,7 +160,9 @@ impl PieceTreeStorage {
     }
     #[cfg(test)]
     pub(super) fn truncate_backing_for_test(&self) -> io::Result<()> {
-        let OriginalTextStorage::FileBacked(original) = &self.original else {
+        let (OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original)) =
+            &self.original
+        else {
             return Err(io::Error::other("original not file-backed"));
         };
         original
@@ -164,6 +177,8 @@ impl PieceTreeStorage {
             original: OriginalTextStorage::Owned(Arc::from(text.into_boxed_str())),
             add: AddTextStorage::default(),
             fault: Arc::default(),
+            original_reachable: None,
+            durable_original: Arc::default(),
         }
     }
 
@@ -229,6 +244,8 @@ impl PieceTreeStorage {
                 original: OriginalTextStorage::FileBacked(Arc::new(original)),
                 add,
                 fault: Arc::default(),
+                original_reachable: None,
+                durable_original: Arc::default(),
             },
             pieces,
             sample,
@@ -237,7 +254,9 @@ impl PieceTreeStorage {
     }
 
     pub(super) fn initial_file_history(&self) -> Option<(super::super::PieceHistoryEdits, u64)> {
-        let OriginalTextStorage::FileBacked(original) = &self.original else {
+        let (OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original)) =
+            &self.original
+        else {
             return None;
         };
         let mut start = 0;
@@ -251,6 +270,7 @@ impl PieceTreeStorage {
                         buffer: PieceBuffer::Original,
                         start_byte: chunk.logical_start as u64,
                         byte_len: chunk.byte_len as u64,
+                        char_len: chunk.char_len as u64,
                     },
                 };
                 start += chunk.char_len;
@@ -263,14 +283,16 @@ impl PieceTreeStorage {
     pub(super) fn owned_original_text(&self) -> Option<&str> {
         match &self.original {
             OriginalTextStorage::Owned(text) => Some(text),
-            OriginalTextStorage::FileBacked(_) => None,
+            OriginalTextStorage::FileBacked(_) | OriginalTextStorage::Chunked(_) => None,
         }
     }
 
     pub(super) fn original_len(&self) -> usize {
         match &self.original {
             OriginalTextStorage::Owned(text) => text.len(),
-            OriginalTextStorage::FileBacked(original) => original.byte_len,
+            OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original) => {
+                original.byte_len
+            }
         }
     }
 
@@ -350,7 +372,9 @@ impl PieceTreeStorage {
                 text.get(start..end).ok_or_else(invalid)?;
                 return Ok(pin);
             }
-            OriginalTextStorage::FileBacked(original) if span.buffer == PieceBuffer::Original => {
+            OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original)
+                if span.buffer == PieceBuffer::Original =>
+            {
                 if end > original.byte_len {
                     return Err(invalid());
                 }
@@ -421,7 +445,10 @@ impl PieceTreeStorage {
             (OriginalTextStorage::Owned(text), PieceBuffer::Original) => {
                 return Ok(PieceTreeText::borrowed(&text[start..end]));
             }
-            (OriginalTextStorage::FileBacked(original), PieceBuffer::Original) => {
+            (
+                OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original),
+                PieceBuffer::Original,
+            ) => {
                 let index = original
                     .chunks
                     .partition_point(|c| c.logical_start + c.byte_len <= start);
@@ -482,7 +509,7 @@ impl PieceTreeStorage {
             OriginalTextStorage::Owned(text) => {
                 PieceTreeText::borrowed(&text[start_byte..start_byte + byte_len])
             }
-            OriginalTextStorage::FileBacked(original) => {
+            OriginalTextStorage::FileBacked(original) | OriginalTextStorage::Chunked(original) => {
                 original.text_for_range(start_byte, byte_len)
             }
         }
@@ -514,6 +541,7 @@ impl AddTextStorage {
         let span = AddTextSpan {
             start_byte,
             byte_len: text.len(),
+            char_len: text.chars().count(),
         };
         if text.is_empty() {
             return span;
@@ -526,7 +554,10 @@ impl AddTextStorage {
                 .last()
                 .and_then(|tail| match &tail.text {
                     ChunkText::Inline(text) => Some(ADD_TAIL_BYTES.saturating_sub(text.len())),
-                    ChunkText::Sealed(_) | ChunkText::Memory(_) | ChunkText::Stored(_) => None,
+                    ChunkText::Sealed(_)
+                    | ChunkText::Memory(_)
+                    | ChunkText::Stored(_)
+                    | ChunkText::Missing(_) => None,
                 })
                 .unwrap_or(0);
             let mut take = remaining.len().min(capacity);
@@ -604,7 +635,23 @@ impl FileBackedOriginal {
             .saturating_sub(1);
         let chunk = &self.chunks[chunk_index];
         let relative_start = start_byte.saturating_sub(chunk.logical_start);
-        debug_assert!(relative_start + byte_len <= chunk.byte_len);
+        if relative_start + byte_len > chunk.byte_len {
+            let end = start_byte + byte_len;
+            let mut text = String::with_capacity(byte_len);
+            for chunk in self
+                .chunks
+                .iter()
+                .skip(chunk_index)
+                .take_while(|c| c.logical_start < end)
+            {
+                let body = chunk.text.load();
+                text.push_str(
+                    &body[start_byte.saturating_sub(chunk.logical_start)
+                        ..(end - chunk.logical_start).min(chunk.byte_len)],
+                );
+            }
+            return PieceTreeText::owned(text);
+        }
         let text = self.cached_chunk(chunk_index, chunk);
         PieceTreeText::shared(text, relative_start..relative_start + byte_len)
     }
@@ -677,5 +724,6 @@ pub(super) fn add_byte_span(start_byte: usize, byte_len: usize) -> ByteSpan {
         buffer: PieceBuffer::Add,
         start_byte: start_byte as u64,
         byte_len: byte_len as u64,
+        char_len: byte_len as u64,
     }
 }

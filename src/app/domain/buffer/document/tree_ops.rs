@@ -141,7 +141,7 @@ impl TextDocument {
             {
                 let record = self.replay_history_node(id, direction)?;
                 selection = direction.selection(&record);
-                latest_record = Some(record);
+                latest_record = super::history_ops::bounded_record(record);
             }
             Ok(())
         })();

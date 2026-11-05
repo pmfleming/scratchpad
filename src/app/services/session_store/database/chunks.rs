@@ -14,6 +14,51 @@ CREATE TABLE chunks(id INTEGER PRIMARY KEY,digest BLOB NOT NULL UNIQUE CHECK(len
 CREATE TABLE chunk_bodies(chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id),body BLOB NOT NULL) STRICT;
 CREATE INDEX chunk_sizes ON chunks(byte_len,id);";
 impl Database {
+    pub(super) async fn collect_chunk_batch(&mut self) -> io::Result<()> {
+        self.ensure_healthy()?;
+        let store = self.chunk_store()?;
+        let live = store.live_row_ids();
+        let candidates=self.query_collect("SELECT id FROM chunks WHERE id>? AND id NOT IN (SELECT chunk_id FROM document_text) ORDER BY id LIMIT 4",[self.collection_cursor],|r|r.get::<i64>(0).map_err(error)).await?;
+        self.collection_cursor = candidates.last().copied().unwrap_or(0);
+        let candidates: Vec<_> = candidates
+            .into_iter()
+            .filter(|id| !live.contains(id))
+            .take(4)
+            .collect();
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        let start = Instant::now();
+        let count = candidates.len();
+        self.conn
+            .execute("BEGIN IMMEDIATE", ())
+            .await
+            .map_err(error)?;
+        let result = async {
+            for id in candidates {
+                self.execute_cached("DELETE FROM chunk_bodies WHERE chunk_id=?", [id])
+                    .await?;
+                self.execute_cached("DELETE FROM chunks WHERE id=?", [id])
+                    .await?;
+            }
+            Ok(())
+        }
+        .await;
+        self.finish_transaction(result).await?;
+        let changes = self.integer("SELECT total_changes()").await?;
+        if let Some(inventory) = &mut self.inventory {
+            inventory.connection_changes = Some(changes);
+        }
+        if start.elapsed() > Duration::from_millis(50) {
+            log::warn!(
+                "chunk collection I/O scheduling overrun: epoch={} chunks={} elapsed_us={}",
+                store.epoch().id,
+                count,
+                start.elapsed().as_micros()
+            );
+        }
+        Ok(())
+    }
     pub(in crate::app::services::session_store) fn chunk_store(
         &self,
     ) -> io::Result<ChunkStoreHandle> {
@@ -115,8 +160,9 @@ impl Database {
         let body = chunk
             .pending_body()
             .ok_or_else(|| invalid("chunk state changed during a single-writer batch"))?;
+        store.record_hashed(body.len());
         let metadata = Metadata::measure(&body);
-        self.execute_cached("INSERT INTO chunks(digest,byte_len,char_len,newline_count,is_ascii) VALUES(?,?,?,?,?) ON CONFLICT(digest) DO NOTHING",params![metadata.digest.as_slice(),i64::try_from(metadata.byte_len).map_err(invalid)?,super::document_rows::signed(metadata.char_len)?,super::document_rows::signed(metadata.newline_count)?,i64::from(metadata.is_ascii)]).await?;
+        let inserted=self.execute_count_cached("INSERT INTO chunks(digest,byte_len,char_len,newline_count,is_ascii) VALUES(?,?,?,?,?) ON CONFLICT(digest) DO NOTHING",params![metadata.digest.as_slice(),i64::try_from(metadata.byte_len).map_err(invalid)?,super::document_rows::signed(metadata.char_len)?,super::document_rows::signed(metadata.newline_count)?,i64::from(metadata.is_ascii)]).await?;
         let row = self
             .query_collect(
                 "SELECT id,byte_len,char_len,newline_count,is_ascii FROM chunks WHERE digest=?",
@@ -141,16 +187,38 @@ impl Database {
         {
             return Err(invalid("chunk digest collision or damaged metadata"));
         }
-        self.execute_cached(
-            "INSERT INTO chunk_bodies(chunk_id,body) VALUES(?,?) ON CONFLICT(chunk_id) DO NOTHING",
-            params![row.0, body.as_bytes()],
-        )
-        .await?;
+        if inserted == 0 {
+            self.verify_deduplicated_body(row.0, body.as_bytes())
+                .await?;
+        } else {
+            self.execute_cached(
+                "INSERT INTO chunk_bodies(chunk_id,body) VALUES(?,?)",
+                params![row.0, body.as_bytes()],
+            )
+            .await?;
+        }
         Ok(ChunkReference {
             id: row.0,
             metadata,
             epoch: store.epoch(),
         })
+    }
+    async fn verify_deduplicated_body(&self, id: i64, expected: &[u8]) -> io::Result<()> {
+        let body = self
+            .query_collect(
+                "SELECT body FROM chunk_bodies WHERE chunk_id=?",
+                [id],
+                |r| r.get::<Vec<u8>>(0).map_err(error),
+            )
+            .await?
+            .pop()
+            .ok_or_else(|| invalid("deduplicated chunk body is missing"))?;
+        if body != expected {
+            return Err(invalid(
+                "deduplicated chunk body is corrupt; accepted text retained in RAM",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -159,6 +227,37 @@ mod tests {
     use super::super::{DatabaseWorker, ReadScope};
     use super::*;
     use futures_lite::future::block_on;
+
+    #[test]
+    fn deduplication_never_releases_accepted_ram_against_a_corrupt_body() {
+        block_on(async {
+            let (_root, mut db) = super::super::tests::database().await;
+            let store = db.chunk_store().unwrap();
+            store.set_limits(0, 0);
+            let text = "accepted λ🦀".repeat(4096);
+            let first = store.seal(Arc::new(text.clone()), 1);
+            db.drain_chunk_batch().await.unwrap();
+            let id = first.reference().unwrap().id;
+            db.execute_cached("UPDATE chunk_bodies SET body=x'00' WHERE chunk_id=?", [id])
+                .await
+                .unwrap();
+            let duplicate = store.seal(Arc::new(text.clone()), 2);
+            assert!(db.drain_chunk_batch().await.is_err());
+            assert!(duplicate.reference().is_none());
+            assert_eq!(duplicate.pending_body().unwrap().as_str(), text);
+            assert_eq!(duplicate.load(false, true).unwrap().as_str(), text);
+            assert!(matches!(store.health(), Health::Failing(_)));
+            db.execute_cached(
+                "UPDATE chunk_bodies SET body=? WHERE chunk_id=?",
+                params![text.as_bytes(), id],
+            )
+            .await
+            .unwrap();
+            db.drain_chunk_batch().await.unwrap();
+            assert_eq!(duplicate.reference().unwrap().id, id);
+            assert_eq!(store.pending_bytes(), 0);
+        });
+    }
 
     #[test]
     fn pending_committed_evicted_and_pinned_chunks_keep_exact_text() {

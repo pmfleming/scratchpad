@@ -57,8 +57,16 @@ fn token_lookup_does_not_decode_unrelated_archives() {
             )
             .await
             .unwrap();
-        let (_, contents) = db.read_closed_tab(&token).await.unwrap();
-        assert_eq!(contents.into_values().collect::<Vec<_>>(), ["wanted"]);
+        let (tab, _) = db.read_closed_tab(&token).await.unwrap();
+        assert_eq!(
+            tab.buffers[0]
+                .history_document
+                .as_ref()
+                .unwrap()
+                .try_extract_text()
+                .unwrap(),
+            "wanted"
+        );
         assert_eq!(
             db.read_closed_tab("missing").await.err().unwrap().kind(),
             std::io::ErrorKind::NotFound

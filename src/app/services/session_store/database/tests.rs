@@ -51,7 +51,10 @@ fn worker_round_trip_and_stale_capture_barrier() {
         .call(|db| block_on(db.load(ReadScope::All)))
         .unwrap()
         .unwrap();
-    assert_eq!(session.contents.values().next().unwrap(), "new\0\r\nλ");
+    assert_eq!(
+        session.text_contents().values().next().unwrap(),
+        "new\0\r\nλ"
+    );
     worker.call(|db| block_on(db.checkpoint())).unwrap();
     drop(worker);
     let reopened = DatabaseWorker::open(directory.path().to_owned()).unwrap();
@@ -60,8 +63,8 @@ fn worker_round_trip_and_stale_capture_barrier() {
             .call(|db| block_on(db.load(ReadScope::Active)))
             .unwrap()
             .unwrap()
-            .contents,
-        session.contents
+            .text_contents(),
+        session.text_contents()
     );
 }
 
@@ -72,7 +75,7 @@ fn unchanged_and_metadata_only_commits_never_rewrite_content_or_history() {
         let mut tabs = vec![tab("unchanged")];
         insert(&mut tabs[0], 0, "history");
         db.persist(request(&tabs), 1).await.unwrap();
-        db.conn.execute_batch("CREATE TRIGGER no_content_write BEFORE INSERT ON blobs BEGIN SELECT RAISE(ABORT, 'content rewritten'); END;
+        db.conn.execute_batch("CREATE TRIGGER no_content_write BEFORE INSERT ON chunk_bodies BEGIN SELECT RAISE(ABORT, 'content rewritten'); END;
             CREATE TRIGGER no_history_write BEFORE INSERT ON history BEGIN SELECT RAISE(ABORT, 'history rewritten'); END;
             CREATE TRIGGER no_tab_write BEFORE INSERT ON tabs BEGIN SELECT RAISE(ABORT, 'tab rewritten'); END;").await.unwrap();
         let unchanged = db.persist(request(&tabs), 2).await.unwrap();
@@ -86,7 +89,7 @@ fn unchanged_and_metadata_only_commits_never_rewrite_content_or_history() {
             super::super::SessionActiveSurface::Settings
         );
         assert_eq!(
-            session.contents.values().next().unwrap(),
+            session.text_contents().values().next().unwrap(),
             "historyunchanged"
         );
     });
@@ -176,7 +179,7 @@ fn invalid_captures_leave_the_committed_session_intact() {
             assert!(db.conn.is_autocommit().unwrap(), "{name}");
             assert!(db.blocked.is_none(), "{name}");
             let stored = db.load(ReadScope::All).await.unwrap().unwrap();
-            assert_eq!(stored.contents, original.contents, "{name}");
+            assert_eq!(stored.text_contents(), original.text_contents(), "{name}");
             assert_eq!(stored.manifest.tabs.len(), 2);
             assert_eq!(
                 db.read_history(&tabs[0].buffers.buffer.temp_id)

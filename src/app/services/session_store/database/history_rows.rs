@@ -1,47 +1,40 @@
-//! Metadata-only capture plus one-entry-at-a-time payload materialization.
+//! A capture retains references; only explicit export materializes undo payloads.
+#[cfg(test)]
+use crate::app::domain::TextDocument;
 use crate::app::domain::{PersistedHistoryEntry, buffer::HistorySnapshot};
 use std::io;
-
-pub(super) enum HistoryRows {
-    Document(HistorySnapshot),
-    Exported(Vec<PersistedHistoryEntry>),
-}
+pub(super) struct HistoryRows(pub HistorySnapshot);
 impl HistoryRows {
-    pub(super) fn len(&self) -> usize {
-        match self {
-            Self::Document(doc) => doc.len(),
-            Self::Exported(rows) => rows.len(),
+    pub(super) fn capture(
+        capture: Option<HistorySnapshot>,
+        exported: Vec<PersistedHistoryEntry>,
+    ) -> io::Result<Self> {
+        if let Some(capture) = capture {
+            return Ok(Self(capture));
+        }
+        #[cfg(test)]
+        {
+            Self::from_exported(exported)
+        }
+        #[cfg(not(test))]
+        {
+            let _ = exported;
+            Err(super::invalid("live capture is missing reference history"))
         }
     }
-    pub(super) fn entry(&self, index: usize) -> io::Result<PersistedHistoryEntry> {
-        match self {
-            Self::Document(doc) => doc.entry(index),
-            Self::Exported(rows) => Ok(rows[index].clone()),
+    #[cfg(test)]
+    fn from_exported(rows: Vec<PersistedHistoryEntry>) -> io::Result<Self> {
+        super::history::validate(&rows)?;
+        let mut document = TextDocument::new(String::new());
+        if !document.restore_exported_history(rows) {
+            return Err(super::invalid("invalid exported history"));
         }
+        Ok(Self(document.history_snapshot()))
+    }
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
     }
     pub(super) fn positions(&self) -> (u64, u64, u64, u64) {
-        match self {
-            Self::Document(doc) => doc.positions(),
-            Self::Exported(rows) => {
-                let now = rows.iter().find(|e| e.current).map_or(0, |e| e.id);
-                let tip = rows.iter().find(|e| e.selected_tip).map_or(0, |e| e.id);
-                let last = rows
-                    .iter()
-                    .filter(|e| e.summary != "Initial contents")
-                    .max_by_key(|e| e.global_seq);
-                (
-                    now,
-                    tip,
-                    last.map_or(0, |e| e.edited_at),
-                    last.map_or(0, |e| e.global_seq),
-                )
-            }
-        }
-    }
-    pub(super) fn validate(&self) -> io::Result<()> {
-        match self {
-            Self::Exported(rows) => super::history::validate(rows),
-            Self::Document(_) => Ok(()),
-        }
+        self.0.positions()
     }
 }

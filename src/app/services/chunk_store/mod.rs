@@ -71,11 +71,14 @@ struct Core {
     epoch: Arc<ReadEpoch>,
     pending: Mutex<VecDeque<Arc<Chunk>>>,
     pending_bytes: AtomicUsize,
+    hashed_bytes: AtomicU64,
     peak_pending_bytes: AtomicUsize,
     changed: Condvar,
     health: Mutex<Health>,
     wake: Mutex<Option<Waker>>,
     cache: Mutex<Cache>,
+    handles: Mutex<Vec<Weak<Chunk>>>,
+    restored: Mutex<HashMap<i64, Weak<Chunk>>>,
 }
 #[derive(Debug)]
 /// Shared immutable text. Accepted pending bodies remain readable after a write failure.
@@ -163,10 +166,13 @@ impl ChunkStoreHandle {
             epoch,
             pending: Mutex::new(VecDeque::new()),
             pending_bytes: AtomicUsize::new(0),
+            hashed_bytes: AtomicU64::new(0),
             peak_pending_bytes: AtomicUsize::new(0),
             changed: Condvar::new(),
             health: Mutex::new(Health::Healthy),
             wake: Mutex::new(None),
+            handles: Mutex::default(),
+            restored: Mutex::default(),
             cache: Mutex::new(Cache {
                 limit: 16 * 1024 * 1024,
                 per_owner: 4 * 1024 * 1024,
@@ -239,6 +245,11 @@ impl ChunkStoreHandle {
             state: Mutex::new(State::Pending(body)),
             changed: Condvar::new(),
         });
+        self.0
+            .handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(Arc::downgrade(&chunk));
         let pending = self.0.pending_bytes.fetch_add(chunk.len, Ordering::AcqRel) + chunk.len;
         self.0
             .peak_pending_bytes
@@ -327,7 +338,16 @@ impl ChunkStoreHandle {
     }
     /// Reconstruct a lazy handle from metadata without reading its body.
     pub fn restored(&self, reference: ChunkReference, owner: u64) -> Arc<Chunk> {
-        Arc::new(Chunk {
+        let mut restored = self
+            .0
+            .restored
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(chunk) = restored.get(&reference.id).and_then(Weak::upgrade) {
+            return chunk;
+        }
+        let row = reference.id;
+        let chunk = Arc::new(Chunk {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             owner,
             len: reference.metadata.byte_len,
@@ -338,7 +358,43 @@ impl ChunkStoreHandle {
                 loading: false,
             }),
             changed: Condvar::new(),
-        })
+        });
+        restored.insert(row, Arc::downgrade(&chunk));
+        self.0
+            .handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(Arc::downgrade(&chunk));
+        chunk
+    }
+    /// Bytes hashed by this epoch's writer, including deduplication attempts.
+    #[must_use]
+    pub fn hashed_bytes(&self) -> u64 {
+        self.0.hashed_bytes.load(Ordering::Relaxed)
+    }
+    pub(crate) fn record_hashed(&self, bytes: usize) {
+        self.0
+            .hashed_bytes
+            .fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+    pub(crate) fn live_row_ids(&self) -> std::collections::HashSet<i64> {
+        let mut handles = self
+            .0
+            .handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut ids = std::collections::HashSet::new();
+        handles.retain(|handle| {
+            if let Some(chunk) = handle.upgrade() {
+                if let Some(reference) = chunk.reference() {
+                    ids.insert(reference.id);
+                }
+                true
+            } else {
+                false
+            }
+        });
+        ids
     }
     /// Apply aggregate and per-document cache budgets immediately.
     pub fn set_limits(&self, limit: usize, per_owner: usize) {

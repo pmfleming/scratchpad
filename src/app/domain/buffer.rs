@@ -34,12 +34,12 @@ pub use history::{
     OperationRecord, PersistedCursorRange, PersistedHistoryEdit, PersistedHistoryEntry,
     PieceSource, TextDocumentEditOperation, TextHistoryBudget, source_label,
 };
-pub(crate) use piece_tree::ByteSlice;
 pub use piece_tree::{
     AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharCursor, PieceTreeCharPosition,
     PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics,
     PieceTreeSlice, PieceTreeSpan, PieceTreeText, TextPin, TryPieceTreeSlice,
 };
+pub(crate) use piece_tree::{PieceBuffer, StorageBlock};
 pub(crate) use snapshot::SnapshotRevision;
 pub use snapshot::{DocumentChunk, DocumentSnapshot};
 pub(crate) use state::TextHistoryEvent;

@@ -27,7 +27,21 @@ impl SessionStore {
         directory.create(destination)?;
         // Enumerate validated manifest references, never arbitrary database keys.
         for buffer in stored.manifest.tabs.iter().flat_map(|tab| &tab.buffers) {
-            if let Some(text) = stored.contents.get(&buffer.temp_id) {
+            if let Some(document) = &buffer.history_document {
+                let snapshot = document.snapshot();
+                write_new(
+                    &destination.join(format!("{}.tmp", buffer.temp_id)),
+                    |file| {
+                        for span in snapshot
+                            .piece_tree()
+                            .try_spans_for_range(0..snapshot.len_chars())
+                        {
+                            file.write_all(span?.text.as_bytes())?;
+                        }
+                        Ok(())
+                    },
+                )?;
+            } else if let Some(text) = stored.contents.get(&buffer.temp_id) {
                 write_new(
                     &destination.join(format!("{}.tmp", buffer.temp_id)),
                     |file| file.write_all(text.as_bytes()),

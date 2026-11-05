@@ -25,12 +25,7 @@ pub fn display_line_count(text: &str) -> usize {
 }
 
 pub(crate) fn display_line_count_from_piece_tree(tree: &PieceTreeLite) -> usize {
-    let metrics = tree.metrics();
-    if metrics.chars == 0 {
-        return 0;
-    }
-
-    metrics.newlines + usize::from(tree.char_at(metrics.chars - 1) != Some('\n'))
+    tree.display_line_count()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

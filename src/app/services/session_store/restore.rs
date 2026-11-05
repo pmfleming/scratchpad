@@ -211,11 +211,8 @@ impl Restorer {
                     restored.document,
                     restored.text_metadata,
                 );
-                state.disk_content_digest = if !state.is_dirty && state.disk_state.is_some() {
-                    state.document().try_content_digest().ok()
-                } else {
-                    buffer.disk_content_digest
-                };
+                state.disk_content_digest = buffer.disk_content_digest;
+                state.pending_source_check = state.path.is_some();
                 state.is_settings_file = buffer.is_settings_file;
                 state.observed_disk_digest = buffer.observed_disk_digest;
                 state.observed_disk_missing = buffer.observed_disk_missing;

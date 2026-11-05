@@ -17,7 +17,7 @@ fn pages_use_total_sequence_order_skip_baselines_and_never_read_edit_payloads() 
         // Deliberately corrupt payloads: drawing the timeline must only use columns.
         db.conn
             .execute(
-                "UPDATE history SET entry=x'00',global_seq=42 WHERE edited_at<>0",
+                "UPDATE history SET packed_spans=x'00',global_seq=42 WHERE edited_at<>0",
                 (),
             )
             .await

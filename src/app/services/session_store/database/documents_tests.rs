@@ -173,8 +173,16 @@ fn save_as_over_a_retained_path_transfers_lookup_without_reusing_the_replaced_tr
         let old = db.read_document(&old_id).await.unwrap();
         assert!(old.path.is_none());
         assert!(old.is_dirty);
-        let (_, contents) = db.load_retained_document(&old_id).await.unwrap();
-        assert_eq!(contents[&old_id], "");
+        let (tab, _) = db.load_retained_document(&old_id).await.unwrap();
+        assert_eq!(
+            tab.buffers[0]
+                .history_document
+                .as_ref()
+                .unwrap()
+                .try_extract_text()
+                .unwrap(),
+            ""
+        );
     });
 }
 
@@ -242,10 +250,28 @@ fn measure_real_typed_metadata_at_ten_thousand_tabs() {
         let (root, mut db) = database().await;
         let mut tabs: Vec<_> = (0..10_000).map(|_| tab("")).collect();
         let begin = Instant::now();
-        db.persist(request(&tabs), 1).await.unwrap();
+        let first_profile = db
+            .persist(
+                crate::app::services::session_store::SessionPersistRequest::capture(
+                    &tabs, 0, 16.0, false,
+                ),
+                1,
+            )
+            .await
+            .unwrap();
+        eprintln!("first_profile={first_profile:?}");
         let first = begin.elapsed();
         let begin = Instant::now();
-        db.persist(request(&tabs), 2).await.unwrap();
+        let steady_profile = db
+            .persist(
+                crate::app::services::session_store::SessionPersistRequest::capture(
+                    &tabs, 0, 16.0, false,
+                ),
+                2,
+            )
+            .await
+            .unwrap();
+        eprintln!("steady_profile={steady_profile:?}");
         let steady = begin.elapsed();
         let begin = Instant::now();
         let loaded = db.load(ReadScope::Shells).await.unwrap().unwrap();
@@ -259,7 +285,14 @@ fn measure_real_typed_metadata_at_ten_thousand_tabs() {
         assert!(crate::app::domain::tab::next_layout_id() > max);
         tabs.remove(0);
         let begin = Instant::now();
-        db.persist(request(&tabs), 1).await.unwrap();
+        db.persist(
+            crate::app::services::session_store::SessionPersistRequest::capture(
+                &tabs, 0, 16.0, false,
+            ),
+            1,
+        )
+        .await
+        .unwrap();
         let close = begin.elapsed();
         eprintln!(
             "typed_metadata tabs=10000 first_ms={} steady_ms={} restore_ms={} startup_reserve_ms={} close_first_ms={}",

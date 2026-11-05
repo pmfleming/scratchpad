@@ -199,7 +199,10 @@ impl Database {
             return Err(cause);
         }
         for buffer in &tab.buffers {
-            if buffer.path.is_none() && !contents.contains_key(&buffer.temp_id) {
+            if buffer.path.is_none()
+                && buffer.history_document.is_none()
+                && !contents.contains_key(&buffer.temp_id)
+            {
                 return Err(invalid("closed tab content is missing"));
             }
         }

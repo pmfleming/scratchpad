@@ -49,13 +49,13 @@ fn per_view_zoom_survives_session_and_closed_tab_restore() {
 }
 
 #[test]
-fn legacy_session_views_default_to_normal_zoom() {
-    let view: super::model::SessionView =
-        serde_json::from_str(r#"{"id":1,"buffer_id":2,"show_line_numbers":false}"#).unwrap();
-    assert_eq!(view.zoom_factor, 1.0);
-    let restored: super::model::SessionView =
-        serde_json::from_str(&serde_json::to_string(&view).unwrap()).unwrap();
-    assert_eq!(restored.zoom_factor, 1.0);
+fn recovery_views_require_the_current_fields() {
+    assert!(
+        serde_json::from_str::<super::model::SessionView>(
+            r#"{"id":1,"buffer_id":2,"show_line_numbers":false}"#
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn saved_clean_buffer_updates_current_content_cache() {
             .read_session(super::database::ReadScope::All)
             .unwrap()
             .unwrap()
-            .contents
+            .text_contents()
             .into_values()
             .next()
             .unwrap(),
@@ -164,11 +164,19 @@ fn clean_cold_history_is_preserved_for_external_change_resolution() {
             .read_session(super::database::ReadScope::All)
             .unwrap()
             .unwrap()
-            .contents
+            .text_contents()
             .len(),
         1
     );
-    let mut restored = store.load().unwrap().unwrap().tabs.remove(0);
+    let initial = store.load().unwrap().unwrap().tabs.remove(0);
+    assert_eq!(initial.active_buffer().text(), "backup text");
+    assert!(initial.active_buffer().pending_source_check);
+    let mut restored = store
+        .reopen_target(
+            super::reopen::RetainedTarget::Document(initial.active_buffer().temp_id.clone()),
+            &[],
+        )
+        .unwrap();
     assert_eq!(restored.active_buffer().text(), "new disk text");
     restored
         .active_buffer_mut()

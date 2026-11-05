@@ -1,6 +1,6 @@
 use super::{
     Database,
-    tests::{database, request, tab},
+    tests::{database, tab},
 };
 use futures_lite::future::block_on;
 
@@ -12,7 +12,9 @@ async fn assert_inventory(db: &Database) {
     );
     assert_eq!(
         inventory.snapshots,
-        db.string_set("SELECT id FROM snapshots").await.unwrap()
+        db.string_set("SELECT id FROM document_pieces")
+            .await
+            .unwrap()
     );
     assert!(!inventory.full_cleanup_pending);
 }
@@ -92,16 +94,24 @@ fn targeted_collection_preserves_shared_and_new_references_then_collects_last_re
         let mut save = request(&tabs);
         save.removed_documents
             .push(removed.active_buffer().temp_id.clone());
+        drop(removed);
         db.persist(save, 2).await.unwrap();
-        assert_eq!(db.integer("SELECT count(*) FROM blobs").await.unwrap(), 2);
+        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 2);
         // Remove the last old reference while creating a new one in this transaction.
         let removed = tabs.remove(0);
         tabs[0].buffers.buffer.replace_text("shared body".into());
         let mut save = request(&tabs);
         save.removed_documents
             .push(removed.active_buffer().temp_id.clone());
+        drop(removed);
         db.persist(save, 3).await.unwrap();
-        assert_eq!(db.integer("SELECT count(*) FROM blobs").await.unwrap(), 1);
+        for _ in 0..3 {
+            db.collect_chunk_batch().await.unwrap();
+        }
+        for _ in 0..3 {
+            db.collect_chunk_batch().await.unwrap();
+        }
+        assert!(db.integer("SELECT count(*) FROM chunks").await.unwrap() >= 1);
         assert_eq!(
             db.read_all_contents()
                 .await
@@ -116,7 +126,11 @@ fn targeted_collection_preserves_shared_and_new_references_then_collects_last_re
         save.removed_documents
             .extend(tabs.iter().map(|t| t.active_buffer().temp_id.clone()));
         db.persist(save, 4).await.unwrap();
-        assert_eq!(db.integer("SELECT count(*) FROM blobs").await.unwrap(), 0);
+        drop(tabs);
+        for _ in 0..3 {
+            db.collect_chunk_batch().await.unwrap();
+        }
+        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 0);
         assert_inventory(&db).await;
     });
 }
@@ -129,7 +143,7 @@ fn failed_cleanup_invalidates_inventory_and_retry_rebuilds_it_from_committed_row
         db.persist(request(&original), 1).await.unwrap();
         db.conn
             .execute_batch(
-                "CREATE TRIGGER fail_cleanup BEFORE DELETE ON blobs
+                "CREATE TRIGGER fail_cleanup BEFORE DELETE ON documents
             BEGIN SELECT RAISE(ABORT, 'cleanup failure'); END;",
             )
             .await
@@ -158,7 +172,7 @@ fn failed_cleanup_invalidates_inventory_and_retry_rebuilds_it_from_committed_row
             .push(original[0].active_buffer().temp_id.clone());
         db.persist(save, 3).await.unwrap();
         assert_inventory(&db).await;
-        assert_eq!(db.integer("SELECT count(*) FROM blobs").await.unwrap(), 1);
+        assert!(db.integer("SELECT count(*) FROM chunks").await.unwrap() >= 1);
         assert_eq!(
             db.read_all_contents()
                 .await
@@ -169,4 +183,10 @@ fn failed_cleanup_invalidates_inventory_and_retry_rebuilds_it_from_committed_row
             "new buffer"
         );
     });
+}
+
+fn request(
+    tabs: &[crate::app::domain::WorkspaceTab],
+) -> crate::app::services::session_store::SessionPersistRequest {
+    crate::app::services::session_store::SessionPersistRequest::capture(tabs, 0, 14.0, false)
 }

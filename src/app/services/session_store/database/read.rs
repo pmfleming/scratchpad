@@ -47,13 +47,28 @@ impl Database {
         result
     }
     async fn read_session(&mut self, scope: ReadScope) -> io::Result<Option<StoredSession>> {
-        if self.integer("SELECT count(*) FROM parts LEFT JOIN snapshots ON parts.temp_id=snapshots.id WHERE snapshots.id IS NULL").await? != 0 {
-            return Err(invalid("orphan recovery chunk"));
+        if matches!(scope, ReadScope::All)
+            && let Some(id) = self.quarantined.keys().next()
+        {
+            return Err(damaged(id, "original recovery data is protected"));
         }
+        if self.integer("SELECT (SELECT count(*) FROM document_text t LEFT JOIN documents d ON t.temp_id=d.id WHERE d.id IS NULL)+(SELECT count(*) FROM document_tail t LEFT JOIN documents d ON t.temp_id=d.id WHERE d.id IS NULL)+(SELECT count(*) FROM document_pieces t LEFT JOIN documents d ON t.id=d.id WHERE d.id IS NULL)").await?!=0 {return Err(invalid("orphan text manifest"));}
         let Some(mut manifest) = self.read_manifest().await? else {
             return Ok(None);
         };
         self.read_tabs(&mut manifest, scope).await?;
+        if !matches!(scope, ReadScope::Shells)
+            && let Some(buffer) = manifest
+                .tabs
+                .iter()
+                .flat_map(|t| &t.buffers)
+                .find(|b| self.quarantined.contains_key(&b.temp_id))
+        {
+            return Err(damaged(
+                &buffer.temp_id,
+                "original recovery data is protected",
+            ));
+        }
         let contents = match async {
             let contents = self.read_contents(&manifest, scope).await?;
             let tabs = if matches!(scope, ReadScope::Shells) {
@@ -96,10 +111,13 @@ impl Database {
         scope: ReadScope,
     ) -> io::Result<HashMap<String, String>> {
         let contents = match scope {
-            ReadScope::All => self.read_all_contents().await?,
+            ReadScope::All => {
+                self.validate_document_pieces(&manifest.tabs).await?;
+                HashMap::new()
+            }
             ReadScope::Active => self.read_tab_contents(&manifest.tabs).await?,
             ReadScope::Shells => {
-                self.validate_snapshots(&manifest.tabs).await?;
+                self.validate_document_pieces(&manifest.tabs).await?;
                 self.read_tab_contents(
                     manifest
                         .tabs
@@ -111,7 +129,10 @@ impl Database {
             }
         };
         if matches!(scope, ReadScope::All) {
-            validate_required(&manifest.tabs, |id| contents.contains_key(id))?;
+            let stored = self
+                .string_set("SELECT id FROM document_pieces WHERE part=0")
+                .await?;
+            validate_required(&manifest.tabs, |id| stored.contains(id))?;
         }
         Ok(contents)
     }
@@ -132,7 +153,7 @@ impl Database {
             )
             .await?;
         let Some(state) = states.into_iter().next() else {
-            if self.integer("SELECT (SELECT count(*) FROM tabs)+(SELECT count(*) FROM snapshots)+(SELECT count(*) FROM parts)+(SELECT count(*) FROM blobs)+(SELECT count(*) FROM history)+(SELECT count(*) FROM documents)+(SELECT count(*) FROM quarantine)+(SELECT count(*) FROM closed_tabs)+(SELECT count(*) FROM layouts)+(SELECT count(*) FROM layout_documents)+(SELECT count(*) FROM layout_views)+(SELECT count(*) FROM document_history)+(SELECT count(*) FROM activity)").await? != 0 { return Err(invalid("missing session commit marker")); }
+            if self.integer("SELECT (SELECT count(*) FROM tabs)+(SELECT count(*) FROM document_pieces)+(SELECT count(*) FROM document_text)+(SELECT count(*) FROM document_tail)+(SELECT count(*) FROM history)+(SELECT count(*) FROM documents)+(SELECT count(*) FROM quarantine)+(SELECT count(*) FROM closed_tabs)+(SELECT count(*) FROM layouts)+(SELECT count(*) FROM layout_documents)+(SELECT count(*) FROM layout_views)+(SELECT count(*) FROM document_history)+(SELECT count(*) FROM activity)").await? != 0 { return Err(invalid("missing session commit marker")); }
             return Ok(None);
         };
         if state.active_tab_index >= state.tab_count.max(1) {
@@ -267,8 +288,10 @@ impl Database {
         let tabs = std::slice::from_ref(tab);
         self.read_tab_contents(tabs).await
     }
-    pub(super) async fn validate_snapshots(&mut self, tabs: &[SessionTab]) -> io::Result<()> {
-        let ids = self.string_set("SELECT id FROM snapshots").await?;
+    pub(super) async fn validate_document_pieces(&mut self, tabs: &[SessionTab]) -> io::Result<()> {
+        let ids = self
+            .string_set("SELECT id FROM document_pieces WHERE part=0")
+            .await?;
         for buffer in tabs
             .iter()
             .flat_map(|tab| &tab.buffers)

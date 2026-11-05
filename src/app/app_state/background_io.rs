@@ -112,7 +112,41 @@ impl ScratchpadApp {
         }
     }
 
+    fn queue_restored_source_checks(&mut self) {
+        let cold = self
+            .tab_manager
+            .cold_session_tabs()
+            .contains_key(&self.tab_manager.active_tab_index);
+        if cold {
+            return;
+        }
+        let actions = self
+            .tab_manager
+            .active_tab_mut()
+            .map(|tab| {
+                tab.buffers_mut()
+                    .filter_map(|buffer| {
+                        if !std::mem::take(&mut buffer.pending_source_check) {
+                            return None;
+                        }
+                        super::PendingReloadBufferAction::new(
+                            buffer,
+                            super::PendingReloadMode::ObserveDiskChange,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for action in actions {
+            self.queue_background_path_loads(
+                vec![action.expected_path.clone()],
+                PendingBackgroundAction::ReloadBuffer(action),
+            );
+        }
+    }
+
     pub(crate) fn poll_background_io(&mut self, ctx: &egui::Context) {
+        self.queue_restored_source_checks();
         self.drain_background_io_results();
         if let Some(store) = self.state.persistence.session_store.opened_chunk_store()
             && self.state.background_io.bound_store_epoch != Some(store.epoch().id)
@@ -154,6 +188,7 @@ impl ScratchpadApp {
         let deadline = Instant::now() + timeout;
         loop {
             self.drain_background_io_results();
+            self.queue_restored_source_checks();
             if self.state.background_io.preparations_pending
                 || self
                     .tab_manager

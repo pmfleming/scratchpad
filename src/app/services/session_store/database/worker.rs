@@ -141,19 +141,32 @@ impl Actor {
                     }
                 }
             }
+            if chunks.pending_bytes() == 0
+                && Instant::now() >= retry_at
+                && let Err(cause) = block_on(database.collect_chunk_batch())
+            {
+                chunks.set_health(Health::Failing(cause.to_string()));
+                retry_at = Instant::now() + backoff;
+            }
         }
-        while chunks.pending_bytes() > 0 && block_on(database.drain_chunk_batch()).is_ok() {}
-        chunks.close_readers();
-        if database.ensure_healthy().is_ok()
-            && let Err(cause) = block_on(database.checkpoint())
-        {
-            crate::app::diagnostics::record_io_error(
-                "session_checkpoint",
-                Some(&root),
-                "session_store",
-                &cause,
-            );
-        }
+        finish_on_disconnect(&mut database, &chunks, &root);
+    }
+}
+fn finish_on_disconnect(
+    database: &mut Database,
+    chunks: &ChunkStoreHandle,
+    root: &std::path::Path,
+) {
+    while chunks.pending_bytes() > 0 && block_on(database.drain_chunk_batch()).is_ok() {}
+    if database.ensure_healthy().is_ok()
+        && let Err(cause) = block_on(database.checkpoint())
+    {
+        crate::app::diagnostics::record_io_error(
+            "session_checkpoint",
+            Some(root),
+            "session_store",
+            &cause,
+        );
     }
 }
 impl DatabaseWorker {

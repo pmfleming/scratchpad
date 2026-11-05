@@ -13,9 +13,9 @@ impl Database {
         id: &str,
         key: &str,
     ) -> io::Result<Vec<String>> {
-        let snapshots = self.query_collect("SELECT id FROM documents WHERE path_key=?1 AND id<>?2 AND id NOT IN (SELECT id FROM quarantine) AND id NOT IN (SELECT id FROM snapshots)",turso::params![key,id],|r|r.get::<String>(0).map_err(error)).await?;
+        let document_pieces = self.query_collect("SELECT id FROM documents WHERE path_key=?1 AND id<>?2 AND id NOT IN (SELECT id FROM quarantine) AND id NOT IN (SELECT id FROM document_pieces WHERE part=0)",turso::params![key,id],|r|r.get::<String>(0).map_err(error)).await?;
         self.execute_cached("UPDATE documents SET path=NULL,path_key=NULL,name=name||' (recovered)',search_text=lower(name||' (recovered)'),is_dirty=1,disk_content_digest=NULL,observed_digest=NULL,observed_missing=0,disk_len=NULL,disk_modified_millis=NULL WHERE path_key=?1 AND id<>?2 AND id NOT IN (SELECT id FROM quarantine)",turso::params![key,id]).await?;
-        for previous in &snapshots {
+        for previous in &document_pieces {
             let snapshot = crate::app::domain::TextDocument::new(String::new()).snapshot();
             self.write_content(
                 previous,
@@ -25,7 +25,7 @@ impl Database {
             )
             .await?;
         }
-        Ok(snapshots)
+        Ok(document_pieces)
     }
     pub(in crate::app::services::session_store) async fn load_retained_document(
         &mut self,

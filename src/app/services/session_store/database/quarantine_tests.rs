@@ -4,11 +4,10 @@ use super::{
 };
 use futures_lite::future::block_on;
 use std::collections::HashMap;
-use turso::params;
 
 async fn damage(db: &Database, id: &str) {
     db.conn
-        .execute("UPDATE blobs SET body=x'00' WHERE digest IN (SELECT digest FROM parts WHERE temp_id=?)", [id])
+        .execute("UPDATE document_pieces SET body=x'00' WHERE id=?", [id])
         .await
         .unwrap();
 }
@@ -60,9 +59,12 @@ fn cold_damage_keeps_healthy_saves_and_retains_original_data_across_restart() {
         db.persist(request(&tabs), 2).await.unwrap();
         let shells = db.load(ReadScope::Shells).await.unwrap().unwrap();
         assert_eq!(shells.manifest.tabs[1].buffers[0].name, "note");
-        assert_eq!(shells.contents.values().next().unwrap(), "healthy edits");
         assert_eq!(
-            db.integer("SELECT count(*) FROM blobs WHERE body=x'00'")
+            shells.text_contents().values().next().unwrap(),
+            "healthy edits"
+        );
+        assert_eq!(
+            db.integer("SELECT count(*) FROM document_pieces WHERE body=x'00'")
                 .await
                 .unwrap(),
             1
@@ -78,11 +80,13 @@ fn cold_damage_keeps_healthy_saves_and_retains_original_data_across_restart() {
         db.persist(request(&tabs), 1).await.unwrap();
         assert_eq!(archive(&db).await, original_bytes);
         assert_eq!(
-            db.integer("SELECT count(*) FROM snapshots").await.unwrap(),
+            db.integer("SELECT count(*) FROM document_pieces")
+                .await
+                .unwrap(),
             2
         );
         assert_eq!(
-            db.integer("SELECT count(*) FROM blobs WHERE body=x'00'")
+            db.integer("SELECT count(*) FROM document_pieces WHERE body=x'00'")
                 .await
                 .unwrap(),
             1
@@ -92,7 +96,7 @@ fn cold_damage_keeps_healthy_saves_and_retains_original_data_across_restart() {
                 .await
                 .unwrap()
                 .unwrap()
-                .contents
+                .text_contents()
                 .values()
                 .next()
                 .unwrap(),
@@ -186,8 +190,16 @@ fn closed_documents_remain_hydratable_without_a_workspace_root() {
         db.persist(request(&tabs), 1).await.unwrap();
         let queued = request(&tabs).tabs.pop().unwrap().session_tab;
         db.persist(request(&tabs[..1]), 2).await.unwrap();
-        let (_, contents) = db.hydrate(queued).await.unwrap();
-        assert_eq!(contents.into_values().collect::<Vec<_>>(), ["closed"]);
+        let (tab, _) = db.hydrate(queued).await.unwrap();
+        assert_eq!(
+            tab.buffers[0]
+                .history_document
+                .as_ref()
+                .unwrap()
+                .try_extract_text()
+                .unwrap(),
+            "closed"
+        );
         assert!(db.blocked.is_none());
         assert!(db.quarantined.is_empty());
         db.persist(request(&tabs[..1]), 3).await.unwrap();
@@ -225,7 +237,7 @@ fn missing_cold_content_detected_by_a_save_is_quarantined_after_rollback() {
         db.persist(request(&tabs), 1).await.unwrap();
         db.conn
             .execute(
-                "DELETE FROM snapshots WHERE id=?",
+                "DELETE FROM document_pieces WHERE id=?",
                 [tabs[1].buffers.buffer.temp_id.as_str()],
             )
             .await
@@ -249,14 +261,19 @@ fn missing_cold_content_detected_by_a_save_is_quarantined_after_rollback() {
                 .await
                 .unwrap()
                 .unwrap()
-                .contents
+                .text_contents()
                 .values()
                 .next()
                 .unwrap(),
             "new protected edit"
         );
         // Deleting a snapshot now cascades its parts, rather than leaving orphans.
-        assert_eq!(db.integer("SELECT count(*) FROM parts").await.unwrap(), 1);
+        assert_eq!(
+            db.integer("SELECT count(*) FROM document_pieces")
+                .await
+                .unwrap(),
+            1
+        );
     });
 }
 
@@ -264,13 +281,13 @@ fn missing_cold_content_detected_by_a_save_is_quarantined_after_rollback() {
 fn malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures() {
     block_on(async {
         for sql in [
-            "UPDATE snapshots SET bytes=-1 WHERE id=?",
-            "UPDATE snapshots SET digest=x'00' WHERE id=?",
-            "UPDATE parts SET part=9 WHERE temp_id=?",
-            "DELETE FROM snapshots WHERE id=?",
+            "UPDATE document_pieces SET bytes=bytes+1 WHERE id=?",
+            "UPDATE document_pieces SET digest=zeroblob(32) WHERE id=?",
+            "UPDATE document_tail SET offset=9 WHERE temp_id=?",
+            "DELETE FROM document_pieces WHERE id=?",
             "UPDATE history SET seq=seq+100 WHERE temp_id=?",
-            "UPDATE history SET global_seq=global_seq+1 WHERE temp_id=?",
-            "UPDATE history SET entry=x'00' WHERE temp_id=?",
+            "DELETE FROM document_history WHERE temp_id=?",
+            "UPDATE history SET packed_spans=x'00' WHERE temp_id=?",
         ] {
             let (_root, mut db) = database().await;
             let mut tabs = vec![tab("healthy"), tab("damaged")];
@@ -304,7 +321,7 @@ fn malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures() {
                     .await
                     .unwrap()
                     .unwrap()
-                    .contents
+                    .text_contents()
                     .values()
                     .next()
                     .unwrap(),
@@ -383,7 +400,7 @@ fn old_schema_is_rejected_and_schema_batch_rolls_back() {
 }
 
 #[test]
-fn supplied_snapshots_are_retained_even_if_capture_policy_changes() {
+fn supplied_document_pieces_are_retained_even_if_capture_policy_changes() {
     block_on(async {
         let (directory, mut db) = database().await;
         let tabs = vec![tab("explicit snapshot")];
@@ -396,11 +413,13 @@ fn supplied_snapshots_are_retained_even_if_capture_policy_changes() {
             captured
         };
         db.persist(captured(), 1).await.unwrap();
-        db.conn.execute_batch("CREATE TRIGGER no_rewrite BEFORE INSERT ON blobs BEGIN SELECT RAISE(ABORT, 'rewritten'); END;").await.unwrap();
+        db.conn.execute_batch("CREATE TRIGGER no_rewrite BEFORE INSERT ON chunk_bodies BEGIN SELECT RAISE(ABORT, 'rewritten'); END;").await.unwrap();
         let second = db.persist(captured(), 2).await.unwrap();
         assert_eq!(second.manifest_write_ns, 0);
         assert_eq!(
-            db.integer("SELECT count(*) FROM snapshots").await.unwrap(),
+            db.integer("SELECT count(*) FROM document_pieces")
+                .await
+                .unwrap(),
             1
         );
     });
@@ -412,25 +431,35 @@ fn lengths_and_hashes_describe_the_bytes_emitted_including_empty_and_unicode() {
         let (_root, mut db) = database().await;
         let tabs = vec![tab(""), tab(&"aλ🦀\0\r\n".repeat(100_000))];
         db.persist(request(&tabs), 1).await.unwrap();
-        assert!(db.integer("SELECT count(*) FROM parts").await.unwrap() > 1);
-        let contents = db.load(ReadScope::All).await.unwrap().unwrap().contents;
+        assert!(
+            db.integer("SELECT count(*) FROM document_text")
+                .await
+                .unwrap()
+                > 1
+        );
+        let contents = db.read_all_contents().await.unwrap();
         for tab in &tabs {
-            let text = tab.buffers.buffer.text();
-            let id = &tab.buffers.buffer.temp_id;
-            assert_eq!(contents[id], text);
-            let row = db.conn.query("SELECT bytes, digest, (SELECT coalesce(sum(length(b.body)),0) FROM parts p JOIN blobs b ON p.digest=b.digest WHERE p.temp_id=?) FROM snapshots WHERE id=?", params![id.as_str(), id.as_str()]).await.unwrap().next().await.unwrap().unwrap();
-            assert_eq!(row.get::<i64>(0).unwrap(), row.get::<i64>(2).unwrap());
-            assert_eq!(row.get::<i64>(0).unwrap() as usize, text.len());
-            let mut expected = super::chunking::manifest_hasher();
-            for chunk in super::chunking::IncrementalChunks::new(
-                &tab.active_buffer().document_snapshot(),
-                None,
-            ) {
-                super::chunking::hash_part(&mut expected, chunk.unwrap().meta);
-            }
+            let id = &tab.active_buffer().temp_id;
+            assert_eq!(contents[id], tab.active_buffer().text());
+            let row = db
+                .conn
+                .query(
+                    "SELECT bytes,digest,body FROM document_pieces WHERE id=?",
+                    [id.as_str()],
+                )
+                .await
+                .unwrap()
+                .next()
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                row.get::<i64>(0).unwrap() as usize,
+                tab.active_buffer().text().len()
+            );
             assert_eq!(
                 row.get::<Vec<u8>>(1).unwrap(),
-                expected.finalize().as_bytes()
+                blake3::hash(&row.get::<Vec<u8>>(2).unwrap()).as_bytes()
             );
         }
     });

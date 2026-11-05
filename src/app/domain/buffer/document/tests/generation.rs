@@ -37,6 +37,7 @@ fn history_offsets_above_u32_round_trip_without_large_text_allocation() {
             buffer: PieceBuffer::Add,
             start_byte: 0,
             byte_len: 2,
+            char_len: 1,
         },
     };
     let persisted = edit.to_persisted(|_| "λ".into());
@@ -50,6 +51,7 @@ fn history_offsets_above_u32_round_trip_without_large_text_allocation() {
             buffer: PieceBuffer::Add,
             start_byte: 0,
             byte_len: text.len() as u64,
+            char_len: text.chars().count() as u64,
         }
     });
     assert_eq!(restored.start_char(), start);

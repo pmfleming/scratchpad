@@ -18,6 +18,7 @@ struct RecoveryBuffer {
     // None means cold or quarantined: preserve the committed history.
     history: Option<HistoryRows>,
     history_fingerprints: Option<Vec<super::history::HistoryFingerprint>>,
+    changed_history: Vec<super::history::PreparedHistoryEntry>,
 }
 
 #[derive(Default)]
@@ -34,7 +35,7 @@ struct Prepared {
     closed: Vec<super::closed::ClosedRow>,
     closed_changed: bool,
     old_closed: Vec<super::closed::ClosedRow>,
-    chunk_checkpoints: HashMap<String, super::chunking::ChunkCheckpoint>,
+    contents: HashMap<String, super::content::PreparedContent>,
 }
 impl Prepared {
     fn new(
@@ -129,23 +130,22 @@ impl Prepared {
     ) -> io::Result<(super::layouts::LayoutRow, SessionTab)> {
         validation::validate_tab(&tab.session_tab)?;
         for buffer in &mut tab.session_tab.buffers {
-            let entries = buffer
-                .history_capture
-                .take()
-                .map(HistoryRows::Document)
-                .unwrap_or_else(|| HistoryRows::Exported(std::mem::take(&mut buffer.text_history)));
-            let history = (!tab.preserve_existing || tab.discard_history).then_some(entries);
-            if let Some(entries) = &history {
-                entries.validate()?;
-            }
+            let history = if tab.preserve_existing {
+                buffer.history_capture = None;
+                buffer.text_history.clear();
+                None
+            } else {
+                Some(HistoryRows::capture(
+                    buffer.history_capture.take(),
+                    std::mem::take(&mut buffer.text_history),
+                )?)
+            };
             let required = validation::needs_snapshot(buffer);
             let policy = RecoveryBuffer {
                 metadata: super::document_rows::DocumentRow::capture(buffer)?,
                 required,
-                history_fingerprints: history
-                    .as_ref()
-                    .map(super::history::fingerprints)
-                    .transpose()?,
+                changed_history: Vec::new(),
+                history_fingerprints: history.as_ref().map(super::history::fingerprints),
                 history,
             };
             if self
@@ -195,6 +195,7 @@ impl Database {
             return Ok(SessionPersistProfile::default());
         }
         let start = Instant::now();
+        let hashed_before = self.chunk_store()?.hashed_bytes();
         let old_closed = self
             .prepare_closed(&mut request)
             .await
@@ -237,6 +238,10 @@ impl Database {
             self.accept_prepared(prepared, inventory, connection_changes);
         }
         self.latest_request = generation;
+        profile.snapshot_bytes_hashed = self
+            .chunk_store()?
+            .hashed_bytes()
+            .saturating_sub(hashed_before);
         profile.total_ns = start.elapsed().as_nanos();
         Ok(profile)
     }
@@ -251,6 +256,52 @@ impl Database {
         prepared.snapshots.retain(|buffer| {
             self.revisions.get(&buffer.temp_id) != Some(&buffer.snapshot.revision_key())
         });
+        let snapshots: HashMap<_, _> = prepared
+            .snapshots
+            .iter()
+            .map(|s| (s.temp_id.as_str(), s))
+            .collect();
+        for (id, buffer) in &prepared.buffers {
+            if let Some(history) = &buffer.history {
+                let changed = self.history_cache.get(id) != buffer.history_fingerprints.as_ref();
+                let text_changed = snapshots.contains_key(id.as_str());
+                if !changed
+                    && history.len() == 0
+                    && self
+                        .document_cache
+                        .get(id)
+                        .is_some_and(|row| row.text_is_empty)
+                    && self
+                        .inventory
+                        .as_ref()
+                        .is_some_and(|i| i.snapshots.contains(id))
+                    && snapshots
+                        .get(id.as_str())
+                        .is_none_or(|s| s.snapshot.len_bytes() == 0)
+                {
+                    // Empty text with no undo references has no backing bytes to
+                    // compare. Preserve its existing manifest after reopening.
+                    continue;
+                }
+                if changed
+                    || text_changed
+                    || !self
+                        .inventory
+                        .as_ref()
+                        .is_some_and(|i| i.snapshots.contains(id))
+                {
+                    let tree = if history.len() == 0 {
+                        snapshots
+                            .get(id.as_str())
+                            .map_or_else(|| history.0.piece_tree(), |s| s.snapshot.piece_tree())
+                    } else {
+                        history.0.piece_tree()
+                    };
+                    let content = self.prepare_content(id, tree).await?;
+                    prepared.contents.insert(id.clone(), content);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -264,12 +315,16 @@ impl Database {
             .is_some_and(|inventory| inventory.connection_changes != Some(connection_changes))
         {
             self.inventory = None;
-            self.chunk_cache.clear();
+            self.tail_cache.clear();
+            self.history_cache.clear();
+            self.history_positions.clear();
         }
         if self.inventory.is_none() {
             self.inventory = Some(ContentInventory {
                 buffers: self.string_set("SELECT id FROM documents").await?,
-                snapshots: self.string_set("SELECT id FROM snapshots").await?,
+                snapshots: self
+                    .string_set("SELECT id FROM document_pieces WHERE part=0")
+                    .await?,
                 full_cleanup_pending: true,
                 connection_changes: Some(connection_changes),
             });
@@ -309,17 +364,32 @@ impl Database {
             self.layout_cache
                 .insert(id, super::layouts::LayoutRow::capture(&tab)?);
         }
+        let history_ids = prepared
+            .buffers
+            .iter()
+            .filter(|(id, b)| {
+                b.history.is_some()
+                    && !self.quarantined.contains_key(*id)
+                    && !self.history_cache.contains_key(*id)
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        if let Err(cause) = self.prime_history_caches(&history_ids).await {
+            return Err(self.protect_failed_write(cause).await);
+        }
         for (id, buffer) in &mut prepared.buffers {
             if self.quarantined.contains_key(id) {
                 buffer.history = None;
                 buffer.history_fingerprints = None;
             }
-            if buffer.history.is_some() && !self.history_cache.contains_key(id) {
-                let entries = match self.read_history_fingerprints(id).await {
-                    Ok(entries) => entries,
-                    Err(cause) => return Err(self.protect_failed_write(cause).await),
-                };
-                self.history_cache.insert(id.clone(), entries);
+        }
+        for (id, buffer) in &mut prepared.buffers {
+            if let (Some(history), Some(keys)) = (&buffer.history, &buffer.history_fingerprints) {
+                if !self.history_positions.contains_key(id) {
+                    self.history_positions
+                        .insert(id.clone(), self.read_history_positions(id).await?);
+                }
+                buffer.changed_history = self.prepare_history(id, history, keys)?;
             }
         }
         Ok(())
@@ -341,6 +411,10 @@ impl Database {
             || prepared.buffers.iter().any(|(id, buffer)| {
                 self.document_cache.get(id) != Some(&buffer.metadata)
                     || buffer
+                        .history
+                        .as_ref()
+                        .is_some_and(|h| self.history_positions.get(id) != Some(&h.positions()))
+                    || buffer
                         .history_fingerprints
                         .as_ref()
                         .is_some_and(|entries| self.history_cache.get(id) != Some(entries))
@@ -353,27 +427,25 @@ impl Database {
         connection_changes: Option<i64>,
     ) {
         // Only after COMMIT. A failed attempt must be fully retryable.
-        inventory.snapshots.extend(
-            prepared
-                .snapshots
-                .iter()
-                .map(|buffer| buffer.temp_id.clone()),
-        );
+        inventory
+            .snapshots
+            .extend(prepared.contents.keys().cloned());
         inventory.buffers.extend(prepared.buffers.keys().cloned());
         inventory.snapshots.extend(prepared.retained_snapshots);
         for id in &prepared.removed_documents {
             inventory.buffers.remove(id);
             inventory.snapshots.remove(id);
             self.revisions.remove(id);
-            self.chunk_cache.remove(id);
+            self.tail_cache.remove(id);
             self.history_cache.remove(id);
+            self.history_positions.remove(id);
             self.document_cache.remove(id);
         }
         inventory.full_cleanup_pending = false;
         inventory.connection_changes = connection_changes;
         self.inventory = Some(inventory);
         // Retention is durable; comparison caches only need the current capture.
-        self.chunk_cache
+        self.tail_cache
             .retain(|id, _| prepared.buffers.contains_key(id));
         self.revisions
             .retain(|id, _| prepared.buffers.contains_key(id));
@@ -381,7 +453,19 @@ impl Database {
             .retain(|id, _| prepared.buffers.contains_key(id));
         self.document_cache
             .retain(|id, _| prepared.buffers.contains_key(id));
-        self.chunk_cache.extend(prepared.chunk_checkpoints);
+        for (id, content) in prepared.contents {
+            if let Some(checkpoint) = content.checkpoint {
+                self.tail_cache.insert(id, checkpoint);
+            } else {
+                self.tail_cache.remove(&id);
+            }
+        }
+        for (id, buffer) in &prepared.buffers {
+            if let Some(history) = &buffer.history {
+                self.history_positions
+                    .insert(id.clone(), history.positions());
+            }
+        }
         self.revisions.extend(
             prepared
                 .snapshots
@@ -460,7 +544,8 @@ impl Database {
             if let (Some(entries), Some(fingerprints)) =
                 (&buffer.history, &buffer.history_fingerprints)
             {
-                self.write_history(id, entries, fingerprints).await?;
+                self.write_history(id, entries, fingerprints, &buffer.changed_history)
+                    .await?;
             } else if !inventory.buffers.contains(id) {
                 self.execute_cached("INSERT INTO history_nodes VALUES(?,0)", [id.as_str()])
                     .await?;
@@ -480,14 +565,11 @@ impl Database {
         removed_digests: &mut HashSet<Vec<u8>>,
         profile: &mut SessionPersistProfile,
     ) -> io::Result<()> {
-        for buffer in &prepared.snapshots {
-            let checkpoint = self
-                .write_content(&buffer.temp_id, &buffer.snapshot, removed_digests, profile)
-                .await?;
-            prepared
-                .chunk_checkpoints
-                .insert(buffer.temp_id.clone(), checkpoint);
+        let _ = removed_digests;
+        for (id, content) in &prepared.contents {
+            self.write_prepared_content(id, content).await?;
         }
+        profile.snapshot_bytes_read = 0;
         Ok(())
     }
 
@@ -527,11 +609,7 @@ impl Database {
         inventory: &ContentInventory,
         mut removed_digests: HashSet<Vec<u8>>,
     ) -> io::Result<()> {
-        let written: HashSet<_> = prepared
-            .snapshots
-            .iter()
-            .map(|buffer| &buffer.temp_id)
-            .collect();
+        let written: HashSet<_> = prepared.contents.keys().collect();
         if let Some((id, _)) = prepared.buffers.iter().find(|(id, buffer)| {
             buffer.required
                 && !inventory.snapshots.contains(*id)
@@ -540,30 +618,10 @@ impl Database {
         }) {
             return Err(damaged(id, "refusing to commit missing recovery content"));
         }
+        let _ = &mut removed_digests;
         for id in &prepared.removed_documents {
-            self.collect_digests(
-                "SELECT digest FROM parts WHERE temp_id=?",
-                [id.as_str()],
-                &mut removed_digests,
-            )
-            .await?;
             self.execute_cached("DELETE FROM documents WHERE id=?", [id.as_str()])
                 .await?;
-        }
-        // Quarantined and shared parts remain GC roots even after live tabs close.
-        if prepared.full_cleanup {
-            self.execute_cached(
-                "DELETE FROM blobs WHERE digest NOT IN (SELECT digest FROM parts)",
-                (),
-            )
-            .await?;
-        } else {
-            for digest in removed_digests {
-                self.execute_cached(
-                    "DELETE FROM blobs WHERE digest=? AND NOT EXISTS(SELECT 1 FROM parts WHERE digest=?)",
-                    params![digest.as_slice(), digest.as_slice()],
-                ).await?;
-            }
         }
         Ok(())
     }

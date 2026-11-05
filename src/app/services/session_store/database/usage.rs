@@ -22,7 +22,7 @@ impl Database {
         // their costs in bulk. No query per archived buffer or text payload reads.
         let mut usage = self.query_collect(
             "WITH costs AS (
-                SELECT id AS temp_id, bytes FROM snapshots
+                SELECT id AS temp_id, bytes FROM document_pieces
                 UNION ALL SELECT temp_id, bytes FROM history INDEXED BY history_sizes
              ), totals AS (SELECT temp_id, sum(bytes) AS bytes FROM costs GROUP BY temp_id),
              layout_costs AS (SELECT l.id,32+length(l.root_pane)+coalesce(d.bytes,0)+coalesce(v.bytes,0) AS bytes FROM layouts l LEFT JOIN (SELECT layout_id,sum(32+length(document_id)) AS bytes FROM layout_documents GROUP BY layout_id) d ON d.layout_id=l.id LEFT JOIN (SELECT layout_id,count(*)*80 AS bytes FROM layout_views GROUP BY layout_id) v ON v.layout_id=l.id),
@@ -49,20 +49,30 @@ impl Database {
             * self.integer("PRAGMA page_size").await? as u64;
         // Deduplicate roots before joining so shared chunks count once. Return
         // four aggregates instead of sending every blob through the worker.
-        for (kind, bytes) in self.query_collect(
-            "WITH roots AS (
-                SELECT digest, 1 AS live, 0 AS recovery FROM parts
-             ), refs AS (SELECT digest, max(live)+2*max(recovery) AS kind FROM roots GROUP BY digest)
-             SELECT coalesce(refs.kind,0), sum(blobs.bytes) FROM blobs INDEXED BY blob_sizes
-             LEFT JOIN refs ON refs.digest=blobs.digest GROUP BY coalesce(refs.kind,0)",
-            (),
-            |row| Ok((row.get::<i64>(0).map_err(error)?, row.get::<i64>(1).map_err(error)? as u64)),
-        ).await? {
+        for (kind, bytes) in self
+            .query_collect(
+                "WITH roots AS (SELECT DISTINCT chunk_id FROM document_text)
+             SELECT CASE WHEN roots.chunk_id IS NULL THEN 0 ELSE 1 END,sum(chunks.byte_len)
+             FROM chunks INDEXED BY chunk_sizes LEFT JOIN roots ON roots.chunk_id=chunks.id
+             GROUP BY CASE WHEN roots.chunk_id IS NULL THEN 0 ELSE 1 END",
+                (),
+                |row| {
+                    Ok((
+                        row.get::<i64>(0).map_err(error)?,
+                        row.get::<i64>(1).map_err(error)? as u64,
+                    ))
+                },
+            )
+            .await?
+        {
             match kind {
                 1 => usage.live_text = bytes,
                 _ => usage.unreferenced_text = bytes,
             }
         }
+        usage.live_text += self
+            .integer("SELECT coalesce(sum(length(body)),0) FROM document_tail")
+            .await? as u64;
         Ok(usage)
     }
 }

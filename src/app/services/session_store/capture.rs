@@ -39,7 +39,6 @@ pub(super) struct CapturedSessionTab {
     pub(super) session_tab: SessionTab,
     pub(super) buffer_snapshots: Vec<CapturedSessionBuffer>,
     pub(super) preserve_existing: bool,
-    pub(super) discard_history: bool,
 }
 
 #[derive(Clone)]
@@ -270,7 +269,6 @@ impl CapturedSessionTab {
             session_tab: SessionTab::from(session_tab),
             buffer_snapshots: Vec::new(),
             preserve_existing: true,
-            discard_history: false,
         }
     }
 
@@ -318,7 +316,6 @@ impl CapturedSessionTab {
             },
             buffer_snapshots,
             preserve_existing: false,
-            discard_history: false,
         }
     }
 }
