@@ -1,0 +1,63 @@
+{
+  "database": {
+    "advisory-count": 1409,
+    "last-commit": "26fd2d43f7280a1fb925a3743ec463017afe7119",
+    "last-updated": "2026-11-05T09:50:49+01:00"
+  },
+  "vulnerability_count": 0,
+  "warnings": {
+    "unmaintained": [
+      {
+        "name": "ttf-parser",
+        "version": "0.25.1",
+        "advisory": "RUSTSEC-2026-0192",
+        "title": "`ttf-parser` is unmaintained",
+        "url": "https://github.com/harfbuzz/ttf-parser/issues/217"
+      },
+      {
+        "name": "zbus_names",
+        "version": "4.3.4",
+        "advisory": "RUSTSEC-2026-0371",
+        "title": "`zbus_names` is unmaintained",
+        "url": "https://github.com/z-galaxy/zbus/issues/2043"
+      },
+      {
+        "name": "zvariant",
+        "version": "5.15.1",
+        "advisory": "RUSTSEC-2026-0370",
+        "title": "`zvariant` is unmaintained",
+        "url": "https://github.com/z-galaxy/zbus/issues/2043"
+      },
+      {
+        "name": "zvariant_derive",
+        "version": "5.15.1",
+        "advisory": "RUSTSEC-2026-0372",
+        "title": "`zvariant_derive` is unmaintained",
+        "url": "https://github.com/z-galaxy/zbus/issues/2043"
+      }
+    ],
+    "unsound": [
+      {
+        "name": "event-listener",
+        "version": "5.4.1",
+        "advisory": "RUSTSEC-2026-0221",
+        "title": "`event-listener` allows `!Send` tags to cross thread boundaries via `StackSlot`",
+        "url": "https://github.com/smol-rs/event-listener/pull/163"
+      }
+    ],
+    "yanked": [
+      {
+        "name": "async-executor",
+        "version": "1.14.0"
+      },
+      {
+        "name": "chacha20",
+        "version": "0.10.1"
+      },
+      {
+        "name": "clipboard-win",
+        "version": "5.4.1"
+      }
+    ]
+  }
+}

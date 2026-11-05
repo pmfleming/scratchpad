@@ -61,7 +61,8 @@ report. No test failure or reliability finding is reported by that run. See
 `evidence/stage-5/quality-summary.json`; no rule or budget was relaxed.
 
 The subsequent stage 6 frozen quality run also passed producer/verification,
-feature powerset and audit commands with unchanged source hashes. Its strict
+tool-version discovery for feature, audit and coverage tools with unchanged source
+hashes. These discovery commands alone are not feature or security scans. Its strict
 policy gate remains failed: 14 partial-evidence artifacts, three required human
 reviews and 39 reported threshold findings. No actual test failure or reliability
 finding is reported. See `evidence/stage-6/quality-summary.json`; the policy and

@@ -53,7 +53,7 @@ to stage 0's structural metadata prototype. Stage 4 must remove history-payload
 work before judging final save cost.
 
 Fresh RQL completed against immutable commit `d769a41`, with matching source
-hashes. Measurement, verification, audit, and feature-tool commands passed.
+hashes. Measurement, verification, and audit/feature tool-version discovery commands passed.
 The strict gate remains failing on partial analysis, existing hotspot findings,
 and three pending required human reviews. No new chunk-store/document-row/layout
 module exceeded a hotspot limit. The compact summary is in

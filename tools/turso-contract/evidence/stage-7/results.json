@@ -15,7 +15,12 @@
     "standard_wal_contract": "passed",
     "criterion_cases": 34,
     "resource_cases": 43,
-    "resource_failures": 0
+    "resource_failures": 0,
+    "feature_powerset": {
+      "passed": true,
+      "all_targets": true,
+      "combinations": 4
+    }
   },
   "evidence": {
     "responsiveness": "responsiveness.json",
@@ -26,5 +31,22 @@
     "benchmarks": "benchmark-comparison.json",
     "metadata": "metadata.log"
   },
-  "strict_quality": "Final follow-up frozen run recorded in quality-summary.json; earlier b58faee results retained separately."
+  "strict_quality": {
+    "passed": false,
+    "source_revision": "fe9ada941e1404df43a9b331a1b78b8010403c47",
+    "source_hashes_stable": true,
+    "partial_artifacts": 14,
+    "unmet_human_reviews": 3,
+    "reported_threshold_findings": 36,
+    "reported_test_failures": 0,
+    "reported_reliability_findings": 0
+  },
+  "dependency_audit": {
+    "exit_code": 0,
+    "vulnerability_entries": 0,
+    "unmaintained_warnings": 4,
+    "unsoundness_warnings": 1,
+    "yanked_warnings": 3,
+    "lockfile_unchanged_from_stage_6": true
+  }
 }

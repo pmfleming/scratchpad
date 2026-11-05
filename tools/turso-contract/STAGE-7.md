@@ -131,3 +131,23 @@ with 14 partial-evidence artifacts, three unmet human reviews and 37 threshold
 findings; no actual test failure or reliability finding was reported. See
 quality-before-indentation.json. The follow-up receives a new frozen-source run;
 no rule or threshold is relaxed.
+
+The final frozen run covers fe9ada9 with identical before/after source hashes and
+an unchanged quality tool. Measurement and verification pass. Strict policy still
+fails: 14 partial-evidence artifacts and three required human reviews remain;
+36 module threshold findings are also retained. No actual test failure or
+reliability finding is reported. The complete compact result is
+`evidence/stage-7/quality-summary.json`. This is not a passing release gate.
+
+Standalone `cargo hack check --locked --all-targets --feature-powerset` passed all
+four feature combinations. Standalone `cargo audit --json` exited zero with no
+vulnerability entries, plus four unmaintained-package warnings, one unsoundness
+warning and three yanked versions. The unsoundness warning is event-listener 5.4.1,
+RUSTSEC-2026-0221 (non-Send StackSlot tags). The dependency lock is unchanged from
+stage 6. These warnings were not suppressed; see audit.json and audit-summary.json.
+Tool-version discovery in the frozen wrapper is distinct from these actual scans.
+
+Implementation and Linux measurements are committed. Native Windows runtime,
+independent human reviews, partial quality evidence, reported thresholds and the
+dependency warnings remain release acceptance items. No policy, engine pin or
+performance target was changed to hide a finding.

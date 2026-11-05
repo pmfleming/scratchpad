@@ -1,0 +1,84 @@
+[0mdirenv: loading ~/Projects/scratchpad/.envrc
+[0mdirenv: using flake
+[0mdirenv: nix-direnv: Using cached dev shell
+Scratchpad dev shell
+Try: cargo check
+info: running `cargo check --all-targets --locked --no-default-features` on scratchpad (1/4)
+   Compiling serde v1.0.228
+    Checking turso_core v0.8.3
+    Checking kittest v0.5.0
+    Checking ciborium-ll v0.2.2
+    Checking zcheapstr v1.1.0
+    Checking enumflags2 v0.7.12
+    Checking zvariant_utils v4.2.0
+    Checking tinytemplate v1.2.1
+    Checking ciborium v0.2.2
+    Checking egui_kittest v0.37.0
+    Checking criterion v0.8.2
+    Checking zvariant v5.15.1
+    Checking zbus_names v4.3.4
+    Checking zbus_xml v5.2.1
+    Checking zbus v5.19.0
+    Checking zbus-lockstep v0.5.2
+    Checking atspi-common v0.13.0
+    Checking atspi-proxies v0.13.0
+    Checking accesskit_atspi_common v0.21.1
+    Checking atspi v0.29.0
+    Checking accesskit_unix v0.24.1
+    Checking accesskit_winit v0.34.2
+    Checking egui-winit v0.37.0
+    Checking eframe v0.37.0
+    Checking turso_sdk_kit v0.8.3
+    Checking turso_sync_engine v0.8.3
+    Checking turso_sync_sdk_kit v0.8.3
+    Checking turso v0.8.3
+    Checking scratchpad v0.4.2 (/home/laufan/Projects/scratchpad)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 45.25s
+
+info: running `cargo check --all-targets --locked --no-default-features --features count-lines,inspection` on scratchpad (2/4)
+    Checking scratchpad v0.4.2 (/home/laufan/Projects/scratchpad)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.57s
+
+info: running `cargo check --all-targets --locked --no-default-features --features count-lines` on scratchpad (3/4)
+    Checking serde v1.0.228
+    Checking turso_core v0.8.3
+    Checking zcheapstr v1.1.0
+    Checking zvariant_utils v4.2.0
+    Checking enumflags2 v0.7.12
+    Checking ciborium v0.2.2
+    Checking tinytemplate v1.2.1
+    Checking egui_kittest v0.37.0
+    Checking criterion v0.8.2
+    Checking zvariant v5.15.1
+    Checking zbus_names v4.3.4
+    Checking zbus_xml v5.2.1
+    Checking zbus v5.19.0
+    Checking zbus-lockstep v0.5.2
+    Checking atspi-common v0.13.0
+    Checking atspi-proxies v0.13.0
+    Checking accesskit_atspi_common v0.21.1
+    Checking atspi v0.29.0
+    Checking accesskit_unix v0.24.1
+    Checking accesskit_winit v0.34.2
+    Checking egui-winit v0.37.0
+    Checking eframe v0.37.0
+    Checking turso_sdk_kit v0.8.3
+    Checking turso_sync_engine v0.8.3
+    Checking turso_sync_sdk_kit v0.8.3
+    Checking turso v0.8.3
+    Checking scratchpad v0.4.2 (/home/laufan/Projects/scratchpad)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 38.78s
+
+info: running `cargo check --all-targets --locked --no-default-features --features inspection` on scratchpad (4/4)
+    Checking turso_core v0.8.3
+    Checking tinytemplate v1.2.1
+    Checking kittest v0.5.0
+    Checking ciborium v0.2.2
+    Checking egui_kittest v0.37.0
+    Checking criterion v0.8.2
+    Checking turso_sdk_kit v0.8.3
+    Checking turso_sync_engine v0.8.3
+    Checking turso_sync_sdk_kit v0.8.3
+    Checking turso v0.8.3
+    Checking scratchpad v0.4.2 (/home/laufan/Projects/scratchpad)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 34.94s
