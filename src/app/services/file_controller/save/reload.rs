@@ -87,10 +87,6 @@ impl FileController {
         let changed = buffer.document().revision_key() != action.expected_revision;
         let requires_clean = action.mode != PendingReloadMode::ExplicitReload;
         if changed || (requires_clean && buffer.is_dirty) {
-            if action.mode == PendingReloadMode::ObserveDiskChange {
-                buffer.mark_conflict_on_disk(result.disk_state);
-                app.tab_manager.mark_session_dirty();
-            }
             app.state.status.set_warning_status_in_domain(
                 action.mode.status_domain(),
                 format!(
@@ -125,7 +121,11 @@ impl FileController {
                     "file_controller::save",
                     &error,
                 );
-                Self::handle_async_reload_error(app, index, &action, result.disk_state, error);
+                app.state.status.set_error_status_with_detail(
+                    action.mode.status_domain(),
+                    format!("Could not reload {} from disk.", action.buffer_name),
+                    error,
+                );
             }
         }
     }
@@ -193,42 +193,6 @@ impl FileController {
             && buffer.disk_state == action.previous_disk_state)
             .then_some((index, result))
     }
-
-    fn handle_async_reload_error(
-        app: &mut ScratchpadApp,
-        index: usize,
-        action: &PendingReloadBufferAction,
-        disk_state: Option<DiskFileState>,
-        error: String,
-    ) {
-        if action.mode == PendingReloadMode::ObserveDiskChange {
-            let Some(buffer) = app
-                .tab_manager
-                .tabs
-                .as_mut_slice()
-                .get_mut(index)
-                .and_then(|tab| tab.buffer_by_id_mut(action.buffer_id))
-            else {
-                return;
-            };
-            buffer.mark_stale_on_disk(disk_state);
-            app.state.status.set_warning_status_with_detail(
-                StatusDomain::Disk,
-                format!(
-                    "Detected a newer on-disk version of {} but could not reload it.",
-                    action.buffer_name
-                ),
-                error,
-            );
-            app.tab_manager.mark_session_dirty();
-        } else {
-            app.state.status.set_error_status_with_detail(
-                action.mode.status_domain(),
-                format!("Could not reload {} from disk.", action.buffer_name),
-                error,
-            );
-        }
-    }
 }
 
 impl PendingReloadMode {
@@ -241,12 +205,10 @@ impl PendingReloadMode {
     }
 
     fn success_message(self, name: &str, loaded: &BufferState) -> String {
-        match self {
-            Self::ObserveDiskChange => format!("Reloaded {name} because it changed on disk."),
-            Self::ExplicitReload => format!("Reloaded {name} from disk."),
-            Self::ReopenWithEncoding => {
-                format!("Reopened {name} with {}.", loaded.format.encoding_label())
-            }
+        if self == Self::ReopenWithEncoding {
+            format!("Reopened {name} with {}.", loaded.format.encoding_label())
+        } else {
+            format!("Reloaded {name} from disk.")
         }
     }
 }

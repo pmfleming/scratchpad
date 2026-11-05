@@ -30,16 +30,6 @@ impl BufferState {
         self.set_disk_state(disk_state, BufferFreshness::InSync);
     }
 
-    pub fn mark_auto_reloaded_from_disk(&mut self, disk_state: Option<DiskFileState>) {
-        self.disk_content_digest = disk_state
-            .as_ref()
-            .map(|_| self.document().content_digest());
-        self.observed_disk_digest
-            .clone_from(&self.disk_content_digest);
-        self.observed_disk_missing = false;
-        self.set_disk_state(disk_state, BufferFreshness::AutoReloaded);
-    }
-
     pub fn mark_stale_on_disk(&mut self, disk_state: Option<DiskFileState>) {
         self.set_disk_state(disk_state, BufferFreshness::StaleOnDisk);
     }
