@@ -52,9 +52,8 @@ fn token_lookup_does_not_decode_unrelated_archives() {
         db.persist(save, 1).await.unwrap();
         let token = db.closed_rows().await.unwrap()[0].token.clone();
         db.conn
-            .execute(
-                "INSERT INTO closed_tabs(token,closed_at,payload) VALUES('broken',0,x'00')",
-                (),
+            .execute_batch(
+                "INSERT INTO layouts VALUES(9223372036854775807,1,'bad'); INSERT INTO closed_tabs(token,closed_at,layout_id) VALUES('broken',0,9223372036854775807)",
             )
             .await
             .unwrap();
@@ -84,7 +83,7 @@ fn archive_diff_failure_rolls_back_removed_and_changed_rows() {
         let changed = ClosedRow {
             token: old[1].token.clone(),
             closed_at: old[1].closed_at + 1,
-            payload: old[1].payload.clone(),
+            layout: old[1].layout.clone(),
             tab: old[1].tab.clone(),
         };
         db.conn.execute_batch("CREATE TRIGGER fail_update BEFORE UPDATE ON closed_tabs BEGIN SELECT RAISE(ABORT, 'injected'); END; BEGIN IMMEDIATE;").await.unwrap();

@@ -98,7 +98,7 @@ fn warm_saves_do_not_read_unrelated_closed_layout_payloads() {
             .push(CapturedClosedTab::capture(&tab("closed"), None));
         db.persist(close, 1).await.unwrap();
         db.conn
-            .execute("UPDATE closed_tabs SET payload=x'00'", ())
+            .execute("UPDATE layouts SET root_pane='bad'", ())
             .await
             .unwrap();
         // An unrelated corrupt archive is preserved; selecting it reports its error.
@@ -134,7 +134,7 @@ fn root_and_nonroot_references_are_constrained_and_layout_indexes_are_validated(
         );
         db.conn
             .execute(
-                "DELETE FROM tab_documents WHERE document_id=?",
+                "DELETE FROM layout_documents WHERE document_id=?",
                 [id.as_str()],
             )
             .await
@@ -175,5 +175,99 @@ fn save_as_over_a_retained_path_transfers_lookup_without_reusing_the_replaced_tr
         assert!(old.is_dirty);
         let (_, contents) = db.load_retained_document(&old_id).await.unwrap();
         assert_eq!(contents[&old_id], "");
+    });
+}
+
+#[test]
+fn a_cursor_move_updates_one_view_and_closing_the_first_tab_preserves_layouts() {
+    use crate::app::domain::{CharCursor, CursorRange};
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let mut tabs = vec![tab("one"), tab("two"), tab("three")];
+        db.persist(request(&tabs), 1).await.unwrap();
+        let ids: Vec<_> = tabs.iter().map(|t| t.layout_id).collect();
+        db.conn.execute_batch("CREATE TABLE metadata_writes(kind TEXT) STRICT;
+            CREATE TRIGGER layout_update AFTER UPDATE ON layouts BEGIN INSERT INTO metadata_writes VALUES('layout'); END;
+            CREATE TRIGGER view_update AFTER UPDATE ON layout_views BEGIN INSERT INTO metadata_writes VALUES('view'); END;
+            CREATE TRIGGER document_update AFTER UPDATE ON documents BEGIN INSERT INTO metadata_writes VALUES('document'); END;
+            CREATE TRIGGER state_update AFTER UPDATE ON session_state BEGIN INSERT INTO metadata_writes VALUES('state'); END;").await.unwrap();
+        tabs[1].layout.views_mut()[0].cursor_range = Some(CursorRange::one(CharCursor::new(2)));
+        db.persist(request(&tabs), 2).await.unwrap();
+        assert_eq!(
+            db.integer("SELECT count(*) FROM metadata_writes")
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.integer("SELECT count(*) FROM metadata_writes WHERE kind='view'")
+                .await
+                .unwrap(),
+            1
+        );
+        db.conn
+            .execute("DELETE FROM metadata_writes", ())
+            .await
+            .unwrap();
+        let closed = tabs.remove(0);
+        let mut save = request(&tabs);
+        save.closed_tabs
+            .push(CapturedClosedTab::capture(&closed, None));
+        db.persist(save, 3).await.unwrap();
+        assert_eq!(
+            db.integer("SELECT count(*) FROM metadata_writes WHERE kind<>'state'")
+                .await
+                .unwrap(),
+            0
+        );
+        let restored = db.load(ReadScope::All).await.unwrap().unwrap();
+        assert_eq!(
+            restored
+                .manifest
+                .tabs
+                .iter()
+                .map(|t| t.layout_id)
+                .collect::<Vec<_>>(),
+            ids[1..]
+        );
+        assert_eq!(db.closed_rows().await.unwrap()[0].tab.layout_id, ids[0]);
+    });
+}
+
+#[test]
+#[ignore = "manual 10,000-tab typed metadata and startup reservation measurement"]
+fn measure_real_typed_metadata_at_ten_thousand_tabs() {
+    use std::time::Instant;
+    block_on(async {
+        let (root, mut db) = database().await;
+        let mut tabs: Vec<_> = (0..10_000).map(|_| tab("")).collect();
+        let begin = Instant::now();
+        db.persist(request(&tabs), 1).await.unwrap();
+        let first = begin.elapsed();
+        let begin = Instant::now();
+        db.persist(request(&tabs), 2).await.unwrap();
+        let steady = begin.elapsed();
+        let begin = Instant::now();
+        let loaded = db.load(ReadScope::Shells).await.unwrap().unwrap();
+        let restore = begin.elapsed();
+        assert_eq!(loaded.manifest.tabs.len(), 10_000);
+        let max = tabs.iter().map(|t| t.layout_id).max().unwrap();
+        drop(db);
+        let begin = Instant::now();
+        let mut db = Database::open(root.path()).await.unwrap();
+        let open = begin.elapsed();
+        assert!(crate::app::domain::tab::next_layout_id() > max);
+        tabs.remove(0);
+        let begin = Instant::now();
+        db.persist(request(&tabs), 1).await.unwrap();
+        let close = begin.elapsed();
+        eprintln!(
+            "typed_metadata tabs=10000 first_ms={} steady_ms={} restore_ms={} startup_reserve_ms={} close_first_ms={}",
+            first.as_millis(),
+            steady.as_millis(),
+            restore.as_millis(),
+            open.as_millis(),
+            close.as_millis()
+        );
     });
 }

@@ -1,9 +1,8 @@
 use crate::app::domain::{PaneNode, PersistedHistoryEntry, SplitAxis, TextFormatMetadata};
-use crate::app::services::settings_store::{default_font_size, default_word_wrap};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const SESSION_VERSION: u32 = 9;
+pub const SESSION_VERSION: u32 = 10;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -21,16 +20,11 @@ pub(crate) struct SessionManifest {
     pub active_tab_index: usize,
     #[serde(default)]
     pub active_surface: SessionActiveSurface,
-    #[serde(default = "default_font_size")]
-    pub font_size: f32,
-    #[serde(default = "default_word_wrap")]
-    pub word_wrap: bool,
     pub tabs: Vec<SessionTab>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct SessionTab {
-    #[serde(skip)]
     pub layout_id: u64,
     #[serde(default)]
     pub buffers: Vec<SessionBuffer>,
@@ -127,10 +121,8 @@ pub(crate) struct SessionBuffer {
     #[serde(default)]
     pub right_to_left_reading_order: bool,
     pub temp_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub format: Option<TextFormatMetadata>,
-    pub encoding: String,
-    pub has_bom: bool,
+    pub format: TextFormatMetadata,
+    pub line_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_modified_millis: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,9 +170,8 @@ impl SessionBuffer {
             show_control_chars: buffer.show_control_chars,
             right_to_left_reading_order: buffer.right_to_left_reading_order,
             temp_id: buffer.temp_id.clone(),
-            format: Some(buffer.format.clone()),
-            encoding: buffer.format.encoding_name.clone(),
-            has_bom: buffer.format.has_bom,
+            format: buffer.format.clone(),
+            line_count: buffer.line_count,
             disk_modified_millis: buffer
                 .disk_state
                 .as_ref()
@@ -197,7 +188,7 @@ impl SessionBuffer {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SessionView {
     pub id: u64,
     pub buffer_id: u64,
@@ -206,8 +197,6 @@ pub(crate) struct SessionView {
     pub show_line_numbers: bool,
     #[serde(default = "crate::app::domain::view::default_zoom_factor")]
     pub zoom_factor: f32,
-    #[serde(default, skip_serializing)]
-    pub show_control_chars: bool,
 }
 
 impl From<&crate::app::domain::EditorViewState> for SessionView {
@@ -218,7 +207,6 @@ impl From<&crate::app::domain::EditorViewState> for SessionView {
             selection: view.pending_cursor_range.or(view.cursor_range),
             show_line_numbers: view.show_line_numbers,
             zoom_factor: view.zoom_factor(),
-            show_control_chars: false,
         }
     }
 }

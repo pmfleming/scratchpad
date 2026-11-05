@@ -118,12 +118,12 @@ fn payload_rows(usage: &StorageUsage) -> [(&'static str, u64, &'static str); 5] 
             "All changes and branches for open and closed files.",
         ),
         (
-            "Session metadata",
+            "Session metadata (estimated)",
             stored.session_metadata,
             "Open tabs, views and session state.",
         ),
         (
-            "Archive metadata",
+            "Archive metadata (estimated)",
             stored.archive_metadata,
             "Metadata for retained closed tabs.",
         ),

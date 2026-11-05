@@ -78,10 +78,13 @@ fn unchanged_and_metadata_only_commits_never_rewrite_content_or_history() {
         let unchanged = db.persist(request(&tabs), 2).await.unwrap();
         assert_eq!(unchanged.manifest_write_ns, 0);
         let mut captured = request(&tabs);
-        captured.font_size = 18.0;
+        captured.active_surface = super::super::SessionActiveSurface::Settings;
         db.persist(captured, 3).await.unwrap();
         let session = db.load(ReadScope::All).await.unwrap().unwrap();
-        assert_eq!(session.manifest.font_size, 18.0);
+        assert_eq!(
+            session.manifest.active_surface,
+            super::super::SessionActiveSurface::Settings
+        );
         assert_eq!(
             session.contents.values().next().unwrap(),
             "historyunchanged"

@@ -68,6 +68,13 @@ impl SessionStore {
         &self.root
     }
 
+    /// Obtain this session's explicit text-store binding, opening its worker once.
+    pub fn chunk_store_handle(
+        &self,
+    ) -> io::Result<crate::app::services::chunk_store::ChunkStoreHandle> {
+        self.worker().map(DatabaseWorker::chunk_store)
+    }
+
     pub(crate) fn history_epoch(&self) -> u64 {
         self.history_epoch.load(Ordering::Acquire)
     }

@@ -3,7 +3,6 @@ use super::{
     tests::{database, insert, request, tab},
 };
 use futures_lite::future::block_on;
-use turso::params;
 
 async fn audit(db: &Database) {
     db.conn.execute_batch("CREATE TABLE writes(kind TEXT NOT NULL, bytes INTEGER NOT NULL) STRICT;
@@ -36,18 +35,12 @@ fn history_appends_updates_prunes_and_restarts_without_rewriting_unchanged_entri
         db.persist(request(&tabs), 2).await.unwrap();
         assert_eq!(count(&db, "insert").await, 1);
         assert_eq!(count(&db, "update").await, 1);
-        let payload = db
-            .conn
-            .query("SELECT payload FROM tabs", ())
-            .await
-            .unwrap()
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .get::<Vec<u8>>(0)
-            .unwrap();
-        assert!(!String::from_utf8(payload).unwrap().contains("text_history"));
+        assert_eq!(
+            db.integer("SELECT count(*) FROM pragma_table_info('tabs') WHERE name='payload'")
+                .await
+                .unwrap(),
+            0
+        );
         reset(&db).await;
         tabs[0]
             .buffers
@@ -133,7 +126,7 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
                 )
             });
             let mut changed = request(&tabs);
-            changed.font_size = 24.0;
+            changed.active_surface = super::super::SessionActiveSurface::Settings;
             changed.removed_documents.push(removed_id.clone());
             changed.tabs[0].session_tab.views[0].show_line_numbers =
                 !changed.tabs[0].session_tab.views[0].show_line_numbers;
@@ -148,7 +141,7 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             assert!(db.revisions.is_empty());
             assert!(db.chunk_cache.is_empty());
             assert!(db.history_cache.is_empty());
-            assert!(db.state_cache.is_empty() && db.tab_cache.is_empty());
+            assert!(db.state_cache.is_none() && db.tab_cache.is_empty());
             assert_eq!(
                 db.integer("SELECT count(*) FROM closed_tabs")
                     .await
@@ -159,8 +152,8 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             assert_eq!(stored.contents, contents, "{table}");
             assert_eq!(stored.manifest.tabs[0].buffers[0].name, "note");
             assert_eq!(
-                (stored.manifest.tabs.len(), stored.manifest.font_size),
-                (2, 16.0)
+                (stored.manifest.tabs.len(), stored.manifest.active_surface),
+                (2, super::super::SessionActiveSurface::Workspace)
             );
             assert_eq!(db.read_history(&id).await.unwrap(), original);
             db.conn
@@ -168,7 +161,7 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
                 .await
                 .unwrap();
             let mut retry = request(&tabs);
-            retry.font_size = 24.0;
+            retry.active_surface = super::super::SessionActiveSurface::Settings;
             retry.removed_documents.push(removed_id);
             retry.tabs[0].session_tab.views[0].show_line_numbers =
                 !retry.tabs[0].session_tab.views[0].show_line_numbers;
@@ -185,8 +178,8 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             assert_eq!(stored.contents[&id], "baoriginal");
             assert_eq!(stored.manifest.tabs[0].buffers[0].name, "edited");
             assert_eq!(
-                (stored.manifest.tabs.len(), stored.manifest.font_size),
-                (1, 24.0)
+                (stored.manifest.tabs.len(), stored.manifest.active_surface),
+                (1, super::super::SessionActiveSurface::Settings)
             );
         }
     });
@@ -212,7 +205,7 @@ fn cold_history_is_lazy_and_survives_metadata_saves_and_quarantine() {
         captured.tabs[1].session_tab = shells.pop().unwrap();
         captured.tabs[1].preserve_existing = true;
         captured.tabs[1].buffer_snapshots.clear();
-        captured.font_size += 1.0;
+        captured.active_surface = super::super::SessionActiveSurface::Settings;
         db.persist(captured, 2).await.unwrap();
         let cold = request(&tabs).tabs.pop().unwrap().session_tab;
         assert_eq!(
@@ -287,7 +280,7 @@ fn cdc_reuses_bodies_after_front_middle_end_edits_and_across_tabs() {
         // No-op and metadata-only saves don't even attempt inserts into blobs.
         reset(&db).await;
         let mut captured = request(&tabs);
-        captured.font_size += 1.0;
+        captured.active_surface = super::super::SessionActiveSurface::Settings;
         db.persist(captured, 5).await.unwrap();
         assert_eq!(count(&db, "blob").await, 0);
         let removed = tabs.remove(0);
@@ -408,10 +401,12 @@ fn strict_types_and_foreign_keys_are_enforced_by_turso() {
                 .await
                 .is_err()
         );
-        db.conn
-            .execute("INSERT INTO documents(id) VALUES(?)", params!["clean"])
-            .await
-            .unwrap();
+        let mut row = super::document_rows::DocumentRow::capture(
+            &super::super::model::SessionBuffer::capture(tab("").active_buffer()),
+        )
+        .unwrap();
+        row.id = "clean".into();
+        db.write_document_row(&row, false).await.unwrap();
         db.conn
             .execute(
                 "INSERT INTO history_nodes VALUES('clean',0),('clean',1)",

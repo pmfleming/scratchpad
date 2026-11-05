@@ -52,8 +52,11 @@ cross-check was explicitly skipped. Audit passed with eight existing allowed
 unmaintained/dependency warnings. All 43 resource baseline samples passed,
 including files through 2 GiB; the complete events are in `evidence/stage-1/baseline.jsonl`.
 
-Fresh RQL is also running. The initial attempt overlapped correctness fixes and
-cannot constitute stable-source evidence. A separate immutable stage-1 checkout
-is used for the final run so implementation can continue. Its local archive is
-`target/quality-runs/live-text-stage-1-frozen`. RQL's known strict evidence/review
-gaps must be reported; no policy limits are raised or suppressed.
+Fresh RQL completed against immutable commit `f57acf0`, with matching before/after
+source hashes. Producer, verification, audit, and feature-tool commands passed.
+The strict gate did not pass: analysis evidence is partial, existing hotspot limits
+are exceeded, and three required human-review obligations remain pending. The
+stable summary is preserved in `evidence/stage-1/quality-summary.json`; the full
+local archive is `target/quality-runs/live-text-stage-1-frozen`. The initial attempt
+overlapped correctness fixes and is not stable-source evidence. No policy limits
+were raised or suppressed.

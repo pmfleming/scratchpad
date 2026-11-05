@@ -84,7 +84,7 @@ fn bulk_usage_matches_reference_accounting_for_archives_and_all_blob_classes() {
         let archives = db.closed_rows().await.unwrap();
         let mut referenced = 0;
         for archive in &archives {
-            referenced += archive.payload.len() as u64;
+            referenced += archive.layout.estimated_bytes() as u64;
             for buffer in &archive.tab.buffers {
                 referenced += db.query_collect(
                     "SELECT coalesce((SELECT bytes FROM snapshots WHERE id=?1),0) + coalesce((SELECT sum(bytes) FROM history WHERE temp_id=?1),0)",

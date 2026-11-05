@@ -1,10 +1,8 @@
 use super::super::model::SessionBuffer;
 use super::Restorer;
-use crate::app::domain::buffer::{
-    BufferTextMetadata, buffer_text_metadata, detected_text_format_and_metadata,
-};
+use crate::app::domain::buffer::{BufferTextMetadata, buffer_text_metadata};
 use crate::app::domain::{
-    BufferFreshness, BufferState, DiskFileState, EncodingSource, RestoredBufferState, TextDocument,
+    BufferFreshness, BufferState, DiskFileState, RestoredBufferState, TextDocument,
     TextFormatMetadata,
 };
 use crate::app::services::file_service::{FileContent, FileService};
@@ -198,24 +196,9 @@ fn session_buffer_format_and_metadata(
     buffer: &SessionBuffer,
     content: &str,
 ) -> (TextFormatMetadata, BufferTextMetadata) {
-    let encoding_source = if buffer.has_bom {
-        EncodingSource::Bom
-    } else {
-        EncodingSource::Heuristic
-    };
-
-    if let Some(mut format) = buffer.format.clone() {
-        let text_metadata = buffer_text_metadata(content, &mut format);
-        return (format, text_metadata);
-    }
-
-    detected_text_format_and_metadata(
-        content,
-        buffer.encoding.clone(),
-        buffer.has_bom,
-        encoding_source,
-        false,
-    )
+    let mut format = buffer.format.clone();
+    let text_metadata = buffer_text_metadata(content, &mut format);
+    (format, text_metadata)
 }
 
 pub(super) fn session_disk_state(buffer: &SessionBuffer) -> Option<DiskFileState> {

@@ -1,4 +1,5 @@
 pub mod background_io;
+pub mod chunk_store;
 pub mod file_controller;
 pub mod file_service;
 pub mod file_watch;

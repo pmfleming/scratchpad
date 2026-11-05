@@ -1,5 +1,5 @@
 use super::{
-    Database, StoredSession, decode, error, invalid,
+    Database, StoredSession, error, invalid,
     quarantine::{damaged, damaged_id},
 };
 use crate::app::services::session_store::{
@@ -116,64 +116,77 @@ impl Database {
         Ok(contents)
     }
     async fn read_manifest(&self) -> io::Result<Option<SessionManifest>> {
-        let mut rows = self
-            .conn
-            .query("SELECT payload FROM session_state WHERE id=1", ())
-            .await
-            .map_err(error)?;
-        let Some(row) = rows.next().await.map_err(error)? else {
-            drop(rows);
-            if self.integer("SELECT (SELECT count(*) FROM tabs)+(SELECT count(*) FROM snapshots)+(SELECT count(*) FROM parts)+(SELECT count(*) FROM blobs)+(SELECT count(*) FROM history)+(SELECT count(*) FROM documents)+(SELECT count(*) FROM quarantine)+(SELECT count(*) FROM closed_tabs)+(SELECT count(*) FROM document_history)+(SELECT count(*) FROM activity)").await? != 0 {
-                return Err(invalid("missing session commit marker"));
-            }
+        let states = self
+            .query_collect(
+                "SELECT tab_count,active_tab_index,active_surface FROM session_state WHERE id=1",
+                (),
+                |r| {
+                    Ok(super::layouts::StateRow {
+                        tab_count: usize::try_from(r.get::<i64>(0).map_err(error)?)
+                            .map_err(invalid)?,
+                        active_tab_index: usize::try_from(r.get::<i64>(1).map_err(error)?)
+                            .map_err(invalid)?,
+                        active_surface: r.get(2).map_err(error)?,
+                    })
+                },
+            )
+            .await?;
+        let Some(state) = states.into_iter().next() else {
+            if self.integer("SELECT (SELECT count(*) FROM tabs)+(SELECT count(*) FROM snapshots)+(SELECT count(*) FROM parts)+(SELECT count(*) FROM blobs)+(SELECT count(*) FROM history)+(SELECT count(*) FROM documents)+(SELECT count(*) FROM quarantine)+(SELECT count(*) FROM closed_tabs)+(SELECT count(*) FROM layouts)+(SELECT count(*) FROM layout_documents)+(SELECT count(*) FROM layout_views)+(SELECT count(*) FROM document_history)+(SELECT count(*) FROM activity)").await? != 0 { return Err(invalid("missing session commit marker")); }
             return Ok(None);
         };
-        let manifest: SessionManifest = decode(&row.get::<Vec<u8>>(0).map_err(error)?)?;
-        if manifest.version != super::super::SESSION_VERSION
-            || !manifest.tabs.is_empty()
-            || manifest.active_tab_index >= manifest.tab_count.max(1)
-        {
-            return Err(invalid("unsupported or invalid session payload"));
+        if state.active_tab_index >= state.tab_count.max(1) {
+            return Err(invalid("invalid active tab"));
         }
-        Ok(Some(manifest))
+        Ok(Some(SessionManifest {
+            version: super::super::SESSION_VERSION,
+            tab_count: state.tab_count,
+            active_tab_index: state.active_tab_index,
+            active_surface: super::document_rows::parse_enum(state.active_surface)?,
+            tabs: Vec::new(),
+        }))
     }
     async fn read_tabs(&self, manifest: &mut SessionManifest, scope: ReadScope) -> io::Result<()> {
-        let active_only = matches!(scope, ReadScope::Active);
-        let mut rows = if active_only {
-            self.conn
-                .query(
-                    "SELECT position, payload FROM tabs WHERE position=?",
-                    [manifest.active_tab_index as i64],
-                )
-                .await
-        } else {
-            self.conn
-                .query("SELECT position, payload FROM tabs ORDER BY position", ())
-                .await
+        if self
+            .integer("SELECT count(*) FROM tabs t JOIN closed_tabs c ON t.layout_id=c.layout_id")
+            .await?
+            != 0
+        {
+            return Err(invalid("layout has multiple owners"));
         }
-        .map_err(error)?;
-        while let Some(row) = rows.next().await.map_err(error)? {
-            let position = if active_only {
+        let active_only = matches!(scope, ReadScope::Active);
+        let rows = self
+            .query_collect(
+                "SELECT position,layout_id FROM tabs WHERE ?1=0 OR position=?2 ORDER BY position",
+                turso::params![
+                    i64::from(active_only),
+                    i64::try_from(manifest.active_tab_index).map_err(invalid)?
+                ],
+                |r| {
+                    Ok((
+                        usize::try_from(r.get::<i64>(0).map_err(error)?).map_err(invalid)?,
+                        super::document_rows::unsigned(r.get(1).map_err(error)?)?,
+                    ))
+                },
+            )
+            .await?;
+        let ids: Vec<_> = rows.iter().map(|r| r.1).collect();
+        let mut layouts = self.read_layouts(&ids).await?;
+        for (position, id) in rows {
+            let expected = if active_only {
                 manifest.active_tab_index
             } else {
                 manifest.tabs.len()
             };
-            if row.get::<i64>(0).map_err(error)? != position as i64 {
+            if position != expected {
                 return Err(invalid("noncontiguous session tab order"));
             }
-            let tab = self
-                .read_stored_tab(&row.get::<Vec<u8>>(1).map_err(error)?)
-                .await?;
-            validation::validate_tab(&tab)?;
-            self.validate_document_refs(
-                &tab,
-                "SELECT document_id FROM tab_documents WHERE position=?",
-                [position as i64],
-            )
-            .await?;
-            manifest.tabs.push(tab);
+            manifest.tabs.push(
+                layouts
+                    .remove(&id)
+                    .ok_or_else(|| invalid("missing workspace layout"))?,
+            );
         }
-        drop(rows);
         let expected = if active_only {
             manifest.tab_count.min(1)
         } else {
@@ -186,13 +199,14 @@ impl Database {
         if manifest
             .tabs
             .iter()
-            .flat_map(|tab| &tab.buffers)
-            .any(|buffer| !ids.insert(&buffer.temp_id))
+            .flat_map(|t| &t.buffers)
+            .any(|b| !ids.insert(&b.temp_id))
         {
             return Err(invalid("duplicate recovery content identity across tabs"));
         }
         Ok(())
     }
+
     pub async fn hydrate(
         &mut self,
         mut tab: SessionTab,

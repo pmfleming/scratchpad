@@ -138,7 +138,7 @@ fn corrupt_metadata_cannot_be_overwritten_without_first_loading() {
         let (directory, mut db) = database().await;
         db.persist(request(&[tab("important")]), 1).await.unwrap();
         db.conn
-            .execute("UPDATE tabs SET payload=x'00'", ())
+            .execute("UPDATE layouts SET root_pane='bad'", ())
             .await
             .unwrap();
         drop(db);

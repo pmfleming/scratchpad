@@ -4,7 +4,7 @@ use super::{
 };
 use crate::app::services::session_store::{
     capture::{CapturedSessionBuffer, CapturedSessionTab, SessionPersistRequest},
-    model::{SessionManifest, SessionTab},
+    model::SessionTab,
     validation,
 };
 use std::collections::{HashMap, HashSet};
@@ -13,12 +13,7 @@ use std::time::Instant;
 use turso::params;
 
 struct RecoveryBuffer {
-    metadata: Vec<u8>,
-    name: String,
-    path: Option<String>,
-    path_key: Option<String>,
-    observed_digest: Option<String>,
-    observed_missing: bool,
+    metadata: super::document_rows::DocumentRow,
     required: bool,
     // None means cold or quarantined: preserve the committed history.
     history: Option<HistoryRows>,
@@ -27,8 +22,8 @@ struct RecoveryBuffer {
 
 #[derive(Default)]
 struct Prepared {
-    state: Vec<u8>,
-    tabs: Vec<Vec<u8>>,
+    state: super::layouts::StateRow,
+    tabs: Vec<super::layouts::LayoutRow>,
     snapshots: Vec<CapturedSessionBuffer>,
     buffers: HashMap<String, RecoveryBuffer>,
     removed_documents: Vec<String>,
@@ -61,17 +56,13 @@ impl Prepared {
         });
         request.active_tab_index = active.saturating_sub(removed_before_active);
         let tab_count = request.tabs.len();
-        let manifest = SessionManifest {
-            version: super::super::SESSION_VERSION,
+        let state = super::layouts::StateRow {
             tab_count,
             active_tab_index: request.active_tab_index.min(tab_count.saturating_sub(1)),
-            active_surface: request.active_surface,
-            font_size: request.font_size,
-            word_wrap: request.word_wrap,
-            tabs: Vec::new(),
+            active_surface: super::document_rows::enum_name(request.active_surface)?,
         };
         let mut prepared = Self {
-            state: serde_json::to_vec(&manifest).map_err(invalid)?,
+            state,
             removed_documents: request.removed_documents,
             activity: request.activity,
             forgotten: request.forgotten.into_iter().map(|(id, _)| id).collect(),
@@ -105,7 +96,7 @@ impl Prepared {
                 prepared.closed.push(super::closed::ClosedRow {
                     token: old.token.clone(),
                     closed_at: old.closed_at,
-                    payload: old.payload.clone(),
+                    layout: old.layout.clone(),
                     tab: old.tab.clone(),
                 });
             }
@@ -120,11 +111,11 @@ impl Prepared {
             {
                 continue;
             }
-            let (payload, tab) = prepared.push_tab(closed.tab)?;
+            let (layout, tab) = prepared.push_tab(closed.tab)?;
             prepared.closed.push(super::closed::ClosedRow {
                 token: closed.token,
                 closed_at: closed.closed_at,
-                payload,
+                layout,
                 tab,
             });
         }
@@ -132,7 +123,10 @@ impl Prepared {
         prepared.old_closed = old_closed;
         Ok(prepared)
     }
-    fn push_tab(&mut self, mut tab: CapturedSessionTab) -> io::Result<(Vec<u8>, SessionTab)> {
+    fn push_tab(
+        &mut self,
+        mut tab: CapturedSessionTab,
+    ) -> io::Result<(super::layouts::LayoutRow, SessionTab)> {
         validation::validate_tab(&tab.session_tab)?;
         for buffer in &mut tab.session_tab.buffers {
             let entries = buffer
@@ -146,19 +140,7 @@ impl Prepared {
             }
             let required = validation::needs_snapshot(buffer);
             let policy = RecoveryBuffer {
-                metadata: serde_json::to_vec(buffer).map_err(invalid)?,
-                name: buffer.name.clone(),
-                path: buffer
-                    .path
-                    .as_ref()
-                    .map(|p| p.to_string_lossy().into_owned()),
-                path_key: buffer.path.as_ref().map(|p| {
-                    crate::app::CanonicalPathKey::from_path(p)
-                        .as_str()
-                        .to_owned()
-                }),
-                observed_digest: buffer.observed_disk_digest.clone(),
-                observed_missing: buffer.observed_disk_missing,
+                metadata: super::document_rows::DocumentRow::capture(buffer)?,
                 required,
                 history_fingerprints: history
                     .as_ref()
@@ -174,8 +156,7 @@ impl Prepared {
                 return Err(invalid("duplicate recovery content identity across tabs"));
             }
         }
-        let payload = serde_json::to_vec(&super::documents::StoredTab::capture(&tab.session_tab))
-            .map_err(invalid)?;
+        let payload = super::layouts::LayoutRow::capture(&tab.session_tab)?;
         // Supplied snapshots are authoritative, independently of capture policy.
         for snapshot in tab.buffer_snapshots {
             if !self.buffers.contains_key(&snapshot.temp_id) {
@@ -187,8 +168,12 @@ impl Prepared {
     }
     fn profile(&self) -> SessionPersistProfile {
         SessionPersistProfile {
-            manifest_size_bytes: (self.state.len() + self.tabs.iter().map(Vec::len).sum::<usize>())
-                as u64,
+            manifest_size_bytes: (24
+                + self
+                    .tabs
+                    .iter()
+                    .map(super::layouts::LayoutRow::estimated_bytes)
+                    .sum::<usize>()) as u64,
             tab_count: self.tabs.len(),
             buffer_count: self.buffers.len(),
             ..SessionPersistProfile::default()
@@ -293,19 +278,38 @@ impl Database {
     }
 
     async fn prepare_history_changes(&mut self, prepared: &mut Prepared) -> io::Result<()> {
+        let ids: Vec<_> = prepared
+            .buffers
+            .keys()
+            .filter(|id| !self.document_cache.contains_key(*id))
+            .cloned()
+            .collect();
+        let ids = serde_json::to_string(&ids).map_err(invalid)?;
+        for row in self
+            .query_collect(
+                &format!(
+                    "SELECT {} FROM documents WHERE id IN (SELECT value FROM json_each(?))",
+                    super::document_rows::COLUMNS
+                ),
+                [ids.as_str()],
+                super::document_rows::DocumentRow::read,
+            )
+            .await?
+        {
+            self.document_cache.insert(row.id.clone(), row);
+        }
+        let layout_ids: Vec<_> = prepared
+            .tabs
+            .iter()
+            .chain(prepared.closed.iter().map(|c| &c.layout))
+            .map(|l| l.id)
+            .filter(|id| !self.layout_cache.contains_key(id))
+            .collect();
+        for (id, tab) in self.read_layouts(&layout_ids).await? {
+            self.layout_cache
+                .insert(id, super::layouts::LayoutRow::capture(&tab)?);
+        }
         for (id, buffer) in &mut prepared.buffers {
-            if !self.document_cache.contains_key(id)
-                && let Some(payload) = self
-                    .query_collect(
-                        "SELECT payload FROM documents WHERE id=?",
-                        [id.as_str()],
-                        |row| row.get::<Vec<u8>>(0).map_err(error),
-                    )
-                    .await?
-                    .pop()
-            {
-                self.document_cache.insert(id.clone(), payload);
-            }
             if self.quarantined.contains_key(id) {
                 buffer.history = None;
                 buffer.history_fingerprints = None;
@@ -328,8 +332,12 @@ impl Database {
             || !prepared.removed_documents.is_empty()
             || prepared.closed_changed
             || !prepared.snapshots.is_empty()
-            || self.state_cache != prepared.state
-            || self.tab_cache != prepared.tabs
+            || self.state_cache.as_ref() != Some(&prepared.state)
+            || self.tab_cache != prepared.tabs.iter().map(|l| l.id).collect::<Vec<_>>()
+            || prepared
+                .tabs
+                .iter()
+                .any(|l| self.layout_cache.get(&l.id) != Some(l))
             || prepared.buffers.iter().any(|(id, buffer)| {
                 self.document_cache.get(id) != Some(&buffer.metadata)
                     || buffer
@@ -392,8 +400,22 @@ impl Database {
                 .into_iter()
                 .filter_map(|(id, b)| b.history_fingerprints.map(|h| (id, h))),
         );
-        self.state_cache = prepared.state;
-        self.tab_cache = prepared.tabs;
+        self.state_cache = Some(prepared.state);
+        self.tab_cache = prepared.tabs.iter().map(|l| l.id).collect();
+        let retained: HashSet<_> = prepared
+            .tabs
+            .iter()
+            .map(|l| l.id)
+            .chain(prepared.closed.iter().map(|c| c.layout.id))
+            .collect();
+        self.layout_cache.retain(|id, _| retained.contains(id));
+        self.layout_cache.extend(
+            prepared
+                .tabs
+                .into_iter()
+                .chain(prepared.closed.into_iter().map(|c| c.layout))
+                .map(|l| (l.id, l)),
+        );
     }
 
     async fn write_prepared(
@@ -427,35 +449,13 @@ impl Database {
     ) -> io::Result<()> {
         for (id, buffer) in &prepared.buffers {
             if self.document_cache.get(id) != Some(&buffer.metadata) {
-                if let Some(key) = &buffer.path_key {
+                if let Some(key) = &buffer.metadata.path_key {
                     prepared
                         .retained_snapshots
                         .extend(self.release_retained_path(id, key).await?);
                 }
-                let sql = if inventory.buffers.contains(id) {
-                    "UPDATE documents SET name=?2,path=?3,path_key=?4,payload=?5,observed_digest=?6,observed_missing=?7,search_text=?8 WHERE id=?1"
-                } else {
-                    "INSERT INTO documents(id,name,path,path_key,payload,observed_digest,observed_missing,search_text) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)"
-                };
-                self.execute_cached(
-                    sql,
-                    params![
-                        id.as_str(),
-                        buffer.name.as_str(),
-                        buffer.path.clone(),
-                        buffer.path_key.clone(),
-                        buffer.metadata.as_slice(),
-                        buffer.observed_digest.clone(),
-                        i64::from(buffer.observed_missing),
-                        format!(
-                            "{}\n{}",
-                            buffer.name,
-                            buffer.path.as_deref().unwrap_or_default()
-                        )
-                        .to_lowercase()
-                    ],
-                )
-                .await?;
+                self.write_document_row(&buffer.metadata, inventory.buffers.contains(id))
+                    .await?;
             }
             if let (Some(entries), Some(fingerprints)) =
                 (&buffer.history, &buffer.history_fingerprints)
@@ -492,38 +492,32 @@ impl Database {
     }
 
     async fn write_prepared_metadata(&self, prepared: &Prepared) -> io::Result<()> {
-        let mut upsert = self.conn.prepare_cached("INSERT INTO tabs VALUES(?, ?) ON CONFLICT(position) DO UPDATE SET payload=excluded.payload").await.map_err(error)?;
-        for (position, bytes) in prepared.tabs.iter().enumerate() {
-            if self.tab_cache.get(position) != Some(bytes) {
-                upsert
-                    .execute(params![position as i64, bytes.as_slice()])
-                    .await
-                    .map_err(error)?;
+        for layout in &prepared.tabs {
+            self.write_layout(layout).await?;
+        }
+        let ids: Vec<_> = prepared.tabs.iter().map(|l| l.id).collect();
+        if self.tab_cache != ids {
+            // Delete positions before inserting: layout_id has a UNIQUE constraint.
+            self.execute_cached("DELETE FROM tabs", ()).await?;
+            for (position, id) in ids.iter().enumerate() {
                 self.execute_cached(
-                    "DELETE FROM tab_documents WHERE position=?",
-                    [position as i64],
+                    "INSERT INTO tabs VALUES(?,?)",
+                    params![
+                        i64::try_from(position).map_err(invalid)?,
+                        super::document_rows::signed(*id)?
+                    ],
                 )
                 .await?;
-                let stored: super::documents::StoredTab = super::decode(bytes)?;
-                for doc in stored.buffers {
-                    self.execute_cached(
-                        "INSERT INTO tab_documents VALUES(?,?)",
-                        params![position as i64, doc.temp_id],
-                    )
-                    .await?;
-                }
             }
         }
-        self.execute_cached(
-            "DELETE FROM tabs WHERE position>=?",
-            [prepared.tabs.len() as i64],
-        )
-        .await?;
-        self.execute_cached("INSERT INTO session_state VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", [prepared.state.as_slice()]).await?;
+        if self.state_cache.as_ref() != Some(&prepared.state) {
+            self.execute_cached("INSERT INTO session_state VALUES(1,?,?,?) ON CONFLICT(id) DO UPDATE SET tab_count=excluded.tab_count,active_tab_index=excluded.active_tab_index,active_surface=excluded.active_surface", params![i64::try_from(prepared.state.tab_count).map_err(invalid)?,i64::try_from(prepared.state.active_tab_index).map_err(invalid)?,prepared.state.active_surface.as_str()]).await?;
+        }
         if prepared.closed_changed {
             self.write_closed(&prepared.closed, &prepared.old_closed)
                 .await?;
         }
+        self.execute_cached("DELETE FROM layouts WHERE id NOT IN (SELECT layout_id FROM tabs UNION ALL SELECT layout_id FROM closed_tabs)",()).await?;
         Ok(())
     }
 

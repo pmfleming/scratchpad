@@ -4,14 +4,12 @@ use crate::app::services::session_store::{capture::SessionPersistRequest, model:
 use std::{collections::HashSet, io};
 use turso::params;
 
-pub(super) const SCHEMA: &str = "CREATE TABLE closed_tabs(sequence INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE, closed_at INTEGER NOT NULL, payload BLOB NOT NULL) STRICT;
-CREATE TABLE closed_documents(token TEXT NOT NULL REFERENCES closed_tabs(token) ON DELETE CASCADE, document_id TEXT NOT NULL REFERENCES documents(id), PRIMARY KEY(token,document_id)) STRICT;
-CREATE INDEX closed_document_lookup ON closed_documents(document_id,token);";
+pub(super) const SCHEMA: &str = "CREATE TABLE closed_tabs(sequence INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE, closed_at INTEGER NOT NULL, layout_id INTEGER NOT NULL UNIQUE REFERENCES layouts(id)) STRICT;";
 
 pub(in crate::app::services::session_store) struct ClosedRow {
     pub token: String,
     pub closed_at: i64,
-    pub payload: Vec<u8>,
+    pub layout: super::layouts::LayoutRow,
     pub tab: SessionTab,
 }
 
@@ -19,7 +17,7 @@ impl PartialEq for ClosedRow {
     fn eq(&self, other: &Self) -> bool {
         self.token == other.token
             && self.closed_at == other.closed_at
-            && self.payload == other.payload
+            && self.layout == other.layout
     }
 }
 impl Eq for ClosedRow {}
@@ -36,34 +34,35 @@ impl Database {
     ) -> io::Result<Vec<ClosedRow>> {
         let rows = self
             .query_collect(
-                "SELECT token, closed_at, payload FROM closed_tabs ORDER BY sequence",
+                "SELECT token,closed_at,layout_id FROM closed_tabs ORDER BY sequence",
                 (),
-                |row| {
+                |r| {
                     Ok((
-                        row.get::<String>(0).map_err(error)?,
-                        row.get::<i64>(1).map_err(error)?,
-                        row.get::<Vec<u8>>(2).map_err(error)?,
+                        r.get::<String>(0).map_err(error)?,
+                        r.get::<i64>(1).map_err(error)?,
+                        super::document_rows::unsigned(r.get(2).map_err(error)?)?,
                     ))
                 },
             )
             .await?;
-        let mut result = Vec::with_capacity(rows.len());
-        for (token, closed_at, payload) in rows {
-            let tab = self.read_stored_tab(&payload).await?;
-            self.validate_document_refs(
-                &tab,
-                "SELECT document_id FROM closed_documents WHERE token=?",
-                [token.as_str()],
-            )
-            .await?;
-            result.push(ClosedRow {
-                token,
-                closed_at,
-                payload,
-                tab,
-            });
-        }
-        Ok(result)
+        self.resolve_closed(rows).await
+    }
+    async fn resolve_closed(&self, rows: Vec<(String, i64, u64)>) -> io::Result<Vec<ClosedRow>> {
+        let ids: Vec<_> = rows.iter().map(|r| r.2).collect();
+        let mut tabs = self.read_layouts(&ids).await?;
+        rows.into_iter()
+            .map(|(token, closed_at, id)| {
+                let tab = tabs
+                    .remove(&id)
+                    .ok_or_else(|| invalid("closed archive has a missing or shared layout"))?;
+                Ok(ClosedRow {
+                    token,
+                    closed_at,
+                    layout: super::layouts::LayoutRow::capture(&tab)?,
+                    tab,
+                })
+            })
+            .collect()
     }
 
     pub(super) async fn prepare_closed(
@@ -83,24 +82,8 @@ impl Database {
             .iter()
             .map(|c| c.token.clone())
             .collect();
-        let rows = self.query_collect("SELECT c.token,c.closed_at,c.payload FROM closed_tabs c WHERE c.token IN (SELECT token FROM closed_documents WHERE document_id IN (SELECT value FROM json_each(?1))) OR c.token IN (SELECT value FROM json_each(?2)) ORDER BY c.sequence",params![serde_json::to_string(&ids).map_err(invalid)?,serde_json::to_string(&tokens).map_err(invalid)?],|row|Ok((row.get::<String>(0).map_err(error)?,row.get::<i64>(1).map_err(error)?,row.get::<Vec<u8>>(2).map_err(error)?))).await?;
-        let mut result = Vec::with_capacity(rows.len());
-        for (token, closed_at, payload) in rows {
-            let tab = self.read_stored_tab(&payload).await?;
-            self.validate_document_refs(
-                &tab,
-                "SELECT document_id FROM closed_documents WHERE token=?",
-                [token.as_str()],
-            )
-            .await?;
-            result.push(ClosedRow {
-                token,
-                closed_at,
-                payload,
-                tab,
-            });
-        }
-        Ok(result)
+        let rows = self.query_collect("SELECT c.token,c.closed_at,c.layout_id FROM closed_tabs c WHERE c.layout_id IN (SELECT layout_id FROM layout_documents WHERE document_id IN (SELECT value FROM json_each(?1))) OR c.token IN (SELECT value FROM json_each(?2)) ORDER BY c.sequence",params![serde_json::to_string(&ids).map_err(invalid)?,serde_json::to_string(&tokens).map_err(invalid)?],|row|Ok((row.get::<String>(0).map_err(error)?,row.get::<i64>(1).map_err(error)?,super::document_rows::unsigned(row.get(2).map_err(error)?)?))).await?;
+        self.resolve_closed(rows).await
     }
 
     pub(super) async fn write_closed(
@@ -108,6 +91,9 @@ impl Database {
         rows: &[ClosedRow],
         old: &[ClosedRow],
     ) -> io::Result<()> {
+        for row in rows {
+            self.write_layout(&row.layout).await?;
+        }
         let positions: std::collections::HashMap<_, _> = old
             .iter()
             .enumerate()
@@ -146,34 +132,26 @@ impl Database {
         for row in &rows[..retained] {
             if row != &old[positions[row.token.as_str()]] {
                 self.execute_cached(
-                    "UPDATE closed_tabs SET closed_at=?, payload=? WHERE token=?",
-                    params![row.closed_at, row.payload.as_slice(), row.token.as_str()],
+                    "UPDATE closed_tabs SET closed_at=?, layout_id=? WHERE token=?",
+                    params![
+                        row.closed_at,
+                        super::document_rows::signed(row.layout.id)?,
+                        row.token.as_str()
+                    ],
                 )
                 .await?;
             }
         }
         for row in &rows[retained..] {
             self.execute_cached(
-                "INSERT INTO closed_tabs(token, closed_at, payload) VALUES(?, ?, ?)",
-                params![row.token.as_str(), row.closed_at, row.payload.as_slice()],
+                "INSERT INTO closed_tabs(token, closed_at, layout_id) VALUES(?, ?, ?)",
+                params![
+                    row.token.as_str(),
+                    row.closed_at,
+                    super::document_rows::signed(row.layout.id)?
+                ],
             )
             .await?;
-        }
-        for (index, row) in rows.iter().enumerate() {
-            if index >= retained || !old.iter().any(|previous| previous == row) {
-                self.execute_cached(
-                    "DELETE FROM closed_documents WHERE token=?",
-                    [row.token.as_str()],
-                )
-                .await?;
-                for buffer in &row.tab.buffers {
-                    self.execute_cached(
-                        "INSERT INTO closed_documents VALUES(?,?)",
-                        params![row.token.as_str(), buffer.temp_id.as_str()],
-                    )
-                    .await?;
-                }
-            }
         }
         Ok(())
     }
@@ -199,20 +177,14 @@ impl Database {
     ) -> io::Result<(SessionTab, std::collections::HashMap<String, String>)> {
         let payload = self
             .query_collect(
-                "SELECT payload FROM closed_tabs WHERE token=?",
+                "SELECT layout_id FROM closed_tabs WHERE token=?",
                 [token],
-                |row| row.get::<Vec<u8>>(0).map_err(error),
+                |row| super::document_rows::unsigned(row.get(0).map_err(error)?),
             )
             .await?
             .pop()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "closed tab expired"))?;
-        let mut tab = self.read_stored_tab(&payload).await?;
-        self.validate_document_refs(
-            &tab,
-            "SELECT document_id FROM closed_documents WHERE token=?",
-            [token],
-        )
-        .await?;
+        let mut tab = self.read_stored_tab(payload).await?;
         let contents = match self.read_tab_contents(std::slice::from_ref(&tab)).await {
             Ok(contents) => contents,
             Err(cause) => {

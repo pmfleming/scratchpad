@@ -5,10 +5,12 @@ mod activity_tests;
 #[cfg(test)]
 mod app_safety_tests;
 mod chunking;
+mod chunks;
 pub(super) mod closed;
 #[cfg(test)]
 mod closed_tests;
 mod content;
+mod document_rows;
 mod documents;
 #[cfg(test)]
 mod documents_tests;
@@ -22,6 +24,7 @@ mod history_rows;
 mod incremental_tests;
 #[cfg(test)]
 mod inventory_tests;
+mod layouts;
 mod persist;
 mod profiling;
 pub use profiling::SessionMaintenanceFixture;
@@ -58,17 +61,10 @@ pub(super) use worker::DatabaseWorker;
 
 const APPLICATION_ID: i64 = 0x5350_4350;
 const SCHEMA: &str = "
-CREATE TABLE session_state(id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL) STRICT;
-CREATE TABLE tabs(position INTEGER PRIMARY KEY, payload BLOB NOT NULL) STRICT;
-CREATE TABLE documents(id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', path TEXT, path_key TEXT, search_text TEXT NOT NULL DEFAULT '',
-    payload BLOB NOT NULL DEFAULT x'7b7d', observed_digest TEXT, observed_missing INTEGER NOT NULL DEFAULT 0 CHECK(observed_missing IN (0,1))) STRICT;
-CREATE INDEX documents_path ON documents(path_key);
 CREATE TABLE activity(global_seq INTEGER PRIMARY KEY CHECK(global_seq>0), observed_at INTEGER NOT NULL,
     kind TEXT NOT NULL CHECK(kind IN ('created','opened','closed','disk_conflict','missing')),
     document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, name TEXT NOT NULL, path TEXT, search_text TEXT NOT NULL DEFAULT '') STRICT;
 CREATE INDEX activity_document_sequence ON activity(document_id,global_seq);
-CREATE TABLE tab_documents(position INTEGER NOT NULL REFERENCES tabs(position) ON DELETE CASCADE,
-    document_id TEXT NOT NULL REFERENCES documents(id), PRIMARY KEY(position,document_id)) STRICT;
 CREATE TABLE history_nodes(temp_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     node_id INTEGER NOT NULL CHECK(node_id>=0), PRIMARY KEY(temp_id,node_id)) STRICT;
 CREATE TABLE history(temp_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -109,15 +105,17 @@ struct ContentInventory {
 
 pub(super) struct Database {
     conn: Connection,
+    chunks: Option<crate::app::services::chunk_store::ChunkStoreHandle>,
     database: TursoDatabase,
     ownership: File,
     startup_notices: Vec<super::RestoreStatus>,
-    tab_cache: Vec<Vec<u8>>,
-    state_cache: Vec<u8>,
+    tab_cache: Vec<u64>,
+    layout_cache: HashMap<u64, layouts::LayoutRow>,
+    state_cache: Option<layouts::StateRow>,
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
     chunk_cache: HashMap<String, chunking::ChunkCheckpoint>,
     history_cache: HashMap<String, Vec<history::HistoryFingerprint>>,
-    document_cache: HashMap<String, Vec<u8>>,
+    document_cache: HashMap<String, document_rows::DocumentRow>,
     // Complete committed IDs, including cold/quarantined content; revisions alone
     // only describe snapshots written by this process. None requires a fresh scan.
     inventory: Option<ContentInventory>,
@@ -146,10 +144,19 @@ impl Database {
         crate::app::domain::buffer::register_text_history_global_seq(maximum as u64);
         // Closed documents/layouts may outlive every restored tab. Reserve their
         // runtime IDs before New or split can allocate IDs used by a later reopen.
-        let buffer_maximum = db.integer("SELECT coalesce(max(CASE WHEN json_valid(CAST(payload AS TEXT)) THEN json_extract(CAST(payload AS TEXT),'$.id') ELSE 0 END),0) FROM documents").await?;
+        let buffer_maximum = db.integer("SELECT coalesce(max(value),0) FROM (SELECT max(buffer_id) AS value FROM documents UNION ALL SELECT max(buffer_id) FROM layout_documents)").await?;
         crate::app::domain::buffer::register_existing_buffer_id(buffer_maximum as u64);
-        let view_maximum = db.integer("SELECT coalesce(max(json_extract(v.value,'$.id')),0) FROM (SELECT payload FROM tabs UNION ALL SELECT payload FROM closed_tabs) w, json_each(CASE WHEN json_valid(CAST(w.payload AS TEXT)) THEN CAST(w.payload AS TEXT) ELSE '{}' END,'$.views') v").await?;
+        let view_maximum = db
+            .integer("SELECT coalesce(max(id),0) FROM layout_views")
+            .await?;
         crate::app::domain::view::register_existing_view_id(view_maximum as u64);
+        let layout_maximum = db
+            .integer("SELECT coalesce(max(id),0) FROM layouts")
+            .await?;
+        crate::app::domain::tab::register_existing_layout_id(layout_maximum as u64);
+        db.chunks = Some(crate::app::services::chunk_store::ChunkStoreHandle::open(
+            &root.join("session.db"),
+        )?);
         Ok(db)
     }
     async fn connect(root: &Path, ownership: File) -> io::Result<Self> {
@@ -171,11 +178,13 @@ impl Database {
         .map_err(error)?;
         Ok(Self {
             conn,
+            chunks: None,
             database,
             ownership,
             startup_notices: Vec::new(),
             tab_cache: Vec::new(),
-            state_cache: Vec::new(),
+            state_cache: None,
+            layout_cache: HashMap::new(),
             revisions: HashMap::new(),
             chunk_cache: HashMap::new(),
             history_cache: HashMap::new(),
@@ -190,7 +199,7 @@ impl Database {
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID && version == 11 {
+        if application == APPLICATION_ID && version == 12 {
             return Ok(());
         }
         if version != 0
@@ -209,9 +218,11 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=11;",
+            "{} {} {SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=12;",
+            document_rows::SCHEMA,
+            layouts::SCHEMA,
             quarantine::SCHEMA,
-            closed::SCHEMA
+            closed::SCHEMA, chunks::SCHEMA
         ))
         .await
     }
@@ -321,7 +332,8 @@ impl Database {
         };
         if result.is_err() {
             // A failed COMMIT can be ambiguous. Never trust pre-attempt caches.
-            self.state_cache.clear();
+            self.state_cache = None;
+            self.layout_cache.clear();
             self.tab_cache.clear();
             self.revisions.clear();
             self.chunk_cache.clear();

@@ -156,7 +156,7 @@ fn failed_incremental_write_and_undo_remain_retryable() {
         let mut tabs = vec![tab(&original)];
         db.persist(request(&tabs), 1).await.unwrap();
         insert(&mut tabs[0], original.len() / 2, "local edit");
-        db.conn.execute_batch("CREATE TRIGGER fail_save BEFORE INSERT ON session_state BEGIN SELECT RAISE(ABORT, 'injected'); END;").await.unwrap();
+        db.conn.execute_batch("CREATE TRIGGER fail_save BEFORE INSERT ON parts BEGIN SELECT RAISE(ABORT, 'injected'); END;").await.unwrap();
         assert!(db.persist(request(&tabs), 2).await.is_err());
         assert!(db.chunk_cache.is_empty());
         db.conn.execute("DROP TRIGGER fail_save", ()).await.unwrap();

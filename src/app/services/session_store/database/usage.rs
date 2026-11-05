@@ -1,7 +1,7 @@
 use super::{Database, error};
 use std::io;
 
-/// Stored payload bytes. SQLite pages, indexes and the WAL are accounted separately.
+/// Logical text bytes and estimated typed metadata. Pages/indexes/WAL are separate.
 #[derive(Clone, Debug, Default)]
 pub struct StoredUsage {
     pub session_metadata: u64,
@@ -25,14 +25,15 @@ impl Database {
                 SELECT id AS temp_id, bytes FROM snapshots
                 UNION ALL SELECT temp_id, bytes FROM history INDEXED BY history_sizes
              ), totals AS (SELECT temp_id, sum(bytes) AS bytes FROM costs GROUP BY temp_id),
-             archives AS (SELECT count(*) AS count, coalesce(sum(length(payload)),0) AS bytes FROM closed_tabs)
+             layout_costs AS (SELECT l.id,32+length(l.root_pane)+coalesce(d.bytes,0)+coalesce(v.bytes,0) AS bytes FROM layouts l LEFT JOIN (SELECT layout_id,sum(32+length(document_id)) AS bytes FROM layout_documents GROUP BY layout_id) d ON d.layout_id=l.id LEFT JOIN (SELECT layout_id,count(*)*80 AS bytes FROM layout_views GROUP BY layout_id) v ON v.layout_id=l.id),
+             archives AS (SELECT count(*) AS count,coalesce(sum(l.bytes),0) AS bytes FROM closed_tabs c JOIN layout_costs l ON l.id=c.layout_id)
              SELECT
-                (SELECT coalesce(sum(length(payload)),0) FROM tabs) + (SELECT coalesce(sum(length(payload)),0) FROM session_state),
+                24+(SELECT count(*)*16 FROM tabs)+(SELECT coalesce(sum(l.bytes),0) FROM tabs t JOIN layout_costs l ON t.layout_id=l.id)+(SELECT coalesce(sum(128+length(id)+length(name)+coalesce(length(path),0)),0) FROM documents),
                 (SELECT coalesce(sum(bytes),0) FROM history INDEXED BY history_sizes),
                 archives.bytes, 0, archives.count, 0,
                 archives.bytes + (SELECT coalesce(sum(totals.bytes),0)
-                    FROM closed_tabs, json_each(CAST(closed_tabs.payload AS TEXT), '$.buffers') AS buffer
-                    LEFT JOIN totals ON totals.temp_id=json_extract(buffer.value, '$.temp_id'))
+                    FROM closed_tabs c JOIN layout_documents d ON d.layout_id=c.layout_id
+                    LEFT JOIN totals ON totals.temp_id=d.document_id)
              FROM archives",
             (),
             |row| Ok(StoredUsage {

@@ -13,8 +13,6 @@ pub(crate) struct SessionPersistRequest {
     pub(super) generation: u64,
     pub(super) active_tab_index: usize,
     pub(super) active_surface: SessionActiveSurface,
-    pub(super) font_size: f32,
-    pub(super) word_wrap: bool,
     pub(super) tabs: Vec<CapturedSessionTab>,
     pub(crate) closed_tabs: Vec<CapturedClosedTab>,
     pub(super) removed_documents: Vec<String>,
@@ -160,8 +158,8 @@ impl SessionPersistRequest {
     pub(crate) fn capture(
         tabs: &[WorkspaceTab],
         active_tab_index: usize,
-        font_size: f32,
-        word_wrap: bool,
+        _font_size: f32,
+        _word_wrap: bool,
     ) -> Self {
         Self {
             activity: Vec::new(),
@@ -169,8 +167,6 @@ impl SessionPersistRequest {
             generation: NEXT_CAPTURE.fetch_add(1, Ordering::Relaxed),
             active_tab_index,
             active_surface: SessionActiveSurface::Workspace,
-            font_size,
-            word_wrap,
             tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
             closed_tabs: Vec::new(),
             removed_documents: Vec::new(),
@@ -182,8 +178,8 @@ impl SessionPersistRequest {
         cold_tabs: &std::collections::HashMap<usize, ColdSessionTab>,
         active_tab_index: usize,
         active_surface: SessionActiveSurface,
-        font_size: f32,
-        word_wrap: bool,
+        _font_size: f32,
+        _word_wrap: bool,
     ) -> Self {
         Self {
             activity: Vec::new(),
@@ -191,8 +187,6 @@ impl SessionPersistRequest {
             generation: NEXT_CAPTURE.fetch_add(1, Ordering::Relaxed),
             active_tab_index,
             active_surface,
-            font_size,
-            word_wrap,
             closed_tabs: Vec::new(),
             removed_documents: Vec::new(),
             tabs: tabs

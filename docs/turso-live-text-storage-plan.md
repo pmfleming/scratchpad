@@ -864,6 +864,10 @@ covers offsets above `u32::MAX` without allocating that much text.
 
 ### 2. Typed metadata, chunk store service, and new schema
 
+Implemented on 2026-11-05; see [stage 2 evidence](../tools/turso-contract/STAGE-2.md).
+This intermediate development boundary uses schema 12 / export version 10 with
+the existing text/history path retained until stage 4; it is not a separate release.
+
 Convert `session_state`, `documents`, and layouts to typed rows first. This doesn't depend on the chunk
 store, so it can be tested on the existing text and history paths, and its measurements stay separate
 from the storage change.

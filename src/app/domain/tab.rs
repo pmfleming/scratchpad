@@ -26,9 +26,14 @@ pub enum TabAttentionState {
     DiskProblem,
 }
 
+static NEXT_LAYOUT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 pub(crate) fn next_layout_id() -> u64 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    NEXT_LAYOUT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn register_existing_layout_id(id: u64) {
+    NEXT_LAYOUT_ID.fetch_max(id.saturating_add(1), std::sync::atomic::Ordering::Relaxed);
 }
 
 impl WorkspaceTab {

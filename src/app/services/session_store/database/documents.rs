@@ -1,43 +1,9 @@
 //! Documents own metadata and content independently of workspace layouts.
-use super::{Database, decode, error, invalid};
-use crate::app::services::session_store::{
-    model::{SessionBuffer, SessionPaneNode, SessionTab, SessionView},
-    validation,
+use super::{Database, error};
+use crate::app::services::session_store::model::{
+    SessionBuffer, SessionPaneNode, SessionTab, SessionView,
 };
-use serde::{Deserialize, Serialize};
 use std::io;
-
-#[derive(Serialize, Deserialize)]
-pub(super) struct DocumentRef {
-    pub id: u64,
-    pub temp_id: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub(super) struct StoredTab {
-    pub buffers: Vec<DocumentRef>,
-    active_view_id: u64,
-    views: Vec<SessionView>,
-    root_pane: SessionPaneNode,
-}
-
-impl StoredTab {
-    pub fn capture(tab: &SessionTab) -> Self {
-        Self {
-            buffers: tab
-                .buffers
-                .iter()
-                .map(|b| DocumentRef {
-                    id: b.id,
-                    temp_id: b.temp_id.clone(),
-                })
-                .collect(),
-            active_view_id: tab.active_view_id,
-            views: tab.views.clone(),
-            root_pane: tab.root_pane.clone(),
-        }
-    }
-}
 
 impl Database {
     /// Save As can replace a closed file. Its former document stays retained,
@@ -47,66 +13,19 @@ impl Database {
         id: &str,
         key: &str,
     ) -> io::Result<Vec<String>> {
-        let mut snapshots = Vec::new();
-        let ids = self
-            .query_collect(
-                "SELECT id FROM documents WHERE path_key=? AND id<>?",
-                turso::params![key, id],
-                |row| row.get::<String>(0).map_err(error),
+        let snapshots = self.query_collect("SELECT id FROM documents WHERE path_key=?1 AND id<>?2 AND id NOT IN (SELECT id FROM quarantine) AND id NOT IN (SELECT id FROM snapshots)",turso::params![key,id],|r|r.get::<String>(0).map_err(error)).await?;
+        self.execute_cached("UPDATE documents SET path=NULL,path_key=NULL,name=name||' (recovered)',search_text=lower(name||' (recovered)'),is_dirty=1,disk_content_digest=NULL,observed_digest=NULL,observed_missing=0,disk_len=NULL,disk_modified_millis=NULL WHERE path_key=?1 AND id<>?2 AND id NOT IN (SELECT id FROM quarantine)",turso::params![key,id]).await?;
+        for previous in &snapshots {
+            let snapshot = crate::app::domain::TextDocument::new(String::new()).snapshot();
+            self.write_content(
+                previous,
+                &snapshot,
+                &mut std::collections::HashSet::default(),
+                &mut super::SessionPersistProfile::default(),
             )
             .await?;
-        for previous in ids {
-            let mut buffer = self.read_document(&previous).await?;
-            buffer.path = None;
-            buffer.name = format!("{} (recovered)", buffer.name);
-            buffer.is_dirty = true;
-            buffer.disk_content_digest = None;
-            buffer.observed_disk_digest = None;
-            buffer.observed_disk_missing = false;
-            buffer.disk_len = None;
-            buffer.disk_modified_millis = None;
-            let bytes = serde_json::to_vec(&buffer).map_err(invalid)?;
-            self.execute_cached("UPDATE documents SET path=NULL,path_key=NULL,name=?,payload=?,observed_digest=NULL,observed_missing=0,search_text=? WHERE id=?",turso::params![buffer.name.as_str(),bytes.as_slice(),buffer.name.to_lowercase(),previous.as_str()]).await?;
-            let exists = self
-                .query_collect(
-                    "SELECT id FROM snapshots WHERE id=?",
-                    [previous.as_str()],
-                    |row| row.get::<String>(0).map_err(error),
-                )
-                .await?;
-            if exists.is_empty() {
-                // Only an empty, never-edited disk document lacks a text cache.
-                let snapshot = crate::app::domain::TextDocument::new(String::new()).snapshot();
-                self.write_content(
-                    &previous,
-                    &snapshot,
-                    &mut std::collections::HashSet::default(),
-                    &mut super::SessionPersistProfile::default(),
-                )
-                .await?;
-                snapshots.push(previous);
-            }
         }
         Ok(snapshots)
-    }
-    pub(super) async fn validate_document_refs(
-        &self,
-        tab: &SessionTab,
-        sql: &str,
-        params: impl turso::IntoParams,
-    ) -> io::Result<()> {
-        let mut indexed = self
-            .query_collect(sql, params, |row| row.get::<String>(0).map_err(error))
-            .await?;
-        let mut stored: Vec<_> = tab.buffers.iter().map(|b| b.temp_id.clone()).collect();
-        indexed.sort();
-        stored.sort();
-        if indexed != stored {
-            return Err(invalid(
-                "workspace document index does not match its layout",
-            ));
-        }
-        Ok(())
     }
     pub(in crate::app::services::session_store) async fn load_retained_document(
         &mut self,
@@ -147,44 +66,14 @@ impl Database {
         else {
             return Ok(None);
         };
-        if let Some(payload) = self.query_collect("SELECT c.payload FROM closed_tabs c JOIN closed_documents r ON c.token=r.token WHERE r.document_id=? ORDER BY c.sequence DESC LIMIT 1", [id.as_str()], |row| row.get::<Vec<u8>>(0).map_err(error)).await?.pop() {
-            return self.read_stored_tab(&payload).await.map(Some);
+        if let Some(payload) = self.query_collect("SELECT c.layout_id FROM closed_tabs c JOIN layout_documents r ON c.layout_id=r.layout_id WHERE r.document_id=? ORDER BY c.sequence DESC LIMIT 1", [id.as_str()], |row| super::document_rows::unsigned(row.get(0).map_err(error)?)).await?.pop() {
+            return self.read_stored_tab(payload).await.map(Some);
         }
         Ok(Some(single_tab(self.read_document(&id).await?)))
     }
 
     pub(super) async fn read_document(&self, id: &str) -> io::Result<SessionBuffer> {
-        let mut buffer: SessionBuffer = self
-            .query_collect("SELECT payload FROM documents WHERE id=?", [id], |row| {
-                decode(&row.get::<Vec<u8>>(0).map_err(error)?)
-            })
-            .await?
-            .pop()
-            .ok_or_else(|| invalid("workspace references a missing document"))?;
-        if buffer.temp_id != id || !buffer.text_history.is_empty() {
-            return Err(invalid("invalid document metadata identity"));
-        }
-        buffer.history_capture = None;
-        Ok(buffer)
-    }
-
-    pub(super) async fn read_stored_tab(&self, payload: &[u8]) -> io::Result<SessionTab> {
-        let stored: StoredTab = decode(payload)?;
-        let mut buffers = Vec::with_capacity(stored.buffers.len());
-        for reference in stored.buffers {
-            let mut buffer = self.read_document(&reference.temp_id).await?;
-            buffer.id = reference.id;
-            buffers.push(buffer);
-        }
-        let tab = SessionTab {
-            layout_id: 0,
-            buffers,
-            active_view_id: stored.active_view_id,
-            views: stored.views,
-            root_pane: stored.root_pane,
-        };
-        validation::validate_tab(&tab)?;
-        Ok(tab)
+        self.read_document_row(id).await?.into_buffer()
     }
 }
 
@@ -195,10 +84,9 @@ fn single_tab(buffer: SessionBuffer) -> SessionTab {
         selection: None,
         show_line_numbers: false,
         zoom_factor: 1.0,
-        show_control_chars: false,
     };
     SessionTab {
-        layout_id: 0,
+        layout_id: crate::app::domain::tab::next_layout_id(),
         buffers: vec![buffer],
         active_view_id: view.id,
         root_pane: SessionPaneNode::Leaf { view_id: view.id },

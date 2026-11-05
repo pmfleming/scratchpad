@@ -31,10 +31,12 @@ fn navigation_preserves_inventory_without_hiding_unknown_writes() {
             .await
             .unwrap();
         assert_inventory(&db).await;
-        db.conn
-            .execute("INSERT INTO documents(id) VALUES('unexpected')", ())
-            .await
-            .unwrap();
+        let mut row = super::document_rows::DocumentRow::capture(
+            &super::super::model::SessionBuffer::capture(tab("").active_buffer()),
+        )
+        .unwrap();
+        row.id = "unexpected".into();
+        db.write_document_row(&row, false).await.unwrap();
         db.persist(request(std::slice::from_ref(&live)), 3)
             .await
             .unwrap();

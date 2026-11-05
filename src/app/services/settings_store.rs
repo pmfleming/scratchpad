@@ -21,7 +21,7 @@ pub use model::{
     ShortcutSettings, StartupSessionBehavior, TabDisplayMode, TabListPosition, TabOrderDirection,
     TabOrderMode, UiSettings, WindowState, WorkspaceSettings,
 };
-pub(crate) use model::{color_from_hex, color_to_hex, default_font_size, default_word_wrap};
+pub(crate) use model::{color_from_hex, color_to_hex};
 
 const SETTINGS_FILE_NAME: &str = "settings.toml";
 
