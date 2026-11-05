@@ -157,7 +157,7 @@ fn startup_conflict_is_durable_and_not_recorded_again_on_restart() {
     b.is_dirty = true;
     session_manager::persist_session_now(&mut f.app).unwrap();
     std::fs::write(&f.path, "external").unwrap();
-    let root = f._directory.path().to_path_buf();
+    let root = f.directory.path().to_path_buf();
     drop(f.app);
     let mut app = test_app(&root);
     wait_for_background_io(&mut app);
@@ -201,7 +201,7 @@ fn timestamp_only_touch_is_ignored_but_same_size_new_contents_are_observed() {
             .set_times(
                 std::fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(secs)),
             )
-            .unwrap()
+            .unwrap();
     };
     touch(&f.path, 1_700_000_000);
     observe(&mut f);
@@ -276,7 +276,7 @@ fn deferred_save_survives_superseded_observations_or_reports_failure() {
             "baseline" => {
                 f.app.tab_manager.tabs.as_mut_slice()[0]
                     .active_buffer_mut()
-                    .disk_state = None
+                    .disk_state = None;
             }
             "renamed" => f.app.tab_manager.tabs.as_mut_slice()[0]
                 .active_buffer_mut()

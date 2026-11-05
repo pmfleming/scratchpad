@@ -6,7 +6,7 @@ mod observation;
 mod reload;
 
 struct SavedBufferFixture {
-    _directory: tempfile::TempDir,
+    directory: tempfile::TempDir,
     path: PathBuf,
     app: ScratchpadApp,
 }
@@ -22,7 +22,7 @@ impl SavedBufferFixture {
         );
 
         Self {
-            _directory: directory,
+            directory,
             path,
             app,
         }
@@ -258,7 +258,7 @@ fn save_as_copy_creates_a_distinct_document_and_keeps_the_conflicted_original() 
         .active_buffer()
         .temp_id
         .clone();
-    let path = fixture._directory.path().join("copy.txt");
+    let path = fixture.directory.path().join("copy.txt");
     assert!(FileController::save_copy_to_path(
         &mut fixture.app,
         0,
