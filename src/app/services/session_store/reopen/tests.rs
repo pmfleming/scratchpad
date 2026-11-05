@@ -304,3 +304,28 @@ fn path_claimed_during_reopen_keeps_the_original_tree_without_the_staged_externa
     assert_eq!(b.document().history_entries().len(), history);
     assert_eq!(std::fs::read_to_string(path).unwrap(), "external");
 }
+
+#[test]
+fn temporary_read_failure_preserves_retained_path_and_allows_retry() {
+    let (_root, store, path, token) = archived(true);
+    let id = store
+        .reopen_archive(&token)
+        .unwrap()
+        .active_buffer()
+        .temp_id
+        .clone();
+    std::fs::remove_file(&path).unwrap();
+    // A directory produces a real non-NotFound read error, even when running as root.
+    std::fs::create_dir(&path).unwrap();
+    assert!(store.reopen_archive(&token).is_err());
+    assert!(store.reopen_path_with_claimed(&path, &[]).is_err());
+    let (_, cold) = store.cold_tab_for_path(&path).unwrap().unwrap();
+    assert!(store.restore_cold_session_tab(cold).is_err());
+    assert_eq!(store.closed_tabs().unwrap().len(), 1);
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::write(&path, "original").unwrap();
+    let tab = store.reopen_path_with_claimed(&path, &[]).unwrap().unwrap();
+    assert_eq!(tab.active_buffer().temp_id, id);
+    assert_eq!(tab.active_buffer().path.as_ref(), Some(&path));
+    assert_eq!(tab.active_buffer().text(), "unsaved");
+}

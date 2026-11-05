@@ -202,8 +202,10 @@ compare disk contents with its last known version:
 - Changed: restore its tree and Now, then apply the disk text with
   `replace_exact_with_history`, sourced as external. This applies whether or not the
   file had unsaved text; that text stays reachable as the preceding state.
-- Missing or unreadable: reopen the retained text as a recovered untitled document
+- Missing (`NotFound`): reopen the retained text as a recovered untitled document
   with the same identity and no new state. Retained history stays accessible.
+- Other read failures: fail the open visibly and leave the retained document,
+  path, and history unchanged so the user can retry.
 
 Remove `fork_recovery_identity`, the `tab: None` result of `reopen_archive`, and
 archives that remain after their documents reopen. A reopened split keeps its

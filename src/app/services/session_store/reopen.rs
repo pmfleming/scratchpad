@@ -17,7 +17,7 @@ pub(super) fn restore_reopened(
     mut tab: SessionTab,
     contents: HashMap<String, String>,
     claimed: &[CanonicalPathKey],
-) -> WorkspaceTab {
+) -> io::Result<WorkspaceTab> {
     let originals = tab.buffers.clone();
     for buffer in &mut tab.buffers {
         buffer.path = None;
@@ -72,10 +72,18 @@ pub(super) fn restore_reopened(
                 buffer.observed_disk_digest = Some(digest);
                 buffer.observed_disk_missing = false;
             }
-            Err(_) => buffer.recover_as_untitled("recovered"),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                buffer.recover_as_untitled("recovered");
+            }
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("Could not reopen {}: {error}", path.display()),
+                ));
+            }
         }
     }
-    restored
+    Ok(restored)
 }
 
 impl SessionStore {
@@ -91,7 +99,7 @@ impl SessionStore {
                 let (tab, contents) = self
                     .worker()?
                     .call(move |db| block_on(db.load_retained_document(&id)))?;
-                Ok(restore_reopened(tab, contents, claimed))
+                restore_reopened(tab, contents, claimed)
             }
         }
     }
@@ -109,7 +117,7 @@ impl SessionStore {
         let (tab, contents) = self
             .worker()?
             .call(move |db| block_on(db.read_closed_tab(&token)))?;
-        Ok(restore_reopened(tab, contents, claimed))
+        restore_reopened(tab, contents, claimed)
     }
 
     pub(crate) fn cold_tab_for_path(
@@ -136,6 +144,8 @@ impl SessionStore {
         let retained = self
             .worker()?
             .call(move |db| block_on(db.load_retained_path(&key)))?;
-        Ok(retained.map(|(tab, contents)| restore_reopened(tab, contents, claimed)))
+        retained
+            .map(|(tab, contents)| restore_reopened(tab, contents, claimed))
+            .transpose()
     }
 }
