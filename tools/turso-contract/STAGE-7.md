@@ -116,3 +116,18 @@ Repeated exploratory samples and the final sampled run are kept separately.
 
 Earlier repeated seeding samples reached 700 ms; the final run does not establish
 a worst-case commit bound. All overruns remain in the retained artifacts.
+
+Final review follow-up: small editor actions pin their complete bounded read range;
+indentation includes the line prefix and outdent lookahead. A long line prefix or
+more than 256 line edits prepares off-thread. Undo/redo also prepares when an entry
+contains more than 256 logical spans, even when its byte payload is tiny. Added
+cases exercise Tab deep in an 80 KiB line, indentation across 300 short lines, and
+undo of hundreds of tiny replacements. The final suite passes 702 library tests,
+seven existing ignores, all integration/doctests and warnings-denied Clippy.
+
+The first frozen stage 7 quality run (commit b58faee) passed measurement,
+verification, audit/feature tools and source-hash stability. Its strict gate failed
+with 14 partial-evidence artifacts, three unmet human reviews and 37 threshold
+findings; no actual test failure or reliability finding was reported. See
+quality-before-indentation.json. The follow-up receives a new frozen-source run;
+no rule or threshold is relaxed.

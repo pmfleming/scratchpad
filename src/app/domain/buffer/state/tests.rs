@@ -159,3 +159,23 @@ fn storage_acknowledgement_survives_anchor_cow_but_rejects_a_divergent_edit() {
     assert!(divergent.storage_attention.is_some());
     assert_eq!(capture.extract_text(), "accepted");
 }
+
+#[test]
+fn history_with_many_tiny_replacements_uses_preparation_even_with_a_small_payload() {
+    let mut buffer = super::BufferState::new("history".into(), "x".repeat(300_000), None);
+    let replacements = (0..300)
+        .rev()
+        .map(|index| (index * 1000..index * 1000 + 1, "y".into()))
+        .collect::<Vec<_>>();
+    buffer
+        .document_mut()
+        .replace_char_ranges_with_source(
+            &replacements,
+            CursorRange::default(),
+            CursorRange::default(),
+            super::super::PieceSource::Edit,
+        )
+        .unwrap();
+    let target = buffer.document().history_step_target(true).unwrap();
+    assert!(buffer.document().history_needs_preparation(target));
+}

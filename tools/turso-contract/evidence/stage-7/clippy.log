@@ -4,4 +4,4 @@
 Scratchpad dev shell
 Try: cargo check
     Checking scratchpad v0.4.2 (/home/laufan/Projects/scratchpad)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.15s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.96s

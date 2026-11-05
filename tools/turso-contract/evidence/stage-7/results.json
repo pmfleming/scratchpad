@@ -6,7 +6,7 @@
   "windows_runtime": "pending by explicit user authorization",
   "batch_target": "50 ms scheduling target; indivisible I/O overruns retained",
   "linux": {
-    "library_passed": 700,
+    "library_passed": 702,
     "library_ignored": 7,
     "all_feature_integration_and_doctests": "passed",
     "clippy_all_targets_all_features_warnings_denied": "passed",
@@ -26,5 +26,5 @@
     "benchmarks": "benchmark-comparison.json",
     "metadata": "metadata.log"
   },
-  "strict_quality": "stage 7 frozen run recorded separately; stage 6 gate failed for partial evidence, human review obligations and threshold findings"
+  "strict_quality": "Final follow-up frozen run recorded in quality-summary.json; earlier b58faee results retained separately."
 }

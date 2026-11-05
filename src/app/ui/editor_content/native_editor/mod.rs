@@ -76,7 +76,31 @@ pub fn render_editor_text_edit(
     let cursor = view.cursor_range.unwrap_or_default();
     let selection = cursor.primary.index.min(cursor.secondary.index)
         ..cursor.primary.index.max(cursor.secondary.index);
-    let bulk_edit=ui.input(|input|input.events.iter().any(|event|matches!(event,egui::Event::Text(text)|egui::Event::Paste(text) if text.len()>=crate::app::domain::buffer::BULK_TEXT_BYTES || selection.len()>=crate::app::domain::buffer::BULK_TEXT_BYTES/4))) || (selection.len()>=crate::app::domain::buffer::BULK_TEXT_BYTES/4 && ui.input(|input|input.events.iter().any(|event|matches!(event,egui::Event::Key{key:egui::Key::Backspace|egui::Key::Delete|egui::Key::Enter,pressed:true,..}))));
+    let indent = ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key {
+                    key: egui::Key::Tab,
+                    pressed: true,
+                    ..
+                }
+            )
+        })
+    });
+    let bulk_edit = selection.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES / 4
+        || (indent && editing::indentation_needs_preparation(buffer, &cursor))
+        || ui.input(|input| {
+            input.events.iter().any(|event| {
+                matches!(event, egui::Event::Text(text) | egui::Event::Paste(text)
+                if text.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES)
+            })
+        });
+    let input_range = if indent {
+        editing::indentation_range(buffer, &cursor)
+    } else {
+        selection
+    };
     let _input_pin = if !buffer.is_preparing_text()
         && !bulk_edit
         && ui.input(|input| {
@@ -90,11 +114,7 @@ pub fn render_editor_text_edit(
                 _ => false,
             })
         }) {
-        match buffer
-            .document()
-            .piece_tree()
-            .pin_edit_boundaries(selection)
-        {
+        match buffer.document().piece_tree().pin_range(input_range) {
             Ok(pin) => Some(pin),
             Err(error) => return render_storage_fault(ui, &error.to_string()),
         }

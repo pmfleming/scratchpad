@@ -385,7 +385,7 @@ fn handle_tab_key(
     cursor: &CursorRange,
     indentation: IndentationInput,
 ) -> bool {
-    if cursor.as_sorted_char_range().len() >= 64 * 1024 {
+    if editing::indentation_needs_preparation(buffer, cursor) {
         let mut working = buffer.clone();
         let previous = *cursor;
         let outdent = modifiers.shift;
@@ -743,5 +743,48 @@ mod tests {
         output.textures_delta.clear();
 
         assert!(events.is_some_and(|events| events.is_empty()));
+    }
+    #[test]
+    fn indentation_of_a_long_prefix_or_many_short_lines_prepares_before_mutation() {
+        use crate::app::domain::{BufferState, CharCursor, CursorRange, EditorViewState};
+        for multiline in [false, true] {
+            let text = if multiline {
+                "x\n".repeat(300)
+            } else {
+                "x".repeat(80 * 1024)
+            };
+            let mut buffer = BufferState::new("indent".into(), text.clone(), None);
+            let mut view = EditorViewState::new(buffer.id);
+            let cursor = if multiline {
+                CursorRange {
+                    primary: CharCursor::new(text.len()),
+                    secondary: CharCursor::new(0),
+                }
+            } else {
+                CursorRange::one(CharCursor::new(text.len()))
+            };
+            assert!(!super::handle_tab_key(
+                egui::Modifiers::NONE,
+                &mut buffer,
+                &mut view,
+                &cursor,
+                super::IndentationInput {
+                    style: crate::app::services::settings_store::IndentationStyle::Spaces,
+                    width: 4,
+                }
+            ));
+            assert!(buffer.is_preparing_text());
+            assert_eq!(buffer.text(), text);
+            let prepared = buffer.take_text_preparation().unwrap().prepare().unwrap();
+            assert!(buffer.install_prepared_text(prepared).is_ok());
+            assert_eq!(
+                buffer.text(),
+                if multiline {
+                    "    x\n".repeat(300)
+                } else {
+                    format!("{text}    ")
+                }
+            );
+        }
     }
 }

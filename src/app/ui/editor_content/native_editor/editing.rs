@@ -102,6 +102,24 @@ pub(super) fn apply_delete_selection(
     delete_range(buffer, cursor, start, end, true).0
 }
 
+pub(super) fn indentation_range(
+    buffer: &BufferState,
+    cursor: &CursorRange,
+) -> std::ops::Range<usize> {
+    let (start, end) = cursor.sorted_indices();
+    let tree = buffer.document().piece_tree();
+    let start = tree.line_info(tree.line_index_at_offset(start)).start_char;
+    // Outdent may inspect a prefix beyond the selected endpoint.
+    start..end.saturating_add(16).min(tree.len_chars())
+}
+
+pub(super) fn indentation_needs_preparation(buffer: &BufferState, cursor: &CursorRange) -> bool {
+    let range = indentation_range(buffer, cursor);
+    let tree = buffer.document().piece_tree();
+    range.len() >= 64 * 1024
+        || tree.line_index_at_offset(range.end) - tree.line_index_at_offset(range.start) > 256
+}
+
 pub(super) fn apply_indent(
     buffer: &mut BufferState,
     cursor: &CursorRange,

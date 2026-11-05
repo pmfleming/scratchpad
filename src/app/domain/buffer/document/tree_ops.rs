@@ -22,7 +22,19 @@ impl TextDocument {
         let mut cost = 0usize;
         for id in transition.undo.iter().chain(&transition.redo) {
             if let Ok(index) = self.history.entries.binary_search_by_key(id, |e| e.id) {
-                cost = cost.saturating_add(self.history.entries[index].byte_cost());
+                let entry = &self.history.entries[index];
+                let mut spans = 0usize;
+                if entry.edits.iter().any(|edit| {
+                    spans = spans.saturating_add(match edit {
+                        PieceHistoryEdit::Inserted { .. } => 1,
+                        PieceHistoryEdit::Deleted { spans, .. } => spans.len(),
+                        PieceHistoryEdit::Replaced { deleted, .. } => deleted.len() + 1,
+                    });
+                    spans > 256
+                }) {
+                    return true;
+                }
+                cost = cost.saturating_add(entry.byte_cost());
                 if cost >= 256 * 1024 {
                     return true;
                 }
