@@ -132,6 +132,50 @@ fn root_and_nonroot_references_are_constrained_and_layout_indexes_are_validated(
                 .await
                 .is_err()
         );
+        // Decode every nullable cursor shape, independent of SQL CHECK enforcement.
+        for mask in 0..16 {
+            let values = [3_i64, 1, 5, 0].map(Some);
+            let values = std::array::from_fn::<_, 4, _>(|i| {
+                if mask & (1 << i) == 0 {
+                    None
+                } else {
+                    values[i]
+                }
+            });
+            let result = db
+                .query_collect(
+                    "SELECT 1,0,1,1,1,1.0,?,?,?,?",
+                    turso::params![values[0], values[1], values[2], values[3]],
+                    super::layouts::read_view,
+                )
+                .await;
+            assert_eq!(
+                result.is_ok(),
+                mask == 0 || mask == 15,
+                "cursor mask {mask}"
+            );
+            if mask == 15 {
+                let selection = result.unwrap()[0].2.selection.unwrap();
+                assert_eq!((selection.primary.index, selection.secondary.index), (3, 5));
+                assert!(selection.primary.prefer_next_row);
+                assert!(!selection.secondary.prefer_next_row);
+            }
+        }
+        for sql in [
+            "SELECT 1,-1,1,1,1,1.0,NULL,NULL,NULL,NULL",
+            "SELECT 1,0,1,1,2,1.0,NULL,NULL,NULL,NULL",
+            "SELECT 1,0,1,1,1,0.0,NULL,NULL,NULL,NULL",
+            "SELECT 1,0,1,1,1,1e100,NULL,NULL,NULL,NULL",
+            "SELECT 1,0,1,1,1,1.0,-1,0,0,0",
+            "SELECT 1,0,1,1,1,1.0,0,2,0,0",
+        ] {
+            assert!(
+                db.query_collect(sql, (), super::layouts::read_view)
+                    .await
+                    .is_err(),
+                "{sql}"
+            );
+        }
         db.conn
             .execute(
                 "DELETE FROM layout_documents WHERE document_id=?",

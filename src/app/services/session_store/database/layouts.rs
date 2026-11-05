@@ -1,8 +1,9 @@
 //! Stable layouts shared by live and closed owners, with independent view rows.
 use super::{
     Database,
-    document_rows::{boolean, signed, unsigned},
+    document_rows::{DocumentRow, signed},
     error, invalid,
+    rows::MetadataRow,
 };
 use crate::app::{
     domain::{CharCursor, CursorRange},
@@ -73,34 +74,42 @@ impl Database {
                 .collect::<io::Result<Vec<_>>>()?,
         )
         .map_err(invalid)?;
-        let mut tabs = HashMap::new();
-        for (id, active_view_id, root_pane) in self.query_collect("SELECT id,active_view_id,root_pane FROM layouts WHERE id IN (SELECT value FROM json_each(?))", [ids.as_str()], |r| Ok((unsigned(r.get(0).map_err(error)?)?, unsigned(r.get(1).map_err(error)?)?, r.get::<String>(2).map_err(error)?))).await? {
-            tabs.insert(id, SessionTab { layout_id:id, buffers:Vec::new(), active_view_id, root_pane:serde_json::from_str(&root_pane).map_err(invalid)?, views:Vec::new() });
-        }
+        let mut tabs: HashMap<_, _> = self.query_collect(
+            "SELECT id,active_view_id,root_pane FROM layouts WHERE id IN (SELECT value FROM json_each(?))",
+            [ids.as_str()], read_layout,
+        ).await?.into_iter().collect();
         let columns = super::document_rows::COLUMNS
             .split(',')
             .map(|s| format!("d.{s}"))
             .collect::<Vec<_>>()
             .join(",");
-        let mut documents: HashMap<_,_> = self.query_collect(&format!("SELECT {columns} FROM documents d WHERE id IN (SELECT document_id FROM layout_documents WHERE layout_id IN (SELECT value FROM json_each(?)))"),[ids.as_str()],super::document_rows::DocumentRow::read).await?.into_iter().map(|r|(r.id.clone(),r)).collect();
-        for (id, ordinal, buffer_id, document_id) in self.query_collect("SELECT layout_id,ordinal,buffer_id,document_id FROM layout_documents WHERE layout_id IN (SELECT value FROM json_each(?)) ORDER BY layout_id,ordinal",[ids.as_str()],|r| Ok((unsigned(r.get(0).map_err(error)?)?,unsigned(r.get(1).map_err(error)?)?,unsigned(r.get(2).map_err(error)?)?,r.get::<String>(3).map_err(error)?))).await? {
-            let tab = tabs.get_mut(&id).ok_or_else(||invalid("document has no layout"))?;
-            if ordinal != tab.buffers.len() as u64 { return Err(invalid("noncontiguous layout documents")); }
-            let mut buffer = documents.get_mut(&document_id).ok_or_else(||invalid("missing layout document"))?.clone().into_buffer()?;
-            buffer.id = buffer_id;
+        // Decode each owner directly. This avoids a second document map, cloning
+        // every DocumentRow, and an extra query; LEFT JOIN rejects missing rows.
+        let documents = self.query_collect(
+            &format!("SELECT {columns},l.layout_id,l.ordinal,l.buffer_id FROM layout_documents l LEFT JOIN documents d ON d.id=l.document_id WHERE l.layout_id IN (SELECT value FROM json_each(?)) ORDER BY l.layout_id,l.ordinal"),
+            [ids.as_str()], |row| {
+                let checked = MetadataRow(row);
+                let offset = row.column_count() - 3;
+                let mut buffer = DocumentRow::read(row)?.into_buffer()?;
+                buffer.id = checked.unsigned(offset + 2)?;
+                Ok((checked.unsigned(offset)?, checked.index(offset + 1)?, buffer))
+            },
+        ).await?;
+        for (id, ordinal, buffer) in documents {
+            let tab = tabs
+                .get_mut(&id)
+                .ok_or_else(|| invalid("document has no layout"))?;
+            if ordinal != tab.buffers.len() {
+                return Err(invalid("noncontiguous layout documents"));
+            }
             tab.buffers.push(buffer);
         }
-        for (id, ordinal, view) in self.query_collect("SELECT layout_id,ordinal,id,buffer_id,show_line_numbers,zoom_factor,primary_index,primary_next,secondary_index,secondary_next FROM layout_views WHERE layout_id IN (SELECT value FROM json_each(?)) ORDER BY layout_id,ordinal",[ids.as_str()],|r| {
-            let selection = match r.get::<Option<i64>>(6).map_err(error)? {
-                None => None,
-                Some(primary) => Some(CursorRange { primary: CharCursor{index:usize::try_from(primary).map_err(invalid)?, prefer_next_row:boolean(r.get(7).map_err(error)?)?}, secondary: CharCursor{index:usize::try_from(r.get::<i64>(8).map_err(error)?).map_err(invalid)?, prefer_next_row:boolean(r.get(9).map_err(error)?)?} }),
-            };
-            let zoom = r.get::<f64>(5).map_err(error)? as f32;
-            if !zoom.is_finite() || zoom <= 0.0 { return Err(invalid("invalid view zoom")); }
-            Ok((unsigned(r.get(0).map_err(error)?)?, unsigned(r.get(1).map_err(error)?)?, SessionView {id:unsigned(r.get(2).map_err(error)?)?,buffer_id:unsigned(r.get(3).map_err(error)?)?,show_line_numbers:boolean(r.get(4).map_err(error)?)?,zoom_factor:zoom,selection}))
-        }).await? {
-            let tab=tabs.get_mut(&id).ok_or_else(||invalid("view has no layout"))?;
-            if ordinal != tab.views.len() as u64 { return Err(invalid("noncontiguous layout views")); }
+        for (id, ordinal, view) in self.query_collect(
+            "SELECT layout_id,ordinal,id,buffer_id,show_line_numbers,zoom_factor,primary_index,primary_next,secondary_index,secondary_next FROM layout_views WHERE layout_id IN (SELECT value FROM json_each(?)) ORDER BY layout_id,ordinal",
+            [ids.as_str()], read_view,
+        ).await? {
+            let tab = tabs.get_mut(&id).ok_or_else(|| invalid("view has no layout"))?;
+            if ordinal != tab.views.len() { return Err(invalid("noncontiguous layout views")); }
             tab.views.push(view);
         }
         for tab in tabs.values() {
@@ -188,4 +197,60 @@ impl Database {
         }
         Ok(())
     }
+}
+
+fn read_layout(row: &turso::Row) -> io::Result<(u64, SessionTab)> {
+    let checked = MetadataRow(row);
+    let id = checked.unsigned(0)?;
+    Ok((
+        id,
+        SessionTab {
+            layout_id: id,
+            buffers: Vec::new(),
+            active_view_id: checked.unsigned(1)?,
+            root_pane: serde_json::from_str(&row.get::<String>(2).map_err(error)?)
+                .map_err(invalid)?,
+            views: Vec::new(),
+        },
+    ))
+}
+
+pub(super) fn read_view(row: &turso::Row) -> io::Result<(u64, usize, SessionView)> {
+    let checked = MetadataRow(row);
+    let selection = match (
+        checked.optional_index(6)?,
+        checked.optional_boolean(7)?,
+        checked.optional_index(8)?,
+        checked.optional_boolean(9)?,
+    ) {
+        (None, None, None, None) => None,
+        (Some(primary), Some(primary_next), Some(secondary), Some(secondary_next)) => {
+            Some(CursorRange {
+                primary: CharCursor {
+                    index: primary,
+                    prefer_next_row: primary_next,
+                },
+                secondary: CharCursor {
+                    index: secondary,
+                    prefer_next_row: secondary_next,
+                },
+            })
+        }
+        _ => return Err(invalid("incomplete view selection")),
+    };
+    let zoom = row.get::<f64>(5).map_err(error)? as f32;
+    if !zoom.is_finite() || zoom <= 0.0 {
+        return Err(invalid("invalid view zoom"));
+    }
+    Ok((
+        checked.unsigned(0)?,
+        checked.index(1)?,
+        SessionView {
+            id: checked.unsigned(2)?,
+            buffer_id: checked.unsigned(3)?,
+            show_line_numbers: checked.boolean(4)?,
+            zoom_factor: zoom,
+            selection,
+        },
+    ))
 }

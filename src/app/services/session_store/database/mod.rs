@@ -36,6 +36,7 @@ mod quarantine_tests;
 mod range_tests;
 mod read;
 mod reset;
+mod rows;
 pub(super) use reset::start_new_session;
 mod schema_reset;
 #[cfg(test)]

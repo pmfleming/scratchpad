@@ -1,5 +1,5 @@
 //! Typed document metadata. No text bodies or serialized document payloads.
-use super::{Database, error, invalid};
+use super::{Database, error, invalid, rows::MetadataRow};
 use crate::app::domain::buffer::BufferTextMetadata;
 use crate::app::domain::{LineEndingCounts, TextFormatMetadata};
 use crate::app::services::session_store::model::SessionBuffer;
@@ -136,43 +136,36 @@ impl DocumentRow {
         })
     }
     pub fn read(row: &turso::Row) -> io::Result<Self> {
+        let checked = MetadataRow(row);
         Ok(Self {
             id: row.get(0).map_err(error)?,
-            buffer_id: unsigned(row.get::<i64>(1).map_err(error)?)?,
+            buffer_id: checked.unsigned(1)?,
             name: row.get(2).map_err(error)?,
             path: row.get(3).map_err(error)?,
             path_key: row.get(4).map_err(error)?,
             search_text: row.get(5).map_err(error)?,
-            is_dirty: boolean(row.get::<i64>(6).map_err(error)?)?,
-            text_is_empty: boolean(row.get::<i64>(7).map_err(error)?)?,
-            has_recorded_edits: boolean(row.get::<i64>(8).map_err(error)?)?,
-            is_settings_file: boolean(row.get::<i64>(9).map_err(error)?)?,
-            show_control_chars: boolean(row.get::<i64>(10).map_err(error)?)?,
-            right_to_left: boolean(row.get::<i64>(11).map_err(error)?)?,
+            is_dirty: checked.boolean(6)?,
+            text_is_empty: checked.boolean(7)?,
+            has_recorded_edits: checked.boolean(8)?,
+            is_settings_file: checked.boolean(9)?,
+            show_control_chars: checked.boolean(10)?,
+            right_to_left: checked.boolean(11)?,
             encoding_name: row.get(12).map_err(error)?,
-            has_bom: boolean(row.get::<i64>(13).map_err(error)?)?,
+            has_bom: checked.boolean(13)?,
             encoding_source: row.get(14).map_err(error)?,
             line_endings: row.get(15).map_err(error)?,
             preferred_line_ending: row.get(16).map_err(error)?,
-            lf_count: unsigned(row.get::<i64>(17).map_err(error)?)?,
-            crlf_count: unsigned(row.get::<i64>(18).map_err(error)?)?,
-            cr_count: unsigned(row.get::<i64>(19).map_err(error)?)?,
-            is_ascii_subset: boolean(row.get::<i64>(20).map_err(error)?)?,
-            has_decoding_warnings: boolean(row.get::<i64>(21).map_err(error)?)?,
-            line_count: unsigned(row.get::<i64>(22).map_err(error)?)?,
-            disk_modified_millis: row
-                .get::<Option<i64>>(23)
-                .map_err(error)?
-                .map(unsigned)
-                .transpose()?,
-            disk_len: row
-                .get::<Option<i64>>(24)
-                .map_err(error)?
-                .map(unsigned)
-                .transpose()?,
+            lf_count: checked.unsigned(17)?,
+            crlf_count: checked.unsigned(18)?,
+            cr_count: checked.unsigned(19)?,
+            is_ascii_subset: checked.boolean(20)?,
+            has_decoding_warnings: checked.boolean(21)?,
+            line_count: checked.unsigned(22)?,
+            disk_modified_millis: checked.optional_unsigned(23)?,
+            disk_len: checked.optional_unsigned(24)?,
             disk_content_digest: row.get(25).map_err(error)?,
             observed_digest: row.get(26).map_err(error)?,
-            observed_missing: boolean(row.get::<i64>(27).map_err(error)?)?,
+            observed_missing: checked.boolean(27)?,
             analysis: read_analysis(row)?,
         })
     }
@@ -296,19 +289,7 @@ impl Database {
         .ok_or_else(|| invalid("workspace references a missing document"))
     }
 }
-pub(super) fn signed(value: u64) -> io::Result<i64> {
-    i64::try_from(value).map_err(invalid)
-}
-pub(super) fn unsigned(value: i64) -> io::Result<u64> {
-    u64::try_from(value).map_err(invalid)
-}
-pub(super) fn boolean(value: i64) -> io::Result<bool> {
-    match value {
-        0 => Ok(false),
-        1 => Ok(true),
-        _ => Err(invalid("invalid metadata boolean")),
-    }
-}
+pub(super) use super::rows::{boolean, signed, unsigned};
 pub(super) fn enum_name(value: impl serde::Serialize) -> io::Result<String> {
     match serde_json::to_value(value).map_err(invalid)? {
         serde_json::Value::String(name) => Ok(name),
@@ -332,14 +313,9 @@ fn read_analysis(row: &turso::Row) -> io::Result<BufferTextMetadata> {
     if !(0..32).contains(&flags) {
         return Err(invalid("invalid artifact flags"));
     }
-    let optional = |index| {
-        row.get::<Option<i64>>(index)
-            .map_err(error)?
-            .map(|n| usize::try_from(n).map_err(invalid))
-            .transpose()
-    };
+    let checked = MetadataRow(row);
     Ok(BufferTextMetadata {
-        line_count: usize::try_from(row.get::<i64>(22).map_err(error)?).map_err(invalid)?,
+        line_count: checked.index(22)?,
         preferred_line_ending: parse_enum(row.get(16).map_err(error)?)?,
         has_non_compliant_characters: flags & 16 != 0,
         artifact_summary: crate::app::domain::TextArtifactSummary {
@@ -347,12 +323,11 @@ fn read_analysis(row: &turso::Row) -> io::Result<BufferTextMetadata> {
             has_carriage_returns: flags & 2 != 0,
             has_backspaces: flags & 4 != 0,
             has_unicode_format_controls: flags & 8 != 0,
-            other_control_count: usize::try_from(row.get::<i64>(29).map_err(error)?)
-                .map_err(invalid)?,
-            ansi_sequence_count: optional(30)?,
-            backspace_count: optional(31)?,
-            unicode_format_control_count: optional(32)?,
-            other_control_count_exact: optional(33)?,
+            other_control_count: checked.index(29)?,
+            ansi_sequence_count: checked.optional_index(30)?,
+            backspace_count: checked.optional_index(31)?,
+            unicode_format_control_count: checked.optional_index(32)?,
+            other_control_count_exact: checked.optional_index(33)?,
         },
     })
 }
