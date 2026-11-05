@@ -172,17 +172,31 @@ branch. Editing after undo keeps the old branch available in History.
 
 The scrubber shows one selected file and branch, with start/end and previous/next
 buttons alongside the live track. Open in History shows the full tree. History
-lists newer edits first, draws connected branch lanes, and has a searchable file
-picker. **All files** includes only open or closed files with recorded history;
-selecting a file keeps that view open. Returning Now to the empty root does not
-hide its file. Viewing old edits does not change file recency. The **Now** button
-scrolls to the selected state without changing the text.
-All branches survive closing and restarting. **Forget history** requires confirmation
-and replaces a file's tree with its current contents; it does not change the source
-file. There are no separate snapshots or automatic expiry settings.
+offers **This file** for branch inspection and a searchable, newest-first
+**Timeline** across open and retained closed documents. Timeline includes grouped
+edits, Created, Opened, Closed, missing-file and disk-conflict observations. Only
+edit rows select a text state; other rows are informational. Selecting a closed
+file's edit opens that document alone, then selects the retained state without
+saving it to disk. Use **This file** on an edit to inspect its branches.
 
-**Settings > History & Recovery** contains reopening preferences and measured disk
-usage. See [history storage and schema changes](SESSION-RETENTION.md).
+Each file has its own Now. Undo, redo, saves and file switches add no activity.
+Timeline uses recording order, local dates and times, and a closed-file marker.
+Up/Down, Home/End and Enter navigate loaded edit rows, skipping informational rows;
+scrolling fetches older pages. **Latest** returns to the top without changing text.
+
+All branches and activity survive closing and restarting. **Close without saving**
+retains unsaved text in history. Reopening unchanged disk text restores that local
+work; changed disk text becomes one **External changes loaded** edit with the
+previous state reachable. Dirty files changed while open or before restart keep
+local text and their path, show **Disk conflict**, and offer the usual save choices.
+Metadata-only touches add no activity. Missing files are recorded once and checked
+again when they return. Same-size changes with an identical modified time are not
+detected by the metadata watcher.
+
+**Forget history** requires confirmation and removes that file's branches and
+activity, establishing a baseline from current text. It does not save the file.
+**Settings > History & Recovery** contains memory limits and measured disk usage.
+See [history storage and schema changes](SESSION-RETENTION.md).
 
 Start with [the configuration guide](docs/configuration.md). It documents the
 TOML sections, shortcut syntax, platform overrides, runtime environment

@@ -40,6 +40,74 @@ impl StoredTab {
 }
 
 impl Database {
+    /// Save As can replace a closed file. Its former document stays retained,
+    /// but must no longer win path lookup or reconcile against the replacement.
+    pub(super) async fn release_retained_path(
+        &self,
+        id: &str,
+        key: &str,
+    ) -> io::Result<Vec<String>> {
+        let mut snapshots = Vec::new();
+        let ids = self
+            .query_collect(
+                "SELECT id FROM documents WHERE path_key=? AND id<>?",
+                turso::params![key, id],
+                |row| row.get::<String>(0).map_err(error),
+            )
+            .await?;
+        for previous in ids {
+            let mut buffer = self.read_document(&previous).await?;
+            buffer.path = None;
+            buffer.name = format!("{} (recovered)", buffer.name);
+            buffer.is_dirty = true;
+            buffer.disk_content_digest = None;
+            buffer.observed_disk_digest = None;
+            buffer.observed_disk_missing = false;
+            buffer.disk_len = None;
+            buffer.disk_modified_millis = None;
+            let bytes = serde_json::to_vec(&buffer).map_err(invalid)?;
+            self.execute_cached("UPDATE documents SET path=NULL,path_key=NULL,name=?,payload=?,observed_digest=NULL,observed_missing=0,search_text=? WHERE id=?",turso::params![buffer.name.as_str(),bytes.as_slice(),buffer.name.to_lowercase(),previous.as_str()]).await?;
+            let exists = self
+                .query_collect(
+                    "SELECT id FROM snapshots WHERE id=?",
+                    [previous.as_str()],
+                    |row| row.get::<String>(0).map_err(error),
+                )
+                .await?;
+            if exists.is_empty() {
+                // Only an empty, never-edited disk document lacks a text cache.
+                let snapshot = crate::app::domain::TextDocument::new(String::new()).snapshot();
+                self.write_content(
+                    &previous,
+                    &snapshot,
+                    &mut std::collections::HashSet::default(),
+                    &mut super::SessionPersistProfile::default(),
+                )
+                .await?;
+                snapshots.push(previous);
+            }
+        }
+        Ok(snapshots)
+    }
+    pub(super) async fn validate_document_refs(
+        &self,
+        tab: &SessionTab,
+        sql: &str,
+        params: impl turso::IntoParams,
+    ) -> io::Result<()> {
+        let mut indexed = self
+            .query_collect(sql, params, |row| row.get::<String>(0).map_err(error))
+            .await?;
+        let mut stored: Vec<_> = tab.buffers.iter().map(|b| b.temp_id.clone()).collect();
+        indexed.sort();
+        stored.sort();
+        if indexed != stored {
+            return Err(invalid(
+                "workspace document index does not match its layout",
+            ));
+        }
+        Ok(())
+    }
     pub(in crate::app::services::session_store) async fn load_retained_document(
         &mut self,
         id: &str,

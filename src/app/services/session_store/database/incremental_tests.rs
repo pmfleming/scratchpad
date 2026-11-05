@@ -414,6 +414,13 @@ fn strict_types_and_foreign_keys_are_enforced_by_turso() {
             .unwrap();
         db.conn
             .execute(
+                "INSERT INTO history_nodes VALUES('clean',0),('clean',1)",
+                (),
+            )
+            .await
+            .unwrap();
+        db.conn
+            .execute(
                 "INSERT INTO history(temp_id, seq, parent_id, edited_at, global_seq, entry, source, summary) VALUES('clean', 1, 0, 0, 1, x'00', 'load', '')",
                 (),
             )

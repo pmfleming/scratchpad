@@ -38,6 +38,11 @@ enum Row {
     Entry(TimelineRow),
 }
 
+enum CachedTail {
+    More(TimelineCursor),
+    Complete,
+}
+
 struct State {
     live: model::LiveRows,
     source: Option<Source>,
@@ -45,6 +50,7 @@ struct State {
     overlay: BTreeMap<TimelineCursor, TimelineRow>,
     pending: Option<PendingPage>,
     next: Option<TimelineCursor>,
+    resume_older: Option<CachedTail>,
     fetched: bool,
     error: Option<String>,
     rows: Vec<Row>,
@@ -64,6 +70,7 @@ impl Default for State {
             overlay: BTreeMap::new(),
             pending: None,
             next: None,
+            resume_older: None,
             fetched: false,
             error: None,
             rows: Vec::new(),
@@ -147,6 +154,10 @@ impl State {
             commit: app.state.persistence.session_store.commit_epoch(),
         };
         if self.source.as_ref() != Some(&source) {
+            let preserve = self
+                .source
+                .as_ref()
+                .is_some_and(|old| old.epoch == source.epoch && old.search == source.search);
             if self
                 .source
                 .as_ref()
@@ -160,8 +171,25 @@ impl State {
                 row.name.to_lowercase().contains(search)
                     || row.label().to_lowercase().contains(search)
             });
+            if preserve {
+                self.persisted.append(&mut self.live.retired);
+                self.persisted.retain(|_, row| {
+                    row.node().is_none()
+                        || source.loaded.binary_search(&row.cursor.document).is_err()
+                });
+                if self.fetched {
+                    self.resume_older = Some(
+                        self.next
+                            .clone()
+                            .map_or(CachedTail::Complete, CachedTail::More),
+                    );
+                }
+            } else {
+                self.persisted.clear();
+                self.live.retired.clear();
+                self.resume_older = None;
+            }
             self.source = Some(source);
-            self.persisted.clear();
             self.pending = None;
             self.next = None;
             self.fetched = false;
@@ -190,7 +218,11 @@ impl State {
                         self.overlay.remove(&row.cursor);
                         self.persisted.insert(row.cursor.clone(), row);
                     }
-                    self.next = page.older;
+                    self.next = match self.resume_older.take() {
+                        Some(CachedTail::Complete) => None,
+                        Some(CachedTail::More(old)) => page.older.map(|new| old.min(new)),
+                        None => page.older,
+                    };
                     self.fetched = true;
                     changed = true;
                 }
@@ -211,7 +243,9 @@ impl State {
         let mut overlay = self.overlay.iter().rev().peekable();
         let mut rows = Vec::new();
         let mut day = String::new();
-        for _ in 0..self.limit {
+        let mut count = 0;
+        let mut anchored = self.anchor.is_none();
+        while count < self.limit || !anchored {
             let key = [
                 memory.peek().map(|(k, _)| *k),
                 overlay.peek().map(|(k, _)| *k),
@@ -243,6 +277,8 @@ impl State {
             let Some(row) = row else {
                 break;
             };
+            count += 1;
+            anchored |= self.anchor.as_ref().is_some_and(|(id, _)| row.id() == *id);
             if self.next.as_ref().is_some_and(|bound| row.cursor < *bound) {
                 break;
             }
@@ -528,6 +564,14 @@ fn paint_visible(
                     11.5,
                     theme::text_muted(ui),
                 );
+                let response = widget_ids::interact(
+                    ui,
+                    rect,
+                    egui::Id::unique(("history.timeline.date", date, index)),
+                    egui::Sense::hover(),
+                    "timeline-date",
+                );
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, date));
             }
             Row::Entry(row) => {
                 let row = row.clone();
@@ -567,6 +611,7 @@ fn paint_row(ui: &mut egui::Ui, row: &TimelineRow, selected: bool, closed: bool)
                 format!("{} · {}", row.summary, row.name),
             )
         });
+        describe_row(ui, &response, row, closed);
         paint_labels(ui, row, rect, closed);
         return None;
     }
@@ -586,6 +631,7 @@ fn paint_row(ui: &mut egui::Ui, row: &TimelineRow, selected: bool, closed: bool)
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::Role::ListBoxOption, true, selected, &label)
     });
+    describe_row(ui, &response, row, closed);
     if selected || response.hovered() {
         ui.painter().rect_filled(
             rect,
@@ -625,6 +671,17 @@ fn paint_row(ui: &mut egui::Ui, row: &TimelineRow, selected: bool, closed: bool)
         ))
         .clicked()
         .then_some(false)
+}
+
+fn describe_row(ui: &egui::Ui, response: &egui::Response, row: &TimelineRow, closed: bool) {
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_description(format!(
+            "{} · {}{}",
+            row.label(),
+            presentation::full_time(row.timestamp),
+            if closed { " · Closed" } else { "" }
+        ));
+    });
 }
 
 fn paint_labels(ui: &egui::Ui, row: &TimelineRow, rect: egui::Rect, closed: bool) {

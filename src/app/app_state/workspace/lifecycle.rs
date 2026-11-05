@@ -11,9 +11,13 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub(crate) fn new_tab(app: &mut ScratchpadApp) {
+    append_created_tab(app, WorkspaceTab::untitled());
+}
+
+pub(crate) fn append_created_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
     create_workspace_tab(
         app,
-        WorkspaceTab::untitled(),
+        tab,
         crate::app::services::session_store::activity::ActivityKind::Created,
     );
 }
@@ -118,10 +122,6 @@ pub(crate) fn save_file_as(app: &mut ScratchpadApp) {
     FileController::save_file_as(app);
 }
 
-pub(crate) fn save_file_as_at(app: &mut ScratchpadApp, index: usize) -> bool {
-    FileController::save_file_as_at(app, index)
-}
-
 pub(crate) fn perform_close_tab(app: &mut ScratchpadApp, index: usize) {
     perform_close_tab_no_persist(app, index);
     if let Err(error) = crate::app::app_state::workspace::accessors::persist_session_now(app) {
@@ -199,6 +199,11 @@ pub(crate) fn install_archive(app: &mut ScratchpadApp, mut tab: WorkspaceTab) ->
             .as_ref()
             .is_some_and(|path| app.tab_manager.find_tab_by_path(path).is_some())
         {
+            if let Some(document) = buffer.pending_reopen_original.take() {
+                *buffer.document_mut() = *document;
+                buffer.pending_reopen_external = None;
+                buffer.refresh_text_metadata();
+            }
             buffer.recover_as_untitled("recovered");
         }
     }

@@ -840,3 +840,5 @@ fn confirmation_resizes_its_footer_without_resizing_history_or_leaving_a_gap() {
     h.run_steps(3);
     assert!((h.ctx.data(|d| d.get_temp::<f32>(key)).unwrap() - normal).abs() < 1.0);
 }
+
+mod performance;

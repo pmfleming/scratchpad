@@ -165,6 +165,12 @@ impl Database {
                 .read_stored_tab(&row.get::<Vec<u8>>(1).map_err(error)?)
                 .await?;
             validation::validate_tab(&tab)?;
+            self.validate_document_refs(
+                &tab,
+                "SELECT document_id FROM tab_documents WHERE position=?",
+                [position as i64],
+            )
+            .await?;
             manifest.tabs.push(tab);
         }
         drop(rows);

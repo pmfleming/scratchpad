@@ -182,7 +182,11 @@ fn load_paths(requests: Vec<PathLoadRequest>) -> Vec<LoadedPathResult> {
 
 fn load_one(request: PathLoadRequest) -> LoadedPathResult {
     match request {
-        PathLoadRequest::Observed(path) => load_observed(path),
+        PathLoadRequest::Observed {
+            path,
+            materialize,
+            observed_digest,
+        } => load_observed(path, materialize, observed_digest.as_deref()),
         PathLoadRequest::Retained {
             path,
             session_store,
@@ -269,14 +273,14 @@ fn save_path(
     }
 }
 
-fn load_observed(path: PathBuf) -> LoadedPathResult {
-    match FileService::read_observed_file(&path) {
-        Ok(observed) => {
-            let state = observed.state.clone();
+fn load_observed(path: PathBuf, materialize: bool, known_digest: Option<&str>) -> LoadedPathResult {
+    match FileService::read_observed_buffer(&path, materialize, known_digest) {
+        Ok(buffer) => {
+            let state = buffer.disk_state.clone();
             LoadedPathResult {
                 path: path.clone(),
-                disk_state: Some(state),
-                result: Ok(FileService::buffer_from_observed(&path, observed)),
+                disk_state: state,
+                result: Ok(buffer),
                 missing: false,
                 retained_tab: None,
             }

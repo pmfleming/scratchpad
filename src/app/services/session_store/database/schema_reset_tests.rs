@@ -135,6 +135,16 @@ fn inconsistent_cursor_and_corrupt_branch_payload_are_rejected() {
         assert!(db.persist(malformed, 2).await.is_err());
         let id = &tabs[0].active_buffer().temp_id;
         assert_eq!(db.read_history(id).await.unwrap().len(), 1);
+        assert!(
+            db.conn
+                .execute("UPDATE document_history SET now_id=999", ())
+                .await
+                .is_err()
+        );
+        db.conn
+            .execute("PRAGMA foreign_keys=OFF", ())
+            .await
+            .unwrap();
         db.conn
             .execute("UPDATE document_history SET now_id=999", ())
             .await

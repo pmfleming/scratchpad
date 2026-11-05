@@ -32,6 +32,7 @@ struct Prepared {
     snapshots: Vec<CapturedSessionBuffer>,
     buffers: HashMap<String, RecoveryBuffer>,
     removed_documents: Vec<String>,
+    retained_snapshots: Vec<String>,
     activity: Vec<super::super::activity::ActivityEvent>,
     forgotten: Vec<String>,
     full_cleanup: bool,
@@ -337,6 +338,7 @@ impl Database {
                 .map(|buffer| buffer.temp_id.clone()),
         );
         inventory.buffers.extend(prepared.buffers.keys().cloned());
+        inventory.snapshots.extend(prepared.retained_snapshots);
         for id in &prepared.removed_documents {
             inventory.buffers.remove(id);
             inventory.snapshots.remove(id);
@@ -406,15 +408,20 @@ impl Database {
 
     async fn write_buffer_history(
         &self,
-        prepared: &Prepared,
+        prepared: &mut Prepared,
         inventory: &ContentInventory,
     ) -> io::Result<()> {
         for (id, buffer) in &prepared.buffers {
             if self.document_cache.get(id) != Some(&buffer.metadata) {
+                if let Some(key) = &buffer.path_key {
+                    prepared
+                        .retained_snapshots
+                        .extend(self.release_retained_path(id, key).await?);
+                }
                 let sql = if inventory.buffers.contains(id) {
-                    "UPDATE documents SET name=?2,path=?3,path_key=?4,payload=?5,observed_digest=?6,observed_missing=?7 WHERE id=?1"
+                    "UPDATE documents SET name=?2,path=?3,path_key=?4,payload=?5,observed_digest=?6,observed_missing=?7,search_text=?8 WHERE id=?1"
                 } else {
-                    "INSERT INTO documents(id,name,path,path_key,payload,observed_digest,observed_missing) VALUES(?1,?2,?3,?4,?5,?6,?7)"
+                    "INSERT INTO documents(id,name,path,path_key,payload,observed_digest,observed_missing,search_text) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)"
                 };
                 self.execute_cached(
                     sql,
@@ -425,7 +432,13 @@ impl Database {
                         buffer.path_key.clone(),
                         buffer.metadata.as_slice(),
                         buffer.observed_digest.clone(),
-                        i64::from(buffer.observed_missing)
+                        i64::from(buffer.observed_missing),
+                        format!(
+                            "{}\n{}",
+                            buffer.name,
+                            buffer.path.as_deref().unwrap_or_default()
+                        )
+                        .to_lowercase()
                     ],
                 )
                 .await?;
@@ -435,6 +448,8 @@ impl Database {
             {
                 self.write_history(id, entries, fingerprints).await?;
             } else if !inventory.buffers.contains(id) {
+                self.execute_cached("INSERT INTO history_nodes VALUES(?,0)", [id.as_str()])
+                    .await?;
                 self.execute_cached(
                     "INSERT INTO document_history VALUES(?,0,0,0,0)",
                     [id.as_str()],

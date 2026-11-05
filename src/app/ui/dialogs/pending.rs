@@ -252,7 +252,7 @@ fn render_unsaved_changes_body(
         close_requested,
         [
             (FLOPPY_DISK, "Save changes", UnsavedChoice::Save),
-            (TRASH, "Discard changes", UnsavedChoice::Discard),
+            (TRASH, "Close without saving", UnsavedChoice::Discard),
             (X, "Cancel", UnsavedChoice::Cancel),
         ],
     )

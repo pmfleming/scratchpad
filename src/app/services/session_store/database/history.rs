@@ -230,6 +230,11 @@ impl Database {
             .history_cache
             .get(id)
             .ok_or_else(|| invalid("history cache not primed"))?;
+        self.execute_cached(
+            "INSERT INTO history_nodes VALUES(?,0) ON CONFLICT DO NOTHING",
+            [id],
+        )
+        .await?;
         if old == fingerprints {
             if entries.len() == 0 {
                 self.execute_cached("INSERT INTO document_history VALUES(?,0,0,0,0) ON CONFLICT(temp_id) DO NOTHING", [id]).await?;
@@ -237,11 +242,25 @@ impl Database {
             return Ok(());
         }
         let (now, tip, edited_at, edit_seq) = entries.positions();
+        for fingerprint in fingerprints {
+            if old.binary_search_by_key(&fingerprint.id, |e| e.id).is_err() {
+                self.execute_cached(
+                    "INSERT INTO history_nodes VALUES(?,?) ON CONFLICT DO NOTHING",
+                    params![id, fingerprint.id as i64],
+                )
+                .await?;
+            }
+        }
         self.execute_cached("INSERT INTO document_history VALUES(?,?,?,?,?) ON CONFLICT(temp_id) DO UPDATE SET now_id=excluded.now_id,tip_id=excluded.tip_id,edited_at=excluded.edited_at,edit_seq=excluded.edit_seq",
             params![id, now as i64, tip as i64, edited_at as i64, edit_seq as i64]).await?;
         let Some((first, last)) = fingerprints.first().zip(fingerprints.last()) else {
+            self.execute_cached("DELETE FROM history WHERE temp_id=?", [id])
+                .await?;
             return self
-                .execute_cached("DELETE FROM history WHERE temp_id=?", [id])
+                .execute_cached(
+                    "DELETE FROM history_nodes WHERE temp_id=? AND node_id<>0",
+                    [id],
+                )
                 .await;
         };
         let last = last.id;
@@ -279,6 +298,6 @@ impl Database {
             self.execute_cached("INSERT INTO history(temp_id, seq, global_seq, entry, bytes, parent_id, edited_at, source, summary) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(temp_id, seq) DO UPDATE SET global_seq=excluded.global_seq, entry=excluded.entry, bytes=excluded.bytes, parent_id=excluded.parent_id, edited_at=excluded.edited_at,source=excluded.source,summary=excluded.summary",
                 params![id, entry.id as i64, entry.global_seq as i64, bytes.as_slice(), bytes.len() as i64, entry.parent_id as i64, entry.edited_at as i64, serde_json::to_value(entry.source).map_err(invalid)?.as_str().ok_or_else(|| invalid("invalid history source"))?, entry.summary.as_str()]).await?;
         }
-        Ok(())
+        self.execute_cached("DELETE FROM history_nodes WHERE temp_id=? AND node_id<>0 AND node_id NOT IN (SELECT seq FROM history WHERE temp_id=?)",params![id,id]).await
     }
 }

@@ -12,6 +12,7 @@ use crate::app::services::file_service::FileService;
 use std::path::{Path, PathBuf};
 
 mod disk_state;
+mod duplicate;
 mod observation;
 mod reload;
 mod result;

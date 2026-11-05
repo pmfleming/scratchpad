@@ -42,7 +42,7 @@ impl TextDocument {
             .entries
             .iter()
             .rev()
-            .find(|e| e.edited_at != 0)
+            .find(|e| e.summary != "Initial contents")
             .map_or((0, 0), |e| (e.edited_at, e.global_seq))
     }
 

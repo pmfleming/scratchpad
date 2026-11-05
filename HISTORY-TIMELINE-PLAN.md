@@ -1,6 +1,8 @@
 # History timeline implementation plan
 
-Status: implementation in progress. Stage 1 is complete: fresh schema 11/session
+Status: all six implementation stages are complete. The validation record below
+distinguishes passing Linux checks from unavailable Windows validation and the
+non-passing strict reliability gate. Stage 1 is complete: fresh schema 11/session
 version 9, document-owned metadata, reference-only workspace layouts, independent
 retention, and transactional final split-view closes. Validation: 614 library tests
 passed (6 manual/profile tests ignored), all-feature library Clippy passed, and
@@ -24,7 +26,17 @@ passed. Stage 5 is complete: background stable reads/digests for clean and dirty
 files, per-version conflict observations, missing/return handling, deferred Save
 conflict checks, startup observation deduplication, and saved-snapshot digests.
 Validation: 641 library tests passed (6 ignored), formatting and strict all-feature
-library Clippy passed. Stage 6 remains.
+library Clippy passed.
+Stage 6 is complete: explicit root/node reference constraints, indexed closed-layout
+updates, Forget/reset and query invalidation coverage, stable page handover and
+viewport anchors, Unicode search, accessible static activity/date information,
+Save As Copy identity, retained-path replacement, late path-claim recovery, owned
+background replacement text, prompt wording and user documentation. Final validation:
+711 tests passed across 35 suites (9 manual/profile tests ignored); the retained
+Timeline profile also passed when explicitly run. Formatting, all four feature
+combinations, strict Clippy, audit, Turso lock checks and the native Linux check passed.
+Windows tooling is unavailable. Fresh strict RQL remains non-passing for the reasons
+recorded below; its policy has not been weakened.
 
 Replace History's **All files** view with **Timeline**, showing recorded text
 changes, file opens, file closes, and external changes discovered by Scratchpad.
@@ -392,3 +404,81 @@ plan.
 The feature is complete when a fresh session supports this full sequence through
 restart, both history views remain navigable, and lifecycle or external activity
 cannot consume retained history or write historical contents to disk implicitly.
+
+
+## Implementation validation record — 2026-11-05
+
+The six stages are separate commits. Tests use temporary databases and files;
+implementation and validation did not reset the installed user's session.
+
+| Check | Result | Evidence in the local ignored `target/` directory |
+| --- | --- | --- |
+| `cargo fmt --all -- --check` | Passed | `timeline-validated-fmt.log` |
+| `cargo check --all-features` | Passed, including the final RQL practice run | `quality-runs/history-timeline-final-20261105-v3/artifacts/rust_practices.json` |
+| `cargo hack check --feature-powerset` | All four combinations passed; repeated by final RQL verification | `timeline-final-features.log`, final RQL practices |
+| `cargo clippy --lib --all-features -- -D warnings` | Passed; final RQL workspace Clippy also passed | `timeline-final-clippy.log`, final RQL practices |
+| `cargo test --all-features` | 711 passed, 0 failed, 9 ignored, across 35 suites; library: 652 passed, 7 ignored | `timeline-validated-tests.log` |
+| `cargo audit` | Passed with existing allowed dependency warnings | `timeline-audit.log`, final RQL practices |
+| `cargo xtask check-turso-locks` | Passed | `timeline-locks.log` |
+| Native Linux target check | Passed | `timeline-validated-platforms.log` |
+| Required Windows target check | Unavailable: `x86_64-pc-windows-gnu` is not installed; combined `--require-all` command exits nonzero | `timeline-validated-platforms.log` |
+| Fresh RustQualityLens | Producers passed; strict gate did not pass | `quality-runs/history-timeline-final-20261105-v3/summary.json` and `check.stdout.log` |
+
+The final RQL executable was built from the sibling lens with `--locked` and frozen
+by `cargo xtask quality`. Source hashes before and after measurement are identical;
+the archived executable is unchanged. Practice evidence reports 19 passed checks,
+9 skipped, no unavailable tools and no failed checks. Test execution reports no
+failures. The strict gate nevertheless rejects partial macro/semantic evidence and
+19 unknown inventory test statuses, and reports three pre-existing `pending-human`
+review obligations: `path-key-newtype-v1`, `path-key-documentation-v1`, and
+`windows-watch-unsafe-necessity-v1`. Its reliability warning inventory also includes
+existing panic paths, including the two unchanged worker mutex `unwrap` calls;
+partial evidence prevents complete evaluation of the configured reliability limits.
+No budgets, exclusions, reviews or waivers were changed to produce a passing result.
+The completion status and this documentation record were written after analysis;
+production and test source remained frozen for that run. Native Windows runtime
+validation is not claimed.
+
+### Retained-history performance
+
+The opt-in `profile_retained_history_timeline` fixture uses 16 and 256 closed
+untitled documents, each with 128 recorded replacements and branching every 16
+edits, plus one live document. It measures the initial metadata query after seeding,
+five edited durable saves (median), 20 warm headless UI frames, 20 scrolling frames,
+and process RSS. Baseline source is commit `3ecba38`, unpacked into an isolated
+ignored directory; its adapter uses the original All files picker/query/renderer.
+Both versions use the same fixture and debug toolchain. The old view initially
+shows file headings; Timeline initially shows 100 edit rows, so these numbers
+compare the implemented experiences rather than identical row contents. They are
+local measurements, not latency guarantees or GPU/display-frame measurements.
+
+| Version | Closed documents / edits | Initial query (ms) | Median edited save (ms) | Warm frame (µs) | Scroll frame (µs) | RSS (KiB) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Old All files | 16 / 2,048 | 3.607 | 6.415 | 2,700 | 2,890 | 144,296 |
+| Timeline | 16 / 2,048 | 8.087 | 7.290 | 3,302 | 3,511 | 144,832 |
+| Old All files | 256 / 32,768 | 44.759 | 17.005 | 2,806 | 2,824 | 211,664 |
+| Timeline | 256 / 32,768 | 7.703 | 11.703 | 3,323 | 3,478 | 222,268 |
+
+The larger fixture improves initial query and save latency. The smaller fixture
+has extra query/save overhead, and the richer visible Timeline rows add frame work
+and some retained memory. RSS includes database caches and allocator retention;
+it is neither a peak measurement nor a count of Timeline metadata alone.
+
+Timeline returned at most 100 records per page. Each page uses two limited source
+queries; six pages use 12 queries. Five older pages took 14.030 ms for the smaller
+fixture and 22.743 ms for the larger one. Old All files uses one unbounded file
+metadata query and cached headings when scrolling. Unchanged Timeline frames make
+no new feed queries. Regression tests verify total keyset ordering, an indexed
+query plan without a temporary sorter, rendering despite deliberately corrupt edit
+payloads, and warm saves that do not decode unrelated closed layouts. Closed edit
+trees are not loaded to draw the feed.
+
+Raw comparison logs are `target/timeline-baseline-performance-repeat.log` and
+`target/timeline-performance-final.log`. Reproduce the current profile with:
+
+```bash
+nix develop -c cargo test --lib --all-features profile_retained_history_timeline -- --ignored --nocapture
+```
+
+The profile is intentionally excluded from ordinary test runs because it builds
+a 32,768-edit temporary database and reports timings without timing assertions.

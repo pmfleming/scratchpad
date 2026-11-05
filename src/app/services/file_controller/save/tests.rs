@@ -250,3 +250,40 @@ fn default_save_as_file_name_adds_txt_only_when_missing_extension() {
     assert_eq!(default_save_as_file_name("notes"), "notes.txt");
     assert_eq!(default_save_as_file_name("notes.md"), "notes.md");
 }
+
+#[test]
+fn save_as_copy_creates_a_distinct_document_and_keeps_the_conflicted_original() {
+    let mut fixture = SavedBufferFixture::dirty("original.txt", "disk", "local");
+    let original = fixture.app.tab_manager.tabs.as_slice()[0]
+        .active_buffer()
+        .temp_id
+        .clone();
+    let path = fixture._directory.path().join("copy.txt");
+    assert!(FileController::save_copy_to_path(
+        &mut fixture.app,
+        0,
+        path.clone()
+    ));
+    wait_for_background_io(&mut fixture.app);
+    assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), "disk");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "local");
+    let source = fixture
+        .app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .flat_map(|t| t.buffers())
+        .find(|b| b.temp_id == original)
+        .unwrap();
+    assert_eq!(source.path.as_ref(), Some(&fixture.path));
+    assert!(source.is_dirty);
+    let copy = fixture
+        .app
+        .tab_manager
+        .active_tab()
+        .unwrap()
+        .active_buffer();
+    assert_ne!(copy.temp_id, original);
+    assert!(!copy.is_dirty);
+}

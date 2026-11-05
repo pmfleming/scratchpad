@@ -106,7 +106,7 @@ pub(super) fn collect(
         a.token
             .is_some()
             .cmp(&b.token.is_some())
-            .then_with(|| b.edited.cmp(&a.edited))
+            .then_with(|| b.edited.1.cmp(&a.edited.1))
             .then_with(|| a.label.cmp(&b.label))
     });
     (files, error)

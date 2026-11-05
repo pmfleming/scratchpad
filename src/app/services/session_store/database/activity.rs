@@ -16,7 +16,7 @@ impl Database {
             )
             .await?;
         }
-        let mut insert=self.conn.prepare_cached("INSERT INTO activity(global_seq,observed_at,kind,document_id,name,path) VALUES(?,?,?,?,?,?) ON CONFLICT(global_seq) DO NOTHING").await.map_err(error)?;
+        let mut insert=self.conn.prepare_cached("INSERT INTO activity(global_seq,observed_at,kind,document_id,name,path,search_text) VALUES(?,?,?,?,?,?,?) ON CONFLICT(global_seq) DO NOTHING").await.map_err(error)?;
         for event in events {
             let sequence = i64::try_from(event.sequence).map_err(invalid)?;
             let timestamp = i64::try_from(event.timestamp).map_err(invalid)?;
@@ -30,7 +30,13 @@ impl Database {
                     event.kind.key(),
                     event.document.as_str(),
                     event.name.as_str(),
-                    event.path.clone()
+                    event.path.clone(),
+                    format!(
+                        "{}\n{}",
+                        event.name,
+                        event.path.as_deref().unwrap_or_default()
+                    )
+                    .to_lowercase()
                 ])
                 .await
                 .map_err(error)?;

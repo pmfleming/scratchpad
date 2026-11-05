@@ -96,9 +96,12 @@ fn save_conflict_as_copy_command(
     tab_index: usize,
     view_id: ViewId,
 ) -> bool {
-    run_save_conflict_command(app, tab_index, view_id, |app, tab_index| {
-        crate::app::app_state::workspace_controller::save_file_as_at(app, tab_index)
-    })
+    run_save_conflict_command(
+        app,
+        tab_index,
+        view_id,
+        FileController::save_conflict_as_copy,
+    )
 }
 
 fn run_save_conflict_command(

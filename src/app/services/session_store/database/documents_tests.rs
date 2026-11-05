@@ -87,3 +87,93 @@ fn unchanged_closed_documents_are_never_rewritten_by_later_saves() {
         assert_eq!(db.read_history(&id).await.unwrap().len(), 1);
     });
 }
+
+#[test]
+fn warm_saves_do_not_read_unrelated_closed_layout_payloads() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let mut close = request(&[]);
+        close
+            .closed_tabs
+            .push(CapturedClosedTab::capture(&tab("closed"), None));
+        db.persist(close, 1).await.unwrap();
+        db.conn
+            .execute("UPDATE closed_tabs SET payload=x'00'", ())
+            .await
+            .unwrap();
+        // An unrelated corrupt archive is preserved; selecting it reports its error.
+        db.persist(request(&[tab("live")]), 2).await.unwrap();
+        assert!(db.closed_rows().await.is_err());
+    });
+}
+
+#[test]
+fn root_and_nonroot_references_are_constrained_and_layout_indexes_are_validated() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let live = tab("baseline");
+        let id = live.active_buffer().temp_id.clone();
+        db.persist(request(&[live]), 1).await.unwrap();
+        assert_eq!(
+            db.integer("SELECT count(*) FROM history_nodes WHERE node_id=0")
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(
+            db.conn
+                .execute("UPDATE document_history SET now_id=999", ())
+                .await
+                .is_err()
+        );
+        assert!(
+            db.conn
+                .execute("UPDATE history SET parent_id=998,seq=999", ())
+                .await
+                .is_err()
+        );
+        db.conn
+            .execute(
+                "DELETE FROM tab_documents WHERE document_id=?",
+                [id.as_str()],
+            )
+            .await
+            .unwrap();
+        assert!(db.load(ReadScope::Shells).await.is_err());
+    });
+}
+
+#[test]
+fn save_as_over_a_retained_path_transfers_lookup_without_reusing_the_replaced_tree() {
+    block_on(async {
+        let (root, mut db) = database().await;
+        let path = root.path().join("target.txt");
+        std::fs::write(&path, "").unwrap();
+        let mut source = tab("source");
+        let source_id = source.active_buffer().temp_id.clone();
+        let mut target = tab("");
+        target.active_buffer_mut().set_path(Some(path.clone()));
+        let old_id = target.active_buffer().temp_id.clone();
+        db.persist(request(&[source.clone(), target]), 1)
+            .await
+            .unwrap();
+        db.persist(request(&[source.clone()]), 2).await.unwrap();
+        source.active_buffer_mut().set_path(Some(path.clone()));
+        db.persist(request(&[source]), 3).await.unwrap();
+        let key = crate::app::CanonicalPathKey::from_path(&path);
+        assert_eq!(
+            db.retained_tab_by_path(key.as_str())
+                .await
+                .unwrap()
+                .unwrap()
+                .buffers[0]
+                .temp_id,
+            source_id
+        );
+        let old = db.read_document(&old_id).await.unwrap();
+        assert!(old.path.is_none());
+        assert!(old.is_dirty);
+        let (_, contents) = db.load_retained_document(&old_id).await.unwrap();
+        assert_eq!(contents[&old_id], "");
+    });
+}

@@ -57,6 +57,7 @@ pub(crate) struct PendingSessionHydrationAction {
 }
 
 pub(crate) struct PendingReloadBufferAction {
+    pub(crate) materialize_replacement: bool,
     pub(crate) expected_observed_digest: Option<String>,
     pub(crate) expected_missing: bool,
     pub(crate) expected_epoch: u64,
@@ -75,6 +76,7 @@ impl PendingReloadBufferAction {
         mode: PendingReloadMode,
     ) -> Option<Self> {
         Some(Self {
+            materialize_replacement: !buffer.is_dirty,
             expected_observed_digest: buffer.observed_disk_digest.clone(),
             expected_missing: buffer.observed_disk_missing,
             expected_epoch: 0,

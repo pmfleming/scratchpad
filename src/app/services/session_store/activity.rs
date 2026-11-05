@@ -83,6 +83,7 @@ pub(crate) fn record_installed(app: &mut ScratchpadApp, documents: &[String], ki
                 .flat_map(|tab| tab.buffers_mut())
                 .filter(|b| documents.contains(&b.temp_id))
             {
+                buffer.pending_reopen_original = None;
                 if let Some(node) = buffer.pending_reopen_external.take() {
                     buffer.document_mut().order_external_edit_after_open(node);
                 }

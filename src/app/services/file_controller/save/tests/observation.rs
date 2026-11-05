@@ -180,3 +180,67 @@ fn startup_conflict_is_durable_and_not_recorded_again_on_restart() {
     assert_eq!(b.freshness, BufferFreshness::ConflictOnDisk);
     assert!(app.state.persistence.pending_activity.is_empty());
 }
+
+#[test]
+fn timestamp_only_touch_is_ignored_but_same_size_new_contents_are_observed() {
+    use std::time::{Duration, UNIX_EPOCH};
+    let mut f = SavedBufferFixture::new("tracked.txt", "saved", "saved");
+    let b = f
+        .app
+        .tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut();
+    b.document_mut().replace_exact_with_history("local");
+    b.is_dirty = true;
+    let touch = |path: &std::path::Path, secs| {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(
+                std::fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(secs)),
+            )
+            .unwrap()
+    };
+    touch(&f.path, 1_700_000_000);
+    observe(&mut f);
+    assert_eq!(rows(&f, ActivityKind::DiskConflict), 0);
+    std::fs::write(&f.path, "other").unwrap();
+    touch(&f.path, 1_700_000_002);
+    observe(&mut f);
+    assert_eq!(rows(&f, ActivityKind::DiskConflict), 1);
+    assert_eq!(
+        f.app
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .text(),
+        "local"
+    );
+}
+
+#[test]
+fn explicit_reload_of_saved_text_discards_local_work_without_an_external_label() {
+    let mut f = SavedBufferFixture::new("tracked.txt", "saved", "saved");
+    let b = f
+        .app
+        .tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut();
+    b.document_mut().replace_exact_with_history("local");
+    b.is_dirty = true;
+    assert!(FileController::reload_buffer_from_disk(&mut f.app, 0));
+    wait_for_background_io(&mut f.app);
+    let b = f.app.tab_manager.active_tab().unwrap().active_buffer();
+    assert_eq!(b.text(), "saved");
+    assert_eq!(
+        b.document().history_entries().last().unwrap().source,
+        crate::app::domain::buffer::PieceSource::Load
+    );
+    let mut doc = b.document().clone();
+    doc.undo_last_operation().unwrap();
+    assert_eq!(doc.extract_text(), "local");
+}

@@ -89,3 +89,22 @@ fn zero_edit_timestamps_and_clock_changes_do_not_hide_or_reorder_activity() {
         assert!(page.rows[0].cursor > page.rows[1].cursor);
     });
 }
+
+#[test]
+fn retained_unicode_names_use_the_same_search_normalization_as_live_documents() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let mut live = tab("baseline");
+        live.active_buffer_mut().name = "ÉTÉ 東京.txt".into();
+        insert(&mut live, 0, "edited");
+        db.persist(request(&[live]), 1).await.unwrap();
+        let page = db.timeline_page(None, vec![], "été".into()).await.unwrap();
+        assert_eq!(page.rows.len(), 1);
+        let plan=db.query_collect("EXPLAIN QUERY PLAN SELECT global_seq,temp_id,seq FROM history WHERE global_seq<=42 ORDER BY global_seq DESC,temp_id DESC,seq DESC LIMIT 101",(),|row|row.get::<String>(3).map_err(error)).await.unwrap();
+        assert!(
+            !plan.iter().any(|line| line.contains("TEMP B-TREE")),
+            "{plan:?}"
+        );
+        eprintln!("timeline keyset plan: {plan:?}");
+    });
+}

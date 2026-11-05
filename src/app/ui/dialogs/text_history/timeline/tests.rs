@@ -213,3 +213,33 @@ fn informational_rows_are_static_and_keyboard_selection_skips_them() {
     h.run_steps(3);
     assert_eq!(text(h.state()), "two");
 }
+
+#[test]
+fn closing_or_persisting_preserves_loaded_pages_and_the_reading_anchor() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app(root.path());
+    let ctx = egui::Context::default();
+    let mut state = State::default();
+    state.refresh(&app, "", &ctx);
+    state.pending = None;
+    state.fetched = true;
+    state.next = None;
+    state.limit = 1;
+    let row = state.live.rows.values().next().unwrap().clone();
+    state.anchor = Some((row.id(), 3.0));
+    state.rebuild();
+    app.tab_manager.set_tabs(Vec::new(), 0);
+    state.refresh(&app, "", &ctx);
+    assert!(state.persisted.values().any(|r| r.id() == row.id()));
+    assert!(
+        state
+            .rows
+            .iter()
+            .any(|r| matches!(r,Row::Entry(r) if r.id()==row.id()))
+    );
+    assert!(state.offset >= 3.0);
+    app.state.persistence.session_store.invalidate_history();
+    state.refresh(&app, "", &ctx);
+    assert!(state.persisted.is_empty());
+    assert!(state.anchor.is_none());
+}

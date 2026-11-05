@@ -250,3 +250,57 @@ fn cold_reopen_preserves_identity_and_applies_disk_changes_when_hydrated() {
         .unwrap();
     assert_eq!(tab.active_buffer().text(), "unsaved");
 }
+
+#[test]
+fn path_claimed_during_reopen_keeps_the_original_tree_without_the_staged_external_edit() {
+    use crate::app::{
+        app_state::{
+            test_support::{test_app, wait_for_background_io},
+            workspace::lifecycle::install_archive,
+        },
+        domain::{BufferState, WorkspaceTab},
+        services::{file_service::FileService, session_manager},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("note.txt");
+    std::fs::write(&path, "saved").unwrap();
+    let mut app = test_app(root.path());
+    wait_for_background_io(&mut app);
+    let mut original =
+        FileService::buffer_from_observed(&path, FileService::read_observed_file(&path).unwrap());
+    original
+        .document_mut()
+        .replace_exact_with_history("unsaved");
+    original.is_dirty = true;
+    let id = original.temp_id.clone();
+    let history = original.document().history_entries().len();
+    app.tab_manager
+        .set_tabs(vec![WorkspaceTab::new(original)], 0);
+    session_manager::persist_session_now(&mut app).unwrap();
+    let store = app.state.persistence.session_store.clone();
+    app.tab_manager.set_tabs(vec![], 0);
+    session_manager::persist_session_now(&mut app).unwrap();
+    std::fs::write(&path, "external").unwrap();
+    let reopened = store
+        .reopen_target(super::RetainedTarget::Document(id.clone()), &[])
+        .unwrap();
+    let owner = WorkspaceTab::new(BufferState::new(
+        "owner".into(),
+        "owner".into(),
+        Some(path.clone()),
+    ));
+    app.tab_manager.set_tabs(vec![owner], 0);
+    assert!(install_archive(&mut app, reopened));
+    let b = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .flat_map(|t| t.buffers())
+        .find(|b| b.temp_id == id)
+        .unwrap();
+    assert_eq!(b.text(), "unsaved");
+    assert!(b.path.is_none());
+    assert_eq!(b.document().history_entries().len(), history);
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "external");
+}

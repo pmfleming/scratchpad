@@ -19,6 +19,7 @@ struct DocumentRows {
 #[derive(Default)]
 pub(super) struct LiveRows {
     pub rows: BTreeMap<TimelineCursor, TimelineRow>,
+    pub retired: BTreeMap<TimelineCursor, TimelineRow>,
     documents: HashMap<String, DocumentRows>,
     search: String,
 }
@@ -111,18 +112,26 @@ impl LiveRows {
         }
         loaded.sort();
         loaded.dedup();
+        changed |= self.retire_absent(&loaded);
+        (loaded, changed)
+    }
+
+    fn retire_absent(&mut self, loaded: &[String]) -> bool {
+        let mut changed = false;
         let live: HashSet<_> = loaded.iter().cloned().collect();
         self.documents.retain(|id, cache| {
             if live.contains(id) {
                 true
             } else {
                 for key in cache.keys.values() {
-                    self.rows.remove(key);
+                    if let Some(row) = self.rows.remove(key) {
+                        self.retired.insert(key.clone(), row);
+                    }
                 }
                 changed = true;
                 false
             }
         });
-        (loaded, changed)
+        changed
     }
 }

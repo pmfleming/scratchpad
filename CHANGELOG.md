@@ -11,13 +11,15 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Closing dirty work now offers **Close without saving** and retains its text in history. Save As Copy creates a separate document; ordinary Save As preserves identity. Timeline preserves older pages during saves and close/reopen handover, searches Unicode names consistently, and exposes static activity dates, paths and times to assistive technology.
+
 - Read and hash external file changes in the background. Dirty files keep their text and record one conflict observation per disk version; metadata-only touches produce no activity. Missing files record once and returning files are reconciled. Save waits for pending disk checks before offering conflict choices.
 - Replaced History's All files view with a paged, newest-first Timeline of retained edits. Selecting a closed file's edit opens that document and navigates its retained tree without saving historical text to disk. This file and the scrubber keep their per-document branch navigation.
 - Reopening a changed file now loads disk text into its retained edit tree, keeping earlier unsaved work reachable. Startup keeps dirty files at their paths with a disk-conflict flag and preserves clean files' history when loading external changes. Removed the two recovery-policy toggles; retained history is always used when reopening a path.
 - Session documents now retain their text and edit trees independently of open tabs and closed split layouts. Closing a file's final split view commits its retained state before removing the view. The new storage format requires the existing explicit fresh-session reset for older sessions.
 - Made History's Forget actions file-specific with a named confirmation, and fixed picker dismissal, caret preservation when selecting files, and selection of files reopened from split tabs.
 - Refined History labels, dates, operation icons, folder paths, selection indicators and contrast; kept visible rows stationary during navigation and sized confirmations without resizing the window.
-- Redesigned History with newest-first branch lanes, a searchable file picker, local edit times, readable whitespace labels, and a scroll-to-Now control. All files uses one scrolling list, includes only files with recorded history, and stays open when selecting a file.
+- Redesigned History with newest-first branch lanes, a searchable file picker, local edit times, readable whitespace labels, and a scroll-to-Now control. The branch tree remains available in This file; Timeline provides the cross-document activity view.
 - Redesigned the scrubber as a square, stable-width card with a wider live track, branch markers, step/start/end controls, and Open in History. Escape and resumed editing still dismiss it; history navigation and undo/redo behaviour are unchanged.
 - Undo, redo, History clicks, and the selected-branch scrubber share the same persisted position. Hover leaves text unchanged.
 - Removed saved-version snapshots and automatic history expiry. Forget history is explicit and per file.

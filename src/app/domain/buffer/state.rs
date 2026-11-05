@@ -50,6 +50,8 @@ pub struct BufferState {
     pub(crate) observed_disk_missing: bool,
     pub(crate) pending_disk_observation: bool,
     pub(crate) pending_reopen_external: Option<u64>,
+    pub(crate) pending_reopen_original: Option<Box<TextDocument>>,
+    pub(crate) loaded_replacement_text: Option<std::sync::Arc<String>>,
     pub freshness: BufferFreshness,
     pub active_selection: Option<Range<usize>>,
     pub has_non_compliant_characters: bool,
@@ -339,7 +341,7 @@ impl BufferState {
 
     pub(crate) fn replace_from_loaded_buffer_source(
         &mut self,
-        loaded: BufferState,
+        mut loaded: BufferState,
         source: super::PieceSource,
     ) {
         let id = self.id;
@@ -347,8 +349,12 @@ impl BufferState {
         let history = if self.is_loading_preview {
             None
         } else {
+            let text = loaded
+                .loaded_replacement_text
+                .take()
+                .unwrap_or_else(|| std::sync::Arc::new(loaded.document.extract_text()));
             self.document
-                .replace_exact_with_history_source(&loaded.document.extract_text(), source);
+                .replace_exact_with_history_source(&text, source);
             Some(self.document.clone())
         };
         *self = loaded;
@@ -497,6 +503,8 @@ impl BufferState {
             observed_disk_missing: false,
             pending_disk_observation: false,
             pending_reopen_external: None,
+            pending_reopen_original: None,
+            loaded_replacement_text: None,
             freshness: state.freshness,
             active_selection: None,
             has_non_compliant_characters: text_metadata.has_non_compliant_characters,

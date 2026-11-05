@@ -105,6 +105,14 @@ impl ScratchpadApp {
             return;
         }
         let observe = matches!(&action,PendingBackgroundAction::ReloadBuffer(load) if load.mode==crate::app::app_state::PendingReloadMode::ObserveDiskChange);
+        let disk_reload = matches!(&action, PendingBackgroundAction::ReloadBuffer(_));
+        let materialize = matches!(&action,PendingBackgroundAction::ReloadBuffer(load) if load.materialize_replacement || load.mode==crate::app::app_state::PendingReloadMode::ExplicitReload);
+        let observed_digest = match &action {
+            PendingBackgroundAction::ReloadBuffer(load) if observe => {
+                load.expected_observed_digest.clone()
+            }
+            _ => None,
+        };
         if let PendingBackgroundAction::ReloadBuffer(load) = &mut action {
             load.expected_epoch = self.state.persistence.session_store.history_epoch();
         }
@@ -138,8 +146,12 @@ impl ScratchpadApp {
                             session_store: self.state.persistence.session_store.clone(),
                             claimed: claimed.clone(),
                         }
-                    } else if observe {
-                        PathLoadRequest::Observed(path)
+                    } else if disk_reload {
+                        PathLoadRequest::Observed {
+                            path,
+                            materialize,
+                            observed_digest: observed_digest.clone(),
+                        }
                     } else {
                         PathLoadRequest::Standard(path)
                     }

@@ -59,7 +59,7 @@ fn persists_split_views_and_active_view() {
 }
 
 #[test]
-fn restored_clean_buffer_preserves_history_for_external_change_resolution() {
+fn restored_clean_buffer_loads_external_text_in_the_same_reversible_tree() {
     let directory = tempfile::tempdir().unwrap();
     let file_path = directory.path().join("tracked.txt");
     std::fs::write(&file_path, "session").unwrap();
@@ -73,6 +73,7 @@ fn restored_clean_buffer_preserves_history_for_external_change_resolution() {
         modified_millis: Some(1),
         len: 7,
     }));
+    let identity = buffer.temp_id.clone();
 
     store
         .persist(&[WorkspaceTab::new(buffer)], 0, 14.0, true)
@@ -80,11 +81,18 @@ fn restored_clean_buffer_preserves_history_for_external_change_resolution() {
     std::fs::write(&file_path, "disk").unwrap();
     let restored = store.load().unwrap().unwrap();
 
-    assert_eq!(restored.tabs[0].buffers.buffer.text(), "session");
+    let buffer = &restored.tabs[0].buffers.buffer;
+    assert_eq!(buffer.text(), "disk");
+    assert_eq!(buffer.temp_id, identity);
+    assert_eq!(buffer.freshness, BufferFreshness::InSync);
     assert_eq!(
-        restored.tabs[0].buffers.buffer.freshness,
-        BufferFreshness::ConflictOnDisk
+        buffer.document().history_entries().last().unwrap().source,
+        scratchpad::app::domain::PieceSource::External
     );
+    let mut document = buffer.document().clone();
+    document.undo_last_operation().unwrap();
+    assert_eq!(document.extract_text(), "session");
+    assert_eq!(std::fs::read_to_string(file_path).unwrap(), "disk");
 }
 
 #[test]

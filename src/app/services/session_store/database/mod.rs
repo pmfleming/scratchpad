@@ -60,23 +60,29 @@ const APPLICATION_ID: i64 = 0x5350_4350;
 const SCHEMA: &str = "
 CREATE TABLE session_state(id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL) STRICT;
 CREATE TABLE tabs(position INTEGER PRIMARY KEY, payload BLOB NOT NULL) STRICT;
-CREATE TABLE documents(id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', path TEXT, path_key TEXT,
+CREATE TABLE documents(id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', path TEXT, path_key TEXT, search_text TEXT NOT NULL DEFAULT '',
     payload BLOB NOT NULL DEFAULT x'7b7d', observed_digest TEXT, observed_missing INTEGER NOT NULL DEFAULT 0 CHECK(observed_missing IN (0,1))) STRICT;
 CREATE INDEX documents_path ON documents(path_key);
 CREATE TABLE activity(global_seq INTEGER PRIMARY KEY CHECK(global_seq>0), observed_at INTEGER NOT NULL,
     kind TEXT NOT NULL CHECK(kind IN ('created','opened','closed','disk_conflict','missing')),
-    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, name TEXT NOT NULL, path TEXT) STRICT;
+    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, name TEXT NOT NULL, path TEXT, search_text TEXT NOT NULL DEFAULT '') STRICT;
 CREATE INDEX activity_document_sequence ON activity(document_id,global_seq);
 CREATE TABLE tab_documents(position INTEGER NOT NULL REFERENCES tabs(position) ON DELETE CASCADE,
     document_id TEXT NOT NULL REFERENCES documents(id), PRIMARY KEY(position,document_id)) STRICT;
+CREATE TABLE history_nodes(temp_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    node_id INTEGER NOT NULL CHECK(node_id>=0), PRIMARY KEY(temp_id,node_id)) STRICT;
 CREATE TABLE history(temp_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
                      seq INTEGER NOT NULL, parent_id INTEGER NOT NULL CHECK(parent_id>=0 AND parent_id<seq), edited_at INTEGER NOT NULL, global_seq INTEGER NOT NULL CHECK(global_seq>0),
-                     source TEXT NOT NULL CHECK(source IN ('load','edit','paste','cut','search_replace','external')), summary TEXT NOT NULL, entry BLOB NOT NULL, bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0), PRIMARY KEY(temp_id, seq)) STRICT;
+                     source TEXT NOT NULL CHECK(source IN ('load','edit','paste','cut','search_replace','external')), summary TEXT NOT NULL, entry BLOB NOT NULL, bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0), PRIMARY KEY(temp_id, seq),
+                     FOREIGN KEY(temp_id,seq) REFERENCES history_nodes(temp_id,node_id) ON DELETE CASCADE,
+                     FOREIGN KEY(temp_id,parent_id) REFERENCES history_nodes(temp_id,node_id) ON DELETE CASCADE) STRICT;
 CREATE TABLE document_history(temp_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
-    now_id INTEGER NOT NULL CHECK(now_id>=0), tip_id INTEGER NOT NULL CHECK(tip_id>=0), edited_at INTEGER NOT NULL, edit_seq INTEGER NOT NULL) STRICT;
-CREATE INDEX document_recency ON document_history(edited_at DESC, edit_seq DESC);
+    now_id INTEGER NOT NULL CHECK(now_id>=0), tip_id INTEGER NOT NULL CHECK(tip_id>=0), edited_at INTEGER NOT NULL, edit_seq INTEGER NOT NULL,
+    FOREIGN KEY(temp_id,now_id) REFERENCES history_nodes(temp_id,node_id) ON DELETE CASCADE,
+    FOREIGN KEY(temp_id,tip_id) REFERENCES history_nodes(temp_id,node_id) ON DELETE CASCADE) STRICT;
+CREATE INDEX document_recency ON document_history(edit_seq DESC);
 CREATE INDEX history_parent ON history(temp_id, parent_id);
-CREATE INDEX history_global_seq ON history(global_seq);
+CREATE INDEX history_global_seq ON history(global_seq,temp_id,seq);
 CREATE INDEX history_document_sequence ON history(temp_id,global_seq,seq);
 CREATE INDEX history_sizes ON history(temp_id, bytes);
 CREATE TABLE snapshots(id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,

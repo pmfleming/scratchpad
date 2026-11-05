@@ -276,10 +276,17 @@ fn malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures() {
             let mut tabs = vec![tab("healthy"), tab("damaged")];
             insert(&mut tabs[1], 0, "history");
             db.persist(request(&tabs), 1).await.unwrap();
+            if sql.contains("SET seq") {
+                db.conn
+                    .execute("PRAGMA foreign_keys=OFF", ())
+                    .await
+                    .unwrap();
+            }
             db.conn
                 .execute(sql, [tabs[1].buffers.buffer.temp_id.as_str()])
                 .await
                 .unwrap();
+            db.conn.execute("PRAGMA foreign_keys=ON", ()).await.unwrap();
             assert!(
                 db.hydrate(request(&tabs).tabs.pop().unwrap().session_tab)
                     .await

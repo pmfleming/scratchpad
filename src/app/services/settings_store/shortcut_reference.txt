@@ -30,7 +30,7 @@
 #   Ctrl+Z / Ctrl+Y                Undo / redo (text field when focused)
 #   Escape                         Close search
 # History (while the history window is open):
-#   Ctrl+1 / Ctrl+2                Timeline / by-file view
-#   Up / Down                      Older / newer state in the selected file
-#   Ctrl+Shift+F                   Toggle following the restored buffer
-#   Ctrl+Shift+Delete              Clear history
+#   Up / Down, Home / End, Enter   Select edits in the current History view
+#                                  Timeline skips informational activity rows
+#   Escape                         Dismiss History, keeping the selected state
+#   Typing                         Return to the editor with the first character

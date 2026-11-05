@@ -27,7 +27,7 @@ impl HistoryRows {
                 let tip = rows.iter().find(|e| e.selected_tip).map_or(0, |e| e.id);
                 let last = rows
                     .iter()
-                    .filter(|e| e.edited_at != 0)
+                    .filter(|e| e.summary != "Initial contents")
                     .max_by_key(|e| e.global_seq);
                 (
                     now,

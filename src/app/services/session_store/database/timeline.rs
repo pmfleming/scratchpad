@@ -26,8 +26,8 @@ impl Database {
             "SELECT h.global_seq,h.temp_id,h.seq,h.edited_at,h.source,h.summary,d.name,d.path
              FROM history h JOIN documents d ON d.id=h.temp_id
              WHERE NOT (h.source='load' AND h.parent_id=0 AND h.edited_at=0 AND h.summary='Initial contents') AND h.temp_id NOT IN (SELECT value FROM json_each(?4))
-             AND (?5='' OR instr(lower(d.name),?5)>0 OR instr(lower(coalesce(d.path,'')),?5)>0)
-             AND (?7=1 OR h.global_seq<?1 OR (h.global_seq=?1 AND (h.temp_id<?2 OR (h.temp_id=?2 AND h.seq<?3))))
+             AND (?5='' OR instr(d.search_text,?5)>0)
+             AND h.global_seq<=?1 AND (?7=1 OR h.global_seq<?1 OR (h.global_seq=?1 AND (h.temp_id<?2 OR (h.temp_id=?2 AND h.seq<?3))))
              ORDER BY h.global_seq DESC,h.temp_id DESC,h.seq DESC LIMIT ?6",
             params![sequence,cursor.document.as_str(),node,loaded,search.to_lowercase(),(TIMELINE_PAGE_SIZE+1) as i64,i64::from(first)],
             |row| {
@@ -40,8 +40,8 @@ impl Database {
         // independently, then merge at most two pages of metadata here.
         rows.extend(self.query_collect(
             "SELECT a.global_seq,a.document_id,a.observed_at,a.kind,a.name,a.path FROM activity a JOIN documents d ON d.id=a.document_id
-             WHERE (?4='' OR instr(lower(a.name),?4)>0 OR instr(lower(coalesce(a.path,'')),?4)>0 OR instr(lower(d.name),?4)>0 OR instr(lower(coalesce(d.path,'')),?4)>0)
-             AND (?5=1 OR a.global_seq<?1 OR (a.global_seq=?1 AND (a.document_id<?2 OR (a.document_id=?2 AND 0<?3))))
+             WHERE (?4='' OR instr(a.search_text,?4)>0 OR instr(d.search_text,?4)>0)
+             AND a.global_seq<=?1 AND (?5=1 OR a.global_seq<?1 OR (a.global_seq=?1 AND (a.document_id<?2 OR (a.document_id=?2 AND 0<?3))))
              ORDER BY a.global_seq DESC,a.document_id DESC LIMIT ?6",
             params![sequence,cursor.document.as_str(),node,search.to_lowercase(),i64::from(first),(TIMELINE_PAGE_SIZE+1) as i64],
             |row| {

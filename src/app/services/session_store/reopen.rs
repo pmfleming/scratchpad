@@ -54,6 +54,7 @@ pub(super) fn restore_reopened(
                 buffer.disk_state = Some(observed.state.clone());
                 buffer.is_dirty = original.is_dirty;
                 if digest != baseline {
+                    let original_document = Box::new(buffer.document().clone());
                     let previous = buffer.document().history_now();
                     let loaded = FileService::buffer_from_observed(&path, observed);
                     buffer.replace_from_loaded_buffer_source(
@@ -62,6 +63,7 @@ pub(super) fn restore_reopened(
                     );
                     if buffer.document().history_now() != previous {
                         buffer.pending_reopen_external = Some(buffer.document().history_now());
+                        buffer.pending_reopen_original = Some(original_document);
                     }
                     buffer.show_control_chars = original.show_control_chars;
                     buffer.right_to_left_reading_order = original.right_to_left_reading_order;
