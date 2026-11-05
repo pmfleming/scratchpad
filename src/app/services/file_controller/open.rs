@@ -307,14 +307,50 @@ impl FileController {
     ) {
         let mut summary = action.accumulator;
         let mut tabs = Vec::with_capacity(shells.len());
+        let mut known_documents: std::collections::HashSet<_> = app
+            .tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .flat_map(|tab| tab.buffers())
+            .map(|buffer| buffer.temp_id.clone())
+            .collect();
+        let mut queued_paths = std::collections::HashSet::new();
         for shell in shells {
             Self::release_pending_open_path(app, &shell.path);
-            if app.tab_manager.find_tab_by_path(&shell.path).is_some() {
+            let path_key = crate::app::CanonicalPathKey::from_path(&shell.path);
+            if queued_paths.contains(&path_key)
+                || app.tab_manager.find_tab_by_path(&shell.path).is_some()
+            {
                 summary.record_outcome(OpenPathOutcome::AlreadyOpen);
                 continue;
             }
             match shell.result {
-                Ok((tab, cold_tab)) => {
+                Ok((mut tab, mut cold_tab)) => {
+                    if tab
+                        .buffers()
+                        .any(|buffer| known_documents.contains(&buffer.temp_id))
+                    {
+                        if let Some(buffer) = tab.buffers().find(|buffer| {
+                            buffer
+                                .path
+                                .as_ref()
+                                .is_some_and(|path| crate::app::paths_match(path, &shell.path))
+                        }) {
+                            let document = buffer.temp_id.clone();
+                            app.queue_retained_open(
+                                crate::app::services::session_store::RetainedTarget::Document(
+                                    document.clone(),
+                                ),
+                                Some(document),
+                                None,
+                            );
+                        }
+                        continue;
+                    }
+                    Self::recover_claimed_cold_paths(app, &mut tab, &mut cold_tab);
+                    known_documents.extend(tab.buffers().map(|buffer| buffer.temp_id.clone()));
+                    queued_paths.extend(tab.buffers().filter_map(|buffer| buffer.path_key.clone()));
                     tabs.push((tab, cold_tab));
                     summary.record_outcome(OpenPathOutcome::Opened {
                         artifact_warning: None,
@@ -331,8 +367,18 @@ impl FileController {
                 }
             }
         }
+        let documents: Vec<_> = tabs
+            .iter()
+            .flat_map(|(tab, _)| tab.buffers())
+            .map(|b| b.temp_id.clone())
+            .collect();
         let installed = !tabs.is_empty();
         app.tab_manager.append_cold_file_tabs(tabs);
+        crate::app::services::session_store::activity::record_installed(
+            app,
+            &documents,
+            crate::app::services::session_store::activity::ActivityKind::Opened,
+        );
         if installed {
             let index = app.tab_manager.tabs.len() - 1;
             app.tab_manager.set_active_tab_index_clamped(index);
@@ -343,6 +389,35 @@ impl FileController {
         }
         app.apply_current_tab_ordering();
         Self::finalize_cold_file_shell_open(app, summary);
+    }
+
+    fn recover_claimed_cold_paths(
+        app: &ScratchpadApp,
+        tab: &mut WorkspaceTab,
+        cold: &mut crate::app::services::session_store::ColdSessionTab,
+    ) {
+        for buffer in tab.buffers_mut() {
+            if buffer
+                .path_key
+                .as_ref()
+                .is_some_and(|key| app.tab_manager.path_owner(key).is_some())
+            {
+                buffer.recover_as_untitled("recovered");
+                if let Some(metadata) = cold
+                    .buffers
+                    .iter_mut()
+                    .find(|metadata| metadata.temp_id == buffer.temp_id)
+                {
+                    metadata.name.clone_from(&buffer.name);
+                    metadata.path = None;
+                    metadata.is_dirty = true;
+                    metadata.is_settings_file = false;
+                    metadata.disk_modified_millis = None;
+                    metadata.disk_len = None;
+                    metadata.disk_content_digest = None;
+                }
+            }
+        }
     }
 
     fn activate_workspace_after_staged_open(app: &mut ScratchpadApp) {
@@ -430,6 +505,9 @@ impl FileController {
         summary: &mut OpenBatchSummary,
         loaded: LoadedPathResult,
     ) {
+        if app.state.cancelled_loading_previews.remove(&loaded.path) {
+            return;
+        }
         Self::release_pending_open_path(app, &loaded.path);
         let preview = app
             .tab_manager
@@ -524,6 +602,12 @@ impl FileController {
                     return;
                 };
                 let deferred_refresh = Self::deferred_buffer_refresh(buffer);
+                let document = buffer.temp_id.clone();
+                crate::app::services::session_store::activity::record_installed(
+                    app,
+                    &[document],
+                    crate::app::services::session_store::activity::ActivityKind::Opened,
+                );
                 app.tab_manager.set_active_tab_index_clamped(tab_index);
                 Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
                 crate::app::app_state::search_runtime::mark_search_dirty(app);
@@ -548,7 +632,7 @@ impl FileController {
     pub(crate) fn finalize_open_tabs(app: &mut ScratchpadApp, action: PendingOpenTabsAction) {
         let summary = action.accumulator;
         if summary.opened_count > 0 {
-            let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+            app.tab_manager.mark_session_dirty();
         }
 
         Self::apply_open_summary(app, summary);

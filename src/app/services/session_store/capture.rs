@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT_CAPTURE: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) struct SessionPersistRequest {
+    pub(crate) activity: Vec<super::activity::ActivityEvent>,
+    pub(crate) forgotten: Vec<(String, u64)>,
     pub(super) generation: u64,
     pub(super) active_tab_index: usize,
     pub(super) active_surface: SessionActiveSurface,
@@ -18,11 +20,19 @@ pub(crate) struct SessionPersistRequest {
     pub(super) removed_documents: Vec<String>,
 }
 
+#[derive(Clone, Default)]
+pub(crate) struct SessionCaptureAck {
+    pub closed_tokens: Vec<String>,
+    pub activity_sequences: Vec<u64>,
+    pub forgotten: Vec<(String, u64)>,
+}
+
 #[derive(Clone)]
 pub(crate) struct CapturedClosedTab {
     pub(crate) token: String,
     pub(super) closed_at: i64,
     pub(super) tab: CapturedSessionTab,
+    pub(super) discarded_documents: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -40,6 +50,13 @@ pub(super) struct CapturedSessionBuffer {
 }
 
 impl SessionPersistRequest {
+    pub(crate) fn acknowledgement(&self) -> SessionCaptureAck {
+        SessionCaptureAck {
+            closed_tokens: self.closed_tabs.iter().map(|c| c.token.clone()).collect(),
+            activity_sequences: self.activity.iter().map(|e| e.sequence).collect(),
+            forgotten: self.forgotten.clone(),
+        }
+    }
     pub(crate) fn close_view(
         &mut self,
         tabs: &[WorkspaceTab],
@@ -59,8 +76,7 @@ impl SessionPersistRequest {
         }
         self.tabs[index] = CapturedSessionTab::capture(&remaining);
         if let Some(buffer) = removed {
-            self.closed_tabs
-                .push(CapturedClosedTab::capture(&WorkspaceTab::new(buffer), None));
+            self.add_close(CapturedClosedTab::capture(&WorkspaceTab::new(buffer), None));
         }
         true
     }
@@ -71,6 +87,59 @@ impl SessionPersistRequest {
             .active_tab_index
             .saturating_sub(usize::from(index < self.active_tab_index))
             .min(self.tabs.len().saturating_sub(1));
+        self.add_close(closed);
+    }
+
+    fn add_close(&mut self, mut closed: CapturedClosedTab) {
+        use super::activity::{ActivityEvent, ActivityKind};
+        self.removed_documents
+            .append(&mut closed.discarded_documents);
+        let discarded: std::collections::HashSet<_> = self.removed_documents.iter().collect();
+        closed
+            .tab
+            .session_tab
+            .buffers
+            .retain(|b| !discarded.contains(&b.temp_id));
+        closed
+            .tab
+            .buffer_snapshots
+            .retain(|b| !discarded.contains(&b.temp_id));
+        if closed.tab.session_tab.buffers.is_empty() {
+            return;
+        }
+        let buffer_ids: std::collections::HashSet<_> = closed
+            .tab
+            .session_tab
+            .buffers
+            .iter()
+            .map(|b| b.id)
+            .collect();
+        closed
+            .tab
+            .session_tab
+            .views
+            .retain(|v| buffer_ids.contains(&v.buffer_id));
+        let views: std::collections::HashSet<_> =
+            closed.tab.session_tab.views.iter().map(|v| v.id).collect();
+        let mut pane = crate::app::domain::PaneNode::from(closed.tab.session_tab.root_pane.clone());
+        pane.retain_views(&views);
+        closed.tab.session_tab.root_pane = SessionPaneNode::from(&pane);
+        if !views.contains(&closed.tab.session_tab.active_view_id) {
+            closed.tab.session_tab.active_view_id = pane.first_view_id();
+        }
+        for buffer in &closed.tab.session_tab.buffers {
+            self.activity.push(ActivityEvent {
+                sequence: crate::app::domain::buffer::next_text_history_global_seq(),
+                timestamp: closed.closed_at as u64,
+                kind: ActivityKind::Closed,
+                document: buffer.temp_id.clone(),
+                name: buffer.name.clone(),
+                path: buffer
+                    .path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned()),
+            });
+        }
         self.closed_tabs.push(closed);
     }
 
@@ -81,6 +150,8 @@ impl SessionPersistRequest {
         word_wrap: bool,
     ) -> Self {
         Self {
+            activity: Vec::new(),
+            forgotten: Vec::new(),
             generation: NEXT_CAPTURE.fetch_add(1, Ordering::Relaxed),
             active_tab_index,
             active_surface: SessionActiveSurface::Workspace,
@@ -101,6 +172,8 @@ impl SessionPersistRequest {
         word_wrap: bool,
     ) -> Self {
         Self {
+            activity: Vec::new(),
+            forgotten: Vec::new(),
             generation: NEXT_CAPTURE.fetch_add(1, Ordering::Relaxed),
             active_tab_index,
             active_surface,
@@ -152,6 +225,28 @@ impl CapturedClosedTab {
             ),
             closed_at: now.as_secs().min(i64::MAX as u64) as i64,
             tab: captured,
+            discarded_documents: if cold.is_none() {
+                tab.buffers()
+                    .filter(|b| {
+                        b.is_loading_preview
+                            || (b.path.is_none()
+                                && b.document().history_entries().is_empty()
+                                && b.document().piece_tree().len_chars() == 0)
+                    })
+                    .map(|b| b.temp_id.clone())
+                    .collect()
+            } else {
+                cold.into_iter()
+                    .flat_map(|tab| &tab.buffers)
+                    .filter(|buffer| {
+                        buffer.path.is_none()
+                            && !buffer.is_dirty
+                            && buffer.text_is_empty
+                            && !buffer.has_recorded_edits
+                    })
+                    .map(|buffer| buffer.temp_id.clone())
+                    .collect()
+            },
         }
     }
 }

@@ -1,3 +1,4 @@
+pub(crate) mod activity;
 mod capture;
 mod database;
 mod model;
@@ -25,7 +26,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
-pub(crate) use capture::{CapturedClosedTab, SessionPersistRequest, cold_tab_from_workspace_tab};
+pub(crate) use capture::{
+    CapturedClosedTab, SessionCaptureAck, SessionPersistRequest, cold_tab_from_workspace_tab,
+};
 pub use database::SessionMaintenanceFixture;
 pub use retained::ClosedTabInfo;
 mod reopen;
@@ -44,6 +47,7 @@ pub struct SessionStore {
     root: PathBuf,
     worker: Arc<OnceLock<Result<DatabaseWorker, String>>>,
     history_epoch: Arc<AtomicU64>,
+    commit_epoch: Arc<AtomicU64>,
 }
 impl Default for SessionStore {
     fn default() -> Self {
@@ -57,6 +61,7 @@ impl SessionStore {
             root,
             worker: Arc::new(OnceLock::new()),
             history_epoch: Arc::new(AtomicU64::new(0)),
+            commit_epoch: Arc::new(AtomicU64::new(0)),
         }
     }
     #[must_use]
@@ -66,6 +71,9 @@ impl SessionStore {
 
     pub(crate) fn history_epoch(&self) -> u64 {
         self.history_epoch.load(Ordering::Acquire)
+    }
+    pub(crate) fn commit_epoch(&self) -> u64 {
+        self.commit_epoch.load(Ordering::Acquire)
     }
     pub(crate) fn invalidate_history(&self) {
         self.history_epoch.fetch_add(1, Ordering::AcqRel);
@@ -262,10 +270,19 @@ impl SessionStore {
         &self,
         request: SessionPersistRequest,
     ) -> io::Result<SessionPersistProfile> {
+        let invalidates = !request.removed_documents.is_empty() || !request.forgotten.is_empty();
         self.worker()?
             .call(move |db| {
                 let generation = request.generation;
                 block_on(db.persist(request, generation))
+            })
+            .inspect(|profile| {
+                if profile.manifest_write_ns > 0 {
+                    self.commit_epoch.fetch_add(1, Ordering::AcqRel);
+                    if invalidates {
+                        self.invalidate_history();
+                    }
+                }
             })
             .inspect_err(|error| {
                 diagnostics::record_io_error(

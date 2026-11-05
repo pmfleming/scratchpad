@@ -107,6 +107,8 @@ pub(crate) struct SessionBuffer {
     pub name: String,
     pub path: Option<PathBuf>,
     pub is_dirty: bool,
+    pub text_is_empty: bool,
+    pub has_recorded_edits: bool,
     #[serde(default)]
     pub is_settings_file: bool,
     #[serde(default)]
@@ -154,6 +156,12 @@ impl SessionBuffer {
             name: buffer.name.clone(),
             path: buffer.path.clone(),
             is_dirty: buffer.is_dirty,
+            text_is_empty: buffer.document().piece_tree().len_chars() == 0,
+            has_recorded_edits: buffer
+                .document()
+                .history_entries()
+                .iter()
+                .any(|entry| entry.summary != "Initial contents"),
             is_settings_file: buffer.is_settings_file,
             show_control_chars: buffer.show_control_chars,
             right_to_left_reading_order: buffer.right_to_left_reading_order,

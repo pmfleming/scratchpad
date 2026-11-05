@@ -67,6 +67,96 @@ fn large_file_stages_first_visible_window_before_background_hydration() {
 }
 
 #[test]
+fn cold_batch_reopening_both_paths_of_a_split_installs_each_document_once() {
+    use crate::app::services::session_store::{CapturedClosedTab, SessionPersistRequest};
+    let root = tempfile::tempdir().unwrap();
+    let paths: Vec<_> = (0..4)
+        .map(|i| {
+            let path = root.path().join(format!("cold_{i}.txt"));
+            std::fs::write(&path, "one").unwrap();
+            path
+        })
+        .collect();
+    let mut app = test_app(root.path(), vec![WorkspaceTab::untitled()]);
+    let load = |path: &std::path::Path| {
+        FileService::build_buffer_from_file_content(
+            path,
+            FileService::read_file(path).unwrap(),
+            Some(FileService::read_disk_state(path).unwrap()),
+        )
+    };
+    let first = load(&paths[0]);
+    let second = load(&paths[1]);
+    let ids = [first.temp_id.clone(), second.temp_id.clone()];
+    let mut split = WorkspaceTab::new(first);
+    split
+        .open_buffer_as_split(second, crate::app::domain::SplitAxis::Vertical, true, 0.5)
+        .unwrap();
+    let mut save = SessionPersistRequest::capture(app.tab_manager.tabs.as_slice(), 0, 16.0, false);
+    save.closed_tabs
+        .push(CapturedClosedTab::capture(&split, None));
+    app.state
+        .persistence
+        .session_store
+        .persist_request(save)
+        .unwrap();
+    FileController::open_paths(&mut app, paths);
+    wait_for_background_io(&mut app);
+    for id in ids {
+        assert_eq!(
+            app.tab_manager
+                .tabs
+                .as_slice()
+                .iter()
+                .flat_map(|tab| tab.buffers())
+                .filter(|buffer| buffer.temp_id == id)
+                .count(),
+            1
+        );
+    }
+    assert_eq!(
+        app.state
+            .persistence
+            .pending_activity
+            .iter()
+            .filter(|event| event.kind
+                == crate::app::services::session_store::activity::ActivityKind::Opened)
+            .count(),
+        4
+    );
+}
+
+#[test]
+fn closing_a_loading_preview_cancels_its_open_without_recording_lifecycle_activity() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("large.txt");
+    std::fs::write(&path, "first visible then fully hydrated").unwrap();
+    let mut app = test_app(root.path(), vec![WorkspaceTab::untitled()]);
+    FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
+    assert!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .is_loading_preview
+    );
+    let index = app.tab_manager.active_tab_index;
+    crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, index);
+    wait_for_background_io(&mut app);
+    assert!(app.tab_manager.find_tab_by_path(&path).is_none());
+    assert!(app.state.persistence.pending_activity.is_empty());
+    assert!(
+        app.state
+            .persistence
+            .session_store
+            .timeline_page(None, vec![], String::new())
+            .unwrap()
+            .rows
+            .is_empty()
+    );
+}
+
+#[test]
 fn large_open_batch_hydrates_most_recent_tab_in_background() {
     let directory = tempfile::tempdir().unwrap();
     let paths = (0..super::LAZY_OPEN_BATCH_THRESHOLD)

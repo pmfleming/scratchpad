@@ -140,7 +140,7 @@ fn recently_closed_menu_has_single_action_rows_and_reopens_retained_and_disk_ent
             .click_accesskit();
         harness.run_steps(2);
         wait_for_background_io(harness.state_mut());
-        let app = harness.state();
+        let app = harness.state_mut();
         let recovered = app
             .tab_manager
             .tabs
@@ -156,6 +156,7 @@ fn recently_closed_menu_has_single_action_rows_and_reopens_retained_and_disk_ent
         assert!(!recovered.is_settings_file);
         assert!(recovered.disk_state.is_none());
         assert!(recovered.disk_content_digest.is_none());
+        crate::app::services::session_manager::persist_session_now(app).unwrap();
         assert!(
             app.state
                 .persistence

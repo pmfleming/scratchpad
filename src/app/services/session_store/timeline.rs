@@ -14,9 +14,15 @@ pub(crate) struct TimelineCursor {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct TimelineId {
-    pub document: String,
-    pub node: u64,
+pub(crate) enum TimelineId {
+    Edit { document: String, node: u64 },
+    Activity(u64),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TimelineKind {
+    Edit(PieceSource),
+    Activity(super::activity::ActivityKind),
 }
 
 #[derive(Clone, Debug)]
@@ -26,18 +32,41 @@ pub(crate) struct TimelineRow {
     pub name: String,
     pub path: Option<String>,
     pub summary: String,
-    pub source: PieceSource,
+    pub kind: TimelineKind,
 }
 
 impl TimelineRow {
     pub fn id(&self) -> TimelineId {
-        TimelineId {
-            document: self.cursor.document.clone(),
-            node: self.cursor.node,
+        match self.kind {
+            TimelineKind::Edit(_) => TimelineId::Edit {
+                document: self.cursor.document.clone(),
+                node: self.cursor.node,
+            },
+            TimelineKind::Activity(_) => TimelineId::Activity(self.cursor.sequence),
         }
+    }
+    pub fn node(&self) -> Option<u64> {
+        matches!(self.kind, TimelineKind::Edit(_)).then_some(self.cursor.node)
     }
     pub fn label(&self) -> &str {
         self.path.as_deref().unwrap_or(&self.name)
+    }
+}
+
+impl super::activity::ActivityEvent {
+    pub fn timeline_row(&self) -> TimelineRow {
+        TimelineRow {
+            cursor: TimelineCursor {
+                sequence: self.sequence,
+                document: self.document.clone(),
+                node: 0,
+            },
+            timestamp: self.timestamp,
+            name: self.name.clone(),
+            path: self.path.clone(),
+            summary: self.kind.label().into(),
+            kind: TimelineKind::Activity(self.kind),
+        }
     }
 }
 

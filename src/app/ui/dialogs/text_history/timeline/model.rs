@@ -97,7 +97,7 @@ impl LiveRows {
                                 name: buffer.name.clone(),
                                 path: path.clone(),
                                 summary: entry.summary.clone(),
-                                source: entry.source,
+                                    kind: crate::app::services::session_store::timeline::TimelineKind::Edit(entry.source),
                             },
                         );
                     }

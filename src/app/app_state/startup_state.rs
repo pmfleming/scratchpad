@@ -106,6 +106,8 @@ impl ScratchpadApp {
                     session_restore_failed: false,
                     session_reset: None,
                     pending_closed_tabs: Vec::new(),
+                    pending_activity: Vec::new(),
+                    pending_history_forgets: std::collections::HashMap::new(),
                     last_session_persist: Instant::now(),
                 },
                 user_manual_path: manual_files::resolve_user_manual_path(),
@@ -118,6 +120,7 @@ impl ScratchpadApp {
                     crate::app::app_state::workspace::display_tabs::WorkspaceSelectionState::default(
                     ),
                 pending_open_file_paths: HashSet::new(),
+                cancelled_loading_previews: HashSet::new(),
                 pending_open_file_dialog: None,
                 recently_closed_files: VecDeque::default(),
                 workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,

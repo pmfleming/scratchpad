@@ -54,6 +54,7 @@ pub(super) fn restore_reopened(
                 buffer.disk_state = FileService::read_disk_state(&path).ok();
                 buffer.is_dirty = original.is_dirty;
                 if digest != baseline {
+                    let previous = buffer.document().history_now();
                     let loaded = FileService::build_buffer_from_file_content(
                         &path,
                         file,
@@ -63,6 +64,9 @@ pub(super) fn restore_reopened(
                         loaded,
                         crate::app::domain::buffer::PieceSource::External,
                     );
+                    if buffer.document().history_now() != previous {
+                        buffer.pending_reopen_external = Some(buffer.document().history_now());
+                    }
                     buffer.show_control_chars = original.show_control_chars;
                     buffer.right_to_left_reading_order = original.right_to_left_reading_order;
                     buffer.is_settings_file = original.is_settings_file;

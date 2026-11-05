@@ -499,10 +499,7 @@ impl ScratchpadApp {
         };
         match result {
             Ok(()) => {
-                self.state
-                    .persistence
-                    .pending_closed_tabs
-                    .retain(|closed| !action.closed_tokens.contains(&closed.token));
+                session_manager::acknowledge_capture(self, &action.acknowledgement);
                 self.state.persistence.last_session_persist = Instant::now();
             }
             Err(error) => {

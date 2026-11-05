@@ -32,6 +32,7 @@ fn ordinary_open_restores_archived_unsaved_text_and_undo_history() {
     assert!(buffer.is_dirty);
     assert_eq!(buffer.document().operation_undo_depth(), 2);
     assert_eq!(std::fs::read_to_string(path).unwrap(), "original");
+    session_manager::persist_session_now(&mut app).unwrap();
     assert!(
         app.state
             .persistence
@@ -147,6 +148,7 @@ fn retained_workspace_reopens_with_undo_and_recovers_versions_without_overwritin
     assert_eq!(reopened.temp_id, id);
     assert_eq!(reopened.text(), "external change");
     assert!(!reopened.is_dirty);
+    session_manager::persist_session_now(&mut app).unwrap();
     assert!(store.closed_tabs().unwrap().is_empty());
     let count = app.tab_manager.tabs.len();
     workspace_controller::reopen_archived_tab(&mut app, token);

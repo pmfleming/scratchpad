@@ -32,6 +32,8 @@ struct Prepared {
     snapshots: Vec<CapturedSessionBuffer>,
     buffers: HashMap<String, RecoveryBuffer>,
     removed_documents: Vec<String>,
+    activity: Vec<super::super::activity::ActivityEvent>,
+    forgotten: Vec<String>,
     full_cleanup: bool,
     closed: Vec<super::closed::ClosedRow>,
     closed_changed: bool,
@@ -56,8 +58,13 @@ impl Prepared {
         let mut prepared = Self {
             state: serde_json::to_vec(&manifest).map_err(invalid)?,
             removed_documents: request.removed_documents,
+            activity: request.activity,
+            forgotten: request.forgotten.into_iter().map(|(id, _)| id).collect(),
             ..Self::default()
         };
+        prepared
+            .activity
+            .retain(|event| !prepared.removed_documents.contains(&event.document));
         for tab in request.tabs {
             let (payload, _) = prepared.push_tab(tab)?;
             prepared.tabs.push(payload);
@@ -301,6 +308,8 @@ impl Database {
 
     fn has_changes(&self, prepared: &Prepared) -> bool {
         prepared.full_cleanup
+            || !prepared.activity.is_empty()
+            || !prepared.forgotten.is_empty()
             || !prepared.removed_documents.is_empty()
             || prepared.closed_changed
             || !prepared.snapshots.is_empty()
@@ -388,6 +397,8 @@ impl Database {
         profile.manifest_write_ns = start.elapsed().as_nanos();
         let start = Instant::now();
         self.delete_stale_content(prepared, inventory, removed_digests)
+            .await?;
+        self.write_activity(&prepared.activity, &prepared.forgotten)
             .await?;
         profile.stale_cleanup_ns = start.elapsed().as_nanos();
         Ok(())

@@ -1,4 +1,7 @@
 //! Local-only transactional session storage. All access belongs to one worker.
+mod activity;
+#[cfg(test)]
+mod activity_tests;
 #[cfg(test)]
 mod app_safety_tests;
 mod chunking;

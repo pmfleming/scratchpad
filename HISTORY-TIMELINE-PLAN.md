@@ -15,7 +15,12 @@ opening of a selected closed document. Turso's UNION probe showed a sorter, so t
 combined activity feed will use limited source queries and merge their results.
 Validation: 625 library tests passed (6 ignored), the final UI-focused pass passed
 25 tests (1 ignored), and all-feature library Clippy/formatting passed.
-Stages 4–6 remain.
+Stage 4 is complete: transactional lifecycle activity, capture-specific
+acknowledgements, informational rows, pending-event projection and deduplication,
+blank untitled cleanup, cancellation of loading previews, and split/cold-shell
+installation guards. Opens use the normal session durability boundary. Validation:
+636 library tests passed (6 ignored), all-feature library Clippy and formatting
+passed. Stages 5–6 remain.
 
 Replace History's **All files** view with **Timeline**, showing recorded text
 changes, file opens, file closes, and external changes discovered by Scratchpad.

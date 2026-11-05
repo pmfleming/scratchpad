@@ -43,11 +43,12 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
         return Ok(());
     }
     let request = capture_session(app);
+    let acknowledgement = request.acknowledgement();
     app.state
         .persistence
         .session_store
         .persist_request(request)?;
-    app.state.persistence.pending_closed_tabs.clear();
+    acknowledge_capture(app, &acknowledgement);
     app.tab_manager.clear_session_dirty();
     app.state.persistence.last_session_persist = Instant::now();
     Ok(())
@@ -73,11 +74,12 @@ pub(crate) fn persist_tab_close(app: &mut ScratchpadApp, index: usize) -> std::i
     );
     let mut request = capture_session(app);
     request.close_tab(index, closed);
+    let acknowledgement = request.acknowledgement();
     app.state
         .persistence
         .session_store
         .persist_request(request)?;
-    app.state.persistence.pending_closed_tabs.clear();
+    acknowledge_capture(app, &acknowledgement);
     Ok(())
 }
 
@@ -94,6 +96,39 @@ fn capture_session(app: &ScratchpadApp) -> SessionPersistRequest {
         .closed_tabs
         .clone_from(&app.state.persistence.pending_closed_tabs);
     request
+        .activity
+        .clone_from(&app.state.persistence.pending_activity);
+    request.forgotten = app
+        .state
+        .persistence
+        .pending_history_forgets
+        .iter()
+        .map(|(id, epoch)| (id.clone(), *epoch))
+        .collect();
+    request
+}
+
+pub(crate) fn acknowledge_capture(
+    app: &mut ScratchpadApp,
+    ack: &crate::app::services::session_store::SessionCaptureAck,
+) {
+    let sequences: std::collections::HashSet<_> = ack.activity_sequences.iter().copied().collect();
+    app.state
+        .persistence
+        .pending_activity
+        .retain(|event| !sequences.contains(&event.sequence));
+    app.state
+        .persistence
+        .pending_closed_tabs
+        .retain(|closed| !ack.closed_tokens.contains(&closed.token));
+    app.state
+        .persistence
+        .pending_history_forgets
+        .retain(|id, epoch| {
+            !ack.forgotten
+                .iter()
+                .any(|(saved_id, saved_epoch)| saved_id == id && saved_epoch == epoch)
+        });
 }
 
 /// Retain a final view's document and the remaining layout in the same commit.
@@ -114,11 +149,12 @@ pub(crate) fn persist_view_close(
     ) {
         return Err(std::io::Error::other("view is no longer open"));
     }
+    let acknowledgement = request.acknowledgement();
     app.state
         .persistence
         .session_store
         .persist_request(request)?;
-    app.state.persistence.pending_closed_tabs.clear();
+    acknowledge_capture(app, &acknowledgement);
     Ok(())
 }
 

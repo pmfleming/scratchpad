@@ -95,10 +95,19 @@ impl FileController {
             return Vec::new();
         };
 
+        let documents: Vec<_> = pending_workspace
+            .buffers()
+            .map(|b| b.temp_id.clone())
+            .collect();
         if !Self::attach_open_here_workspace(app, anchor_view_id, pending_workspace) {
             return Self::failed_open_here_outcomes(log_entries.len());
         }
 
+        crate::app::services::session_store::activity::record_installed(
+            app,
+            &documents,
+            crate::app::services::session_store::activity::ActivityKind::Opened,
+        );
         Self::queue_deferred_buffer_refreshes(app, deferred_refreshes);
         log_entries
             .into_iter()
@@ -175,7 +184,6 @@ impl FileController {
         }
 
         app.tab_manager.mark_session_dirty();
-        let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
     }
 
     fn find_existing_open_here_path(
@@ -315,8 +323,10 @@ impl FileController {
         pending_workspace: WorkspaceTab,
     ) -> bool {
         let opened = if let Some(tab) = app.tab_manager.active_tab_mut() {
-            if let Some(anchor_view_id) = anchor_view_id {
-                let _ = tab.activate_view(anchor_view_id);
+            if let Some(anchor_view_id) = anchor_view_id
+                && !tab.activate_view(anchor_view_id)
+            {
+                return false;
             }
             tab.combine_with_tab(pending_workspace, SplitAxis::Vertical, false, 0.5)
                 .is_some()

@@ -149,6 +149,7 @@ fn selecting_a_closed_edit_loads_one_document_then_seeks_without_writing_the_fil
     assert_eq!(buffer.text(), "unsaved");
     assert_eq!(app.tab_manager.active_tab().unwrap().buffers().count(), 1);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "external");
+    crate::app::services::session_manager::persist_session_now(&mut app).unwrap();
     assert!(
         app.state
             .persistence
@@ -176,7 +177,39 @@ fn viewport_anchor_stays_on_its_row_when_new_activity_arrives() {
     let index = state
         .rows
         .iter()
-        .position(|r| matches!(r,Row::Edit(r) if r.id()==row.id()))
+        .position(|r| matches!(r,Row::Entry(r) if r.id()==row.id()))
         .unwrap();
     assert_eq!(state.offset, index as f32 * ROW_HEIGHT + 7.0);
+}
+
+#[test]
+fn informational_rows_are_static_and_keyboard_selection_skips_them() {
+    use crate::app::services::session_store::activity::{ActivityEvent, ActivityKind};
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app(root.path());
+    let event = ActivityEvent::new(
+        ActivityKind::Opened,
+        app.tab_manager.active_tab().unwrap().active_buffer(),
+    );
+    app.state.persistence.pending_activity.push(event);
+    let mut h = harness(app);
+    h.run_steps(3);
+    h.get_by_label("Timeline").click();
+    h.run_steps(3);
+    assert!(
+        h.query_by_role_and_label(egui::accesskit::Role::Button, "Opened · note.txt")
+            .is_none()
+    );
+    h.get_by_label("Opened · note.txt").hover();
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "two");
+    h.get_by_label("Opened · note.txt").click();
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "two");
+    h.key_press(egui::Key::End);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "one");
+    h.key_press(egui::Key::Home);
+    h.run_steps(3);
+    assert_eq!(text(h.state()), "two");
 }

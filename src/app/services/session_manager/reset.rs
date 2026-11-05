@@ -5,6 +5,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 pub(crate) struct PendingSessionReset {
     receiver: Receiver<(SessionStore, Result<PathBuf, String>)>,
+    acknowledgement: crate::app::services::session_store::SessionCaptureAck,
 }
 
 pub(crate) fn start_new_session(app: &mut ScratchpadApp, ctx: &egui::Context) {
@@ -15,6 +16,7 @@ pub(crate) fn start_new_session(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
     let request = capture_session(app);
+    let acknowledgement = request.acknowledgement();
     let mut store = app.state.persistence.session_store.clone();
     let (sender, receiver) = mpsc::channel();
     let ctx = ctx.clone();
@@ -27,7 +29,12 @@ pub(crate) fn start_new_session(app: &mut ScratchpadApp, ctx: &egui::Context) {
             let _ = sender.send((store, result));
             ctx.request_repaint();
         }) {
-        Ok(_) => app.state.persistence.session_reset = Some(PendingSessionReset { receiver }),
+        Ok(_) => {
+            app.state.persistence.session_reset = Some(PendingSessionReset {
+                receiver,
+                acknowledgement,
+            });
+        }
         Err(error) => report_reset_failure(app, error.to_string()),
     }
 }
@@ -44,11 +51,12 @@ pub(crate) fn poll_session_reset(app: &mut ScratchpadApp) {
             result
         }
     };
+    let acknowledgement = pending.acknowledgement.clone();
     app.state.persistence.session_reset = None;
     match result {
         Ok(backup) => {
             app.state.persistence.session_restore_failed = false;
-            app.state.persistence.pending_closed_tabs.clear();
+            super::acknowledge_capture(app, &acknowledgement);
             app.state.persistence.last_session_persist = Instant::now();
             // Edits made while the reset was running must still be saved.
             app.tab_manager.mark_session_dirty();

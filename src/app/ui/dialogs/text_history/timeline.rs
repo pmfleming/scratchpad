@@ -8,7 +8,9 @@ use crate::app::{
     app_state::ScratchpadApp,
     services::session_store::{
         SessionStore,
-        timeline::{TIMELINE_PAGE_SIZE, TimelineCursor, TimelineId, TimelinePage, TimelineRow},
+        timeline::{
+            TIMELINE_PAGE_SIZE, TimelineCursor, TimelineId, TimelineKind, TimelinePage, TimelineRow,
+        },
     },
     theme,
     ui::widget_ids,
@@ -25,19 +27,22 @@ type PendingPage = Arc<Mutex<Option<Result<TimelinePage, String>>>>;
 #[derive(Clone, PartialEq, Eq)]
 struct Source {
     loaded: Vec<String>,
+    opened: Vec<String>,
     search: String,
     epoch: u64,
+    commit: u64,
 }
 
 enum Row {
     Date(String),
-    Edit(TimelineRow),
+    Entry(TimelineRow),
 }
 
 struct State {
     live: model::LiveRows,
     source: Option<Source>,
     persisted: BTreeMap<TimelineCursor, TimelineRow>,
+    overlay: BTreeMap<TimelineCursor, TimelineRow>,
     pending: Option<PendingPage>,
     next: Option<TimelineCursor>,
     fetched: bool,
@@ -56,6 +61,7 @@ impl Default for State {
             live: model::LiveRows::default(),
             source: None,
             persisted: BTreeMap::new(),
+            overlay: BTreeMap::new(),
             pending: None,
             next: None,
             fetched: false,
@@ -125,8 +131,20 @@ impl State {
         let (loaded, mut changed) = self.live.update(app, search);
         let source = Source {
             loaded,
+            opened: app
+                .tab_manager
+                .tabs
+                .as_slice()
+                .iter()
+                .flat_map(|tab| tab.buffers())
+                .filter(|buffer| !buffer.is_loading_preview)
+                .map(|buffer| buffer.temp_id.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect(),
             search: search.to_owned(),
             epoch: app.state.persistence.session_store.history_epoch(),
+            commit: app.state.persistence.session_store.commit_epoch(),
         };
         if self.source.as_ref() != Some(&source) {
             if self
@@ -136,7 +154,12 @@ impl State {
             {
                 self.selected = None;
                 self.anchor = None;
+                self.overlay.clear();
             }
+            self.overlay.retain(|_, row| {
+                row.name.to_lowercase().contains(search)
+                    || row.label().to_lowercase().contains(search)
+            });
             self.source = Some(source);
             self.persisted.clear();
             self.pending = None;
@@ -144,6 +167,16 @@ impl State {
             self.fetched = false;
             self.error = None;
             changed = true;
+        }
+        for event in &app.state.persistence.pending_activity {
+            let row = event.timeline_row();
+            if (row.name.to_lowercase().contains(search)
+                || row.label().to_lowercase().contains(search))
+                && !self.overlay.contains_key(&row.cursor)
+            {
+                self.overlay.insert(row.cursor.clone(), row);
+                changed = true;
+            }
         }
         let reply = self
             .pending
@@ -154,6 +187,7 @@ impl State {
             match reply {
                 Ok(page) => {
                     for row in page.rows {
+                        self.overlay.remove(&row.cursor);
                         self.persisted.insert(row.cursor.clone(), row);
                     }
                     self.next = page.older;
@@ -174,15 +208,38 @@ impl State {
     fn rebuild(&mut self) {
         let mut memory = self.live.rows.iter().rev().peekable();
         let mut disk = self.persisted.iter().rev().peekable();
+        let mut overlay = self.overlay.iter().rev().peekable();
         let mut rows = Vec::new();
         let mut day = String::new();
         for _ in 0..self.limit {
-            let row = match (memory.peek(), disk.peek()) {
-                (Some((a, _)), Some((b, _))) if a >= b => memory.next().map(|(_, r)| r),
-                (_, Some(_)) => disk.next().map(|(_, r)| r),
-                (Some(_), None) => memory.next().map(|(_, r)| r),
-                (None, None) => None,
+            let key = [
+                memory.peek().map(|(k, _)| *k),
+                overlay.peek().map(|(k, _)| *k),
+                disk.peek().map(|(k, _)| *k),
+            ]
+            .into_iter()
+            .flatten()
+            .max()
+            .cloned();
+            let Some(key) = key else {
+                break;
             };
+            let mut row = None;
+            if memory.peek().is_some_and(|(k, _)| **k == key) {
+                row = memory.next().map(|(_, r)| r);
+            }
+            if overlay.peek().is_some_and(|(k, _)| **k == key) {
+                let pending = overlay.next().map(|(_, r)| r);
+                if row.is_none() {
+                    row = pending;
+                }
+            }
+            if disk.peek().is_some_and(|(k, _)| **k == key) {
+                let persisted = disk.next().map(|(_, r)| r);
+                if row.is_none() {
+                    row = persisted;
+                }
+            }
             let Some(row) = row else {
                 break;
             };
@@ -194,14 +251,14 @@ impl State {
                 day.clone_from(&date);
                 rows.push(Row::Date(date));
             }
-            rows.push(Row::Edit(row.clone()));
+            rows.push(Row::Entry(row.clone()));
         }
         self.rows = rows;
         if let Some((id, fraction)) = &self.anchor
             && let Some(index) = self
                 .rows
                 .iter()
-                .position(|r| matches!(r,Row::Edit(row) if row.id()==*id))
+                .position(|r| matches!(r,Row::Entry(row) if row.id()==*id))
         {
             self.offset = index as f32 * ROW_HEIGHT + fraction;
         }
@@ -232,17 +289,25 @@ pub(super) fn keyboard(ctx: &egui::Context, app: &ScratchpadApp) -> Option<Actio
         .rows
         .iter()
         .enumerate()
-        .filter_map(|(i, r)| matches!(r, Row::Edit(_)).then_some(i))
+        .filter_map(|(i, r)| matches!(r, Row::Entry(row) if row.node().is_some()).then_some(i))
         .collect();
     if indices.is_empty() {
         ctx.input_mut(|i| {
-            i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+            for key in [
+                egui::Key::ArrowUp,
+                egui::Key::ArrowDown,
+                egui::Key::Home,
+                egui::Key::End,
+                egui::Key::Enter,
+            ] {
+                i.consume_key(egui::Modifiers::NONE, key);
+            }
         });
         return None;
     }
     let mut position = indices
         .iter()
-        .position(|&i| matches!(&state.rows[i],Row::Edit(r) if Some(r.id())==state.selected));
+        .position(|&i| matches!(&state.rows[i],Row::Entry(r) if Some(r.id())==state.selected));
     let mut changed = false;
     let mut select = false;
     ctx.input_mut(|input| {
@@ -267,12 +332,12 @@ pub(super) fn keyboard(ctx: &egui::Context, app: &ScratchpadApp) -> Option<Actio
         }
     });
     if changed {
-        let Row::Edit(row) = &state.rows[indices[position?]] else {
+        let Row::Entry(row) = &state.rows[indices[position?]] else {
             return None;
         };
         let action = Action {
             document: row.cursor.document.clone(),
-            node: Some(row.cursor.node),
+            node: row.node(),
             inspect: false,
         };
         state.selected = Some(row.id());
@@ -373,7 +438,7 @@ pub(super) fn show(
         if let Some(index) = state
             .rows
             .iter()
-            .position(|r| matches!(r,Row::Edit(row) if Some(row.id())==state.selected))
+            .position(|r| matches!(r,Row::Entry(row) if Some(row.id())==state.selected))
         {
             state.offset = (index as f32 * ROW_HEIGHT - height * 0.5).max(0.0);
         }
@@ -402,7 +467,7 @@ pub(super) fn show(
         .enumerate()
         .skip(index)
         .find_map(|(i, r)| match r {
-            Row::Edit(row) => Some((row.id(), state.offset - i as f32 * ROW_HEIGHT)),
+            Row::Entry(row) => Some((row.id(), state.offset - i as f32 * ROW_HEIGHT)),
             Row::Date(_) => None,
         });
     if near_end && state.pending.is_none() && state.error.is_none() {
@@ -416,7 +481,7 @@ pub(super) fn show(
         } else if state
             .rows
             .iter()
-            .filter(|r| matches!(r, Row::Edit(_)))
+            .filter(|r| matches!(r, Row::Entry(_)))
             .count()
             >= state.limit
             && state.live.rows.len() + state.persisted.len() > state.limit
@@ -464,18 +529,18 @@ fn paint_visible(
                     theme::text_muted(ui),
                 );
             }
-            Row::Edit(row) => {
+            Row::Entry(row) => {
                 let row = row.clone();
                 let selected = state.selected.as_ref() == Some(&row.id());
                 let closed = state
                     .source
                     .as_ref()
-                    .is_none_or(|s| s.loaded.binary_search(&row.cursor.document).is_err());
+                    .is_none_or(|s| s.opened.binary_search(&row.cursor.document).is_err());
                 if let Some(inspect) = paint_row(ui, &row, selected, closed) {
                     state.selected = Some(row.id());
                     action = Some(Action {
                         document: row.cursor.document.clone(),
-                        node: (!inspect).then_some(row.cursor.node),
+                        node: if inspect { None } else { row.node() },
                         inspect,
                     });
                 }
@@ -487,6 +552,24 @@ fn paint_visible(
 
 fn paint_row(ui: &mut egui::Ui, row: &TimelineRow, selected: bool, closed: bool) -> Option<bool> {
     let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), ROW_HEIGHT));
+    if row.node().is_none() {
+        let response = widget_ids::interact(
+            ui,
+            rect,
+            egui::Id::unique(("history.timeline.information", row.id())),
+            egui::Sense::hover(),
+            "timeline-information",
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::Role::Label,
+                true,
+                format!("{} · {}", row.summary, row.name),
+            )
+        });
+        paint_labels(ui, row, rect, closed);
+        return None;
+    }
     let response = widget_ids::interact(
         ui,
         rect,
@@ -545,11 +628,21 @@ fn paint_row(ui: &mut egui::Ui, row: &TimelineRow, selected: bool, closed: bool)
 }
 
 fn paint_labels(ui: &egui::Ui, row: &TimelineRow, rect: egui::Rect, closed: bool) {
-    let icon = match row.source {
-        crate::app::domain::buffer::PieceSource::External => {
+    let icon = match row.kind {
+        TimelineKind::Edit(crate::app::domain::buffer::PieceSource::External) => {
             egui_phosphor::regular::ARROWS_CLOCKWISE
         }
-        _ => egui_phosphor::regular::PENCIL_SIMPLE,
+        TimelineKind::Edit(_) => egui_phosphor::regular::PENCIL_SIMPLE,
+        TimelineKind::Activity(
+            crate::app::services::session_store::activity::ActivityKind::Created,
+        ) => egui_phosphor::regular::FILE_PLUS,
+        TimelineKind::Activity(
+            crate::app::services::session_store::activity::ActivityKind::Opened,
+        ) => egui_phosphor::regular::FOLDER_OPEN,
+        TimelineKind::Activity(
+            crate::app::services::session_store::activity::ActivityKind::Closed,
+        ) => egui_phosphor::regular::X,
+        TimelineKind::Activity(_) => egui_phosphor::regular::WARNING,
     };
     style::text(
         ui,

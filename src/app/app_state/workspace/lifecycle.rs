@@ -11,8 +11,11 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub(crate) fn new_tab(app: &mut ScratchpadApp) {
-    create_workspace_tab(app, WorkspaceTab::untitled());
-    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+    create_workspace_tab(
+        app,
+        WorkspaceTab::untitled(),
+        crate::app::services::session_store::activity::ActivityKind::Created,
+    );
 }
 
 pub(crate) fn open_file(app: &mut ScratchpadApp) {
@@ -130,13 +133,20 @@ pub(crate) fn perform_close_tab_no_persist(app: &mut ScratchpadApp, index: usize
     if index >= app.tab_manager.tabs.len() {
         return;
     }
-    // A permanently protected/unavailable store must not trap the application;
-    // existing exit protection handles that case without replacing its database.
-    if !app.startup_restore_pending()
-        && !app.state.persistence.session_restore_failed
-        && !app.state.persistence.session_store.writes_blocked()
-        && let Err(error) = crate::app::services::session_manager::persist_tab_close(app, index)
-    {
+    // A blank placeholder has no work to retain. Keep the existing escape from
+    // a permanently unavailable store; documents containing work stay open.
+    let placeholder = app.tab_manager.tabs.as_slice()[index]
+        .buffers()
+        .all(|buffer| {
+            buffer.path.is_none()
+                && buffer.document().piece_tree().len_chars() == 0
+                && buffer.document().history_entries().is_empty()
+        });
+    if placeholder && app.state.persistence.session_store.writes_blocked() {
+        close_tab_internal(app, index);
+        return;
+    }
+    if let Err(error) = crate::app::services::session_manager::persist_tab_close(app, index) {
         app.state.status.report_session_save_failed(error);
         return;
     }
@@ -155,15 +165,32 @@ pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
 }
 
 pub(crate) fn install_archive(app: &mut ScratchpadApp, mut tab: WorkspaceTab) -> bool {
-    let already_live = app
+    let live_documents: HashSet<_> = app
         .tab_manager
         .tabs
         .as_slice()
         .iter()
         .flat_map(WorkspaceTab::buffers)
-        .any(|live| tab.buffers().any(|buffer| buffer.temp_id == live.temp_id));
-    if already_live {
+        .map(|live| live.temp_id.clone())
+        .collect();
+    if tab
+        .buffers()
+        .all(|buffer| live_documents.contains(&buffer.temp_id))
+    {
         return false;
+    }
+    let shared_views: Vec<_> = tab
+        .layout
+        .views()
+        .iter()
+        .filter(|view| {
+            tab.buffer_by_id(view.buffer_id)
+                .is_some_and(|buffer| live_documents.contains(&buffer.temp_id))
+        })
+        .map(|view| view.id)
+        .collect();
+    for view in shared_views {
+        tab.close_view(view);
     }
     for buffer in tab.buffers_mut() {
         // A restored split must not steal a path from an already-open tab.
@@ -175,22 +202,37 @@ pub(crate) fn install_archive(app: &mut ScratchpadApp, mut tab: WorkspaceTab) ->
             buffer.recover_as_untitled("recovered");
         }
     }
-    create_workspace_tab(app, tab);
-    if let Err(error) = crate::app::services::session_manager::persist_session_now(app) {
-        app.state.status.report_session_save_failed(error);
-    }
+    create_workspace_tab(
+        app,
+        tab,
+        crate::app::services::session_store::activity::ActivityKind::Opened,
+    );
     true
 }
 
 pub(crate) fn append_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
-    create_workspace_tab(app, tab);
+    create_workspace_tab(
+        app,
+        tab,
+        crate::app::services::session_store::activity::ActivityKind::Opened,
+    );
 }
 
-fn create_workspace_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
+fn create_workspace_tab(
+    app: &mut ScratchpadApp,
+    tab: WorkspaceTab,
+    kind: crate::app::services::session_store::activity::ActivityKind,
+) {
+    let documents: Vec<_> = tab
+        .buffers()
+        .filter(|b| !b.is_loading_preview)
+        .map(|b| b.temp_id.clone())
+        .collect();
     app.reload_settings_before_workspace_change();
     crate::app::app_state::frame::begin_layout_transition(app);
     let index = new_tab_insert_index(app);
     app.tab_manager.insert_tab(index, tab);
+    crate::app::services::session_store::activity::record_installed(app, &documents, kind);
     app.apply_history_budget_to_open_buffers();
     app.apply_current_tab_ordering();
     settings_controller::activate_workspace_surface(app);
@@ -241,6 +283,11 @@ fn selected_workspace_tab_range(app: &ScratchpadApp) -> (usize, usize) {
 }
 
 fn close_tab_internal(app: &mut ScratchpadApp, index: usize) {
+    let buffers: Vec<_> = app.tab_manager.tabs.as_slice()[index]
+        .buffers()
+        .map(|b| b.id)
+        .collect();
+    cancel_loading_previews(app, &buffers);
     let closed_file_paths = tab_file_paths(app, index);
     let settings_refresh = app.settings_toml_refresh_on_tab_close(index);
     crate::app::app_state::frame::begin_layout_transition(app);
@@ -282,6 +329,29 @@ pub(crate) fn record_recently_closed_file_paths(app: &mut ScratchpadApp, paths: 
         app.state.recently_closed_files.iter().cloned().collect();
     if let Err(error) = crate::app::app_state::settings_state::persist_settings_now(app) {
         app.state.status.report_settings_save_failed(error);
+    }
+}
+
+pub(crate) fn cancel_loading_previews(app: &mut ScratchpadApp, buffers: &[BufferId]) {
+    let cancelled: Vec<_> = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .flat_map(WorkspaceTab::buffers)
+        .filter(|buffer| buffer.is_loading_preview && buffers.contains(&buffer.id))
+        .filter_map(|buffer| {
+            buffer
+                .path
+                .clone()
+                .map(|path| (path, buffer.path_key.clone()))
+        })
+        .collect();
+    for (path, key) in cancelled {
+        app.state.cancelled_loading_previews.insert(path);
+        if let Some(key) = key {
+            app.state.pending_open_file_paths.remove(&key);
+        }
     }
 }
 

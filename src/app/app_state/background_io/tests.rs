@@ -48,6 +48,36 @@ fn forgetting_history_rejects_a_delayed_reopen_result() {
 }
 
 #[test]
+fn a_delayed_commit_acknowledges_only_its_captured_activity() {
+    use crate::app::services::session_store::{
+        SessionCaptureAck,
+        activity::{ActivityEvent, ActivityKind},
+    };
+    let mut app = app_with_buffer(BufferState::new("live".into(), "text".into(), None));
+    let buffer = app.tab_manager.active_tab().unwrap().active_buffer();
+    let first = ActivityEvent::new(ActivityKind::Opened, buffer);
+    let later = ActivityEvent::new(ActivityKind::Closed, buffer);
+    let sequence = later.sequence;
+    app.state.background_io.insert_pending_background_action(
+        981,
+        PendingBackgroundAction::PersistSession(
+            crate::app::app_state::PendingSessionPersistAction {
+                acknowledgement: SessionCaptureAck {
+                    activity_sequences: vec![first.sequence],
+                    ..SessionCaptureAck::default()
+                },
+            },
+        ),
+    );
+    app.state.persistence.pending_activity = vec![first, later];
+    app.tab_manager.mark_session_dirty();
+    app.apply_session_persisted_result(981, Ok(()));
+    assert_eq!(app.state.persistence.pending_activity.len(), 1);
+    assert_eq!(app.state.persistence.pending_activity[0].sequence, sequence);
+    assert!(app.tab_manager.session_dirty);
+}
+
+#[test]
 fn background_wait_reports_timeout_instead_of_claiming_completion() {
     let mut app = test_app();
     let timeout = std::time::Duration::ZERO;

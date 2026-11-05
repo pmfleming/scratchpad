@@ -123,7 +123,7 @@ impl Database {
             .map_err(error)?;
         let Some(row) = rows.next().await.map_err(error)? else {
             drop(rows);
-            if self.integer("SELECT (SELECT count(*) FROM tabs)+(SELECT count(*) FROM snapshots)+(SELECT count(*) FROM parts)+(SELECT count(*) FROM blobs)+(SELECT count(*) FROM history)+(SELECT count(*) FROM documents)+(SELECT count(*) FROM quarantine)+(SELECT count(*) FROM closed_tabs)+(SELECT count(*) FROM document_history)").await? != 0 {
+            if self.integer("SELECT (SELECT count(*) FROM tabs)+(SELECT count(*) FROM snapshots)+(SELECT count(*) FROM parts)+(SELECT count(*) FROM blobs)+(SELECT count(*) FROM history)+(SELECT count(*) FROM documents)+(SELECT count(*) FROM quarantine)+(SELECT count(*) FROM closed_tabs)+(SELECT count(*) FROM document_history)+(SELECT count(*) FROM activity)").await? != 0 {
                 return Err(invalid("missing session commit marker"));
             }
             return Ok(None);

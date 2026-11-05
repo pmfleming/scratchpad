@@ -92,7 +92,7 @@ pub(crate) struct PendingSavePathAction {
 }
 
 pub(crate) struct PendingSessionPersistAction {
-    pub(crate) closed_tokens: Vec<String>,
+    pub(crate) acknowledgement: crate::app::services::session_store::SessionCaptureAck,
 }
 
 pub(crate) struct PendingEncodingComplianceAction {

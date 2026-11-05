@@ -112,6 +112,8 @@ pub(crate) struct AppPersistenceState {
     pub(crate) session_restore_failed: bool,
     pub(crate) session_reset: Option<crate::app::services::session_manager::PendingSessionReset>,
     pub(crate) pending_closed_tabs: Vec<crate::app::services::session_store::CapturedClosedTab>,
+    pub(crate) pending_activity: Vec<crate::app::services::session_store::activity::ActivityEvent>,
+    pub(crate) pending_history_forgets: std::collections::HashMap<String, u64>,
     pub(crate) last_session_persist: Instant,
 }
 
@@ -144,6 +146,7 @@ pub struct ScratchpadAppState {
     pub(crate) search_state: SearchState,
     pub(crate) workspace_selection: WorkspaceSelectionState,
     pub(crate) pending_open_file_paths: HashSet<CanonicalPathKey>,
+    pub(crate) cancelled_loading_previews: HashSet<std::path::PathBuf>,
     pub(crate) pending_open_file_dialog: Option<OpenFileDialogState>,
     pub(crate) recently_closed_files: VecDeque<RecentlyClosedFile>,
     pub(crate) workspace_reflow_axis: SplitAxis,

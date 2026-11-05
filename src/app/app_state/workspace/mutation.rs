@@ -8,6 +8,15 @@ pub(crate) fn clear_text_history(app: &mut ScratchpadApp, buffer_ids: &[BufferId
         for buffer in tab.buffers_mut() {
             if buffer_ids.contains(&buffer.id) && !buffer.document().history_entries().is_empty() {
                 buffer.document_mut().clear_operation_history();
+                let document = buffer.temp_id.clone();
+                app.state
+                    .persistence
+                    .pending_activity
+                    .retain(|event| event.document != document);
+                app.state.persistence.pending_history_forgets.insert(
+                    document,
+                    app.state.persistence.session_store.history_epoch() + 1,
+                );
                 cleared = true;
             }
         }

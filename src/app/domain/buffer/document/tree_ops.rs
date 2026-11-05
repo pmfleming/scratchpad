@@ -228,6 +228,19 @@ impl TextDocument {
         self.replace_exact_with_history_source(text, PieceSource::Load);
     }
 
+    /// The loaded state becomes installed after its Opened observation. Updating
+    /// only ordering metadata keeps the stable node identity and its read timestamp.
+    pub(crate) fn order_external_edit_after_open(&mut self, node: u64) {
+        let Some(index) = self.history.entries.len().checked_sub(1) else {
+            return;
+        };
+        let entry = &mut self.history.entries[index];
+        if entry.id == node && entry.source == PieceSource::External {
+            entry.global_seq = next_text_history_global_seq();
+            self.advance_history_revision();
+        }
+    }
+
     pub(crate) fn replace_exact_with_history_source(&mut self, text: &str, source: PieceSource) {
         let before = self.extract_text();
         if before == text {
