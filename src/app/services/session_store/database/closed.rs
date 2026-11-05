@@ -27,18 +27,9 @@ impl Database {
     pub(in crate::app::services::session_store) async fn recent_history_files(
         &self,
     ) -> io::Result<Vec<super::super::retained::RecentHistoryFile>> {
-        self.query_collect(
-            "SELECT c.token, json_extract(b.value,'$.temp_id'), coalesce(d.path,d.name), coalesce(h.edited_at,0), coalesce(h.edit_seq,0), EXISTS(SELECT 1 FROM history e WHERE e.temp_id=json_extract(b.value,'$.temp_id')) FROM closed_tabs c, json_each(CAST(c.payload AS TEXT),'$.buffers') b JOIN documents d ON d.id=json_extract(b.value,'$.temp_id') LEFT JOIN document_history h ON h.temp_id=json_extract(b.value,'$.temp_id') ORDER BY h.edited_at DESC,h.edit_seq DESC",
-            (), |row| Ok(super::super::retained::RecentHistoryFile {
-                token: row.get(0).map_err(error)?,
-                temp_id: row.get(1).map_err(error)?,
-                label: row.get(2).map_err(error)?,
-                edited_at: row.get::<i64>(3).map_err(error)? as u64,
-                edit_seq: row.get::<i64>(4).map_err(error)? as u64,
-                has_history: row.get::<i64>(5).map_err(error)? != 0,
-            }),
-        ).await
+        self.query_collect("SELECT d.id,coalesce(d.path,d.name),coalesce(h.edited_at,0),coalesce(h.edit_seq,0),EXISTS(SELECT 1 FROM history e WHERE e.temp_id=d.id) FROM documents d LEFT JOIN document_history h ON h.temp_id=d.id ORDER BY h.edited_at DESC,h.edit_seq DESC",(),|row|Ok(super::super::retained::RecentHistoryFile {temp_id:row.get(0).map_err(error)?,label:row.get(1).map_err(error)?,edited_at:row.get::<i64>(2).map_err(error)? as u64,edit_seq:row.get::<i64>(3).map_err(error)? as u64,has_history:row.get::<i64>(4).map_err(error)? !=0})).await
     }
+
     pub(in crate::app::services::session_store) async fn closed_rows(
         &self,
     ) -> io::Result<Vec<ClosedRow>> {

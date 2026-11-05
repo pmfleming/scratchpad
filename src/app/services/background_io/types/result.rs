@@ -9,6 +9,10 @@ use crate::app::services::settings_store::AppSettings;
 use std::path::PathBuf;
 
 pub(crate) enum BackgroundIoResult {
+    RetainedReopened {
+        request_id: u64,
+        result: Result<Box<WorkspaceTab>, String>,
+    },
     PathsLoaded {
         request_id: u64,
         results: Vec<LoadedPathResult>,

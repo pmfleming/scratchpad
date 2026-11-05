@@ -147,27 +147,11 @@ pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
     if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
         return;
     }
-    let claimed: Vec<_> = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .flat_map(WorkspaceTab::buffers)
-        .filter_map(|buffer| buffer.path_key.clone())
-        .collect();
-    let reopened = match app
-        .state
-        .persistence
-        .session_store
-        .reopen_archive_with_claimed(token, &claimed)
-    {
-        Ok(reopened) => reopened,
-        Err(error) => {
-            app.state.status.report_session_restore_failed(error);
-            return;
-        }
-    };
-    install_archive(app, reopened);
+    app.queue_retained_open(
+        crate::app::services::session_store::RetainedTarget::Archive(token.to_owned()),
+        None,
+        None,
+    );
 }
 
 pub(crate) fn install_archive(app: &mut ScratchpadApp, mut tab: WorkspaceTab) -> bool {

@@ -40,6 +40,17 @@ impl StoredTab {
 }
 
 impl Database {
+    pub(in crate::app::services::session_store) async fn load_retained_document(
+        &mut self,
+        id: &str,
+    ) -> io::Result<(SessionTab, std::collections::HashMap<String, String>)> {
+        self.ensure_healthy()?;
+        let buffer = self.read_document(id).await?;
+        let mut tab = single_tab(buffer);
+        let contents = self.read_tab_contents(std::slice::from_ref(&tab)).await?;
+        self.read_histories(std::slice::from_mut(&mut tab)).await?;
+        Ok((tab, contents))
+    }
     pub(in crate::app::services::session_store) async fn load_retained_path(
         &mut self,
         path_key: &str,
@@ -71,21 +82,7 @@ impl Database {
         if let Some(payload) = self.query_collect("SELECT c.payload FROM closed_tabs c JOIN closed_documents r ON c.token=r.token WHERE r.document_id=? ORDER BY c.sequence DESC LIMIT 1", [id.as_str()], |row| row.get::<Vec<u8>>(0).map_err(error)).await?.pop() {
             return self.read_stored_tab(&payload).await.map(Some);
         }
-        let buffer = self.read_document(&id).await?;
-        let view = SessionView {
-            id: crate::app::domain::view::next_view_id(),
-            buffer_id: buffer.id,
-            selection: None,
-            show_line_numbers: false,
-            zoom_factor: 1.0,
-            show_control_chars: false,
-        };
-        Ok(Some(SessionTab {
-            buffers: vec![buffer],
-            active_view_id: view.id,
-            root_pane: SessionPaneNode::Leaf { view_id: view.id },
-            views: vec![view],
-        }))
+        Ok(Some(single_tab(self.read_document(&id).await?)))
     }
 
     pub(super) async fn read_document(&self, id: &str) -> io::Result<SessionBuffer> {
@@ -119,5 +116,22 @@ impl Database {
         };
         validation::validate_tab(&tab)?;
         Ok(tab)
+    }
+}
+
+fn single_tab(buffer: SessionBuffer) -> SessionTab {
+    let view = SessionView {
+        id: crate::app::domain::view::next_view_id(),
+        buffer_id: buffer.id,
+        selection: None,
+        show_line_numbers: false,
+        zoom_factor: 1.0,
+        show_control_chars: false,
+    };
+    SessionTab {
+        buffers: vec![buffer],
+        active_view_id: view.id,
+        root_pane: SessionPaneNode::Leaf { view_id: view.id },
+        views: vec![view],
     }
 }

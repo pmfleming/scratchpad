@@ -7,7 +7,7 @@ use crate::app::{
 use eframe::App;
 use egui_kittest::{Harness, kittest::Queryable};
 
-fn app(root: &std::path::Path) -> ScratchpadApp {
+pub(super) fn app(root: &std::path::Path) -> ScratchpadApp {
     let mut app = test_app(root);
     let mut buffer = BufferState::new("note.txt".into(), "base".into(), None);
     for text in ["one", "two"] {
@@ -24,7 +24,7 @@ fn app(root: &std::path::Path) -> ScratchpadApp {
     app.state.dialogs.text_history.open();
     app
 }
-fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
+pub(super) fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
     Harness::builder()
         .allow_missing_glyphs()
         .with_size(egui::vec2(1200.0, 850.0))
@@ -41,7 +41,7 @@ fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
             app,
         )
 }
-fn text(app: &ScratchpadApp) -> String {
+pub(super) fn text(app: &ScratchpadApp) -> String {
     app.tab_manager.active_tab().unwrap().active_buffer().text()
 }
 
@@ -219,62 +219,47 @@ fn profile_edit_tree_history_rendering() {
 }
 
 #[test]
-fn newest_rows_are_first_and_all_files_filters_by_history_not_now() {
+fn timeline_shows_edits_from_unapplied_branches_without_baseline_rows() {
     let root = tempfile::tempdir().unwrap();
     let mut app = app(root.path());
-    let blank = BufferState::new("empty.txt".into(), String::new(), None);
-    let mut undone = BufferState::new("undone.txt".into(), "retained".into(), None);
-    undone.undo_last_text_operation().unwrap();
-    let undone_id = undone.id;
+    let mut undone = BufferState::new("undone.txt".into(), "initial".into(), None);
+    undone.document_mut().replace_exact_with_history("changed");
+    undone.navigate_history(0).unwrap();
+    let id = undone.id;
     let original = app.tab_manager.active_tab().unwrap().clone();
     app.tab_manager.set_tabs(
         vec![
             original,
-            WorkspaceTab::new(blank),
             WorkspaceTab::new(undone),
+            WorkspaceTab::new(BufferState::new("empty.txt".into(), String::new(), None)),
         ],
         0,
     );
     let mut h = harness(app);
     h.run_steps(3);
-    assert!(
-        h.get_by_label("Now · Replace match").rect().top()
-            < h.get_by_label("Empty document").rect().top()
-    );
-    h.get_by_label("All files").click();
+    h.get_by_label("Timeline").click();
     h.run_steps(3);
-    assert!(
-        h.query_by_role_and_label(egui::accesskit::Role::Button, "empty.txt")
-            .is_none()
-    );
-    assert!(
-        h.query_by_role_and_label(egui::accesskit::Role::Button, "note.txt")
-            .is_some()
-    );
-    h.get_by_role_and_label(egui::accesskit::Role::Button, "undone.txt")
+    assert!(h.query_by_label("Now · Empty document").is_none());
+    h.get_by_label("Replace with \"changed\" · undone.txt")
         .click();
     h.run_steps(3);
-    let state = h
-        .ctx
-        .data(|d| d.get_temp::<HistoryUi>(state_key()))
-        .unwrap();
-    assert!(state.all_files);
-    assert!(state.expanded.contains(&undone_id));
-    assert_eq!(state.selected, Some(undone_id));
-    assert_eq!(active_buffer(h.state()), Some(undone_id));
-    assert_eq!(text(h.state()), "");
+    assert_eq!(active_buffer(h.state()), Some(id));
+    assert_eq!(text(h.state()), "changed");
     assert!(
-        h.query_by_role_and_label(egui::accesskit::Role::Button, "undone.txt")
-            .is_some()
+        h.ctx
+            .data(|d| d.get_temp::<HistoryUi>(state_key()))
+            .unwrap()
+            .all_files
     );
-    assert!(h.query_by_label("Now · Empty document").is_some());
-    h.state_mut().tab_manager.set_active_tab_index_clamped(0);
+    h.get_by_label("Inspect branches for undone.txt").click();
     h.run_steps(3);
-    h.get_by_role_and_label(egui::accesskit::Role::Button, "undone.txt")
-        .click();
-    h.run_steps(3);
-    assert_eq!(active_buffer(h.state()), Some(undone_id));
-    assert_eq!(text(h.state()), "");
+    assert!(
+        !h.ctx
+            .data(|d| d.get_temp::<HistoryUi>(state_key()))
+            .unwrap()
+            .all_files
+    );
+    assert!(h.query_by_label("Empty document").is_some());
 }
 
 fn scrubber_app(root: &std::path::Path) -> ScratchpadApp {
@@ -629,14 +614,14 @@ fn selecting_current_file_keeps_caret_and_visible_row_click_does_not_recenter() 
     let root = tempfile::tempdir().unwrap();
     let mut h = harness(app(root.path()));
     h.run_steps(3);
-    h.get_by_label("All files").click();
-    h.run_steps(3);
     let tab = h.state_mut().tab_manager.active_tab_mut().unwrap();
     let view_id = tab.layout.active_view_id();
     let (buffer, view) = tab.buffer_and_view_mut(view_id).unwrap();
     let selection = CursorRange::one(CharCursor::new(3));
     view.set_cursor_range_anchored(buffer, selection);
     view.set_pending_cursor_range_anchored(buffer, selection);
+    h.run_steps(3);
+    h.get_by_label("Choose history file").click();
     h.run_steps(3);
     h.get_by_role_and_label(egui::accesskit::Role::Button, "note.txt")
         .click();
@@ -677,14 +662,12 @@ fn forget_is_named_per_visible_file_and_is_reset_by_filter_or_close() {
         0,
     );
     let mut h = harness(app);
-    h.run_steps(3);
-    h.get_by_label("All files").click();
+    h.get_by_label("This file").click();
     h.run_steps(3);
     h.get_by_label("Forget history for note.txt").click();
     h.run_steps(3);
     assert!(h.query_by_label("Forget history for note.txt?").is_some());
-    h.ctx
-        .data_mut(|d| d.get_temp_mut_or_default::<HistoryUi>(state_key()).search = "other".into());
+    h.get_by_label("Timeline").click();
     h.run_steps(3);
     assert!(h.query_by_label("Forget this file's history").is_none());
     assert!(h.query_by_label("Forget history for note.txt").is_none());
@@ -709,6 +692,7 @@ fn forget_is_named_per_visible_file_and_is_reset_by_filter_or_close() {
             .search
             .clear();
     });
+    h.get_by_label("This file").click();
     h.run_steps(3);
     h.get_by_label("Forget history for note.txt").click();
     h.run_steps(3);
@@ -734,7 +718,7 @@ fn forget_is_named_per_visible_file_and_is_reset_by_filter_or_close() {
 }
 
 #[test]
-fn reopening_a_split_archive_selects_the_requested_file() {
+fn file_picker_reopens_the_requested_document_from_a_split_archive() {
     use crate::app::{
         domain::SplitAxis,
         services::session_store::{CapturedClosedTab, SessionPersistRequest},
@@ -765,7 +749,7 @@ fn reopening_a_split_archive_selects_the_requested_file() {
         .unwrap();
     let mut h = harness(app);
     h.run_steps(3);
-    h.get_by_label("All files").click();
+    h.get_by_label("Choose history file").click();
     for _ in 0..100 {
         h.run_steps(1);
         if h.query_by_role_and_label(egui::accesskit::Role::Button, "first-closed.txt")
@@ -777,6 +761,8 @@ fn reopening_a_split_archive_selects_the_requested_file() {
     }
     h.get_by_role_and_label(egui::accesskit::Role::Button, "first-closed.txt")
         .click();
+    h.run_steps(2);
+    crate::app::app_state::test_support::wait_for_background_io(h.state_mut());
     h.run_steps(5);
     assert_eq!(
         h.state()
@@ -789,7 +775,7 @@ fn reopening_a_split_archive_selects_the_requested_file() {
     );
     assert_eq!(text(h.state()), "first closed");
     assert!(
-        h.ctx
+        !h.ctx
             .data(|d| d.get_temp::<HistoryUi>(state_key()))
             .unwrap()
             .all_files

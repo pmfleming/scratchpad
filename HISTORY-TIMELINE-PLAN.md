@@ -9,7 +9,13 @@ reopen/startup reconciliation, a distinct external edit source, separate saved a
 observed disk versions, background retained-path/cold-shell loading, and removal
 of recovery identity forking and both recovery policy settings. Validation: 617
 library tests passed (6 ignored), all-feature library Clippy and formatting passed.
-Stages 3–6 remain.
+Stage 3 is complete: metadata-only keyset queries, a separately indexed/virtualized
+Timeline, stable edit row identities, independent keyboard navigation, and background
+opening of a selected closed document. Turso's UNION probe showed a sorter, so the
+combined activity feed will use limited source queries and merge their results.
+Validation: 625 library tests passed (6 ignored), the final UI-focused pass passed
+25 tests (1 ignored), and all-feature library Clippy/formatting passed.
+Stages 4–6 remain.
 
 Replace History's **All files** view with **Timeline**, showing recorded text
 changes, file opens, file closes, and external changes discovered by Scratchpad.

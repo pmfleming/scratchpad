@@ -13,6 +13,7 @@ pub(crate) fn clear_text_history(app: &mut ScratchpadApp, buffer_ids: &[BufferId
         }
     }
     if cleared {
+        app.state.persistence.session_store.invalidate_history();
         app.tab_manager.mark_session_dirty();
         app.state
             .status

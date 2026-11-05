@@ -66,7 +66,7 @@ pub(super) fn show(
                             .clicked();
                         }
                         let old_scope = state.all_files;
-                        ui.selectable_value(&mut state.all_files, true, "All files");
+                        ui.selectable_value(&mut state.all_files, true, "Timeline");
                         ui.selectable_value(&mut state.all_files, false, "This file");
                         if old_scope != state.all_files {
                             state.search.clear();

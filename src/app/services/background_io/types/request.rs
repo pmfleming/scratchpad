@@ -27,6 +27,12 @@ impl PathLoadRequest {
 }
 
 pub(crate) enum BackgroundIoRequest {
+    ReopenRetained {
+        request_id: u64,
+        session_store: SessionStore,
+        target: crate::app::services::session_store::RetainedTarget,
+        claimed: Vec<crate::app::CanonicalPathKey>,
+    },
     LoadPaths {
         request_id: u64,
         requests: Vec<PathLoadRequest>,
@@ -81,6 +87,7 @@ pub(crate) enum BackgroundIoRequest {
 impl BackgroundIoRequest {
     pub(in crate::app::services::background_io) fn kind(&self) -> &'static str {
         match self {
+            Self::ReopenRetained { .. } => "reopen_retained",
             Self::LoadPaths { .. } => "load_paths",
             Self::BuildColdFileShells { .. } => "build_cold_file_shells",
             Self::SavePath { .. } => "save_path",
@@ -94,9 +101,10 @@ impl BackgroundIoRequest {
 
     pub(in crate::app::services::background_io) fn lane(&self) -> BackgroundIoLane {
         match self {
-            Self::LoadPaths { .. } | Self::BuildColdFileShells { .. } | Self::SavePath { .. } => {
-                BackgroundIoLane::Path
-            }
+            Self::LoadPaths { .. }
+            | Self::BuildColdFileShells { .. }
+            | Self::SavePath { .. }
+            | Self::ReopenRetained { .. } => BackgroundIoLane::Path,
             Self::RestoreSession { .. }
             | Self::HydrateSessionTab { .. }
             | Self::PersistSession { .. } => BackgroundIoLane::Session,

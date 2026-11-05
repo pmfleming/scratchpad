@@ -6,6 +6,7 @@ mod parallel;
 mod parity_tests;
 mod recovery_export;
 mod restore;
+pub(crate) mod timeline;
 mod types;
 mod usage;
 pub use usage::StorageUsage;
@@ -20,6 +21,7 @@ use model::{SessionBuffer, SessionManifest, SessionPaneNode, SessionTab, Session
 use restore::Restorer;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
@@ -30,6 +32,7 @@ mod reopen;
 mod retained;
 pub(crate) use model::SessionTabParts as ColdSessionTab;
 pub use model::{SESSION_VERSION, SessionActiveSurface};
+pub(crate) use reopen::RetainedTarget;
 pub use types::{
     ProfiledRestoredSession, RestoreStatus, RestoreStatusLevel, RestoredSession,
     SessionPersistProfile, SessionRestoreProfile,
@@ -40,6 +43,7 @@ pub use types::{
 pub struct SessionStore {
     root: PathBuf,
     worker: Arc<OnceLock<Result<DatabaseWorker, String>>>,
+    history_epoch: Arc<AtomicU64>,
 }
 impl Default for SessionStore {
     fn default() -> Self {
@@ -52,6 +56,7 @@ impl SessionStore {
         Self {
             root,
             worker: Arc::new(OnceLock::new()),
+            history_epoch: Arc::new(AtomicU64::new(0)),
         }
     }
     #[must_use]
@@ -59,10 +64,18 @@ impl SessionStore {
         &self.root
     }
 
+    pub(crate) fn history_epoch(&self) -> u64 {
+        self.history_epoch.load(Ordering::Acquire)
+    }
+    pub(crate) fn invalidate_history(&self) {
+        self.history_epoch.fetch_add(1, Ordering::AcqRel);
+    }
+
     pub(crate) fn start_new_session(
         &mut self,
         request: SessionPersistRequest,
     ) -> io::Result<PathBuf> {
+        self.invalidate_history();
         // Retire the cached open failure or old worker, including stale clones.
         let previous = std::mem::replace(&mut self.worker, Arc::new(OnceLock::new()));
         let worker = previous.get().and_then(|result| result.as_ref().ok());

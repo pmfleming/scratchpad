@@ -15,6 +15,46 @@ enum AnalysisRefreshKind {
 }
 
 impl ScratchpadApp {
+    pub(crate) fn queue_retained_open(
+        &mut self,
+        target: crate::app::services::session_store::RetainedTarget,
+        document: Option<String>,
+        node: Option<u64>,
+    ) {
+        let store = self.state.persistence.session_store.clone();
+        let request_id = self.state.background_io.allocate_background_request_id();
+        let claimed = self
+            .tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .flat_map(|tab| tab.buffers())
+            .filter_map(|buffer| buffer.path_key.clone())
+            .collect();
+        self.state.background_io.insert_pending_background_action(
+            request_id,
+            PendingBackgroundAction::ReopenRetained(
+                crate::app::app_state::PendingRetainedOpenAction {
+                    expected_epoch: store.history_epoch(),
+                    document,
+                    node,
+                },
+            ),
+        );
+        let request = BackgroundIoRequest::ReopenRetained {
+            request_id,
+            session_store: store,
+            target,
+            claimed,
+        };
+        self.send_background_request_or_apply(request_id, request, |app, request_id, _| {
+            app.apply_background_io_result(BackgroundIoResult::RetainedReopened {
+                request_id,
+                result: Err("Background document reopening unavailable.".into()),
+            });
+        });
+    }
+
     pub(crate) fn queue_active_buffer_encoding_compliance_refresh(&mut self) {
         let Some((buffer_id, revision, snapshot, format)) =
             self.tab_manager.active_tab().and_then(|tab| {

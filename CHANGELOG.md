@@ -10,6 +10,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Replaced History's All files view with a paged, newest-first Timeline of retained edits. Selecting a closed file's edit opens that document and navigates its retained tree without saving historical text to disk. This file and the scrubber keep their per-document branch navigation.
 - Reopening a changed file now loads disk text into its retained edit tree, keeping earlier unsaved work reachable. Startup keeps dirty files at their paths with a disk-conflict flag and preserves clean files' history when loading external changes. Removed the two recovery-policy toggles; retained history is always used when reopening a path.
 - Session documents now retain their text and edit trees independently of open tabs and closed split layouts. Closing a file's final split view commits its retained state before removing the view. The new storage format requires the existing explicit fresh-session reset for older sessions.
 - Made History's Forget actions file-specific with a named confirmation, and fixed picker dismissal, caret preservation when selecting files, and selection of files reopened from split tabs.

@@ -85,6 +85,10 @@ impl BackgroundIoState {
         })
     }
 
+    pub(crate) fn has_pending_retained_open(&self, document: &str) -> bool {
+        self.pending_background_actions.values().any(|action|matches!(action,PendingBackgroundAction::ReopenRetained(open) if open.document.as_deref()==Some(document)))
+    }
+
     pub(crate) fn has_pending_save_for_buffer(&self, buffer_id: BufferId) -> bool {
         self.pending_background_actions.values().any(|action| {
             matches!(

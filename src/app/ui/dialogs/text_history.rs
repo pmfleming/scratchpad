@@ -9,6 +9,7 @@ mod selection;
 mod style;
 #[cfg(test)]
 mod tests;
+mod timeline;
 mod tree_list;
 
 use crate::app::{
@@ -26,10 +27,11 @@ pub(crate) use scrubber::history_scrubbing;
 struct HistoryUi {
     opened: bool,
     all_files: bool,
+    pending_file: Option<String>,
+    open_error: bool,
     selected: Option<u64>,
     search: String,
     forget: Option<u64>,
-    expanded: std::collections::HashSet<u64>,
     picker_index: usize,
     file_picked: bool,
     restore_focus: bool,
@@ -126,7 +128,18 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
         }
         return;
     }
+    let timeline = rail
+        && ctx
+            .data(|d| d.get_temp::<HistoryUi>(state_key()))
+            .is_some_and(|s| s.all_files);
+    if timeline && let Some(action) = timeline::keyboard(ctx, app) {
+        timeline::apply(ctx, app, action);
+        return;
+    }
     if resume_editor_input(ctx, app) {
+        return;
+    }
+    if timeline {
         return;
     }
     let selected = ctx
@@ -224,33 +237,25 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
 }
 
 fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    let mut state = ctx.data_mut(|d| d.get_temp_mut_or_default::<HistoryUi>(state_key()).clone());
-    state.file_picked = false;
-    let old_selected = state.selected;
-    let first = !state.opened;
-    if first {
-        state.forget = None;
-        state.restore_focus = false;
-        state.search.clear();
-    }
-    state.opened = true;
-    if first
-        || !app.tab_manager.tabs.as_slice().iter().any(|tab| {
-            state
-                .selected
-                .is_some_and(|id| tab.buffer_by_id(id).is_some())
-        })
-    {
-        state.selected = active_buffer(app);
-    }
-    if first && let Some(id) = state.selected {
-        state.expanded.insert(id);
-    }
+    let (mut state, old_selected, first) = prepare_history_state(ctx, app);
     let mut action = None;
     let mut forgotten = None;
     let mut reopen = None;
     let mut focus = false;
+    let mut timeline_action = None;
     let should_close = panel::show(ctx, app, &mut state, |ui, app, state| {
+        if state.open_error {
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                "Could not open that history target. Details are in status history.",
+            );
+        }
+        if state.pending_file.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Opening document…");
+            });
+        }
         if state.all_files {
             recent::search(ui, state);
         } else {
@@ -259,20 +264,30 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
         footer::validate(app, state);
         forgotten = footer::panel(ui, app, state);
         let height = ui.available_height().max(30.0);
+        if state.all_files {
+            timeline_action = timeline::show(ui, app, state, height);
+            focus = timeline_action.is_some() || std::mem::take(&mut state.restore_focus);
+            history_focus(ui, ctx, app, focus, first);
+            return;
+        }
         let outcome = list::show(ui, app, state, height);
         action = outcome.navigate;
-        reopen = outcome.reopen.or(reopen.take());
         focus = outcome.focus || std::mem::take(&mut state.restore_focus);
         history_focus(ui, ctx, app, focus, first);
     });
-    if action.is_none()
-        && (state.file_picked || old_selected != state.selected)
-        && !first
-        && let Some(id) = state.selected
-    {
+    let activate =
+        if action.is_none() && (state.file_picked || old_selected != state.selected) && !first {
+            state.selected
+        } else {
+            None
+        };
+    ctx.data_mut(|d| d.insert_temp(state_key(), state));
+    if let Some(id) = activate {
         selection::activate(ctx, app, id);
     }
-    ctx.data_mut(|d| d.insert_temp(state_key(), state));
+    if let Some(action) = timeline_action {
+        timeline::apply(ctx, app, action);
+    }
     if let Some((buffer, node)) = action {
         navigate(ctx, app, buffer, node);
     }
@@ -280,16 +295,7 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
         mutation::clear_text_history(app, &[id]);
     }
     if let Some(file) = reopen {
-        let selected = selection::reopen(ctx, app, file);
-        ctx.data_mut(|d| {
-            d.get_temp_mut_or_default::<HistoryUi>(state_key()).selected =
-                selected.or_else(|| active_buffer(app));
-            if let Some(id) = selected {
-                d.get_temp_mut_or_default::<HistoryUi>(state_key())
-                    .expanded
-                    .insert(id);
-            }
-        });
+        selection::reopen(ctx, app, file);
     }
     if should_close {
         close(ctx, app);
@@ -302,6 +308,51 @@ fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     {
         accessors::consume_focus_request(app, view);
     }
+}
+
+fn prepare_history_state(
+    ctx: &egui::Context,
+    app: &ScratchpadApp,
+) -> (HistoryUi, Option<u64>, bool) {
+    let mut state = ctx.data_mut(|d| d.get_temp_mut_or_default::<HistoryUi>(state_key()).clone());
+    state.file_picked = false;
+    let old_selected = state.selected;
+    let first = !state.opened;
+    if first {
+        state.forget = None;
+        state.restore_focus = false;
+        state.search.clear();
+    }
+    state.opened = true;
+    if let Some(target) = &state.pending_file {
+        if let Some(buffer) = app
+            .tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !app.tab_manager.cold_session_tabs().contains_key(i))
+            .flat_map(|(_, tab)| tab.buffers())
+            .find(|b| b.temp_id == *target)
+        {
+            state.selected = Some(buffer.id);
+            state.pending_file = None;
+            state.restore_focus = true;
+        } else if !app.state.background_io.has_pending_retained_open(target) {
+            state.pending_file = None;
+            state.open_error = true;
+        }
+    }
+    if first
+        || !app.tab_manager.tabs.as_slice().iter().any(|tab| {
+            state
+                .selected
+                .is_some_and(|id| tab.buffer_by_id(id).is_some())
+        })
+    {
+        state.selected = active_buffer(app);
+    }
+    (state, old_selected, first)
 }
 
 fn history_focus(

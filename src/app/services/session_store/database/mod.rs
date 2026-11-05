@@ -37,6 +37,9 @@ mod schema_reset_tests;
 mod size_tests;
 #[cfg(test)]
 mod tests;
+mod timeline;
+#[cfg(test)]
+mod timeline_tests;
 pub(super) mod usage;
 mod worker;
 

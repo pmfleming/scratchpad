@@ -7,6 +7,12 @@ use std::{collections::HashMap, io, path::Path};
 #[cfg(test)]
 mod tests;
 
+pub(crate) enum RetainedTarget {
+    Archive(String),
+    Document(String),
+    Cold(super::ColdSessionTab),
+}
+
 pub(super) fn restore_reopened(
     mut tab: SessionTab,
     contents: HashMap<String, String>,
@@ -71,6 +77,22 @@ pub(super) fn restore_reopened(
 }
 
 impl SessionStore {
+    pub(crate) fn reopen_target(
+        &self,
+        target: RetainedTarget,
+        claimed: &[CanonicalPathKey],
+    ) -> io::Result<WorkspaceTab> {
+        match target {
+            RetainedTarget::Cold(tab) => self.restore_cold_session_tab(tab).map(|r| r.0),
+            RetainedTarget::Archive(token) => self.reopen_archive_with_claimed(&token, claimed),
+            RetainedTarget::Document(id) => {
+                let (tab, contents) = self
+                    .worker()?
+                    .call(move |db| block_on(db.load_retained_document(&id)))?;
+                Ok(restore_reopened(tab, contents, claimed))
+            }
+        }
+    }
     #[cfg(test)]
     pub(crate) fn reopen_archive(&self, token: &str) -> io::Result<WorkspaceTab> {
         self.reopen_archive_with_claimed(token, &[])

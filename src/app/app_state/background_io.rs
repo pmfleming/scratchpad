@@ -23,6 +23,89 @@ mod fallback;
 mod queue;
 
 impl ScratchpadApp {
+    fn apply_retained_reopened_result(
+        &mut self,
+        request_id: u64,
+        result: Result<Box<crate::app::domain::WorkspaceTab>, String>,
+    ) {
+        let Some(action) = self.take_pending_action(
+            request_id,
+            PendingActionKind::ReopenRetained,
+            PendingBackgroundAction::into_retained_open,
+        ) else {
+            return;
+        };
+        if action.expected_epoch != self.state.persistence.session_store.history_epoch() {
+            self.state.status.set_warning_status_in_domain(
+                super::StatusDomain::History,
+                "History changed while opening that document. Select the row again.",
+            );
+            return;
+        }
+        let tab = match result {
+            Ok(tab) => tab,
+            Err(error) => {
+                self.state.status.report_session_restore_failed(error);
+                return;
+            }
+        };
+        let target = action
+            .document
+            .unwrap_or_else(|| tab.active_buffer().temp_id.clone());
+        let cold_index = self
+            .tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .enumerate()
+            .find_map(|(index, tab)| {
+                (self.tab_manager.cold_session_tabs().contains_key(&index)
+                    && tab.buffers().any(|b| b.temp_id == target))
+                .then_some(index)
+            });
+        if let Some(index) = cold_index {
+            self.tab_manager.replace_restored_tab(index, *tab);
+            self.tab_manager.take_cold_session_tab(index);
+        } else if !self
+            .tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .flat_map(|tab| tab.buffers())
+            .any(|b| b.temp_id == target)
+        {
+            crate::app::app_state::workspace::lifecycle::install_archive(self, *tab);
+        }
+        let location = self
+            .tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .enumerate()
+            .find_map(|(index, tab)| {
+                tab.buffers()
+                    .find(|b| b.temp_id == target)
+                    .and_then(|buffer| {
+                        tab.layout
+                            .views()
+                            .iter()
+                            .find(|v| v.buffer_id == buffer.id)
+                            .map(|v| (index, v.id, buffer.id))
+                    })
+            });
+        if let Some((index, view, buffer)) = location {
+            self.tab_manager.set_active_tab_index_clamped(index);
+            self.tab_manager.tabs.as_mut_slice()[index].activate_view(view);
+            if let Some(node) = action.node {
+                crate::app::app_state::workspace::mutation::navigate_text_history(
+                    self, buffer, node, true,
+                );
+            }
+            self.tab_manager.mark_session_dirty();
+            crate::app::app_state::workspace::accessors::request_focus_for_view(self, view);
+        }
+    }
+
     pub(crate) fn poll_background_io(&mut self, ctx: &egui::Context) {
         self.drain_background_io_results();
 
@@ -83,6 +166,9 @@ impl ScratchpadApp {
 
     fn apply_background_io_result(&mut self, result: BackgroundIoResult) {
         match result {
+            BackgroundIoResult::RetainedReopened { request_id, result } => {
+                self.apply_retained_reopened_result(request_id, result);
+            }
             BackgroundIoResult::PathsLoaded {
                 request_id,
                 results,
@@ -211,6 +297,7 @@ impl ScratchpadApp {
             }
             Some(
                 action @ (PendingBackgroundAction::SavePath(_)
+                | PendingBackgroundAction::ReopenRetained(_)
                 | PendingBackgroundAction::StartupRestore(_)
                 | PendingBackgroundAction::HydrateSessionTab(_)
                 | PendingBackgroundAction::PersistSession(_)

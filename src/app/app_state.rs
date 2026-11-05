@@ -52,8 +52,9 @@ pub(crate) use settings_state::mutators as settings_controller;
 pub(crate) use types::{
     AppSurface, PendingActionKind, PendingBackgroundAction, PendingEncodingComplianceAction,
     PendingOpenHereAction, PendingOpenTabsAction, PendingReloadBufferAction, PendingReloadMode,
-    PendingSavePathAction, PendingSessionHydrationAction, PendingSessionPersistAction,
-    PendingStartupRestoreAction, PendingTabContextMenu, PendingTextMetadataAction, TabRenameState,
+    PendingRetainedOpenAction, PendingSavePathAction, PendingSessionHydrationAction,
+    PendingSessionPersistAction, PendingStartupRestoreAction, PendingTabContextMenu,
+    PendingTextMetadataAction, TabRenameState,
 };
 use workspace::display_tabs::WorkspaceSelectionState;
 pub(crate) use workspace::lifecycle as workspace_controller;

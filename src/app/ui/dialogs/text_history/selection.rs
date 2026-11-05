@@ -10,6 +10,21 @@ pub(super) fn activate(ctx: &egui::Context, app: &mut ScratchpadApp, buffer: u64
     let Some(index) = mutation::tab_index_for_buffer(app, buffer) else {
         return;
     };
+    if let Some(cold) = app.tab_manager.cold_session_tabs().get(&index).cloned() {
+        let document = app.tab_manager.tabs.as_slice()[index]
+            .buffer_by_id(buffer)
+            .map(|b| b.temp_id.clone());
+        app.queue_retained_open(
+            crate::app::services::session_store::RetainedTarget::Cold(cold),
+            document.clone(),
+            None,
+        );
+        ctx.data_mut(|d| {
+            d.get_temp_mut_or_default::<super::HistoryUi>(super::state_key())
+                .pending_file = document;
+        });
+        return;
+    }
     let tab = &app.tab_manager.tabs.as_slice()[index];
     let view = tab
         .layout
@@ -49,26 +64,17 @@ pub(super) fn activate(ctx: &egui::Context, app: &mut ScratchpadApp, buffer: u64
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(super) struct ArchivedFile {
-    pub token: String,
     pub temp_id: String,
 }
 
-pub(super) fn reopen(
-    ctx: &egui::Context,
-    app: &mut ScratchpadApp,
-    file: ArchivedFile,
-) -> Option<u64> {
-    crate::app::app_state::workspace::lifecycle::reopen_archived_tab(app, &file.token);
-    let id = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .flat_map(|tab| tab.buffers())
-        .find(|buffer| buffer.temp_id == file.temp_id)
-        .map(|buffer| buffer.id);
-    if let Some(id) = id {
-        activate(ctx, app, id);
-    }
-    id
+pub(super) fn reopen(ctx: &egui::Context, app: &mut ScratchpadApp, file: ArchivedFile) {
+    super::timeline::apply(
+        ctx,
+        app,
+        super::timeline::Action {
+            document: file.temp_id,
+            node: None,
+            inspect: true,
+        },
+    );
 }

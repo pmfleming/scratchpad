@@ -30,15 +30,10 @@ pub(super) fn panel(ui: &mut egui::Ui, app: &ScratchpadApp, state: &mut HistoryU
 }
 
 pub(super) fn visible(buffer: &BufferState, state: &HistoryUi) -> bool {
-    recent::has_history(buffer)
-        && if state.all_files {
-            state.expanded.contains(&buffer.id)
-                && crate::app::text_history::buffer_label(buffer)
-                    .to_lowercase()
-                    .contains(&state.search.to_lowercase())
-        } else {
-            state.selected == Some(buffer.id)
-        }
+    !state.all_files
+        && state.pending_file.is_none()
+        && state.selected == Some(buffer.id)
+        && recent::has_history(buffer)
 }
 
 pub(super) fn validate(app: &ScratchpadApp, state: &mut HistoryUi) {
@@ -145,16 +140,4 @@ pub(super) fn show(ui: &mut egui::Ui, app: &ScratchpadApp, state: &mut HistoryUi
         }
     });
     None
-}
-
-pub(super) fn file_row(ui: &mut egui::Ui, buffer: &BufferState, state: &mut HistoryUi) {
-    let rect =
-        widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), style::ROW_HEIGHT));
-    let mut child = widget_ids::rect_child_ui(
-        ui,
-        rect,
-        ("history.file.footer", buffer.id),
-        egui::Layout::right_to_left(egui::Align::Center),
-    );
-    forget_button(&mut child, buffer, state);
 }

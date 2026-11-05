@@ -90,7 +90,6 @@ pub(super) fn collect(
                         file.label.clone(),
                         None,
                         Some(ArchivedFile {
-                            token: file.token.clone(),
                             temp_id: file.temp_id.clone(),
                         }),
                         (file.edited_at, file.edit_seq),
@@ -117,7 +116,7 @@ pub(super) fn search(ui: &mut egui::Ui, state: &mut HistoryUi) -> egui::Response
     ui.add(
         egui::TextEdit::singleline(&mut state.search)
             .desired_width(f32::INFINITY)
-            .hint_text("Find recently edited files")
+            .hint_text("Find files by name or path")
             .return_key(None)
             .id_salt("history.file_search"),
     )
@@ -125,14 +124,12 @@ pub(super) fn search(ui: &mut egui::Ui, state: &mut HistoryUi) -> egui::Response
 
 pub(super) struct FileResponse {
     pub selected: bool,
-    pub toggled: bool,
 }
 
 pub(super) fn row(
     ui: &mut egui::Ui,
     file: &File,
     selected: bool,
-    expanded: Option<bool>,
     highlighted: bool,
 ) -> FileResponse {
     let rect =
@@ -158,36 +155,6 @@ pub(super) fn row(
         );
     }
     let mut left = rect.left() + 8.0;
-    let mut toggled = false;
-    if let Some(expanded) = expanded {
-        let toggle_rect = egui::Rect::from_center_size(
-            egui::pos2(left + 9.0, rect.center().y),
-            egui::vec2(22.0, 24.0),
-        );
-        let button = widget_ids::scope(ui, ("history.file.toggle", file.id, &file.token), |ui| {
-            ui.put(
-                toggle_rect,
-                egui::Button::new(
-                    egui::RichText::new(if expanded {
-                        icons::CARET_DOWN
-                    } else {
-                        icons::CARET_RIGHT
-                    })
-                    .font(egui_phosphor::font_id(12.0)),
-                )
-                .frame(false),
-            )
-        })
-        .inner;
-        let label = format!(
-            "{} history for {}",
-            if expanded { "Collapse" } else { "Expand" },
-            file.name
-        );
-        button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
-        toggled = button.on_hover_text(label).clicked();
-        left += 24.0;
-    }
     style::text(
         ui,
         egui::Rect::from_min_size(
@@ -205,8 +172,7 @@ pub(super) fn row(
     left += 22.0;
     paint_labels(ui, file, rect, left, response.hovered(), selected);
     FileResponse {
-        selected: response.on_hover_text(&file.label).clicked() && !toggled,
-        toggled,
+        selected: response.on_hover_text(&file.label).clicked(),
     }
 }
 
@@ -510,7 +476,6 @@ fn picker_contents(
                 ui,
                 file,
                 selected,
-                None,
                 search.has_focus() && i == state.picker_index,
             )
             .selected

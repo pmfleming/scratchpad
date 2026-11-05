@@ -141,6 +141,7 @@ fn retained_workspace_reopens_with_undo_and_recovers_versions_without_overwritin
     assert_eq!(closed.len(), 1);
     let token = &closed[0].token;
     workspace_controller::reopen_archived_tab(&mut app, token);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     let index = app.tab_manager.active_tab_index;
     let reopened = app.tab_manager.active_tab().unwrap().active_buffer();
     assert_eq!(reopened.temp_id, id);
@@ -149,6 +150,7 @@ fn retained_workspace_reopens_with_undo_and_recovers_versions_without_overwritin
     assert!(store.closed_tabs().unwrap().is_empty());
     let count = app.tab_manager.tabs.len();
     workspace_controller::reopen_archived_tab(&mut app, token);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(
         app.tab_manager.tabs.len(),
         count,

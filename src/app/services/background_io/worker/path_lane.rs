@@ -17,6 +17,18 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
         endpoints.result_tx,
         endpoints.lane_depths,
         |request, result_tx| match request {
+            BackgroundIoRequest::ReopenRetained {
+                request_id,
+                session_store,
+                target,
+                claimed,
+            } => LaneOutcome::result(BackgroundIoResult::RetainedReopened {
+                request_id,
+                result: session_store
+                    .reopen_target(target, &claimed)
+                    .map(Box::new)
+                    .map_err(|e| e.to_string()),
+            }),
             BackgroundIoRequest::LoadPaths {
                 request_id,
                 requests,

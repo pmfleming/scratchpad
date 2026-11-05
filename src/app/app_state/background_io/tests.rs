@@ -21,6 +21,33 @@ fn app_with_buffer(buffer: BufferState) -> ScratchpadApp {
 }
 
 #[test]
+fn forgetting_history_rejects_a_delayed_reopen_result() {
+    let mut app = app_with_buffer(BufferState::new("live".into(), "live text".into(), None));
+    let closed = WorkspaceTab::new(BufferState::new(
+        "closed".into(),
+        "closed text".into(),
+        None,
+    ));
+    let document = closed.active_buffer().temp_id.clone();
+    app.state.background_io.insert_pending_background_action(
+        731,
+        PendingBackgroundAction::ReopenRetained(crate::app::app_state::PendingRetainedOpenAction {
+            expected_epoch: app.state.persistence.session_store.history_epoch(),
+            document: Some(document),
+            node: Some(1),
+        }),
+    );
+    let live = app.tab_manager.active_tab().unwrap().active_buffer().id;
+    assert!(crate::app::app_state::workspace::mutation::clear_text_history(&mut app, &[live]));
+    app.apply_retained_reopened_result(731, Ok(Box::new(closed)));
+    assert_eq!(app.tab_manager.tabs.len(), 1);
+    assert_eq!(
+        app.tab_manager.active_tab().unwrap().active_buffer().text(),
+        "live text"
+    );
+}
+
+#[test]
 fn background_wait_reports_timeout_instead_of_claiming_completion() {
     let mut app = test_app();
     let timeout = std::time::Duration::ZERO;

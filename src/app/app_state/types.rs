@@ -30,6 +30,12 @@ pub(crate) struct PendingOpenTabsAction {
     pub(crate) accumulator: OpenBatchSummary,
 }
 
+pub(crate) struct PendingRetainedOpenAction {
+    pub(crate) expected_epoch: u64,
+    pub(crate) document: Option<String>,
+    pub(crate) node: Option<u64>,
+}
+
 pub(crate) struct PendingOpenHereAction {
     pub(crate) already_here_count: usize,
     pub(crate) migrated_count: usize,
@@ -107,6 +113,7 @@ pub(crate) enum PendingReloadMode {
 }
 
 pub(crate) enum PendingBackgroundAction {
+    ReopenRetained(PendingRetainedOpenAction),
     OpenTabs(PendingOpenTabsAction),
     OpenHere(PendingOpenHereAction),
     StartupRestore(PendingStartupRestoreAction),
@@ -121,6 +128,7 @@ pub(crate) enum PendingBackgroundAction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PendingActionKind {
+    ReopenRetained,
     OpenTabs,
     OpenHere,
     StartupRestore,
@@ -149,6 +157,7 @@ macro_rules! pending_action_extractors {
 impl PendingBackgroundAction {
     pub(crate) fn kind(&self) -> PendingActionKind {
         match self {
+            Self::ReopenRetained(_) => PendingActionKind::ReopenRetained,
             Self::OpenTabs(_) => PendingActionKind::OpenTabs,
             Self::OpenHere(_) => PendingActionKind::OpenHere,
             Self::StartupRestore(_) => PendingActionKind::StartupRestore,
@@ -163,6 +172,7 @@ impl PendingBackgroundAction {
     }
 
     pending_action_extractors! {
+        into_retained_open, ReopenRetained, PendingRetainedOpenAction;
         into_save_path, SavePath, PendingSavePathAction;
         into_startup_restore, StartupRestore, PendingStartupRestoreAction;
         into_session_hydration, HydrateSessionTab, PendingSessionHydrationAction;

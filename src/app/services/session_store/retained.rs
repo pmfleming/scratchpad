@@ -4,7 +4,6 @@ use std::io;
 
 #[derive(Clone, Debug)]
 pub(crate) struct RecentHistoryFile {
-    pub token: String,
     pub temp_id: String,
     pub label: String,
     pub edited_at: u64,
