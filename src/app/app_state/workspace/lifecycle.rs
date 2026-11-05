@@ -133,19 +133,6 @@ pub(crate) fn perform_close_tab_no_persist(app: &mut ScratchpadApp, index: usize
     if index >= app.tab_manager.tabs.len() {
         return;
     }
-    // A blank placeholder has no work to retain. Keep the existing escape from
-    // a permanently unavailable store; documents containing work stay open.
-    let placeholder = app.tab_manager.tabs.as_slice()[index]
-        .buffers()
-        .all(|buffer| {
-            buffer.path.is_none()
-                && buffer.document().piece_tree().len_chars() == 0
-                && buffer.document().history_entries().is_empty()
-        });
-    if placeholder && app.state.persistence.session_store.writes_blocked() {
-        close_tab_internal(app, index);
-        return;
-    }
     if let Err(error) = crate::app::services::session_manager::persist_tab_close(app, index) {
         app.state.status.report_session_save_failed(error);
         return;

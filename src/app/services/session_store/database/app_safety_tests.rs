@@ -402,3 +402,39 @@ fn closing_cold_split_retains_both_documents_and_remaining_layout() {
         "second unsaved"
     );
 }
+
+#[test]
+fn unavailable_session_store_does_not_trap_tabs_or_split_panes() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("session"), "unavailable").unwrap();
+    let mut app = crate::app::app_state::test_support::test_app(root.path());
+    assert!(app.state.persistence.session_restore_failed);
+    let path = root.path().join("saved.txt");
+    std::fs::write(&path, "saved").unwrap();
+    let load = || {
+        crate::app::services::file_service::FileService::buffer_from_observed(
+            &path,
+            crate::app::services::file_service::FileService::read_observed_file(&path).unwrap(),
+        )
+    };
+    let mut tab = WorkspaceTab::new(load());
+    let view = tab
+        .open_buffer_as_split(load(), crate::app::domain::SplitAxis::Vertical, true, 0.5)
+        .unwrap();
+    app.tab_manager
+        .set_tabs(vec![tab, WorkspaceTab::untitled()], 0);
+    crate::app::commands::perform_close_view(&mut app, view);
+    assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 1);
+    crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, 0);
+    assert_eq!(app.tab_manager.tabs.len(), 1);
+    assert!(
+        app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .path
+            .is_none()
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("session")).unwrap(),
+        "unavailable"
+    );
+}

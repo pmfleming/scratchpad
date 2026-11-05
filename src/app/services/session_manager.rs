@@ -57,7 +57,14 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
 /// Commit the closed archive and the remaining workspace before the UI removes
 /// the tab. A failed transaction leaves the live tab and its latest edits intact.
 pub(crate) fn persist_tab_close(app: &mut ScratchpadApp, index: usize) -> std::io::Result<()> {
-    if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
+    // A failed restore or permanently unavailable store must not trap the user.
+    // Dirty-close confirmation still runs before these persistence helpers.
+    if app.state.persistence.session_restore_failed
+        || app.state.persistence.session_store.writes_blocked()
+    {
+        return Ok(());
+    }
+    if app.startup_restore_pending() {
         return Err(std::io::Error::other(
             "session recovery is not ready; tab was not closed",
         ));
@@ -136,7 +143,14 @@ pub(crate) fn persist_view_close(
     app: &mut ScratchpadApp,
     view: crate::app::domain::ViewId,
 ) -> std::io::Result<()> {
-    if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
+    // A failed restore or permanently unavailable store must not trap the user.
+    // Dirty-close confirmation still runs before these persistence helpers.
+    if app.state.persistence.session_restore_failed
+        || app.state.persistence.session_store.writes_blocked()
+    {
+        return Ok(());
+    }
+    if app.startup_restore_pending() {
         return Err(std::io::Error::other(
             "session recovery is not ready; view was not closed",
         ));
