@@ -1,0 +1,7 @@
+[0mdirenv: loading ~/Projects/scratchpad/.envrc
+[0mdirenv: using flake
+[0mdirenv: nix-direnv: Using cached dev shell
+Scratchpad dev shell
+Try: cargo check
+    Checking scratchpad v0.4.2 (/home/laufan/Projects/scratchpad)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.15s

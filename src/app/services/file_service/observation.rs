@@ -35,7 +35,7 @@ impl FileService {
         context: &super::super::chunk_store::ImportContext,
     ) -> io::Result<BufferState> {
         context.check()?;
-        let (state, digest) = Self::observe_decoded_digest(path)?;
+        let (state, digest) = Self::observe_decoded_digest_with_context(path, context)?;
         if !materialize || known_digest == Some(digest.as_str()) {
             // Transport only: callers apply its observation metadata and never
             // adopt its empty document. No original/add chunks are imported.
@@ -44,32 +44,25 @@ impl FileService {
             buffer.observed_disk_digest = Some(digest);
             return Ok(buffer);
         }
-        for _ in 0..3 {
-            let observed = Self::read_observed_file_with_context(path, context)?;
-            let text = if materialize && Some(observed.digest.as_str()) != known_digest {
-                Some(observed.content.document.try_extract_text()?)
-            } else {
-                None
-            };
-            if let Some(text) = &text
-                && (blake3::hash(text.as_bytes()).to_hex().as_str() != observed.digest
-                    || Self::read_disk_state(path)? != observed.state)
-            {
-                continue;
-            }
-            let mut buffer = Self::buffer_from_observed(path, observed);
-            buffer.loaded_replacement_text = text.map(std::sync::Arc::new);
-            return Ok(buffer);
-        }
-        Err(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "File kept changing while preparing its replacement. Current text was kept.",
-        ))
+        let observed = Self::read_observed_file_with_context(path, context)?;
+        let mut buffer = Self::buffer_from_observed(path, observed);
+        buffer.replacement_ready = true;
+        Ok(buffer)
     }
 
     /// Hash the same decoded UTF-8 as adoption while retaining bounded buffers.
     /// Decoder state preserves split code points/BOMs and CRLF across reads.
+    #[cfg(test)]
     pub(crate) fn observe_decoded_digest(path: &Path) -> io::Result<(DiskFileState, String)> {
+        Self::observe_decoded_digest_with_context(
+            path,
+            &super::super::chunk_store::ImportContext::default(),
+        )
+    }
+    pub(crate) fn observe_decoded_digest_with_context(
+        path: &Path,
+        context: &super::super::chunk_store::ImportContext,
+    ) -> io::Result<(DiskFileState, String)> {
         for _ in 0..3 {
             let before = Self::read_disk_state(path)?;
             let prefix = super::read::inspect_file_prefix(path)?;
@@ -83,6 +76,7 @@ impl FileService {
             let mut decoded = [0_u8; 32 * 1024];
             let mut hasher = blake3::Hasher::new();
             loop {
+                context.check()?;
                 let read = file.read(&mut raw)?;
                 let last = read == 0;
                 let mut consumed = 0;
@@ -117,6 +111,7 @@ impl FileService {
     }
     /// Run on an I/O worker. Hash decoded text before accepting its metadata;
     /// retry replacements/writes that occur while the file is being read.
+    #[cfg(test)]
     pub(crate) fn read_observed_file(path: &Path) -> io::Result<ObservedFile> {
         Self::read_observed_file_with_context(
             path,
@@ -171,7 +166,7 @@ mod tests {
         let text = "a".repeat(17 * 1024 * 1024);
         std::fs::write(&path, &text).unwrap();
         let loaded = FileService::read_observed_buffer(&path, true, None).unwrap();
-        assert!(loaded.loaded_replacement_text.is_some());
+        assert!(loaded.replacement_ready);
         std::fs::OpenOptions::new()
             .write(true)
             .open(&path)
@@ -184,7 +179,7 @@ mod tests {
             crate::app::domain::buffer::PieceSource::External,
         );
         assert_eq!(original.text(), text);
-        assert!(original.loaded_replacement_text.is_none());
+        assert!(!original.replacement_ready);
         original.document_mut().undo_last_operation().unwrap();
         assert_eq!(original.text(), "");
     }
@@ -195,11 +190,11 @@ mod tests {
         let path = root.path().join("note.txt");
         std::fs::write(&path, "saved").unwrap();
         let dirty = FileService::read_observed_buffer(&path, false, None).unwrap();
-        assert!(dirty.loaded_replacement_text.is_none());
+        assert!(!dirty.replacement_ready);
         let touch =
             FileService::read_observed_buffer(&path, true, dirty.observed_disk_digest.as_deref())
                 .unwrap();
-        assert!(touch.loaded_replacement_text.is_none());
+        assert!(!touch.replacement_ready);
         assert_eq!(touch.observed_disk_digest, dirty.observed_disk_digest);
         assert_eq!(dirty.document().piece_tree().len_bytes(), 0);
         assert!(dirty.document().history_entries().is_empty());
@@ -288,5 +283,68 @@ mod tests {
                 "{name}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod reference_adoption_tests {
+    use super::*;
+    use crate::app::domain::{PieceSource, WorkspaceTab};
+    use crate::app::services::{chunk_store::ImportContext, session_store::SessionStore};
+    #[test]
+    fn large_changed_source_adopts_references_without_body_reads_or_rewriting_imported_chunks() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("source");
+        let original = "αβ\n".repeat(3_500_000);
+        std::fs::write(&path, &original).unwrap();
+        let session = SessionStore::new(root.path().join("session"));
+        let store = session.chunk_store_handle().unwrap();
+        let context = ImportContext {
+            store: Some(store.clone()),
+            ..Default::default()
+        };
+        let observed = FileService::read_observed_file_with_context(&path, &context).unwrap();
+        let mut buffer = FileService::buffer_from_observed(&path, observed);
+        session
+            .persist(
+                std::slice::from_ref(&WorkspaceTab::new(buffer.clone())),
+                0,
+                14.,
+                false,
+            )
+            .unwrap();
+        let replacement = "xyλ\n".repeat(3_500_000);
+        std::fs::write(&path, &replacement).unwrap();
+        let loaded = FileService::read_observed_buffer_with_context(
+            &path,
+            true,
+            buffer.observed_disk_digest.as_deref(),
+            &context,
+        )
+        .unwrap();
+        session.flush_text_chunks().unwrap();
+        store.set_limits(0, 0);
+        let reads = store.epoch().read_count();
+        let hashed = store.hashed_bytes();
+        assert!(buffer.replace_from_loaded_buffer_source(loaded, PieceSource::External));
+        assert_eq!(store.epoch().read_count(), reads);
+        session
+            .persist(
+                std::slice::from_ref(&WorkspaceTab::new(buffer.clone())),
+                0,
+                14.,
+                false,
+            )
+            .unwrap();
+        assert_eq!(store.hashed_bytes(), hashed);
+        assert_eq!(
+            buffer.document().try_content_digest().unwrap(),
+            blake3::hash(replacement.as_bytes()).to_hex().as_str()
+        );
+        buffer.document_mut().undo_last_operation().unwrap();
+        assert_eq!(
+            buffer.document().try_content_digest().unwrap(),
+            blake3::hash(original.as_bytes()).to_hex().as_str()
+        );
     }
 }

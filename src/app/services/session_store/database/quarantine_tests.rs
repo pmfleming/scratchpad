@@ -190,7 +190,7 @@ fn closed_documents_remain_hydratable_without_a_workspace_root() {
         db.persist(request(&tabs), 1).await.unwrap();
         let queued = request(&tabs).tabs.pop().unwrap().session_tab;
         db.persist(request(&tabs[..1]), 2).await.unwrap();
-        let (tab, _) = db.hydrate(queued).await.unwrap();
+        let tab = db.hydrate(queued).await.unwrap();
         assert_eq!(
             tab.buffers[0]
                 .history_document

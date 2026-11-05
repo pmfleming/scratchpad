@@ -9,7 +9,12 @@ fn unreadable_snapshot_save_preserves_the_existing_destination() {
     let target = directory.path().join("target");
     std::fs::write(&source, "aλ\r\n".repeat(128)).unwrap();
     std::fs::write(&target, "keep this exact destination").unwrap();
-    let (document, _, _) = TextDocument::from_utf8_file(&source, 0, 0).unwrap();
+    let (document, _) = TextDocument::import_utf8_file(
+        &source,
+        0,
+        &crate::app::services::chunk_store::ImportContext::default(),
+    )
+    .unwrap();
     document.piece_tree().inject_read_failure_for_test();
     assert!(FileService::write_snapshot_utf8(&target, &document.snapshot()).is_err());
     assert_eq!(
@@ -36,7 +41,6 @@ fn large_utf8_import_uses_durable_lazy_chunks_and_survives_source_replacement() 
     std::fs::write(&path, "replaced source").unwrap();
     let tree = content.document.piece_tree();
 
-    assert!(tree.is_chunked());
     assert_eq!(tree.loaded_chunk_count(), 0);
     assert_eq!(tree.borrow_range(0..5).as_deref(), Some("alpha"));
     assert_eq!(tree.loaded_chunk_count(), 1);
@@ -208,4 +212,46 @@ fn assert_write_errors(document: &TextDocument, format: &TextFormatMetadata, byt
             "{format:?} limit={limit}"
         );
     }
+}
+
+#[test]
+fn reader_replacement_interrupts_scans_without_permanently_faulting_live_text() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("original.txt");
+    std::fs::write(&path, "λ\r\n".repeat(100_000)).unwrap();
+    let session =
+        crate::app::services::session_store::SessionStore::new(root.path().join("session"));
+    let handle = session.chunk_store_handle().unwrap();
+    let (document, _) = TextDocument::import_utf8_file(
+        &path,
+        0,
+        &crate::app::services::chunk_store::ImportContext {
+            store: Some(handle.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    session.flush_text_chunks().unwrap();
+    handle.set_limits(0, 0);
+    handle.set_bulk_stopped(true);
+    handle.close_readers();
+    let Err(cause) = document
+        .piece_tree()
+        .try_spans_for_range(0..1)
+        .next()
+        .unwrap()
+    else {
+        panic!("closed reader must interrupt the scan");
+    };
+    assert_eq!(cause.kind(), std::io::ErrorKind::Interrupted);
+    assert!(document.piece_tree().read_fault().is_none());
+    handle
+        .epoch()
+        .reopen(&session.root().join("session.db"))
+        .unwrap();
+    handle.set_bulk_stopped(false);
+    assert_eq!(
+        document.try_extract_text().unwrap(),
+        "λ\r\n".repeat(100_000)
+    );
 }

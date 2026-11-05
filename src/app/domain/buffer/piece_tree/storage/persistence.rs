@@ -305,12 +305,31 @@ impl PieceTreeStorage {
     }
 
     pub(crate) fn retain_reachable(&mut self, spans: &[ByteSpan]) {
+        let mut ranges: [Vec<std::ops::Range<u64>>; 2] = [Vec::new(), Vec::new()];
+        for span in spans {
+            ranges[usize::from(span.buffer == PieceBuffer::Add)]
+                .push(span.start_byte..span.byte_end());
+        }
+        for group in &mut ranges {
+            group.sort_unstable_by_key(|range| range.start);
+            let mut merged: Vec<std::ops::Range<u64>> = Vec::new();
+            for range in group.drain(..) {
+                if let Some(last) = merged.last_mut()
+                    && range.start <= last.end
+                {
+                    last.end = last.end.max(range.end);
+                } else {
+                    merged.push(range);
+                }
+            }
+            *group = merged;
+        }
         let used = |buffer, start: usize, len: usize| {
-            spans.iter().any(|s| {
-                s.buffer == buffer
-                    && s.start_byte < (start + len) as u64
-                    && s.byte_end() > start as u64
-            })
+            let group = &ranges[usize::from(buffer == PieceBuffer::Add)];
+            let index = group.partition_point(|range| range.end <= start as u64);
+            group
+                .get(index)
+                .is_some_and(|range| range.start < (start + len) as u64)
         };
         for index in 0..self.add.chunks.len() {
             let chunk = &self.add.chunks[index];

@@ -6,7 +6,8 @@ use crate::app::services::chunk_store::Health;
 pub(crate) struct StorageStatus {
     last: (u8, u8),
     last_fault: u64,
-    refusal: Option<(u64, SnapshotRevision, String)>,
+    refusal: Option<(Option<(u64, SnapshotRevision)>, String)>,
+    new_refusal: bool,
     pub warning: Option<StorageWarning>,
 }
 pub(crate) struct StorageWarning {
@@ -82,7 +83,7 @@ pub(crate) fn poll_storage_health(app: &mut ScratchpadApp) {
                 1 => "Session not saving. Memory nearly full.".to_owned(),
                 _ => "Session not saving. Text is in memory only.".to_owned(),
             },
-            |(_, _, cause)| cause.clone(),
+            |(_, cause)| cause.clone(),
         );
         Some(StorageWarning {
             message,
@@ -118,8 +119,14 @@ fn count_ram_and_attention(
     kind: u8,
     previous: u8,
 ) -> usize {
-    let mut tails = 0usize;
-    let mut new_refusal = false;
+    let mut tails = app
+        .state
+        .persistence
+        .pending_closed_tabs
+        .iter()
+        .map(crate::app::services::session_store::CapturedClosedTab::ram_tail_bytes)
+        .sum::<usize>();
+    let mut new_refusal = std::mem::take(&mut app.state.persistence.storage.new_refusal);
     for tab in app.tab_manager.tabs.as_mut_slice() {
         for buffer in tab.buffers_mut() {
             if let Some(store) = store {
@@ -129,7 +136,7 @@ fn count_ram_and_attention(
             if let Some(cause) = buffer.storage_refusal.take() {
                 new_refusal = true;
                 app.state.persistence.storage.refusal =
-                    Some((buffer.id, buffer.storage_revision(), cause));
+                    Some((Some((buffer.id, buffer.storage_revision())), cause));
             }
             buffer.update_storage_attention(kind != 0);
         }
@@ -149,18 +156,39 @@ fn count_ram_and_attention(
             );
         }
     }
-    if let Some((id, revision, _)) = &app.state.persistence.storage.refusal {
-        let unchanged = app
-            .tab_manager
-            .tabs
-            .as_slice()
-            .iter()
-            .flat_map(|tab| tab.buffers())
-            .find(|b| b.id == *id)
-            .is_some_and(|b| b.storage_revision() == *revision);
+    if let Some((owner, _)) = &app.state.persistence.storage.refusal {
+        let unchanged = owner.as_ref().map_or_else(
+            || app.tab_manager.tabs.is_empty(),
+            |(id, revision)| {
+                app.tab_manager
+                    .tabs
+                    .as_slice()
+                    .iter()
+                    .flat_map(|tab| tab.buffers())
+                    .find(|buffer| buffer.id == *id)
+                    .is_some_and(|buffer| buffer.storage_revision() == *revision)
+            },
+        );
         if !unchanged || kind == 0 || (kind != previous && !new_refusal) {
             app.state.persistence.storage.refusal = None;
         }
     }
     tails
+}
+
+pub(crate) fn note_file_refusal(app: &mut ScratchpadApp, path: &std::path::Path, cause: &str) {
+    if app.state.persistence.session_store.storage_health() == Health::Healthy
+        || !(cause.contains("limit") || cause.contains("memory"))
+    {
+        return;
+    }
+    let owner = app.tab_manager.active_tab().map(|tab| {
+        let buffer = tab.active_buffer();
+        (buffer.id, buffer.storage_revision())
+    });
+    app.state.persistence.storage.refusal = Some((
+        owner,
+        format!("Could not open {}. Memory limit reached.", path.display()),
+    ));
+    app.state.persistence.storage.new_refusal = true;
 }

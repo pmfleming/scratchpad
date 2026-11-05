@@ -62,6 +62,7 @@ fn a_delayed_commit_acknowledges_only_its_captured_activity() {
         981,
         PendingBackgroundAction::PersistSession(
             crate::app::app_state::PendingSessionPersistAction {
+                close: None,
                 acknowledgement: SessionCaptureAck {
                     activity_sequences: vec![first.sequence],
                     ..SessionCaptureAck::default()

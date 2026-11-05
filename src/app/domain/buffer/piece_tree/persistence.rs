@@ -5,6 +5,23 @@ use super::{
 use crate::app::services::chunk_store::ChunkStoreHandle;
 
 impl PieceTreeLite {
+    pub(crate) fn adopt_visible(&mut self, other: &Self) -> io::Result<Vec<ByteSpan>> {
+        let pieces = other
+            .root
+            .nodes
+            .iter()
+            .flat_map(|node| &node.leaves)
+            .flat_map(|leaf| &leaf.pieces)
+            .copied()
+            .collect::<Vec<_>>();
+        let pieces = self.storage.adopt(&other.storage, &pieces)?;
+        self.runtime.advance_generation();
+        self.root = build_root_from_pieces(pieces);
+        self.assign_missing_leaf_ids();
+        self.reference_spans(0..self.len_chars())
+            .map(super::coalesce_spans)
+    }
+
     pub(crate) fn visit_history_span(
         &self,
         span: ByteSpan,
@@ -26,13 +43,22 @@ impl PieceTreeLite {
         &self,
         range: std::ops::Range<usize>,
     ) -> io::Result<Vec<ByteSpan>> {
-        let mut position = 0;
+        let address = self.find_leaf_for_char_offset(range.start);
+        let mut position = address.leaf_start_char;
         let mut spans = Vec::new();
         for piece in self
             .root
             .nodes
             .iter()
-            .flat_map(|n| &n.leaves)
+            .enumerate()
+            .skip(address.node_index)
+            .flat_map(|(index, n)| {
+                n.leaves.iter().skip(if index == address.node_index {
+                    address.leaf_index
+                } else {
+                    0
+                })
+            })
             .flat_map(|l| &l.pieces)
         {
             let end = position + piece.char_len;
@@ -41,6 +67,8 @@ impl PieceTreeLite {
             if lo < hi {
                 let (start, bytes) = if lo == position && hi == end {
                     (piece.start_byte, piece.byte_len)
+                } else if piece.is_ascii {
+                    (piece.start_byte + lo - position, hi - lo)
                 } else {
                     let text = self.storage.try_text_for_span(
                         ByteSpan {

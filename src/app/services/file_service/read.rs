@@ -43,12 +43,17 @@ impl StagedDocument {
         self.content.push_str(text);
         Ok(())
     }
-    fn finish(self) -> LoadedDocument {
-        LoadedDocument {
-            document: TextDocument::new(self.content),
+    fn finish(self, context: &ImportContext) -> io::Result<LoadedDocument> {
+        let document = if self.content.len() >= CHUNKED_UTF8_MIN_BYTES as usize {
+            TextDocument::import_utf8_text(&self.content, context)?
+        } else {
+            TextDocument::new(self.content)
+        };
+        Ok(LoadedDocument {
+            document,
             inspection: self.inspector.finish(),
             has_decoding_warnings: self.has_decoding_warnings,
-        }
+        })
     }
 }
 
@@ -230,7 +235,7 @@ fn read_document_with_encoding(
             store.check_bulk_capacity(document.content.len())?;
         }
         if eof {
-            return Ok(document.finish());
+            return document.finish(context);
         }
     }
 }

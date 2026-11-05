@@ -1,0 +1,2 @@
+{"bytes":67108864,"cached_bytes":262144,"edit_save_ns":4488066,"first_paint_ns":4008254,"first_paint_result":199006,"import_ns":174526617,"new_body_bytes_hashed_after_edit":0,"peak_pending_bytes":524287,"read_max_ns":1124334,"read_p99_ns":598215,"scenario":"store_import"}
+{"bytes":2147483648,"cached_bytes":262144,"edit_save_ns":56882848,"first_paint_ns":2848194,"first_paint_result":199006,"import_ns":5605289637,"new_body_bytes_hashed_after_edit":0,"peak_pending_bytes":1835006,"read_max_ns":961237,"read_p99_ns":371538,"scenario":"store_import"}

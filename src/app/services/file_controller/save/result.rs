@@ -58,7 +58,7 @@ impl FileController {
         crate::app::app_state::workspace::accessors::clear_status_message(app);
         app.tab_manager.mark_session_dirty();
         app.apply_current_tab_ordering();
-        let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+        crate::app::app_state::workspace::accessors::request_session_persist(app);
     }
 
     pub(crate) fn apply_async_save_result(

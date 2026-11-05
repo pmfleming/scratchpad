@@ -3,6 +3,7 @@ use super::parallel;
 use super::{RestoreStatus, RestoreStatusLevel};
 use crate::app::domain::{BufferFreshness, BufferState, RestoredBufferState, WorkspaceTab};
 use crate::app::utils::pluralize;
+#[cfg(test)]
 use std::collections::HashMap;
 use std::io;
 
@@ -15,6 +16,7 @@ mod tests;
 
 /// An owned, coherent database read. Reconstruction never performs database I/O.
 pub(super) struct Restorer {
+    #[cfg(test)]
     contents: HashMap<String, String>,
 }
 
@@ -69,7 +71,14 @@ impl RestoreSummary {
     }
 }
 impl Restorer {
-    pub(super) fn new(contents: HashMap<String, String>) -> Self {
+    pub(super) fn new() -> Self {
+        Self {
+            #[cfg(test)]
+            contents: HashMap::new(),
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn with_contents(contents: HashMap<String, String>) -> Self {
         Self { contents }
     }
     pub(super) fn restore_tabs_ordered(
@@ -83,17 +92,9 @@ impl Restorer {
         let total = tabs.len();
         let chunk_size = total.div_ceil(workers);
         let mut tabs = tabs.into_iter();
-        let jobs = (0..workers).map(|_| {
-            let chunk = tabs.by_ref().take(chunk_size).collect::<Vec<_>>();
-            let contents = chunk
-                .iter()
-                .flat_map(|tab| &tab.buffers)
-                .filter_map(|buffer| self.contents.remove_entry(&buffer.temp_id))
-                .collect();
-            (chunk, contents)
-        });
-        let batches = parallel::ordered("session-reconstruct", jobs, |(tabs, contents)| {
-            Ok(Restorer::new(contents).restore_sequential(tabs))
+        let jobs = (0..workers).map(|_| tabs.by_ref().take(chunk_size).collect::<Vec<_>>());
+        let batches = parallel::ordered("session-reconstruct", jobs, |tabs| {
+            Ok(Restorer::new().restore_sequential(tabs))
         })?;
         let mut restored = Vec::with_capacity(total);
         for batch in batches {

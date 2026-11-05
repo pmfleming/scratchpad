@@ -30,24 +30,24 @@ impl Database {
     pub(in crate::app::services::session_store) async fn load_retained_document(
         &mut self,
         id: &str,
-    ) -> io::Result<(SessionTab, std::collections::HashMap<String, String>)> {
+    ) -> io::Result<SessionTab> {
         self.ensure_healthy()?;
         let buffer = self.read_document(id).await?;
         let mut tab = single_tab(buffer);
-        let contents = self.read_tab_contents(std::slice::from_ref(&tab)).await?;
+        self.validate_tab_text(std::slice::from_ref(&tab)).await?;
         self.read_histories(std::slice::from_mut(&mut tab)).await?;
-        Ok((tab, contents))
+        Ok(tab)
     }
     pub(in crate::app::services::session_store) async fn load_retained_path(
         &mut self,
         path_key: &str,
-    ) -> io::Result<Option<(SessionTab, std::collections::HashMap<String, String>)>> {
+    ) -> io::Result<Option<SessionTab>> {
         let Some(mut tab) = self.retained_tab_by_path(path_key).await? else {
             return Ok(None);
         };
-        let contents = self.read_tab_contents(std::slice::from_ref(&tab)).await?;
+        self.validate_tab_text(std::slice::from_ref(&tab)).await?;
         self.read_histories(std::slice::from_mut(&mut tab)).await?;
-        Ok(Some((tab, contents)))
+        Ok(Some(tab))
     }
 
     pub(in crate::app::services::session_store) async fn retained_tab_by_path(
@@ -120,7 +120,7 @@ impl Database {
         let mut retained = Vec::new();
         for id in ids {
             if !live.contains(&id) {
-                let (mut tab, _) = self.load_retained_document(&id).await?;
+                let mut tab = self.load_retained_document(&id).await?;
                 super::super::validation::validate_tab(&tab)?;
                 retained.append(&mut tab.buffers);
             }

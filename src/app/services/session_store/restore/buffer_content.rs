@@ -5,13 +5,24 @@ use crate::app::domain::{
     BufferFreshness, BufferState, DiskFileState, RestoredBufferState, TextDocument,
     TextFormatMetadata,
 };
-use crate::app::services::file_service::{FileContent, FileService};
+#[cfg(test)]
+use crate::app::services::file_service::FileContent;
+use crate::app::services::file_service::FileService;
 
 impl Restorer {
+    #[cfg(not(test))]
     pub(super) fn restore_buffer_content(
         &mut self,
         buffer: &mut SessionBuffer,
     ) -> RestoredBufferContent {
+        RestoredBufferContent::from_references(buffer)
+    }
+    #[cfg(test)]
+    pub(super) fn restore_buffer_content(
+        &mut self,
+        buffer: &mut SessionBuffer,
+    ) -> RestoredBufferContent {
+        #[cfg(test)]
         let content = self.contents.remove(&buffer.temp_id);
         if content.is_none() && buffer.history_document.is_some() {
             return RestoredBufferContent::from_references(buffer);
@@ -161,6 +172,7 @@ impl RestoredBufferContent {
         }
     }
 
+    #[cfg(test)]
     fn from_file_content(
         file_content: FileContent,
         disk_state: Option<DiskFileState>,

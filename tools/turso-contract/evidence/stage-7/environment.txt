@@ -1,0 +1,1 @@
+Linux thinkpad 6.18.60 #1-NixOS SMP PREEMPT_DYNAMIC @1793362001 x86_64 GNU/Linux

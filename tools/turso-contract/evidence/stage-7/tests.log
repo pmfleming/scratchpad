@@ -1,0 +1,987 @@
+[0mdirenv: loading ~/Projects/scratchpad/.envrc
+[0mdirenv: using flake
+[0mdirenv: nix-direnv: Using cached dev shell
+Scratchpad dev shell
+Try: cargo check
+   Compiling scratchpad v0.4.2 (/home/laufan/Projects/scratchpad)
+    Finished `release` profile [optimized] target(s) in 1m 02s
+     Running unittests src/lib.rs (target/release/deps/scratchpad-84e82abd46b64b84)
+
+running 707 tests
+test app::app_paths::tests::linux_paths_fallback_to_home_when_xdg_unset ... ok
+test app::app_paths::tests::linux_paths_follow_xdg_locations ... ok
+test app::app_state::instance_broker::tests::activation_only_request_has_no_files ... ok
+test app::app_state::frame::tests::dropped_file_paths_returns_all_paths ... ok
+test app::app_state::background_io::tests::unknown_background_result_is_ignored ... ok
+test app::app_state::background_io::tests::a_delayed_commit_acknowledges_only_its_captured_activity ... ok
+test app::app_state::background_io::tests::forgetting_history_rejects_a_delayed_reopen_result ... ok
+test app::app_state::background_io::tests::a_close_keeps_input_waiting_for_its_view_to_replay ... ok
+test app::app_state::lifecycle_tests::broker_activation_is_processed_while_minimized ... ok
+test app::app_state::background_io::tests::failed_hydration_keeps_cold_recovery_payload ... ok
+test app::app_state::background_io::tests::text_metadata_result_updates_matching_buffer_and_clears_pending_action ... ok
+test app::app_state::background_io::tests::raw_bulk_input_is_left_with_a_focused_non_editor_widget ... ok
+test app::app_state::background_io::tests::background_wait_reports_timeout_instead_of_claiming_completion ... ok
+test app::app_state::background_io::tests::stale_encoding_compliance_result_clears_action_without_mutating_buffer ... ok
+test app::app_state::background_io::tests::partial_open_tabs_result_keeps_action_until_terminal_result ... ok
+test app::app_state::background_io::tests::large_prepared_paste_publishes_atomically_and_undo_keeps_the_original_text ... ok
+test app::app_state::background_io::tests::large_prepared_paste_preserves_independent_split_carets ... ok
+test app::app_state::lifecycle_tests::restore::permanently_unavailable_store_does_not_trap_window_or_retry_on_drop ... ok
+test app::app_state::lifecycle_tests::dirty_session_is_persisted_while_occluded ... ok
+test app::app_state::lifecycle_tests::hidden_logic_does_not_replay_stale_dropped_files ... ok
+test app::app_state::lifecycle_tests::first_ui_pass_does_not_control_visibility_or_maximization ... ok
+test app::app_state::lifecycle_tests::minimized_close_is_handled_without_ui ... ok
+test app::app_state::lifecycle_tests::restore::failed_streamed_restore_keeps_the_persistence_fence_after_pending_action_is_removed ... ok
+test app::app_state::background_io::tests::progressive_session_hydration_replaces_matching_cold_shell_after_index_shift ... ok
+test app::app_state::search_state::api_tests::active_buffer_search_counts_matches ... ok
+test app::app_state::search_state::api_tests::all_open_tabs_search_counts_matches_across_tabs ... ok
+test app::app_state::lifecycle_tests::restore::automatic_exit_failure_is_attempted_once_and_explicit_close_can_retry ... ok
+test app::app_state::lifecycle_tests::restore::placeholder_close_and_streamed_prefix_cannot_save_or_trigger_empty_exit ... ok
+test app::app_state::search_state::helpers::tests::accumulator_groups_all_matches_without_eager_preview_entries ... ok
+test app::app_state::search_state::api_tests::closing_replace_mode_clears_replacement_preview ... ok
+test app::app_state::search_state::helpers::tests::target_collection_searches_one_file_once_across_many_views ... ok
+test app::app_state::search_state::api_tests::lazy_preview_cache_evicts_least_recently_used_entry ... ok
+test app::app_state::search_state::helpers::tests::target_collection_searches_same_saved_path_once ... ok
+test app::app_state::lifecycle_tests::retained::ordinary_open_restores_archived_unsaved_text_and_undo_history ... ok
+test app::app_state::lifecycle_tests::startup_restore_completes_without_a_single_ui_pass ... ok
+test app::app_state::search_state::api_tests::lazy_preview_lookup_builds_and_reuses_cached_entry ... ok
+test app::app_state::background_io::tests::timeline_cold_hydration_runs_conflict_search_and_restore_status_updates ... ok
+test app::app_state::search_state::api_tests::replacement_typing_updates_preview_without_mutating_buffer ... ok
+test app::app_state::search_state::api_tests::tab_reorder_marks_open_search_dirty ... ok
+test app::app_state::search_state::api_tests::replace_current_advances_after_empty_replacement ... ok
+test app::app_state::search_state::api_tests::replace_all_changes_every_buffer_in_scope ... ok
+test app::app_state::settings_state::mutators::tests::command_open_settings_selects_only_settings_slot ... ok
+test app::app_state::settings_state::mutators::tests::reset_settings_to_defaults_restores_startup_default_state ... ok
+test app::app_state::lifecycle_tests::restore::closing_or_dropping_before_first_frame_preserves_the_saved_session ... ok
+test app::app_state::search_state::api_tests::replace_current_advances_past_self_matching_replacement ... ok
+test app::app_state::search_state::runtime::tests::batched_search_labels_preserve_duplicate_names_and_active_first_order ... ok
+test app::app_state::settings_state::mutators::tests::close_settings_selects_only_active_workspace_slot ... ok
+test app::app_state::settings_state::tests::app_appearance_honors_os_font_selection ... ok
+test app::app_state::settings_state::window::tests::window_state_capture_keeps_normal_geometry_while_maximized ... ok
+test app::app_state::settings_state::window::tests::window_state_capture_records_normal_geometry ... ok
+test app::app_state::settings_state::tests::applying_settings_reports_invalid_shortcut_overrides ... ok
+test app::app_state::settings_state::mutators::tests::tab_strip_open_settings_can_preserve_existing_selection ... ok
+test app::app_state::tests::clearing_current_status_keeps_history ... ok
+test app::app_state::tests::common_status_helpers_avoid_fragile_vocabulary ... ok
+test app::app_state::tests::common_status_helpers_keep_raw_errors_in_detail ... ok
+test app::app_state::lifecycle_tests::retained::retained_workspace_reopens_with_undo_and_recovers_versions_without_overwriting_files ... ok
+test app::app_state::tests::setting_status_pushes_to_history ... ok
+test app::app_state::tests::status_setters_preserve_severity ... ok
+test app::app_state::window_lifecycle::tests::hidden_focus_does_not_request_paint_until_renderable ... ok
+test app::app_state::window_lifecycle::tests::unknown_visibility_uses_focus_return_without_continuous_repaints ... ok
+test app::app_state::window_lifecycle::tests::visibility_return_requests_one_repaint_without_focus ... ok
+test app::app_state::tests::status_history_is_capped ... ok
+test app::app_state::settings_state::mutators::tests::startup_keeps_workspace_active_when_settings_tab_is_open ... ok
+test app::app_state::settings_state::mutators::tests::startup_restores_settings_as_active_surface_from_session ... ok
+test app::app_state::settings_state::tab_order::tests::file_name_order_sorts_workspace_tabs_and_preserves_active_tab ... ok
+test app::capacity_metrics::tests::histogram_overflow_does_not_clip_long_stalls ... ok
+test app::capacity_metrics::tests::snapshot_groups_background_io_lane_metrics ... ok
+test app::capacity_metrics::tests::snapshot_groups_frame_phase_metrics ... ok
+test app::capacity_metrics::tests::snapshot_reports_frame_time_summary_metrics ... ok
+test app::chrome::resize::tests::east_resize_grip_tracks_screen_rect_right_edge ... ok
+test app::chrome::resize::tests::vertical_resize_grips_track_screen_rect_top_and_bottom_edges ... ok
+test app::chrome::tabs::tests::tab_label_font_uses_editor_family_with_chrome_safe_size ... ok
+test app::color_contrast::tests::optimal_text_color_keeps_bright_highlights_readable_without_plain_black ... ok
+test app::color_contrast::tests::optimal_text_color_keeps_dark_highlights_readable_without_plain_white ... ok
+test app::diagnostics::tests::changed_id_warning_attributes_all_matching_pass_sites ... ok
+test app::diagnostics::tests::duplicate_widget_ids_are_deduplicated ... ok
+test app::diagnostics::tests::extract_hexes_reads_all_warning_ids ... ok
+test app::diagnostics::tests::logger_filters_by_severity_origin_and_the_exact_benign_clipboard_error ... ok
+test app::diagnostics::tests::structured_log_creates_parent_and_preserves_ordered_records_when_appending ... ok
+test app::diagnostics::tests::unavailable_log_path_does_not_panic ... ok
+test app::domain::buffer::analysis::artifacts::tests::evidence_delta_preserves_uncertain_previous_evidence ... ok
+test app::domain::buffer::analysis::artifacts::tests::status_text_lists_only_detected_control_kinds ... ok
+test app::domain::buffer::analysis::format::tests::encoding_label_names_known_windows_ansi_encoding ... ok
+test app::domain::buffer::analysis::format::tests::format_warning_text_combines_format_warnings ... ok
+test app::domain::buffer::analysis::inspection::tests::byte_inspection_detects_unicode_and_c1_controls ... ok
+test app::domain::buffer::analysis::inspection::tests::byte_inspection_preserves_crlf_across_spans ... ok
+test app::domain::buffer::analysis::inspection::tests::inserted_line_endings_preserve_unicode_lone_cr_and_borrowed_fast_paths ... ok
+test app::domain::buffer::analysis::inspection::tests::parallel_span_inspection_corrects_crlf_worker_boundaries ... ok
+test app::app_state::settings_state::tab_order::tests::custom_order_restores_order_from_before_automatic_sort ... ok
+test app::app_state::settings_state::tab_order::tests::file_age_order_uses_disk_modified_time_and_treats_unsaved_tabs_as_newest ... ok
+test app::domain::buffer::analysis::line_endings::tests::mixed_preferred_line_ending_uses_dominant_style ... ok
+test app::domain::buffer::analysis::tests::analyze_piece_tree_text_returns_metadata_and_cached_length ... ok
+test app::domain::buffer::analysis::line_endings::tests::concrete_line_ending_style_is_already_preferred ... ok
+test app::domain::buffer::analysis::tests::display_line_count_from_piece_tree_tracks_edited_buffers ... ok
+test app::domain::buffer::analysis::tests::display_line_count_from_piece_tree_uses_metrics_and_last_char ... ok
+test app::domain::buffer::document::tests::adjacent_backspaces_coalesce_into_one_delete_entry ... ok
+test app::domain::buffer::document::tests::adjacent_pre_burst_backspace_coalesces_as_replacement ... ok
+test app::domain::buffer::document::tests::adjacent_typing_coalesces_into_one_undo_entry ... ok
+test app::domain::buffer::document::tests::backspace_across_hard_dividers_starts_new_entries ... ok
+test app::domain::buffer::document::tests::backspace_inside_typing_burst_shrinks_the_insert_entry ... ok
+test app::domain::buffer::document::tests::cached_history_byte_usage_tracks_history_mutations ... ok
+test app::domain::buffer::document::tests::cursor_jump_starts_a_new_undo_entry ... ok
+test app::domain::buffer::document::tests::dash_is_a_soft_divider ... ok
+test app::domain::buffer::document::tests::empty_replacement_does_not_enter_history_or_clear_redo ... ok
+test app::domain::buffer::document::tests::forward_delete_across_hard_divider_starts_new_entries ... ok
+test app::domain::buffer::document::tests::generation::history_offsets_above_u32_round_trip_without_large_text_allocation ... ok
+test app::app_state::startup_state::tests::startup_failure_keeps_the_save_fence_with_or_without_requested_files ... ok
+test app::app_state::settings_state::tab_order::tests::file_size_order_uses_disk_size_and_falls_back_to_buffer_text ... ok
+test app::domain::buffer::document::tests::generation::history_token_invalidates_replay_clear_restore_and_replacement ... ok
+test app::domain::buffer::document::tests::hard_divider_seals_the_entry ... ok
+test app::domain::buffer::document::tests::keyboard_redo_replays_one_history_entry_at_a_time ... ok
+test app::domain::buffer::document::tests::long_typing_burst_stays_one_entry ... ok
+test app::domain::buffer::document::tests::mistype_delete_retype_drops_the_transient_mistype ... ok
+test app::domain::buffer::document::tests::multi_edit_history_undo_and_redo_apply_in_safe_order ... ok
+test app::domain::buffer::document::tests::memory_and_payload_budgets_do_not_delete_durable_changes ... ok
+test app::domain::buffer::document::tests::navigation_contract::navigation_moves_the_document_without_recording_edits ... ok
+test app::domain::buffer::document::tests::navigation_contract::initial_contents_and_alternative_paths_survive_recovery ... ok
+test app::domain::buffer::document::tests::navigation_contract::reload_is_an_edit_and_forget_history_keeps_an_initial_insertion ... ok
+test app::domain::buffer::document::tests::navigation_contract::separate_files_have_independent_navigation_positions ... ok
+test app::domain::buffer::document::tests::newline_seals_the_entry ... ok
+test app::domain::buffer::document::tests::no_op_edits_are_dropped_from_multi_edit_records ... ok
+test app::domain::buffer::document::tests::prefer_next_row_flip_does_not_split_a_typing_burst ... ok
+test app::domain::buffer::document::tests::removed_transient_edit_does_not_reopen_previous_coalescing_window ... ok
+test app::domain::buffer::document::tests::redo_then_typing_starts_a_new_coalescing_boundary ... ok
+test app::app_state::settings_state::tab_order::tests::custom_order_survives_switching_between_automatic_modes ... ok
+test app::domain::buffer::document::tests::replay_model::failed_history_import_preserves_original_text_and_all_original_spans ... ok
+test app::domain::buffer::document::tests::replay_model::profile_edit_tree_navigation_and_capture ... ignored, manual edit-tree latency profile
+test app::domain::buffer::document::tests::replay_model::replay_across_a_barrier_is_atomic_in_both_directions ... ok
+test app::domain::buffer::document::tests::soft_divider_does_not_seal_inside_a_continuous_burst ... ok
+test app::domain::buffer::document::tests::soft_divider_seals_after_a_pause ... ok
+test app::domain::buffer::document::tests::target_history_redo_replays_through_the_clicked_entry ... ok
+test app::domain::buffer::document::tests::large_edit_preserves_undo_redo_payload_access ... ok
+test app::domain::buffer::document::tests::target_history_undo_rejects_when_current_text_no_longer_matches_entry ... ok
+test app::domain::buffer::document::tests::target_history_undo_replays_clicked_entry_and_later_entries ... ok
+test app::domain::buffer::document::tests::undo_then_typing_preserves_alternative_without_coalescing_into_ancestor ... ok
+test app::app_state::settings_state::tab_order::tests::manual_display_reorder_switches_back_to_custom_order ... ok
+test app::domain::buffer::document::tests::tree_position_is_authoritative_when_restoring_history ... ok
+test app::domain::buffer::edit_tree::tests::branches_share_ancestors_and_remember_the_selected_continuation ... ok
+test app::domain::buffer::edit_tree::tests::invalid_links_and_positions_do_not_form_a_tree ... ok
+test app::domain::buffer::history::coalescing::tests::continuous_insert_records_merge_in_place ... ok
+test app::domain::buffer::history::coalescing::tests::cursor_jump_prevents_coalescing ... ok
+test app::domain::buffer::history::coalescing::tests::delete_records_do_not_merge_across_newline ... ok
+test app::domain::buffer::history::coalescing::tests::deleting_the_only_inserted_char_removes_transient_entry ... ok
+test app::domain::buffer::history::coalescing::tests::hard_dividers_seal_immediately_for_insert_and_delete ... ok
+test app::domain::buffer::history::coalescing::tests::soft_dividers_seal_only_after_pause ... ok
+test app::domain::buffer::persistent_vector::tests::alternating_push_pop_reuses_partial_branch_boundaries ... ok
+test app::domain::buffer::piece_tree::anchor::decision_tests::inserted_anchor_offset_respects_bias_at_insert_boundary ... ok
+test app::domain::buffer::piece_tree::anchor::decision_tests::leaf_index_for_anchor_offset_selects_containing_leaf ... ok
+test app::domain::buffer::piece_tree::anchor::decision_tests::removed_anchor_offset_collapses_inside_range_and_shifts_after_range ... ok
+test app::domain::buffer::piece_tree::metrics::tests::fenwick_index_matches_linear_prefixes_and_boundaries ... ok
+test app::app_state::settings_state::tab_order::tests::recent_edit_order_uses_latest_text_history_sequence_then_save_date ... ok
+test app::domain::buffer::piece_tree::storage::import::tests::cancellation_after_a_chunk_abandons_the_entire_import ... ok
+test app::domain::buffer::document::history_ops::persistence::export::tests::streamed_json_matches_export_and_replays_unicode_with_bounded_payload_windows ... ok
+test app::domain::buffer::piece_tree::tests::anchor_stripped_clone_shares_original_text_storage ... ok
+test app::domain::buffer::piece_tree::tests::anchors_track_bias_deletion_ownership_and_release ... ok
+test app::domain::buffer::piece_tree::tests::batched_previews_match_single_preview_on_edited_tree ... ok
+test app::domain::buffer::persistent_vector::tests::captures_remain_immutable_across_growth_edits_and_shrinking ... ok
+test app::domain::buffer::piece_tree::tests::bounded_extraction_reports_truncation_without_splitting_characters ... ok
+test app::domain::buffer::piece_tree::tests::byte_spans_preserve_offsets_beyond_four_gibibytes ... ok
+test app::domain::buffer::piece_tree::tests::character_cursor_walks_forward_and_reverse_across_utf8_pieces ... ok
+test app::domain::buffer::piece_tree::tests::cloned_tree_line_cache_stays_revision_local_across_replacement ... ok
+test app::domain::buffer::edit_tree::tests::seeded_routes_match_an_independent_parent_model ... ok
+test app::domain::buffer::piece_tree::tests::line_lookup_tracks_mixed_edits ... ok
+test app::domain::buffer::piece_tree::tests::failed_scan_faults_document_and_refuses_edits_before_mutation ... ok
+test app::domain::buffer::piece_tree::tests::partial_ascii_reference_capture_needs_no_body_read ... ok
+test app::domain::buffer::piece_tree::tests::add_offsets_stay_stable_across_deletion_and_divergent_clones ... ok
+test app::domain::buffer::piece_tree::tests::unicode_insert_delete_and_extract_use_char_offsets ... ok
+test app::domain::buffer::piece_tree::tests::cloned_tree_keeps_add_tail_stable_when_current_tree_appends ... ok
+test app::domain::buffer::piece_tree::tests::randomized_edits_match_string_model ... ok
+test app::domain::buffer::state::preparation::tests::unbound_sealed_text_and_divergent_clones_remain_readable ... ok
+test app::domain::buffer::state::tests::failed_store_refuses_large_preparation_atomically_and_old_ack_cannot_clear_new_edit ... ok
+test app::domain::buffer::state::tests::reliable_artifact_evidence_decrements_without_full_refresh ... ok
+test app::domain::buffer::state::tests::storage_acknowledgement_survives_anchor_cow_but_rejects_a_divergent_edit ... ok
+test app::domain::buffer::state::tests::unreadable_reload_preserves_dirty_metadata_and_history ... ok
+test app::domain::buffer::state::tests::unreliable_artifact_evidence_keeps_line_endings_and_defers_rescan ... ok
+test app::domain::buffer::state::tests::visible_control_availability_includes_line_breaks_tabs_and_format_controls ... ok
+test app::domain::buffer::state::tests::visible_control_mode_auto_clears_when_last_substitution_disappears ... ok
+test app::domain::tab_manager::tests::buffer_tab_index_tracks_tab_mutations ... ok
+test app::domain::tab_manager::tests::closing_last_tab_leaves_empty_workspace_and_indices ... ok
+test app::domain::tab_manager::tests::path_index_tracks_open_file_owners ... ok
+test app::app_state::workspace::mutation::tests::follow_history_undo_activates_containing_tab_and_moves_one_view ... ok
+test app::domain::view::caret_animation::tests::adjacent_row_animation_uses_the_destination_column ... ok
+test app::domain::tab_manager::tests::set_tabs_dedupes_duplicate_restored_paths ... ok
+test app::app_state::workspace::zoom::tests::split_inherits_zoom_then_changes_and_resets_independently ... ok
+test app::app_state::workspace::editing::tests::display_toggles_affect_only_active_buffer_and_its_views ... ok
+test app::domain::view::caret_animation::tests::eases_between_keyboard_targets_on_the_same_row ... ok
+test app::domain::view::caret_animation::tests::forced_snap_cancels_an_active_animation ... ok
+test app::domain::view::caret_animation::tests::large_cursor_jumps_and_layout_motion_snap ... ok
+test app::domain::view::tests::center_cursor_reveal_request_dominates_pending_modes ... ok
+test app::domain::view::tests::keep_visible_cursor_reveal_request_dominates_horizontal_only ... ok
+test app::domain::view::zoom::tests::zoom_is_bounded_and_relative_to_the_configured_font_size ... ok
+test app::fonts::fallback_tests::installed_fonts_render_missing_scripts_and_color_emoji ... ignored, requires installed Arabic/Indic and color emoji fonts; run on native font test hosts
+test app::fonts::tests::configured_indent_width_sets_literal_tab_width ... ok
+test app::fonts::tests::default_os_font_candidates_are_available ... ok
+test app::fonts::tests::os_font_selection_labels_default_when_no_family_is_set ... ok
+test app::platform::tests::auto_profile_detects_generic_linux_without_hyprland_env ... ok
+test app::platform::tests::auto_profile_detects_hyprland_from_env ... ok
+test app::platform::tests::env_override_can_select_hyprland_profile ... ok
+test app::platform::tests::hyprland_profile_hides_window_manager_buttons ... ok
+test app::platform::tests::windows_profile_keeps_caption_buttons ... ok
+test app::platform_file::tests::linux_reveal_label_is_file_manager_neutral ... ok
+test app::platform_file::tests::open_dialog_kinds_have_distinct_titles ... ok
+test app::services::background_io::dispatcher::tests::analysis_requests_route_to_analysis_lane ... ok
+test app::services::background_io::dispatcher::tests::send_reports_disconnected_lane_without_losing_request ... ok
+test app::services::background_io::dispatcher::tests::send_reports_full_lane_without_losing_request ... ok
+test app::services::background_io::worker::analysis_lane::tests::refresh_encoding_compliance_detects_unencodable_snapshot_text ... ok
+test app::services::background_io::worker::analysis_lane::tests::refresh_text_metadata_reports_lines_and_control_artifacts ... ok
+test app::services::background_io::worker::path_lane::tests::load_one_with_explicit_encoding_marks_loaded_buffer_format ... ok
+test app::app_state::lifecycle_tests::only_the_last_display_tab_exits_and_persists_an_empty_workspace ... ok
+test app::services::chunk_store::budget::admission_tests::failure_limit_refuses_bulk_without_losing_accepted_text_and_reaps_only_abandoned_chunks ... ok
+test app::services::chunk_store::budget::tests::automatic_uses_total_memory_and_overrides_are_clamped ... ok
+test app::services::background_io::worker::path_lane::tests::load_paths_preserves_input_order_for_parallel_reads ... ok
+test app::services::chunk_store::budget::concurrency_tests::concurrent_bulk_admission_is_atomic_and_pending_aliases_keep_their_body ... ok
+test app::app_state::workspace::zoom::tests::zoom_while_a_cold_tab_loads_survives_persistence_and_stale_hydration ... ok
+test app::fonts::fallback_tests::configured_fonts_take_precedence_and_provider_survives_font_switches ... ok
+test app::domain::buffer::document::tests::replay_model::large_branches_survive_cache_eviction_and_replay_does_not_append_payloads ... ok
+test app::domain::buffer::analysis::inspection::tests::parallel_text_inspection_matches_serial_for_boundary_cases ... ok
+test app::services::chunk_store::import::tests::cdc_preserves_utf8_boundaries_and_rejects_truncated_input ... ok
+test app::fonts::fallback_tests::bundled_text_and_icons_render_without_system_fonts_on_the_first_pass ... ok
+test app::domain::buffer::state::preparation::history_preparation_tests::prepared_history_is_atomic_and_reuses_existing_text_without_new_body_writes ... ok
+test app::services::file_controller::open::tests::closing_a_loading_preview_cancels_its_open_without_recording_lifecycle_activity ... ok
+test app::services::file_controller::open::tests::large_file_stages_first_visible_window_before_background_hydration ... ok
+test app::domain::buffer::piece_tree::tests::lookups_and_spans_cross_leaves_nodes_and_sampled_unicode_lines ... ok
+test app::app_state::lifecycle_tests::retained::startup_external_changes_keep_one_document_and_dirty_conflicts_keep_the_path ... ok
+test app::services::file_controller::save::tests::default_save_as_file_name_adds_txt_only_when_missing_extension ... ok
+test app::services::file_controller::open::tests::unavailable_store_opens_single_files_and_large_batches_from_disk ... ok
+test app::services::file_controller::open::tests::open_selected_paths_async_deduplicates_pending_path ... ok
+test app::domain::buffer::state::preparation::tests::prepared_unicode_is_atomic_undoable_bound_and_scan_preserves_the_viewport_cache ... ok
+test app::services::file_controller::open::tests::large_open_batch_hydrates_most_recent_tab_in_background ... ok
+test app::services::file_controller::open::tests::cold_batch_reopening_both_paths_of_a_split_installs_each_document_once ... ok
+test app::services::file_controller::rename::tests::rename_tab_moves_disk_file_and_updates_buffer_identity ... ok
+test app::services::file_controller::open_here::tests::open_loaded_files_here_adds_each_loaded_file_to_active_workspace ... ok
+test app::services::file_controller::open_here::tests::open_selected_paths_here_migrates_existing_path_from_another_tab ... ok
+test app::services::file_controller::open::tests::persisting_large_file_preview_keeps_retained_identity_and_history ... ok
+test app::services::file_controller::open_here::tests::open_selected_paths_here_reuses_path_already_in_current_workspace ... ok
+test app::domain::buffer::piece_tree::tests::file_backed_chunk_cache_is_bounded_without_invalidating_active_text ... ok
+test app::services::file_controller::save::tests::observation::explicit_reload_of_saved_text_discards_local_work_without_an_external_label ... ok
+test app::domain::buffer::document::tests::replay_model::seeded_history_replay_matches_independent_text_states_and_survives_restart ... ok
+test app::services::file_controller::save::tests::observation::completed_own_save_uses_written_snapshot_even_when_local_work_continues ... ok
+test app::services::file_controller::save::tests::observation::timestamp_only_touch_is_ignored_but_same_size_new_contents_are_observed ... ok
+test app::services::file_controller::save::tests::overlapping_save_as_is_rejected_before_writing_a_second_path ... ok
+test app::services::file_controller::save::tests::observation::superseded_or_forgotten_observations_never_replace_local_text ... ok
+test app::services::file_controller::save::tests::observation::missing_once_then_returned_file_is_reconciled ... ok
+test app::services::file_controller::save::tests::reload::reopening_unchanged_bytes_with_encoding_records_a_load_instead_of_external_changes ... ok
+test app::services::file_controller::save::tests::save_as_to_already_open_path_activates_existing_owner ... ok
+test app::services::file_controller::save::tests::observation::clean_and_dirty_observations_deduplicate_versions_and_keep_previous_states ... ok
+test app::services::file_service::document_write::imp::tests::atomic_save_preserves_executable_permissions ... ok
+test app::services::file_controller::save::tests::observation::startup_conflict_is_durable_and_not_recorded_again_on_restart ... ok
+test app::services::file_service::document_write::imp::tests::failed_in_place_save_retains_original_recovery_copy ... ok
+test app::services::file_service::document_write::imp::tests::atomic_save_preserves_user_extended_attributes_when_supported ... ok
+test app::services::file_controller::save::tests::save_as_copy_creates_a_distinct_document_and_keeps_the_conflicted_original ... ok
+test app::services::file_controller::save::tests::save_as_path_assignment_uses_written_disk_state ... ok
+test app::services::file_service::observation::tests::dirty_and_content_identical_observations_do_not_allocate_replacement_text ... ok
+test app::services::file_controller::save::tests::save_existing_path_stops_when_dirty_buffer_conflicts_with_disk ... ok
+test app::services::file_service::document_write::imp::tests::save_through_symlink_updates_target_without_replacing_link ... ok
+test app::services::file_service::observation::tests::observation_matches_adoption_across_decoder_boundaries_and_boms ... ok
+test app::services::file_service::document_write::imp::tests::hard_link_save_preserves_inode_and_all_linked_names ... ok
+test app::services::file_service::tests::cold_file_shell_retains_path_and_disk_length_without_text_ingest ... ok
+test app::services::file_service::tests::first_visible_window_stops_on_a_utf8_boundary ... ok
+test app::services::file_controller::open::tests::open_results_preserve_identity_release_reservations_and_handle_failures ... ok
+test app::services::file_controller::save::tests::save_with_encoding_failure_leaves_file_and_buffer_state_unchanged ... ok
+test app::services::file_service::tests::unreadable_snapshot_save_preserves_the_existing_destination ... ok
+test app::services::instance_broker::protocol::tests::clean_request_is_rejected_for_existing_primary ... ok
+test app::services::instance_broker::protocol::tests::malformed_frame_is_rejected ... ok
+test app::services::instance_broker::protocol::tests::non_unicode_unix_path_round_trips ... ok
+test app::services::instance_broker::protocol::tests::request_round_trip_preserves_launch_fields ... ok
+test app::services::instance_broker::protocol::tests::response_round_trip_preserves_rejection_reason ... ok
+test app::services::instance_broker::tests::clean_request_is_rejected_by_primary ... ok
+test app::services::instance_broker::tests::ownership_lock_prevents_a_second_primary ... ok
+test app::services::instance_broker::tests::primary_listener_accepts_a_forwarded_request ... ok
+test app::services::search::matchers::ascii::tests::case_insensitive_multi_byte_whole_word_filters_embedded_hits ... ok
+test app::services::search::matchers::ascii::tests::case_insensitive_single_byte_matches_upper_and_lower_forms ... ok
+test app::services::search::matchers::ascii::tests::case_sensitive_matches_report_byte_ranges ... ok
+test app::services::search::matchers::ascii::tests::interruptible_ascii_scan_can_abort ... ok
+test app::services::search::matchers::word_boundary::tests::ascii_whole_word_treats_underscore_as_word_character ... ok
+test app::services::search::matchers::word_boundary::tests::disabled_whole_word_matcher_allows_embedded_matches ... ok
+test app::services::search::matchers::word_boundary::tests::dispatcher_uses_ascii_fast_path_when_text_is_ascii ... ok
+test app::services::search::matchers::word_boundary::tests::unicode_byte_range_whole_word_checks_adjacent_scalars ... ok
+test app::services::file_controller::save::tests::save_completion_keeps_dirty_state_when_buffer_changed_while_write_was_pending ... ok
+test app::services::search::matchers::word_boundary::tests::unicode_whole_word_treats_letters_digits_and_underscore_as_word_characters ... ok
+test app::services::search::tests::ascii_case_insensitive_search_uses_same_ranges ... ok
+test app::services::search::tests::case_sensitive_search_reports_char_ranges_in_utf8_text ... ok
+test app::services::search::tests::compiled_program_matches_plain_search ... ok
+test app::services::search::tests::interruptible_search_can_cancel_large_scan ... ok
+test app::services::search::tests::regex_program_matches_bounded_query ... ok
+test app::services::search::tests::regex_program_expands_capture_replacements ... ok
+test app::services::search::tests::regex_program_rejects_unbounded_matches ... ok
+test app::services::search::tests::regex_program_rejects_replacement_for_non_matching_text ... ok
+test app::services::search::tests::whole_word_case_sensitive_search_checks_unicode_boundaries ... ok
+test app::services::search::tests::whole_word_unicode_does_not_allocate_full_char_vector_contract ... ok
+test app::services::search::tests::regex_program_reports_utf8_char_ranges ... ok
+test app::services::session_store::capture::tests::clean_disk_buffer_retains_initial_edit_and_current_content_cache ... ok
+test app::services::file_service::tests::encoded_streams_flush_state_and_propagate_write_errors ... ok
+test app::services::file_service::tests::formatted_writers_agree_across_encodings_newlines_and_piece_boundaries ... ok
+test app::services::file_service::tests::reader_replacement_interrupts_scans_without_permanently_faulting_live_text ... ok
+test app::services::session_store::database::activity_tests::activity_and_document_changes_roll_back_together_when_a_reference_is_missing ... ok
+test app::services::file_controller::save::tests::reload::queued_reload_and_encoding_reopen_preserve_intervening_edits ... ok
+test app::services::session_store::database::activity_tests::activity_alone_commits_and_repeated_captures_are_idempotent ... ok
+test app::services::file_controller::save::tests::saving_an_existing_path_or_confirmed_conflict_clears_only_the_written_dirty_state ... ok
+test app::services::session_store::database::activity_tests::an_empty_disk_file_has_open_and_close_rows_but_a_blank_untitled_document_leaves_none ... ok
+test app::services::session_store::database::activity_tests::closing_a_cold_blank_untitled_document_removes_its_creation_without_hydrating ... ok
+test app::services::session_store::database::activity_tests::closing_a_second_view_does_not_close_the_document ... ok
+test app::services::file_service::observation::tests::replacement_text_survives_source_changes_beyond_the_file_chunk_cache ... ok
+test app::services::session_store::database::activity_tests::promoting_an_open_split_pane_does_not_record_another_open ... ok
+test app::services::session_store::database::activity_tests::failed_close_activity_commit_keeps_the_document_open_and_pending_work_retryable ... ok
+test app::services::session_store::database::app_safety_tests::closing_cold_split_retains_both_documents_and_remaining_layout ... ok
+test app::app_state::startup_state::tests::startup_modes_share_settings_precedence_restore_and_fallback_policy ... ok
+test app::services::session_store::database::activity_tests::open_edit_close_reopen_and_restart_keep_one_ordered_feed ... ok
+test app::services::session_store::database::app_safety_tests::unavailable_session_store_does_not_trap_tabs_or_split_panes ... ok
+test app::services::file_service::observation::tests::unchanged_large_observation_writes_no_chunks_and_cancelled_import_is_atomic ... ok
+test app::services::session_store::database::app_safety_tests::failed_blocking_restore_cannot_erase_healthy_tabs_after_quarantine ... ok
+test app::services::session_store::database::chunks::tests::a_reader_panic_is_an_error_and_background_reads_still_work ... ok
+test app::services::session_store::database::app_safety_tests::failed_archive_commit_leaves_the_live_tab_open ... ok
+test app::services::session_store::database::app_safety_tests::failed_reset_keeps_saving_paused_and_can_be_retried ... ok
+test app::services::file_controller::save::tests::observation::deferred_save_survives_superseded_observations_or_reports_failure ... ok
+test app::services::session_store::database::chunks::tests::deduplication_never_releases_accepted_ram_against_a_corrupt_body ... ok
+test app::services::session_store::database::app_safety_tests::cold_documents_survive_a_failed_backup_and_retry_after_writer_retirement ... ok
+test app::services::session_store::database::app_safety_tests::final_split_view_close_retains_latest_text_and_rolls_back_before_removing_the_view ... ok
+test app::services::session_store::database::chunks::tests::failed_chunk_transaction_retains_ram_restores_full_and_retries_idempotently ... ok
+test app::services::session_store::database::documents_tests::measure_real_typed_metadata_at_ten_thousand_tabs ... ignored, manual 10,000-tab typed metadata and startup reservation measurement
+test app::services::session_store::database::app_safety_tests::retryable_session_save_failure_keeps_window_open_and_does_not_loop ... ok
+test app::services::session_store::database::closed_tests::archive_diff_failure_rolls_back_removed_and_changed_rows ... ok
+test app::services::file_service::tests::large_utf8_import_uses_durable_lazy_chunks_and_survives_source_replacement ... ok
+test app::services::session_store::database::closed_tests::token_lookup_does_not_decode_unrelated_archives ... ok
+test app::services::session_store::database::chunks::tests::pending_committed_evicted_and_pinned_chunks_keep_exact_text ... ok
+test app::services::session_store::database::documents_tests::root_and_nonroot_references_are_constrained_and_layout_indexes_are_validated ... ok
+test app::services::session_store::database::documents_tests::consuming_a_closed_split_layout_retains_every_other_document ... ok
+test app::services::session_store::database::documents_tests::documents_and_branches_survive_loss_of_every_workspace_reference ... ok
+test app::services::session_store::database::documents_tests::save_as_over_a_retained_path_transfers_lookup_without_reusing_the_replaced_tree ... ok
+test app::services::session_store::database::closed_tests::archive_diff_preserves_survivors_and_requested_order ... ok
+test app::services::session_store::database::documents_tests::a_cursor_move_updates_one_view_and_closing_the_first_tab_preserves_layouts ... ok
+test app::services::session_store::database::documents_tests::unchanged_closed_documents_are_never_rewritten_by_later_saves ... ok
+test app::services::session_store::database::fault_tests::corrupt_metadata_cannot_be_overwritten_without_first_loading ... ok
+test app::services::session_store::database::fault_tests::existing_session_directory_is_private ... ok
+test app::services::session_store::database::app_safety_tests::incompatible_session_requires_explicit_reset_then_saves_and_restarts ... ok
+test app::services::session_store::database::documents_tests::warm_saves_do_not_read_unrelated_closed_layout_payloads ... ok
+test app::services::session_store::database::fault_tests::failed_rollback_blocks_subsequent_reads_and_writes ... ok
+test app::services::session_store::database::fault_tests::document_replacement_with_reused_generation_is_not_skipped ... ok
+test app::services::session_manager::close::tests::close_during_a_writer_pause_keeps_a_newer_edit_and_a_later_close_commits_it ... ok
+test app::services::session_store::database::incremental_tests::opening_reserves_global_sequences_from_unhydrated_cold_history ... ok
+test app::services::session_store::database::incremental_tests::strict_types_and_foreign_keys_are_enforced_by_turso ... ok
+test app::services::session_store::database::incremental_tests::cold_history_is_lazy_and_survives_metadata_saves_and_quarantine ... ok
+test app::services::session_store::database::fault_tests::disk_full_rolls_back_content_metadata_and_cleanup ... ok
+test app::services::session_store::database::inventory_tests::failed_cleanup_invalidates_inventory_and_retry_rebuilds_it_from_committed_rows ... ok
+test app::services::session_store::database::inventory_tests::navigation_preserves_inventory_without_hiding_unknown_writes ... ok
+test app::services::file_service::observation::reference_adoption_tests::large_changed_source_adopts_references_without_body_reads_or_rewriting_imported_chunks ... ok
+test app::services::session_store::database::quarantine_tests::archive_write_failure_blocks_every_save ... ok
+test app::services::session_store::database::incremental_tests::history_appends_updates_prunes_and_restarts_without_rewriting_unchanged_entries ... ok
+test app::services::session_store::database::inventory_tests::targeted_collection_preserves_shared_and_new_references_then_collects_last_reference ... ok
+test app::services::session_store::database::quarantine_tests::closed_documents_remain_hydratable_without_a_workspace_root ... ok
+test app::services::session_store::database::inventory_tests::warm_and_reopened_saves_do_not_even_attempt_to_reinsert_known_documents ... ok
+test app::services::file_controller::save::tests::observation::saving_pasted_newlines_does_not_create_false_external_changes ... ok
+test app::services::session_store::database::incremental_tests::references_reuse_original_bodies_after_front_middle_end_edits_and_across_tabs ... ok
+test app::services::session_store::database::quarantine_tests::lengths_and_hashes_describe_the_bytes_emitted_including_empty_and_unicode ... ok
+test app::services::session_store::database::history_fingerprint_tests::compact_history_cache_persists_complete_row_changes_and_survives_reopen ... ok
+test app::services::session_store::database::quarantine_tests::damaged_active_tab_stays_cold_while_other_tabs_restore_and_save ... ok
+test app::services::session_store::database::quarantine_tests::cold_damage_keeps_healthy_saves_and_retains_original_data_across_restart ... ok
+test app::services::session_store::database::quarantine_tests::missing_cold_content_detected_by_a_save_is_quarantined_after_rollback ... ok
+test app::services::session_store::database::quarantine_tests::old_schema_is_rejected_and_schema_batch_rolls_back ... ok
+test app::services::session_store::database::quarantine_tests::quarantine_archives_committed_metadata_not_a_stale_hydration_payload ... ok
+test app::services::session_store::database::quarantine_tests::supplied_document_pieces_are_retained_even_if_capture_policy_changes ... ok
+test app::services::session_store::database::fault_tests::missing_or_corrupt_content_is_quarantined_not_replaced_with_empty_text ... ok
+test app::services::session_store::database::reference_tests::collection_keeps_live_only_handles_and_durable_history_roots ... ok
+test app::services::session_store::database::reference_tests::divergent_tail_capture_replaces_segments_without_changing_old_snapshot ... ok
+test app::services::session_store::database::reset::tests::incomplete_backup_does_not_remove_any_source ... ok
+test app::services::session_store::database::reset::tests::moves_database_and_sidecars_but_leaves_other_files ... ok
+test app::services::session_store::database::reference_tests::large_entries_use_packed_spans_and_keep_exact_replay_after_restore ... ok
+test app::services::session_store::database::range_tests::failed_reference_manifest_is_retryable_without_rescanning_immutable_text ... ok
+test app::services::session_store::database::reference_tests::forget_releases_whole_chunks_without_rewriting_logical_offsets_or_old_clones ... ok
+test app::services::session_store::database::reset::tests::another_owner_prevents_reset ... ok
+test app::services::session_store::database::schema_reset_tests::foreign_database_is_never_reset ... ok
+test app::services::session_store::database::schema_reset_tests::fresh_database_has_no_reset_warning ... ok
+test app::services::session_store::database::reference_tests::reference_restore_is_lazy_and_preserves_unicode_branches_and_export ... ok
+test app::services::session_store::database::schema_reset_tests::malformed_database_is_not_a_schema_reset ... ok
+test app::services::session_store::database::schema_reset_tests::profile_edit_tree_database_growth_and_restart ... ignored, manual edit-tree database profile
+test app::services::session_store::database::reset::live_text_tests::reset_rebinds_large_live_and_history_only_chunks_and_keeps_old_clones_readable ... ok
+test app::services::session_store::database::schema_reset_tests::lazy_queries_do_not_silently_reset_an_incompatible_session ... ok
+test app::services::session_store::database::reset::retry_tests::failed_backup_keeps_evicted_text_readable_and_reset_can_be_retried ... ok
+test app::services::session_store::database::schema_reset_tests::inconsistent_cursor_and_corrupt_branch_payload_are_rejected ... ok
+test app::services::session_store::database::schema_reset_tests::closed_file_branches_now_and_edit_recency_survive_restart_and_forget ... ok
+test app::services::session_store::database::size_tests::profile_payload_lengths_against_covering_byte_counts ... ignored, manual accounting scan profile; allocates a 64 MiB fixture
+test app::services::session_store::database::size_tests::accounting_queries_use_covering_indexes_not_payload_rows ... ok
+test app::services::session_store::database::reset::tests::replacing_an_open_store_retires_stale_clones_and_retains_ownership ... ok
+test app::services::session_store::database::schema_reset_tests::recent_closed_files_report_history_even_at_root_or_without_edit_timestamps ... ok
+test app::services::session_store::database::schema_reset_tests::recovery_export_does_not_reset_an_unsupported_source ... ok
+test app::services::session_store::database::schema_reset_tests::tree_rows_and_positions_round_trip_transactionally ... ok
+test app::services::session_store::database::reset::tests::newer_session_is_backed_up_and_replaced_only_on_request ... ok
+test app::services::session_store::database::size_tests::bulk_usage_matches_reference_accounting_for_archives_and_all_chunk_classes ... ok
+test app::services::session_store::database::timeline_tests::characterize_union_pagination_plan_before_adding_activity ... ok
+test app::services::session_store::database::tests::unchanged_and_metadata_only_commits_never_rewrite_content_or_history ... ok
+test app::services::session_store::database::timeline_tests::pages_use_total_sequence_order_skip_baselines_and_never_read_edit_payloads ... ok
+test app::services::session_store::database::timeline_tests::retained_unicode_names_use_the_same_search_normalization_as_live_documents ... ok
+test app::services::session_store::parallel::tests::ordered_batches_report_panics_without_losing_siblings ... ok
+test app::services::session_store::database::tests::worker_round_trip_and_stale_capture_barrier ... ok
+test app::services::session_store::database::timeline_tests::zero_edit_timestamps_and_clock_changes_do_not_hide_or_reorder_activity ... ok
+test app::services::session_store::database::size_tests::sizes_track_writes_coalescing_undo_and_shared_recovery_chunks ... ok
+test app::services::session_store::database::worker::tests::health_query_does_not_wait_for_a_running_job_and_ack_publishes_latch ... ok
+test app::services::session_store::parity_tests::recovery_views_require_the_current_fields ... ok
+test app::services::session_store::parity_tests::clean_disk_buffer_restores_complete_edit_tree ... ok
+test app::services::session_store::parity_tests::combined_tabs_preserve_format_flags_views_and_active_surface ... ok
+test app::services::session_store::database::tests::second_owner_and_unsupported_schemas_are_rejected_without_discarding_data ... ok
+test app::services::session_store::parity_tests::clean_cold_history_is_preserved_for_external_change_resolution ... ok
+test app::services::session_store::parity_tests::per_view_zoom_survives_session_and_closed_tab_restore ... ok
+test app::services::session_store::database::worker::tests::a_queued_job_waits_for_at_most_one_four_chunk_batch ... ok
+test app::services::session_store::database::tests::invalid_captures_leave_the_committed_session_intact ... ok
+test app::app_state::startup_state::tests::startup_file_targets_and_explicit_restore_override_saved_preferences ... ok
+test app::services::session_store::parity_tests::saved_clean_buffer_updates_current_content_cache ... ok
+test app::services::session_store::database::quarantine_tests::malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures ... ok
+test app::services::session_store::reopen::tests::clean_external_change_keeps_identity_and_missing_file_recovers_untitled ... ok
+test app::services::session_store::restore::tests::disk_reconciliation_preserves_dirty_edits_but_reloads_clean_files ... ok
+test app::services::session_store::restore::tests::restore_status_reports_counts_and_prioritizes_warnings ... ok
+test app::services::session_store::reopen::tests::cold_reopen_preserves_identity_and_applies_disk_changes_when_hydrated ... ok
+test app::services::session_store::reopen::tests::path_claimed_by_a_live_document_recovers_without_an_external_edit ... ok
+test app::services::settings_store::model::tests::highlight_text_default_matches_generated_contrast_color ... ok
+test app::services::settings_store::recently_closed::tests::legacy_paths_and_timestamped_records_round_trip ... ok
+test app::services::session_store::reopen::tests::external_change_preserves_unsaved_text_as_the_preceding_state ... ok
+test app::services::session_store::recovery_export::tests::export_includes_closed_retained_text_and_exact_history_without_consuming_the_archive ... ok
+test app::services::settings_store::shortcut_reference::tests::commented_defaults_do_not_freeze_platform_specific_shortcuts ... ok
+test app::services::session_store::reopen::tests::path_claimed_during_reopen_keeps_the_original_tree_without_the_staged_external_edit ... ok
+test app::services::settings_store::tests::fallback_settings_are_loaded_and_migrated_to_primary_root ... ok
+test app::services::settings_store::shortcut_reference::tests::saves_preserve_overrides_including_unknown_and_invalid_keys_without_duplicates ... ok
+test app::services::store_io::tests::write_atomic_with_leaves_existing_target_when_replace_fails ... ok
+test app::services::store_io::tests::write_atomic_with_removes_temp_file_after_write_failure ... ok
+test app::shortcut_keymap::tests::every_action_keeps_its_persisted_key_and_platform_defaults ... ok
+test app::shortcut_keymap::tests::exact_modifiers_keep_overlapping_shortcuts_distinct ... ok
+test app::shortcut_keymap::tests::overrides_fall_back_atomically_and_report_only_known_invalid_actions ... ok
+test app::shortcut_keymap::tests::parser_supports_aliases_and_rejects_incomplete_or_ambiguous_lists ... ok
+test app::shortcut_tooltips::tests::runtime_keymap_reserves_platform_and_user_bindings_exactly ... ok
+test app::shortcut_keymap::tests::shortcut_consumption_leaves_nonmatches_and_consumes_matches_once ... ok
+test app::shortcut_tooltips::tests::tooltips_follow_real_context_defaults_overrides_and_invalid_fallbacks ... ok
+test app::services::store_io::tests::write_atomic_with_replaces_existing_target ... ok
+test app::shortcuts::traversal::tests::f6_traversal_wraps_forward ... ok
+test app::shortcuts::traversal::tests::shift_f6_traversal_wraps_backward ... ok
+test app::system_appearance::linux::tests::parses_hyprctl_argb_gradient_color ... ok
+test app::system_appearance::tests::bridge_color_scheme_parses_theme_values ... ok
+test app::system_appearance::tests::bridge_hex_color_parses_hash_prefixed_rgb ... ok
+test app::system_appearance::tests::gtk_font_name_family_removes_trailing_size ... ok
+test app::system_appearance::tests::gtk_font_name_size_is_read_from_last_token ... ok
+test app::system_appearance::tests::native_system_theme_remains_live_without_a_bridge_override ... ok
+test app::tests::canonical_path_keys_keep_missing_dot_spellings_distinct ... ok
+test app::tests::canonical_path_keys_preserve_case_on_case_sensitive_platforms ... ok
+test app::tests::canonical_path_keys_resolve_existing_dot_spellings ... ok
+test app::theme::tests::secondary_text_is_readable_but_quieter_than_primary_in_both_themes ... ok
+test app::services::settings_store::shortcut_reference::tests::every_generated_default_is_listed_and_can_be_uncommented_for_each_profile ... ok
+test app::ui::accessibility_tests::named_dialog_disappears_from_accessibility_tree_when_closed ... ok
+test app::ui::accessibility_tests::tab_identity_survives_reordering_and_close_is_a_named_action ... ok
+test app::services::session_store::database::incremental_tests::write_failures_roll_back_reference_manifest_before_retry ... ok
+test app::ui::dialogs::status_history::tests::status_filter_matches_by_severity ... ok
+test app::ui::dialogs::status_history::tests::status_history_row_keeps_detail_separate_from_primary_text ... ok
+test app::ui::dialogs::status_history::tests::status_history_rows_are_newest_first ... ok
+test app::services::session_store::reopen::tests::temporary_read_failure_preserves_retained_path_and_allows_retry ... ok
+test app::services::session_store::reopen::tests::unchanged_disk_restores_unsaved_text_and_undo ... ok
+test app::services::session_store::reopen::tests::previously_observed_conflict_is_not_loaded_again_on_reopen ... ok
+test app::shortcuts::tests::zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers ... ok
+test app::services::session_store::restore::tests::streaming_restores_active_first_preserves_cold_payloads_and_honors_cancellation ... ok
+test app::services::session_store::usage::tests::usage_counts_payloads_and_roots_once_without_following_symlinks ... ok
+test app::ui::dialogs::text_history::tests::branches_remain_selectable_and_recent_order_ignores_navigation ... ok
+test app::ui::dialogs::text_history::tests::confirmation_resizes_its_footer_without_resizing_history_or_leaving_a_gap ... ok
+test app::ui::dialogs::text_history::tests::editing_from_scrubber_preserves_first_event_and_old_continuation ... ok
+test app::services::session_store::reopen::tests::reopened_split_keeps_identities_and_retains_changed_files_previous_states ... ok
+test app::ui::dialogs::text_history::tests::collapsed_branch_is_display_only_and_reveals_now_when_navigated_into ... ok
+test app::ui::dialogs::text_history::tests::performance::profile_retained_history_timeline ... ignored, manual retained Timeline comparison; reports timings without budgets
+test app::ui::accessibility_tests::settings_inputs_have_names_and_custom_switches_are_actionable ... ok
+test app::ui::dialogs::text_history::tests::profile_edit_tree_history_rendering ... ignored, manual virtualized History rendering profile
+test app::ui::dialogs::text_history::tests::file_picker_reopens_the_requested_document_from_a_split_archive ... ok
+test app::ui::dialogs::status_history::tests::full_status_details_and_reset_action_are_visible_without_expanding ... ok
+test app::ui::dialogs::text_history::tests::file_picker_search_and_enter_restore_history_navigation_focus ... ok
+test app::ui::dialogs::text_history::tests::forget_requires_confirmation_and_keeps_current_text_as_a_new_initial_edit ... ok
+test app::ui::dialogs::text_history::tests::forget_is_named_per_visible_file_and_is_reset_by_filter_or_close ... ok
+test app::ui::dialogs::text_history::tests::history_typing_delivers_first_event_to_editor ... ok
+test app::services::session_store::database::range_tests::reference_ranges_survive_multiple_unicode_edits_eof_changes_and_replay ... ok
+test app::ui::dialogs::text_history::tests::old_edit_dates_and_operation_icons_preserve_meaning_without_wrapper_quotes ... ok
+test app::ui::dialogs::text_history::tests::now_is_visible_hover_is_inert_and_click_selects_a_state ... ok
+test app::ui::dialogs::text_history::tests::scrubber_accessibility_actions_use_the_same_navigation ... ok
+test app::services::session_store::database::reference_tests::typing_writes_tail_suffixes_and_navigation_changes_no_history_rows ... ok
+test app::ui::dialogs::text_history::tests::picker_escape_and_outside_dismissal_keep_history_and_restore_navigation ... ok
+test app::ui::dialogs::text_history::tests::scrubber_drag_cancels_on_file_switch_even_without_an_initial_seek ... ok
+test app::ui::dialogs::text_history::tests::scrubber_hover_is_inert_and_drag_updates_editor_before_release ... ok
+test app::ui::dialogs::text_history::tests::scrubber_shows_only_the_selected_route_and_opens_without_moving_now ... ok
+test app::ui::editor_area::tests::ctrl_shift_scroll_stays_reserved_for_zoom_handling ... ok
+test app::ui::editor_area::tests::editor_panel_is_flush_with_adjacent_window_chrome ... ok
+test app::ui::editor_area::tests::plain_scroll_does_not_change_font_size ... ok
+test app::ui::editor_area::tests::shift_scroll_maps_to_font_size_delta ... ok
+test app::ui::editor_area::tile::autoscroll::tests::edge_autoscroll_offset_advances_without_snap_back ... ok
+test app::ui::editor_area::tile::autoscroll::tests::edge_autoscroll_offset_clamps_to_scroll_extent ... ok
+test app::ui::editor_area::tile::autoscroll::tests::selection_autoscroll_is_idle_near_center ... ok
+test app::ui::editor_area::tile::autoscroll::tests::selection_autoscroll_moves_down_below_viewport ... ok
+test app::ui::editor_area::tile::chrome::tests::multiple_visible_tiles_distinguish_active_border ... ok
+test app::ui::editor_area::tile::chrome::tests::single_visible_tile_has_no_border ... ok
+test app::ui::editor_area::tile::context_menu::model::tests::every_split_menu_item_queues_its_named_direction_and_equal_split ... ok
+test app::ui::editor_area::tile::context_menu::model::tests::inactive_tiles_activate_on_secondary_click_only ... ok
+test app::ui::dialogs::text_history::timeline::tests::closing_or_persisting_preserves_loaded_pages_and_the_reading_anchor ... ok
+test app::ui::editor_area::tile::context_menu::model::tests::shortcut_tooltip_lookup_covers_menu_commands ... ok
+test app::ui::editor_area::tile::context_menu::widgets::tests::icon_rail_leading_space_centers_fixed_button_rail ... ok
+test app::ui::editor_area::tile::context_menu::widgets::tests::icon_rail_leading_space_clamps_when_menu_is_narrow ... ok
+test app::ui::editor_area::tile::decisions::tests::context_menu_attach_policy_skips_tile_menu_inside_editor_rect ... ok
+test app::ui::editor_area::tile::decisions::tests::scrollbar_visibility_hides_scrollbars_during_tab_drag ... ok
+test app::ui::editor_area::tile::scroll_frame::tests::eof_tail_does_not_create_blank_scroll_page ... ok
+test app::ui::editor_area::tile::scroll_frame::tests::unwrapped_scroll_content_width_preserves_measured_extent ... ok
+test app::ui::editor_area::tile::scroll_frame::tests::virtual_content_height_excludes_blank_eof_page ... ok
+test app::ui::editor_area::tile::scroll_frame::tests::wrapped_scroll_content_width_tracks_viewport ... ok
+test app::ui::editor_area::tile::scroll_input::tests::editor_local_scroll_source_accepts_mouse_wheel ... ok
+test app::ui::editor_area::tile::scroll_input::tests::editor_scroll_override_clamps_to_content_bounds ... ok
+test app::ui::editor_area::tile::scroll_input::tests::scrollbar_offset_wins_over_wheel_and_layout_requests ... ok
+test app::ui::editor_area::tile::tests::wrapped_width_change_is_only_significant_for_word_wrap ... ok
+test app::ui::dialogs::text_history::tests::scroll_to_now_changes_only_the_viewport ... ok
+test app::ui::editor_content::extent::tests::based_slice_height_adds_logical_line_offset ... ok
+test app::ui::editor_content::extent::tests::content_height_falls_back_to_logical_lines_without_measurement ... ok
+test app::ui::editor_content::extent::tests::content_height_uses_measured_display_height_when_it_exceeds_logical_lines ... ok
+test app::ui::editor_content::extent::tests::eof_tail_does_not_create_blank_scroll_page ... ok
+test app::ui::editor_content::gutter::tests::fallback_gutter_rows_are_limited_to_visible_viewport ... ok
+test app::ui::editor_content::gutter::tests::fallback_gutter_rows_keep_legacy_full_range_without_viewport ... ok
+test app::ui::editor_content::gutter::tests::gutter_digits_follow_line_count_without_fixed_three_digit_floor ... ok
+test app::ui::editor_content::native_editor::cursor::tests::arrow_down_clamps_to_shorter_target_line ... ok
+test app::ui::editor_content::native_editor::cursor::tests::arrow_down_moves_past_visible_slice_boundaries_by_document_line ... ok
+test app::ui::editor_content::native_editor::cursor::tests::arrow_up_moves_one_wrapped_display_row_before_logical_line_fallback ... ok
+test app::ui::editor_content::native_editor::cursor::tests::document_navigation_respects_lines_endings_edges_and_character_indices ... ok
+test app::ui::editor_content::native_editor::cursor::tests::horizontal_movement_clears_visual_column_goal ... ok
+test app::ui::editor_content::native_editor::cursor::tests::horizontal_selection_collapse_does_not_override_shift_or_word_navigation ... ok
+test app::ui::editor_content::native_editor::cursor::tests::vertical_movement_restores_visual_column_after_short_line ... ok
+test app::ui::editor_content::native_editor::editing::tests::backspace_deletes_previous_scalar_value ... ok
+test app::ui::editor_content::native_editor::editing::tests::cut_records_cut_source_and_returns_document_text ... ok
+test app::ui::editor_content::native_editor::editing::tests::delete_removes_next_scalar_value ... ok
+test app::ui::editor_content::native_editor::editing::tests::delete_selection_collapses_to_start_with_next_row_preference ... ok
+test app::ui::editor_content::native_editor::editing::tests::insert_replaces_selection_and_records_deleted_text ... ok
+test app::ui::editor_content::native_editor::editing::tests::multiline_outdent_handles_mixed_tabs_and_spaces ... ok
+test app::ui::editor_content::native_editor::editing::tests::multiline_selection_indents_every_selected_line_as_one_undo_step ... ok
+test app::ui::editor_content::native_editor::editing::tests::outdent_removes_leading_tab_on_current_line ... ok
+test app::ui::editor_content::native_editor::editing::tests::outdent_removes_no_more_than_the_configured_width ... ok
+test app::ui::editor_content::native_editor::editing::tests::outdent_removes_up_to_four_leading_spaces ... ok
+test app::ui::editor_content::native_editor::editing::tests::outdent_without_indent_is_noop ... ok
+test app::ui::editor_content::native_editor::editing::tests::pasted_newlines_follow_buffer_preferred_line_ending ... ok
+test app::ui::editor_content::native_editor::editing::tests::spaces_indent_advances_to_the_next_tab_stop ... ok
+test app::ui::editor_content::native_editor::editing::tests::spaces_indent_uses_the_configured_width ... ok
+test app::ui::editor_content::native_editor::editing::tests::tab_indent_inserts_an_actual_tab_character ... ok
+test app::ui::dialogs::text_history::tests::whitespace_labels_are_display_only ... ok
+test app::ui::editor_content::native_editor::editing::tests::wordwise_backspace_removes_previous_word_after_whitespace ... ok
+test app::ui::editor_content::native_editor::editing::tests::wordwise_delete_removes_current_word_and_following_whitespace ... ok
+test app::ui::editor_content::native_editor::interactions::keyboard::tests::alt_backspace_is_classic_undo_without_extra_modifiers ... ok
+test app::ui::editor_content::native_editor::interactions::keyboard::tests::ime_commit_event_becomes_insertable_text ... ok
+test app::ui::editor_content::native_editor::history_feedback::tests::feedback_is_buffer_scoped_revision_bound_and_temporary ... ok
+test app::ui::editor_content::native_editor::interactions::keyboard::tests::ime_preedit_event_is_kept_separate_from_committed_text ... ok
+test app::ui::editor_content::native_editor::interactions::keyboard::tests::key_events_remain_available_for_runtime_keymap_filtering ... ok
+test app::ui::editor_content::native_editor::interactions::mouse::tests::pointer_tracking_requires_owned_interaction_before_drag ... ok
+test app::ui::editor_content::native_editor::interactions::keyboard::tests::runtime_app_shortcuts_are_filtered_after_releasing_the_input_lock ... ok
+test app::ui::editor_content::native_editor::interactions::mouse::tests::pointer_tracking_uses_latest_position_during_drag ... ok
+test app::ui::editor_content::native_editor::interactions::mouse::tests::secondary_click_at_selection_end_moves_caret ... ok
+test app::ui::editor_content::native_editor::interactions::mouse::tests::secondary_click_inside_selection_preserves_selection ... ok
+test app::services::file_controller::save::tests::reload::pending_loads_only_replace_the_requested_unchanged_buffer ... ok
+test app::ui::editor_content::native_editor::layout::cache_tests::viewport_preflight_reports_unreadable_text_before_building_a_galley ... ok
+test app::ui::dialogs::text_history::tests::scrubber_transport_moves_real_now_and_open_history_keeps_it ... ok
+test app::ui::editor_content::native_editor::layout::tests::editor_interaction_id_is_stable_per_view ... ok
+test app::ui::editor_content::native_editor::layout::tests::eof_tail_does_not_create_blank_scroll_page ... ok
+test app::ui::editor_content::native_editor::layout::tests::preview_text_slice_can_project_deletion ... ok
+test app::ui::editor_content::native_editor::layout::tests::preview_text_slice_ignores_replacement_outside_slice ... ok
+test app::ui::editor_content::native_editor::layout::tests::preview_text_slice_projects_adjacent_replacements ... ok
+test app::ui::editor_content::native_editor::layout::tests::preview_text_slice_projects_deletion_at_eof ... ok
+test app::ui::editor_content::native_editor::layout::tests::preview_text_slice_projects_replacement_at_eof ... ok
+test app::ui::editor_content::native_editor::layout::tests::preview_text_slice_projects_replacements_without_changing_original_coordinates ... ok
+test app::ui::editor_content::native_editor::layout::tests::visible_bare_cr_creates_display_row_break ... ok
+test app::ui::editor_content::native_editor::layout::tests::visible_c0_and_del_controls_use_control_pictures ... ok
+test app::ui::editor_content::native_editor::layout::tests::viewport_slice_ignores_offscreen_cursor_without_pending_reveal ... ok
+test app::ui::editor_content::native_editor::layout::tests::visible_control_text_maps_newline_marker_to_single_document_char ... ok
+test app::ui::editor_content::native_editor::layout::tests::visible_crlf_pins_each_line_ending_char ... ok
+test app::ui::editor_content::native_editor::layout::tests::visible_unicode_controls_use_private_use_glyphs ... ok
+test app::ui::editor_content::native_editor::painting::tests::replacement_preview_rect_covers_original_match_when_label_is_shorter ... ok
+test app::ui::editor_content::native_editor::painting::tests::replacement_preview_rect_expands_for_longer_label ... ok
+test app::ui::editor_content::native_editor::primary_selection::tests::publishes_once_on_release_and_not_on_idle_or_focus_changes ... ok
+test app::ui::editor_content::native_editor::tests::cursor_movement_without_edit_requests_keep_visible_reveal ... ok
+test app::ui::editor_content::native_editor::tests::cursor_only_movement_inside_existing_slice_keeps_galley ... ok
+test app::ui::editor_content::native_editor::tests::cursor_only_movement_outside_existing_slice_rebuilds_for_reveal ... ok
+test app::ui::editor_content::native_editor::tests::cut_returns_document_controls_not_display_glyphs ... ok
+test app::ui::editor_content::native_editor::tests::consecutive_vertical_keys_restore_visual_column_after_short_line ... ok
+test app::ui::editor_content::native_editor::tests::editor_keeps_tab_for_indentation ... ok
+test app::ui::editor_content::native_editor::layout::cache_tests::cached_text_uses_current_display_scale ... ok
+test app::ui::editor_content::native_editor::tests::edited_frame_publishes_current_snapshot_and_consumes_reveal ... ok
+test app::ui::editor_content::native_editor::tests::losing_focus_clears_ime_state ... ok
+test app::ui::editor_content::native_editor::tests::image_only_paste_does_not_change_plain_text_or_revision ... ok
+test app::ui::editor_content::native_editor::tests::home_and_end_move_to_line_boundaries ... ok
+test app::ui::editor_content::native_editor::tests::newline_edit_requests_vertical_cursor_reveal ... ok
+test app::ui::dialogs::text_history::timeline::tests::live_index_moves_coalesced_edits_without_changing_row_identity_or_tracking_navigation ... ok
+test app::ui::editor_content::native_editor::tests::publishing_active_selection_reports_shared_selection_changes ... ok
+test app::ui::editor_content::native_editor::tests::same_line_edit_requests_horizontal_cursor_reveal ... ok
+test app::ui::editor_content::native_editor::tests::selection_copy_returns_document_controls_not_display_glyphs ... ok
+test app::ui::editor_content::native_editor::tests::unchanged_input_keeps_existing_galley ... ok
+test app::ui::editor_content::native_editor::tests::selection_drag_suppresses_cursor_reveal ... ok
+test app::ui::editor_content::native_editor::tests::unchanged_cursor_does_not_request_reveal ... ok
+test app::ui::editor_content::native_editor::tests::undo_after_control_char_edit_restores_document_text ... ok
+test app::ui::editor_content::native_editor::types::tests::domain_selections_keep_direction_and_row_affinity_through_egui ... ok
+test app::ui::editor_content::native_editor::tests::wrapped_same_line_edit_requests_vertical_cursor_reveal ... ok
+test app::ui::editor_content::native_editor::word_boundary::tests::boundaries_clamp_to_document_edges ... ok
+test app::ui::editor_content::native_editor::word_boundary::tests::left_boundary_skips_whitespace_then_previous_word ... ok
+test app::ui::editor_content::native_editor::word_boundary::tests::punctuation_forms_its_own_boundary_class ... ok
+test app::ui::editor_content::native_editor::word_boundary::tests::right_boundary_consumes_current_class_then_whitespace ... ok
+test app::ui::editor_content::native_editor::word_boundary::tests::underscores_are_word_characters ... ok
+test app::ui::editor_content::native_editor::word_boundary::tests::unicode_letters_and_digits_are_word_characters ... ok
+test app::ui::editor_content::tests::body_viewport_tolerates_negative_transient_viewport_size ... ok
+test app::ui::editor_content::tests::body_viewport_uses_text_lane_width_after_gutter ... ok
+test app::ui::editor_content::native_editor::tests::middle_press_pastes_only_into_the_target_split_at_the_pointer ... ok
+test app::ui::editor_content::tests::body_viewport_uses_visible_viewport_instead_of_stale_available_width ... ok
+test app::ui::editor_content::tests::content_margin_does_not_pad_before_visible_line_numbers ... ok
+test app::ui::editor_content::tests::content_margin_keeps_left_padding_without_line_numbers ... ok
+test app::ui::editor_content::tests::zero_gutter_keeps_cursor_inside_viewport_clip ... ok
+test app::ui::scrolling::acceleration::tests::direction_change_resets_ramp ... ok
+test app::ui::recovery::tests::retry_expires_the_cache_without_discarding_an_inflight_worker ... ok
+test app::ui::scrolling::acceleration::tests::pause_resets_ramp ... ok
+test app::ui::scrolling::acceleration::tests::repeated_scrolls_ramp_up ... ok
+test app::ui::scrolling::area::source_tests::wheel_and_unknown_keep_acceleration_but_trackpad_and_momentum_do_not ... ok
+test app::ui::scrolling::manager::tests::reveal_nearest_keeps_visible_rect_stationary ... ok
+test app::ui::scrolling::manager::tests::reveal_nearest_scrolls_to_hidden_rect_with_margin ... ok
+test app::ui::scrolling::manager::tests::scrollbar_scroll_marks_user_scrolled_but_reveal_clears_it ... ok
+test app::ui::search_replace::controls::shortcuts::tests::find_input_enter_shortcuts_choose_navigation_actions ... ok
+test app::ui::search_replace::controls::shortcuts::tests::global_navigation_shortcuts_require_matches ... ok
+test app::ui::search_replace::controls::shortcuts::tests::global_replace_shortcuts_require_allowed_replace_state ... ok
+test app::ui::search_replace::controls::shortcuts::tests::regex_mode_shortcut_toggles_between_modes ... ok
+test app::ui::search_replace::controls::shortcuts::tests::replace_input_plain_enter_requests_replace_current ... ok
+test app::ui::search_replace::controls::shortcuts::tests::undo_redo_shortcuts_do_not_steal_text_input_focus ... ok
+test app::ui::search_replace::result_model::tests::active_match_local_row_requires_match_inside_group ... ok
+test app::ui::search_replace::result_model::tests::empty_message_prioritizes_query_status_then_result_presence ... ok
+test app::ui::search_replace::result_model::tests::file_match_count_label_pluralizes_only_non_one_counts ... ok
+test app::ui::search_replace::result_model::tests::match_preview_uses_placeholder_for_empty_preview ... ok
+test app::ui::search_replace::result_model::tests::search_result_group_key_uses_stable_identity_fields ... ok
+test app::ui::search_replace::state::tests::virtual_rows_for_clip_adds_bounded_overscan ... ok
+test app::ui::search_replace::state::tests::virtual_rows_for_clip_clamps_outside_content ... ok
+test app::ui::search_replace::state::tests::virtual_total_height_counts_rows_without_trailing_gap ... ok
+test app::ui::settings::recovery::storage::chart::tests::graph_preserves_proportions_and_handles_empty_or_large_directories ... ok
+test app::ui::editor_content::native_editor::tests::wrapped_layout_rebuilds_when_viewport_width_changes ... ok
+test app::ui::settings::recovery::storage::chart::tests::pie_slices_use_linear_shares_without_inflating_small_or_zero_values ... ok
+test app::ui::settings::recovery::storage::chart::tests::pie_mesh_handles_tiny_majority_and_full_circle_slices ... ok
+test app::ui::settings::recovery::storage::tests::byte_units_keep_small_values_readable_and_preserve_large_sizes ... ok
+test app::ui::recovery::tests::query_shares_nonclone_results_suppresses_duplicate_loads_and_refreshes_errors ... ok
+test app::ui::settings::recovery::storage::tests::payload_total_counts_exclusive_categories_once_not_overlapping_references ... ok
+test app::ui::dialogs::text_history::tests::selecting_current_file_keeps_caret_and_visible_row_click_does_not_recenter ... ok
+test app::ui::search_replace::controls::input::accessibility_tests::search_input_is_named_and_accepts_text ... ok
+test app::ui::dialogs::text_history::timeline::tests::viewport_anchor_stays_on_its_row_when_new_activity_arrives ... ok
+test app::ui::settings::search::tests::highlighting_requires_a_selective_query_and_matches_labels_and_aliases ... ok
+test app::ui::dialogs::text_history::tests::timeline_shows_edits_from_unapplied_branches_without_baseline_rows ... ok
+test app::ui::settings::sections::tests::search_supports_labels_and_legacy_aliases ... ok
+test app::ui::settings::style::tests::settings_inherit_ui_fonts_and_share_the_app_palette_in_both_themes ... ok
+test app::ui::settings::recovery::storage::tests::unavailable_recovery_is_not_an_empty_chart ... ok
+test app::ui::settings::recovery::storage::tests::empty_pie_keeps_zero_categories_at_narrow_and_wide_widths ... ok
+test app::ui::settings::recovery::storage::tests::both_pies_and_exact_values_are_visible_without_nested_disclosures ... ok
+test app::ui::editor_content::native_editor::layout::cache_tests::cached_text_survives_font_atlas_rollover_and_selection_toggling ... ok
+test app::ui::editor_area::tile::context_menu::zoom::tests::zoom_menu_targets_clicked_pane_and_stays_open_for_repeated_adjustments ... ok
+test app::ui::dialogs::text_history::timeline::tests::informational_rows_are_static_and_keyboard_selection_skips_them ... ok
+test app::ui::dialogs::text_history::timeline::tests::timeline_keyboard_selects_across_files_and_first_typed_event_reaches_editor ... ok
+test app::ui::dialogs::text_history::timeline::tests::selecting_a_closed_edit_loads_one_document_then_seeks_without_writing_the_file ... ok
+test app::ui::settings::tests::long_segment_labels_stack_without_overlapping_the_next_row ... ok
+test app::ui::settings::recovery::tests::history_settings_explain_retention_without_expiry_controls ... ok
+test app::ui::settings::tests::rendering_byte_budgets_does_not_round_or_clamp_stored_values ... ok
+test app::ui::editor_area::tile::zoom_tests::editor_renders_each_views_font_size_and_gestures_only_zoom_the_hovered_pane ... ok
+test app::ui::settings::recovery::storage::tests::storage_summary_and_legend_columns_keep_their_hierarchy_when_resized ... ok
+test app::ui::settings::tests::appearance_controls_stay_visible_for_system_source_and_editing_switches_source ... ok
+test app::ui::settings::widgets::card::tests::indentation_preview_uses_joyce_quote ... ok
+test app::ui::settings::widgets::card::tests::tab_markers_only_represent_actual_tabs ... ok
+test app::ui::settings::widgets::primitives::tests::keyboard_focus_is_painted_for_on_and_off_switches_in_both_themes ... ok
+test app::ui::status_bar::tests::control_character_status_uses_conventional_marker ... ok
+test app::ui::status_bar::tests::dark_status_attention_color_stays_warm_without_neon_yellow ... ok
+test app::ui::status_bar::tests::light_plain_text_icon_is_dark_enough_to_see ... ok
+test app::ui::status_bar::tests::light_status_attention_color_is_readable_on_light_status_bar ... ok
+test app::ui::status_bar::tests::narrow_status_bar_drops_items_from_the_left ... ok
+test app::ui::status_bar::tests::path_width_only_shrinks_below_floor_when_no_space_remains ... ok
+test app::ui::status_bar::tests::path_width_stays_pinned_while_items_disappear ... ok
+test app::ui::status_bar::tests::status_prefers_live_cursor_over_pending_cursor ... ok
+test app::ui::settings::tests::auto_hide_reveals_delay_and_keeps_the_saved_value_when_disabled ... ok
+test app::ui::status_bar::tests::visible_control_character_status_uses_readable_attention_color ... ok
+test app::ui::settings::tests::global_reset_requires_confirmation_and_cancel_does_not_change_settings ... ok
+test app::ui::settings::tests::exact_value_inputs_and_recommended_limits_keep_slider_values_in_sync ... ok
+test app::ui::tab_drag::state::drag::tests::hover_does_not_commit_and_invalid_releases_are_cleared ... ok
+test app::ui::settings::tests::font_size_slider_and_presets_stay_in_sync_and_persist ... ok
+test app::ui::tab_overflow::tests::drag_hover_open_waits_for_dwell_delay ... ok
+test app::ui::tab_overflow::tests::drag_hover_repaint_uses_remaining_delay ... ok
+test app::ui::tab_overflow::tests::overflow_popup_height_caps_at_viewport_max ... ok
+test app::ui::tab_overflow::tests::overflow_popup_height_tracks_visible_rows ... ok
+test app::ui::tab_strip::context_menu::file_actions::recently_closed::tests::access_errors_are_not_misreported_as_missing_files ... ok
+test app::ui::tab_strip::context_menu::file_actions::recently_closed::tests::merge_sorts_sources_together_deduplicates_paths_and_keeps_archive_versions ... ok
+test app::ui::tab_strip::context_menu::file_actions::recently_closed::tests::missing_archives_remain_recoverable_but_missing_file_only_entries_do_not ... ok
+test app::ui::tab_strip::context_menu::file_actions::recently_closed::tests::split_tab_status_reports_each_file_and_untitled_entries_use_only_unsaved_dot ... ok
+test app::ui::settings::tests::both_reset_actions_are_destructive_without_restyling_ordinary_buttons ... ok
+test app::ui::status_bar::tests::zoom_status_is_read_only_tracks_the_active_pane_and_is_hidden_in_settings ... ok
+test app::ui::tab_strip::entries::shared::tests::horizontal_virtual_tabs_advance_by_width ... ok
+test app::ui::tab_strip::entries::shared::tests::vertical_virtual_tabs_advance_by_height_not_panel_width ... ok
+test app::ui::tab_strip::layout::tests::hyprland_header_reserves_no_caption_control_width ... ok
+test app::ui::tab_strip::layout::tests::windows_header_reserves_caption_control_width ... ok
+test app::ui::tile_header::control::tests::close_control_is_white_on_black_in_both_themes ... ok
+test app::ui::tile_header::control::tests::close_control_keeps_white_icon_on_red_hover ... ok
+test app::services::session_store::database::quarantine_tests::full_parallel_read_attributes_damage_to_one_buffer ... ok
+test app::ui::widget_ids::tests::queued_scroll_offset_reaches_the_same_scroll_area_once ... ok
+test app::utils::tests::pluralize_uses_singular_only_for_one ... ok
+test profile::process_metrics::tests::counter_deltas_preserve_zero_and_abstain_for_missing_or_reset_samples ... ok
+test profile::process_metrics::tests::proc_rss_units_are_bytes ... ok
+test app::ui::settings::tests::settings_have_five_independent_categories_without_nested_disclosures ... ok
+test app::ui::tab_drag::state::drag::tests::settings_slot_is_not_an_editor_drop_source ... ok
+test app::ui::status_bar::tests::storage_warning_is_visible_in_settings_and_empty_workspaces_at_narrow_width ... ok
+test app::ui::settings::tests::search_reveals_matching_groups_without_losing_collapse_state ... ok
+test app::ui::tab_drag::state::drag::tests::release_over_editor_combines_single_and_group_selections ... ok
+test app::services::session_store::database::fault_tests::parallel_scan_detects_orphan_chunks_outside_all_content_ranges ... ok
+test app::ui::widget_ids::tests::app_code_uses_widget_id_wrappers_for_raw_egui_ids ... ok
+test app::shortcuts::tests::configured_utility_keys_reach_their_application_actions ... ok
+test app::ui::settings::tests::padding_slider_keeps_dragging_while_preview_resize_moves_the_row ... ok
+test app::ui::settings::tests::appearance_controls_share_right_edge_and_all_sliders_share_columns ... ok
+test app::ui::settings::search::tests::matching_rows_are_highlighted_without_changing_settings_or_layout ... ok
+test profile::workflows::tests::production_search_measures_delivery_and_tessellation_with_correct_results ... ok
+test app::ui::tab_strip::context_menu::file_actions::tests::recently_closed_menu_has_single_action_rows_and_reopens_retained_and_disk_entries ... ok
+test app::ui::tab_strip::context_menu::file_actions::tests::open_file_submenu_contains_closed_files_without_a_separate_menu_item ... ok
+test app::ui::settings::tests::styled_controls_fit_and_align_with_production_fonts_in_both_themes ... ok
+test app::ui::settings::tests::both_previews_are_right_aligned_and_vertically_centered_without_clipping ... ok
+
+test result: ok. 700 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 1.86s
+
+     Running unittests src/bin/capacity_probe.rs (target/release/deps/capacity_probe-837050450834d0f5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests scripts/count_lines.rs (target/release/deps/count_lines-bd324ee399467fe1)
+
+running 3 tests
+test tests::test_only_paths_are_detected ... ok
+test tests::excluding_tests_removes_test_functions_from_counts ... ok
+test tests::excluding_tests_removes_cfg_test_modules_from_counts ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/frame_metrics.rs (target/release/deps/frame_metrics-39cfc372f2a49be0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_document_snapshot.rs (target/release/deps/profile_document_snapshot-b4f72dcc13c5c305)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_paste_stress.rs (target/release/deps/profile_paste_stress-a9ed1ac3410cd9ce)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_scroll_stress.rs (target/release/deps/profile_scroll_stress-af24fc884a57e1a5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_search_all_tabs.rs (target/release/deps/profile_search_all_tabs-2d1286efc866c33a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_search_capacity.rs (target/release/deps/profile_search_capacity-15436068d2f971de)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_search_current_app_state.rs (target/release/deps/profile_search_current_app_state-53bc9767a0e5e548)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_search_dispatch.rs (target/release/deps/profile_search_dispatch-565ccfe5f3579bd2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_split_stress.rs (target/release/deps/profile_split_stress-0839523cffc16d59)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_tab_operations.rs (target/release/deps/profile_tab_operations-9fe187b57d95ea0c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_tab_strip_frame.rs (target/release/deps/profile_tab_strip_frame-e18d6ecd7e5653d3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_tab_tile_layout.rs (target/release/deps/profile_tab_tile_layout-fdef2c4bd6a9d753)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_ui_render_frame.rs (target/release/deps/profile_ui_render_frame-e21780640d5c3eb5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_view_navigation.rs (target/release/deps/profile_view_navigation-554aa1490c30ed25)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_viewport_extraction.rs (target/release/deps/profile_viewport_extraction-1abeb324adb0a860)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/realistic_frame_metrics.rs (target/release/deps/realistic_frame_metrics-a23b7cf316b5ece7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/resource_probe.rs (target/release/deps/resource_probe-1bf6a7e9f15d0fd3)
+
+running 1 test
+test alloc_metrics::tests::interval_reset_preserves_prepared_allocations_and_baseline ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/release/deps/scratchpad-ec7dbd586ae10333)
+
+running 4 tests
+test tests::defaults_to_wgpu_without_a_recognized_override ... ok
+test tests::wgpu_can_be_selected_explicitly ... ok
+test tests::glow_override_is_case_insensitive ... ok
+test tests::startup_viewport_restores_geometry_without_a_hidden_frame_gate ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/search_workflow_metrics.rs (target/release/deps/search_workflow_metrics-59f238523ebc08f9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/session_backup.rs (target/release/deps/session_backup-651508e79b952288)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/file_service_tests.rs (target/release/deps/file_service_tests-22614c560ebc0618)
+
+running 4 tests
+test detects_binary_file ... ok
+test read_large_utf8_file_round_trips_across_decode_chunks ... ok
+test invalid_encoding_and_unrepresentable_text_fail_before_replacing_original ... ok
+test formatted_saves_round_trip_with_exact_boms_and_stateful_encoding_bytes ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+     Running tests/first_visible_profile.rs (target/release/deps/first_visible_profile-0b05cb90eef8bd1a)
+
+running 2 tests
+test an_opened_empty_file_is_valid_first_visible_content ... ok
+test first_visible_waits_for_async_file_instead_of_rendering_untitled_frame ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/instance_broker_tests.rs (target/release/deps/instance_broker_tests-105bc2a8a254a514)
+
+running 2 tests
+test lock_is_released_when_primary_inbox_drops ... ok
+test concurrent_elections_choose_one_primary_and_forward_the_rest ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/session_backup_tests.rs (target/release/deps/session_backup_tests-a641ef95abd00487)
+
+running 4 tests
+test command_refuses_a_running_instance_then_exports_after_it_closes ... ok
+test empty_committed_session_exports_but_corrupt_source_does_not ... ok
+test export_is_private_readable_and_never_overwrites ... ok
+test bounded_parallel_restore_preserves_all_tab_order_and_content ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
+
+     Running tests/session_database_recovery_tests.rs (target/release/deps/session_database_recovery_tests-b7d1e02a596ba236)
+
+running 3 tests
+test abrupt_writer ... ignored, subprocess helper invoked by acknowledged_commit_survives_abrupt_exit
+
+running 1 test
+test acknowledged_commit_survives_abrupt_exit ... ok
+test healthy_shutdown_drains_and_checkpoints_the_wal ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/session_save_profile.rs (target/release/deps/session_save_profile-2b1c50e0483fbf86)
+
+running 1 test
+test warm_save_costs_at_ten_thousand_tabs ... ignored, 10k-tab release profiling; run explicitly on an idle host
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/session_store_tests.rs (target/release/deps/session_store_tests-27745a5295cefe30)
+
+running 4 tests
+test persists_split_views_and_active_view ... ok
+test restore_returns_committed_clean_text_before_background_disk_observation ... ok
+test restore_keeps_dirty_session_text_before_background_disk_observation ... ok
+test persists_and_restores_open_tabs ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.95s
+
+     Running tests/settings_store_tests.rs (target/release/deps/settings_store_tests-885108d6148d3003)
+
+running 12 tests
+test missing_settings_file_returns_none ... ok
+test legacy_yaml_is_ignored_when_toml_is_missing ... ok
+test legacy_show_tab_characters_boolean_maps_to_character_mode ... ok
+test malformed_toml_returns_invalid_data ... ok
+test load_ignores_ephemeral_tab_order_and_window_geometry ... ok
+test documented_settings_example_stays_loadable ... ok
+test older_toml_missing_newer_fields_uses_defaults ... ok
+test shortcut_overrides_load_from_flat_toml_table ... ok
+test save_omits_ephemeral_tab_order_and_window_geometry ... ok
+test platform_profile_round_trips_in_toml_settings ... ok
+test save_and_load_round_trip_toml_settings ... ok
+test shortcut_overrides_round_trip_in_toml_settings ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+
+     Running tests/startup_tests.rs (target/release/deps/startup_tests-c76937b2aad78fdc)
+
+running 9 tests
+test addto_active_targets_current_workspace ... ok
+test clean_mode_skips_session_restore ... ok
+test addto_index_is_one_based ... ok
+test addto_without_files_returns_startup_notice ... ok
+test comma_delimited_file_payload_supports_quotes ... ok
+test help_and_version_are_standalone_actions ... ok
+test parses_positional_files ... ok
+test invalid_switch_combination_returns_startup_notice ... ok
+test unix_absolute_paths_are_positional_files ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tab_tests.rs (target/release/deps/tab_tests-61098b874d493c31)
+
+running 9 tests
+test keyboard_moving_a_single_tile_is_a_noop ... ok
+test keyboard_moving_collapses_then_splits_tile_nearest_the_focal_point ... ok
+test keyboard_moving_can_change_split_axis_like_hyprland_dwindle ... ok
+test keyboard_moving_reinserts_active_tile_toward_direction ... ok
+test rebalancing_views_shares_space_equally ... ok
+test keyboard_resizing_grows_active_tile_toward_direction ... ok
+test combining_tabs_merges_buffers_and_focuses_source_workspace ... ok
+test open_buffer_as_split_tracks_distinct_file_group ... ok
+test splitting_and_closing_views_updates_pane_tree ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests scratchpad
+
+running 2 tests
+test src/profile/process_metrics.rs - profile::process_metrics::ProcessMeasurement::between (line 115) ... ok
+test src/profile/process_metrics.rs - profile::process_metrics::ProcessSnapshot (line 13) ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+test src/profile/process_metrics.rs - profile::process_metrics::ProcessMeasurement::between (line 127) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+all doctests ran in 1.85s; merged doctests compilation took 1.77s

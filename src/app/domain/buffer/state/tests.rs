@@ -6,7 +6,12 @@ fn unreadable_reload_preserves_dirty_metadata_and_history() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("source");
     std::fs::write(&path, "aλ\r\n".repeat(128)).unwrap();
-    let (document, _, _) = super::TextDocument::from_utf8_file(&path, 0, 0).unwrap();
+    let (document, _) = super::TextDocument::import_utf8_file(
+        &path,
+        0,
+        &crate::app::services::chunk_store::ImportContext::default(),
+    )
+    .unwrap();
     let mut buffer = BufferState::new("dirty".into(), String::new(), None);
     buffer.document = document;
     buffer.is_dirty = true;
@@ -129,4 +134,28 @@ fn failed_store_refuses_large_preparation_atomically_and_old_ack_cannot_clear_ne
         buffer.storage_attention,
         Some(super::StorageAttention::Unreadable(_))
     ));
+}
+
+#[test]
+fn storage_acknowledgement_survives_anchor_cow_but_rejects_a_divergent_edit() {
+    let mut buffer = super::BufferState::new("revision".into(), "accepted".into(), None);
+    let capture = buffer.document_snapshot();
+    let committed = buffer.storage_revision();
+    buffer
+        .document_mut()
+        .piece_tree_mut()
+        .create_anchor(2, super::super::AnchorBias::Right);
+    assert!(buffer.storage_revision() == committed);
+    buffer.acknowledge_storage(&committed);
+    buffer.update_storage_attention(true);
+    assert!(buffer.storage_attention.is_none());
+    let mut divergent = buffer.clone();
+    divergent
+        .document_mut()
+        .replace_text("other accepted text".into());
+    divergent.acknowledge_storage(&committed);
+    divergent.update_storage_attention(true);
+    assert!(divergent.storage_revision() != committed);
+    assert!(divergent.storage_attention.is_some());
+    assert_eq!(capture.extract_text(), "accepted");
 }

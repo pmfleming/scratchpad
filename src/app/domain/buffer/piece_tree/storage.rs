@@ -1,4 +1,6 @@
+mod adopt;
 mod import;
+mod metrics;
 mod persistence;
 use super::text_cache::{self, ChunkText};
 use super::{ByteSpan, Piece, PieceBuffer, PieceSource, PieceTreeText};
@@ -7,8 +9,6 @@ pub(crate) use persistence::{StorageBlock, StorageCapture};
 use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
-const FILE_CHUNK_BYTES: usize = 256 * 1024;
 
 type StoredOriginalBlock = (usize, Arc<crate::app::services::chunk_store::Chunk>);
 type DurableOriginalCache = Arc<Mutex<std::collections::HashMap<u64, Vec<StoredOriginalBlock>>>>;
@@ -65,6 +65,7 @@ struct AddTextStorage {
     chunks: PersistentVector<AddTextChunk>,
     store: Option<crate::app::services::chunk_store::ChunkStoreHandle>,
     bulk_intake: bool,
+    intake_error: Option<String>,
 }
 
 impl Default for AddTextStorage {
@@ -74,6 +75,7 @@ impl Default for AddTextStorage {
             chunks: PersistentVector::default(),
             store: None,
             bulk_intake: false,
+            intake_error: None,
         }
     }
 }
@@ -227,7 +229,13 @@ impl PieceTreeStorage {
     pub(super) fn store(&self) -> Option<&crate::app::services::chunk_store::ChunkStoreHandle> {
         self.add.store.as_ref()
     }
+    pub(super) fn intake_error(&self) -> Option<String> {
+        self.add.intake_error.clone()
+    }
     pub(super) fn set_bulk_intake(&mut self, enabled: bool) {
+        if enabled {
+            self.add.intake_error = None;
+        }
         self.add.bulk_intake = enabled;
     }
     #[cfg(test)]
@@ -258,30 +266,17 @@ impl PieceTreeStorage {
         }
     }
 
-    pub(super) fn is_chunked(&self) -> bool {
-        matches!(self.original, OriginalTextStorage::Chunked(_))
-    }
-
     pub(super) fn loaded_chunk_count(&self) -> usize {
-        if self.is_chunked() {
-            self.add
-                .store
-                .as_ref()
-                .map_or(0, |store| store.owner_loaded(self.add.owner))
-        } else {
-            0
-        }
+        self.add
+            .store
+            .as_ref()
+            .map_or(0, |store| store.owner_loaded(self.add.owner))
     }
-
     pub(super) fn chunk_cache_limit(&self) -> usize {
-        if self.is_chunked() {
-            self.add
-                .store
-                .as_ref()
-                .map_or(0, |store| store.owner_cache_limit() / FILE_CHUNK_BYTES)
-        } else {
-            0
-        }
+        self.add
+            .store
+            .as_ref()
+            .map_or(0, |store| store.owner_cache_limit() / (16 * 1024 - 3) + 1)
     }
 
     #[cfg(test)]
@@ -320,7 +315,9 @@ impl PieceTreeStorage {
         } else {
             self.pin_span_inner(span, retain)
         };
-        if let Err(error) = &result {
+        if let Err(error) = &result
+            && error.kind() != io::ErrorKind::Interrupted
+        {
             let mut fault = self
                 .fault
                 .lock()
@@ -533,15 +530,21 @@ impl AddTextStorage {
                 take -= 1;
             }
             if take == 0 {
-                if self.bulk_intake
-                    && let Some(store) = &self.store
-                {
-                    // Healthy bulk work waits here only on its background lane.
-                    // Accepted bodies stay in RAM after a write failure.
-                    let _ = store.wait_for_capacity();
-                }
                 if let Some(tail) = self.chunks.last_mut() {
-                    tail.text.seal(self.owner, self.store.as_ref());
+                    if self.bulk_intake
+                        && let Some(store) = &self.store
+                        && let ChunkText::Inline(body) = &tail.text
+                    {
+                        match store.seal_bulk(body.clone(), self.owner) {
+                            Ok(chunk) => tail.text = ChunkText::Stored(chunk),
+                            Err(cause) => {
+                                self.intake_error = Some(cause.to_string());
+                                break;
+                            }
+                        }
+                    } else {
+                        tail.text.seal(self.owner, self.store.as_ref());
+                    }
                 }
                 let start_byte = self.len();
                 self.chunks.push(AddTextChunk {

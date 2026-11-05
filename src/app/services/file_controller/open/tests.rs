@@ -142,6 +142,7 @@ fn closing_a_loading_preview_cancels_its_open_without_recording_lifecycle_activi
     );
     let index = app.tab_manager.active_tab_index;
     crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, index);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     wait_for_background_io(&mut app);
     assert!(app.tab_manager.find_tab_by_path(&path).is_none());
     assert!(app.state.persistence.pending_activity.is_empty());

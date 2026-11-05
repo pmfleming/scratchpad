@@ -206,6 +206,21 @@ impl ScratchpadApp {
                     },
                     None => request,
                 })
+                .map(|request| {
+                    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let tokens = self
+                        .state
+                        .background_io
+                        .path_imports
+                        .entry(request.path().clone())
+                        .or_default();
+                    tokens.retain(|token| token.strong_count() > 0);
+                    tokens.push(std::sync::Arc::downgrade(&cancelled));
+                    PathLoadRequest::Cancelable {
+                        cancelled,
+                        request: Box::new(request),
+                    }
+                })
                 .collect(),
             streaming,
         };
@@ -384,10 +399,25 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn queue_background_session_persist(&mut self, request: SessionPersistRequest) {
+        self.queue_session_persist_with_close(request, None);
+    }
+    pub(crate) fn queue_background_session_close(
+        &mut self,
+        request: SessionPersistRequest,
+        close: crate::app::services::session_manager::CloseAfterPersist,
+    ) {
+        self.queue_session_persist_with_close(request, Some(close));
+    }
+    fn queue_session_persist_with_close(
+        &mut self,
+        request: SessionPersistRequest,
+        close: Option<crate::app::services::session_manager::CloseAfterPersist>,
+    ) {
         let request_id = self.state.background_io.allocate_background_request_id();
         self.state.background_io.insert_pending_background_action(
             request_id,
             PendingBackgroundAction::PersistSession(PendingSessionPersistAction {
+                close,
                 acknowledgement: request.acknowledgement(),
             }),
         );
@@ -494,9 +524,6 @@ impl ScratchpadApp {
     ) {
         if let Err(error) = self.state.background_io.tx.send(request) {
             record_background_send_error(&error);
-            self.state
-                .background_io
-                .drop_pending_background_action(request_id);
             fallback(self, request_id, error.into_request());
         }
     }

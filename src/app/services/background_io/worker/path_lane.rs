@@ -83,7 +83,7 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
                             path,
                             result: Ok(result),
                         },
-                        Ok(None) => build_cold_file_shell(path),
+                        Ok(None) => build_cold_file_shell(path, &session_store),
                         Err(error) => ColdFileShellResult {
                             path,
                             result: Err(error.to_string()),
@@ -215,6 +215,10 @@ fn load_one_with_context(
     mut context: crate::app::services::chunk_store::ImportContext,
 ) -> LoadedPathResult {
     match request {
+        PathLoadRequest::Cancelable { cancelled, request } => {
+            context.cancelled = Some(cancelled);
+            load_one_with_context(*request, context)
+        }
         PathLoadRequest::Reconcile {
             base,
             source,
@@ -223,7 +227,7 @@ fn load_one_with_context(
         } => {
             let mut loaded = load_one_with_context(*request, context);
             loaded.result = loaded.result.and_then(|loaded| {
-                if materialized_only && loaded.loaded_replacement_text.is_none() {
+                if materialized_only && !loaded.replacement_ready {
                     Ok(loaded)
                 } else {
                     base.prepare_loaded_replacement(loaded, source)
@@ -265,7 +269,7 @@ fn load_one_with_context(
                     .ok()
                     .or_else(|| session_store.opened_chunk_store());
             }
-            match session_store.reopen_path_with_claimed(&path, &claimed) {
+            match session_store.reopen_path_with_context(&path, &claimed, &context) {
                 Ok(Some(tab)) => LoadedPathResult {
                     missing: false,
                     path,
@@ -300,15 +304,24 @@ fn load_one_with_context(
     }
 }
 
-fn build_cold_file_shell(path: PathBuf) -> ColdFileShellResult {
-    let result = FileService::read_disk_state(&path)
-        .map(|disk_state| {
-            let tab = crate::app::domain::WorkspaceTab::new(FileService::build_cold_file_shell(
-                &path,
-                Some(disk_state),
-            ));
-            let cold_tab = crate::app::services::session_store::cold_tab_from_workspace_tab(&tab);
-            (tab, cold_tab)
+fn build_cold_file_shell(
+    path: PathBuf,
+    store: &crate::app::services::session_store::SessionStore,
+) -> ColdFileShellResult {
+    // Adopt the requested version before publishing a cold tab. A new source
+    // is distinct from a damaged committed manifest: restore never falls back
+    // to a potentially newer disk file.
+    let result = store
+        .chunk_store_handle()
+        .and_then(|handle| {
+            let content = FileService::read_file_in_store(&path, handle)?;
+            let tab =
+                crate::app::domain::WorkspaceTab::new(FileService::build_buffer_from_file_content(
+                    &path,
+                    content,
+                    FileService::read_disk_state(&path).ok(),
+                ));
+            Ok(store.cold_tab_from_imported(&tab))
         })
         .map_err(|error| error.to_string());
     ColdFileShellResult { path, result }

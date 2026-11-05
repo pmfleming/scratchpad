@@ -309,9 +309,7 @@ impl Database {
         for buffer in tabs.iter_mut().flat_map(|t| &mut t.buffers) {
             if !self.quarantined.contains_key(&buffer.temp_id) {
                 buffer.history_document = self.read_history_document(&buffer.temp_id).await?;
-                if buffer.history_document.is_none()
-                    && super::super::validation::needs_snapshot(buffer)
-                {
+                if buffer.history_document.is_none() {
                     return Err(damaged(
                         &buffer.temp_id,
                         "required text manifest is missing",

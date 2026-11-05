@@ -71,10 +71,6 @@ impl StreamedTextInspection {
         let metadata = build_buffer_text_metadata(self.inspection, &format, false);
         (format, metadata, self.digest)
     }
-    #[cfg(test)]
-    pub(crate) fn line_count(&self) -> usize {
-        self.inspection.line_count
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

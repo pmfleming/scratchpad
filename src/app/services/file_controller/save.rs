@@ -221,6 +221,21 @@ impl FileController {
         update_buffer_path: bool,
         format_override: Option<TextFormatMetadata>,
     ) -> bool {
+        let tab = &app.tab_manager.tabs.as_slice()[index];
+        let buffer = tab.active_buffer();
+        if buffer.is_preparing_text()
+            || tab
+                .layout
+                .views()
+                .iter()
+                .any(|view| view.buffer_id == buffer.id && !view.deferred_editor_events.is_empty())
+        {
+            app.state.status.set_info_status_in_domain(
+                StatusDomain::File,
+                "Wait for accepted input to finish before saving.",
+            );
+            return false;
+        }
         if update_buffer_path && Self::activate_conflicting_open_path(app, index, &path) {
             app.state
                 .status

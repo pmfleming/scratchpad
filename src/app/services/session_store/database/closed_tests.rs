@@ -57,7 +57,7 @@ fn token_lookup_does_not_decode_unrelated_archives() {
             )
             .await
             .unwrap();
-        let (tab, _) = db.read_closed_tab(&token).await.unwrap();
+        let tab = db.read_closed_tab(&token).await.unwrap();
         assert_eq!(
             tab.buffers[0]
                 .history_document

@@ -243,6 +243,13 @@ impl SessionPersistRequest {
 }
 
 impl CapturedClosedTab {
+    pub(crate) fn ram_tail_bytes(&self) -> usize {
+        self.tab
+            .buffer_snapshots
+            .iter()
+            .map(|buffer| buffer.snapshot.piece_tree().ram_tail_bytes())
+            .sum()
+    }
     pub(crate) fn capture(tab: &WorkspaceTab, cold: Option<&ColdSessionTab>) -> Self {
         let mut captured = cold.cloned().map_or_else(
             || CapturedSessionTab::capture(tab),
@@ -304,11 +311,28 @@ pub(crate) fn cold_tab_from_workspace_tab(tab: &WorkspaceTab) -> ColdSessionTab 
 
 impl CapturedSessionTab {
     fn capture_cold(session_tab: ColdSessionTab) -> Self {
+        let imported = session_tab
+            .buffers
+            .iter()
+            .all(|buffer| buffer.history_document.is_some());
+        let buffer_snapshots = session_tab
+            .buffers
+            .iter()
+            .filter_map(|buffer| {
+                buffer
+                    .history_document
+                    .as_ref()
+                    .map(|document| CapturedSessionBuffer {
+                        temp_id: buffer.temp_id.clone(),
+                        snapshot: document.snapshot(),
+                    })
+            })
+            .collect();
         Self {
             loading_preview_only: false,
             session_tab: SessionTab::from(session_tab),
-            buffer_snapshots: Vec::new(),
-            preserve_existing: true,
+            buffer_snapshots,
+            preserve_existing: !imported,
         }
     }
 

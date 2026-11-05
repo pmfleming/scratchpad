@@ -105,6 +105,7 @@ fn open_edit_close_reopen_and_restart_keep_one_ordered_feed() {
     buffer.mark_dirty_after_local_edit();
     let index = app.tab_manager.active_tab_index;
     workspace_controller::perform_close_tab_no_persist(&mut app, index);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     let store = app.state.persistence.session_store.clone();
     let rows = store
         .timeline_page(None, vec![], String::new())
@@ -163,6 +164,7 @@ fn an_empty_disk_file_has_open_and_close_rows_but_a_blank_untitled_document_leav
     FileController::open_paths(&mut app, vec![path]);
     let index = app.tab_manager.active_tab_index;
     workspace_controller::perform_close_tab_no_persist(&mut app, index);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     let rows = app
         .state
         .persistence
@@ -189,6 +191,7 @@ fn an_empty_disk_file_has_open_and_close_rows_but_a_blank_untitled_document_leav
     );
     let index = app.tab_manager.active_tab_index;
     workspace_controller::perform_close_tab_no_persist(&mut app, index);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert!(
         !app.state
             .persistence
@@ -230,6 +233,7 @@ fn failed_close_activity_commit_keeps_the_document_open_and_pending_work_retryab
     let count = app.tab_manager.tabs.len();
     let index = app.tab_manager.active_tab_index;
     workspace_controller::perform_close_tab_no_persist(&mut app, index);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.tabs.len(), count);
     assert_eq!(app.state.persistence.pending_activity.len(), 1);
     store
@@ -246,6 +250,7 @@ fn failed_close_activity_commit_keeps_the_document_open_and_pending_work_retryab
         })
         .unwrap();
     workspace_controller::perform_close_tab_no_persist(&mut app, index);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.tabs.len(), count - 1);
     assert!(app.state.persistence.pending_activity.is_empty());
     assert_eq!(
@@ -273,6 +278,7 @@ fn closing_a_second_view_does_not_close_the_document() {
         .unwrap();
     session_manager::persist_session_now(&mut app).unwrap();
     crate::app::commands::perform_close_view(&mut app, view);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 1);
     let rows = app
         .state
@@ -300,6 +306,7 @@ fn closing_a_cold_blank_untitled_document_removes_its_creation_without_hydrating
     );
     app.tab_manager.set_cold_session_tab(index, cold);
     workspace_controller::perform_close_tab_no_persist(&mut app, index);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert!(
         app.state
             .persistence

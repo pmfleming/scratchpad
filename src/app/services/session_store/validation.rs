@@ -1,9 +1,6 @@
-use super::model::{SessionBuffer, SessionPaneNode, SessionTab};
+use super::model::{SessionPaneNode, SessionTab};
 use std::{collections::HashSet, io};
 
-pub(super) fn needs_snapshot(buffer: &SessionBuffer) -> bool {
-    buffer.path.is_none() || buffer.is_dirty
-}
 fn valid_temp_id(id: &str) -> bool {
     !id.is_empty()
         && id

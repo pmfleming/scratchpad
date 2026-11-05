@@ -7,7 +7,11 @@ use eframe::egui;
 use std::time::Instant;
 
 mod storage_health;
-pub(crate) use storage_health::{StorageStatus, poll_storage_health};
+pub(crate) use storage_health::{StorageStatus, note_file_refusal, poll_storage_health};
+mod close;
+pub(crate) use close::{
+    CloseAfterPersist, finish_close, finish_unavailable_close, poll_close_intents,
+};
 mod reset;
 pub(crate) use reset::{PendingSessionReset, poll_session_reset, start_new_session};
 
@@ -15,6 +19,8 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
     ctx.request_repaint_after(std::time::Duration::from_mins(1));
     if app.startup_restore_pending()
         || app.state.persistence.session_restore_failed
+        || app.state.persistence.close_in_flight
+        || !app.state.persistence.close_queue.is_empty()
         || (!app.tab_manager.session_dirty
             && app.state.persistence.last_session_persist.elapsed()
                 < std::time::Duration::from_mins(1))
@@ -38,6 +44,10 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
 }
 
 pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()> {
+    if app.state.persistence.close_in_flight || !app.state.persistence.close_queue.is_empty() {
+        app.tab_manager.mark_session_dirty();
+        return Ok(());
+    }
     // Covers explicit saves and Drop as well as exit. Never replace a committed
     // session with the startup placeholder, streamed prefix, or failed fallback.
     if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
@@ -53,6 +63,22 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
     app.tab_manager.clear_session_dirty();
     app.state.persistence.last_session_persist = Instant::now();
     Ok(())
+}
+
+/// UI actions request persistence without waiting behind a body batch or fsync.
+/// Exit and Drop use the explicit synchronous final-save barrier above.
+pub(crate) fn request_session_persist(app: &mut ScratchpadApp) {
+    app.tab_manager.mark_session_dirty();
+    if app.startup_restore_pending()
+        || app.state.persistence.session_restore_failed
+        || app.state.persistence.close_in_flight
+        || !app.state.persistence.close_queue.is_empty()
+        || app.state.background_io.has_pending_persist()
+    {
+        return;
+    }
+    let request = capture_session(app);
+    app.queue_background_session_persist(request);
 }
 
 /// Commit the closed archive and the remaining workspace before the UI removes
@@ -89,11 +115,21 @@ pub(crate) fn persist_tab_close(app: &mut ScratchpadApp, index: usize) -> std::i
             "Text is still being prepared; the tab was kept open.",
         ));
     }
+    if app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .get(index)
+        .is_some_and(|tab| tab.buffers().all(|buffer| buffer.is_loading_preview))
+    {
+        return Ok(());
+    }
     // A failed restore or permanently unavailable store must not trap the user.
     // Dirty-close confirmation still runs before these persistence helpers.
     if app.state.persistence.session_restore_failed
         || app.state.persistence.session_store.writes_blocked()
     {
+        close::retain_ram_close(app, index, None);
         return Ok(());
     }
     if app.startup_restore_pending() {
@@ -101,30 +137,7 @@ pub(crate) fn persist_tab_close(app: &mut ScratchpadApp, index: usize) -> std::i
             "session recovery is not ready; tab was not closed",
         ));
     }
-    let tab = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .get(index)
-        .ok_or_else(|| std::io::Error::other("tab is no longer open"))?;
-    let closed = crate::app::services::session_store::CapturedClosedTab::capture(
-        tab,
-        app.tab_manager.cold_session_tabs().get(&index),
-    );
-    let mut request = capture_session(app);
-    request.close_tab(index, closed);
-    let acknowledgement = request.acknowledgement();
-    if let Err(error) = app.state.persistence.session_store.persist_request(request) {
-        // The first explicit persistence attempt may discover an unavailable
-        // lazy store. Reading health itself must never open or queue work.
-        if app.state.persistence.session_store.writes_blocked() {
-            app.state.status.report_session_save_failed(error);
-            return Ok(());
-        }
-        return Err(error);
-    }
-    acknowledge_capture(app, &acknowledgement);
-    Ok(())
+    close::enqueue(app, index, None)
 }
 
 fn capture_session(app: &ScratchpadApp) -> SessionPersistRequest {
@@ -216,11 +229,22 @@ pub(crate) fn persist_view_close(
             "Text is still being prepared; the view was kept open.",
         ));
     }
+    if app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .filter_map(|tab| tab.buffer_for_view(view))
+        .any(|buffer| buffer.is_loading_preview)
+    {
+        return Ok(());
+    }
     // A failed restore or permanently unavailable store must not trap the user.
     // Dirty-close confirmation still runs before these persistence helpers.
     if app.state.persistence.session_restore_failed
         || app.state.persistence.session_store.writes_blocked()
     {
+        close::retain_ram_close(app, app.tab_manager.active_tab_index, Some(view));
         return Ok(());
     }
     if app.startup_restore_pending() {
@@ -228,26 +252,7 @@ pub(crate) fn persist_view_close(
             "session recovery is not ready; view was not closed",
         ));
     }
-    let mut request = capture_session(app);
-    if !request.close_view(
-        app.tab_manager.tabs.as_slice(),
-        app.tab_manager.active_tab_index,
-        view,
-    ) {
-        return Err(std::io::Error::other("view is no longer open"));
-    }
-    let acknowledgement = request.acknowledgement();
-    if let Err(error) = app.state.persistence.session_store.persist_request(request) {
-        // The first explicit persistence attempt may discover an unavailable
-        // lazy store. Reading health itself must never open or queue work.
-        if app.state.persistence.session_store.writes_blocked() {
-            app.state.status.report_session_save_failed(error);
-            return Ok(());
-        }
-        return Err(error);
-    }
-    acknowledge_capture(app, &acknowledgement);
-    Ok(())
+    close::enqueue(app, app.tab_manager.active_tab_index, Some(view))
 }
 
 pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<()> {

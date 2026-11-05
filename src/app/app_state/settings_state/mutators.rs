@@ -315,7 +315,7 @@ pub(crate) fn reset_settings_to_defaults(app: &mut ScratchpadApp) {
         app,
         crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app),
     );
-    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+    crate::app::app_state::workspace::accessors::request_session_persist(app);
     match crate::app::app_state::settings_state::persist_settings_now(app) {
         Ok(()) => app.state.status.set_info_status_in_domain(
             crate::app::app_state::StatusDomain::Settings,

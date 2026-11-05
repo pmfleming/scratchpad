@@ -219,6 +219,13 @@ impl PieceTreeLite {
         }
     }
 
+    pub(crate) fn pin_edit_boundaries(&self, range: Range<usize>) -> io::Result<super::TextPin> {
+        let mut pin = self.pin_range(range.start..range.start)?;
+        if range.start != range.end {
+            pin.extend(self.pin_range(range.end..range.end)?);
+        }
+        Ok(pin)
+    }
     pub fn pin_range(&self, range: Range<usize>) -> io::Result<super::TextPin> {
         if range.start > range.end || range.end > self.len_chars() {
             return Err(io::Error::new(

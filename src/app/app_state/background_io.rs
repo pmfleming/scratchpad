@@ -163,7 +163,9 @@ impl ScratchpadApp {
             self.queue_text_preparations();
         }
 
+        session_manager::poll_close_intents(self);
         if self.state.background_io.has_pending_background_actions()
+            || !self.state.persistence.close_queue.is_empty()
             || self.state.background_io.preparations_pending
         {
             ctx.request_repaint_after(BACKGROUND_IO_POLL_INTERVAL);
@@ -188,6 +190,7 @@ impl ScratchpadApp {
         let deadline = Instant::now() + timeout;
         loop {
             self.drain_background_io_results();
+            session_manager::poll_close_intents(self);
             self.queue_restored_source_checks();
             if self.state.background_io.preparations_pending
                 || self
@@ -199,6 +202,8 @@ impl ScratchpadApp {
             }
             if !self.state.background_io.has_pending_background_actions()
                 && !self.state.background_io.preparations_pending
+                && !self.state.persistence.close_in_flight
+                && self.state.persistence.close_queue.is_empty()
             {
                 return true;
             }
@@ -344,6 +349,14 @@ impl ScratchpadApp {
         results: Vec<LoadedPathResult>,
         is_partial: bool,
     ) {
+        for result in &results {
+            if let Some(tokens) = self.state.background_io.path_imports.get_mut(&result.path) {
+                tokens.retain(|token| token.strong_count() > 0);
+                if tokens.is_empty() {
+                    self.state.background_io.path_imports.remove(&result.path);
+                }
+            }
+        }
         if is_partial {
             self.apply_partial_paths_loaded_result(request_id, results);
             return;
@@ -556,12 +569,25 @@ impl ScratchpadApp {
         ) else {
             return;
         };
+        if action.close.is_some() {
+            self.state.persistence.close_in_flight = false;
+        }
         match result {
             Ok(()) => {
                 session_manager::acknowledge_capture(self, &action.acknowledgement);
                 self.state.persistence.last_session_persist = Instant::now();
+                if let Some(close) = action.close {
+                    session_manager::finish_close(self, close);
+                }
+                session_manager::poll_close_intents(self);
             }
             Err(error) => {
+                if self.state.persistence.session_store.writes_blocked()
+                    && let Some(close) = action.close
+                {
+                    session_manager::finish_unavailable_close(self, close);
+                }
+                session_manager::poll_close_intents(self);
                 diagnostics::record_background_failure(
                     "session_persist_result",
                     "app_state::background_io",

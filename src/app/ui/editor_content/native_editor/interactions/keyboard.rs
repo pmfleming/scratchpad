@@ -186,10 +186,18 @@ fn handle_relevant_input_event(
             handle_movement_event,
         ),
         RelevantInputEvent::Copy => {
+            if cursor.as_sorted_char_range().len() >= 64 * 1024 {
+                queue_clipboard(ui, buffer, view, &cursor, false);
+                return false;
+            }
             copy_selection(ui, buffer, &cursor);
             false
         }
         RelevantInputEvent::Cut if !cursor.is_empty() => {
+            if cursor.as_sorted_char_range().len() >= 64 * 1024 {
+                queue_clipboard(ui, buffer, view, &cursor, true);
+                return false;
+            }
             let (new_cursor, selected) = editing::apply_cut(buffer, &cursor);
             ui.copy_text(selected);
             view.set_cursor_range_anchored(buffer, new_cursor);
@@ -333,7 +341,7 @@ fn handle_non_movement_key_event(
     if let Some(changed) = handle_history_key(key_event, buffer, view) {
         return Some(changed);
     }
-    if let Some(changed) = handle_insert_key(ui, key_event, buffer, cursor) {
+    if let Some(changed) = handle_insert_key(ui, key_event, buffer, view, cursor) {
         return Some(changed);
     }
     if let Some(changed) = handle_delete_key(key_event, buffer, view, cursor) {
@@ -377,6 +385,36 @@ fn handle_tab_key(
     cursor: &CursorRange,
     indentation: IndentationInput,
 ) -> bool {
+    if cursor.as_sorted_char_range().len() >= 64 * 1024 {
+        let mut working = buffer.clone();
+        let previous = *cursor;
+        let outdent = modifiers.shift;
+        buffer.queue_edit_transform(previous, view.id, true, !outdent, move || {
+            working.document_mut().set_bulk_intake(true);
+            working.document_mut().seal_history_group();
+            let before = working.document().history_token();
+            let next = if outdent {
+                editing::apply_outdent(&mut working, &previous, indentation.width)
+                    .unwrap_or(previous)
+            } else {
+                editing::apply_indent(
+                    &mut working,
+                    &previous,
+                    indentation.style,
+                    indentation.width,
+                )
+            };
+            let changes = reference_changes(&working, before);
+            working.document_mut().set_bulk_intake(false);
+            Ok((
+                working.document().clone(),
+                working.format.clone(),
+                next,
+                changes,
+            ))
+        });
+        return false;
+    }
     if !modifiers.shift {
         let next_cursor =
             editing::apply_indent(buffer, cursor, indentation.style, indentation.width);
@@ -411,6 +449,17 @@ fn handle_history_key(
     view: &mut EditorViewState,
 ) -> Option<bool> {
     let undo = history_direction(key_event)?;
+    if let Some(target) = buffer.document().history_step_target(undo)
+        && buffer.document().history_needs_preparation(target)
+    {
+        buffer.queue_history_preparation(
+            target,
+            view.cursor_range.unwrap_or_default(),
+            Some(view.id),
+            crate::app::domain::buffer::TextHistoryEvent::Replay,
+        );
+        return Some(false);
+    }
     let selection = if undo {
         buffer.undo_last_text_operation()
     } else {
@@ -443,14 +492,19 @@ fn is_classic_undo_shortcut(key_event: PressedKeyEvent) -> bool {
 fn handle_insert_key(
     ui: &mut egui::Ui,
     key_event: PressedKeyEvent,
-    buffer: &BufferState,
+    buffer: &mut BufferState,
+    view: &EditorViewState,
     cursor: &CursorRange,
 ) -> Option<bool> {
     if key_event.key != egui::Key::Insert {
         return None;
     }
     if key_event.modifiers.ctrl && !key_event.modifiers.shift {
-        copy_selection(ui, buffer, cursor);
+        if cursor.as_sorted_char_range().len() >= 64 * 1024 {
+            queue_clipboard(ui, buffer, view, cursor, false);
+        } else {
+            copy_selection(ui, buffer, cursor);
+        }
         return Some(false);
     }
     if key_event.modifiers.shift && !key_event.modifiers.ctrl {
@@ -521,6 +575,83 @@ fn apply_cursor_update(
     }
 
     false
+}
+
+fn reference_changes(
+    buffer: &BufferState,
+    before: crate::app::domain::buffer::HistoryToken,
+) -> Vec<(std::ops::Range<usize>, usize)> {
+    if before == buffer.document().history_token() {
+        return Vec::new();
+    }
+    buffer
+        .document()
+        .history_entries()
+        .last()
+        .map_or_else(Vec::new, |entry| {
+            entry
+                .edits
+                .iter()
+                .map(|edit| {
+                    let start = edit.start_char() as usize;
+                    let removed = edit
+                        .deleted_spans()
+                        .iter()
+                        .map(|span| span.char_len as usize)
+                        .sum::<usize>();
+                    let inserted = edit
+                        .inserted_span()
+                        .map_or(0, |span| span.char_len as usize);
+                    (start..start + removed, inserted)
+                })
+                .collect()
+        })
+}
+fn queue_clipboard(
+    ui: &egui::Ui,
+    buffer: &mut BufferState,
+    view: &EditorViewState,
+    cursor: &CursorRange,
+    cut: bool,
+) {
+    let mut working = buffer.clone();
+    let range = cursor.as_sorted_char_range();
+    let previous = *cursor;
+    let ctx = ui.ctx().clone();
+    buffer.queue_edit_transform(previous, view.id, cut, false, move || {
+        let mut text = String::new();
+        for span in working
+            .document()
+            .piece_tree()
+            .try_spans_for_range(range.clone())
+        {
+            text.push_str(&span?.text);
+        }
+        let before = working.document().history_token();
+        let next = if cut {
+            let next = CursorRange::one(super::super::CharCursor::new(range.start));
+            working
+                .document_mut()
+                .replace_char_ranges_with_source(
+                    &[(range, String::new())],
+                    previous,
+                    next,
+                    PieceSource::Cut,
+                )
+                .map_err(|_| std::io::Error::other("Cut text became unreadable"))?;
+            next
+        } else {
+            previous
+        };
+        let changes = reference_changes(&working, before);
+        ctx.copy_text(text);
+        Ok((
+            working.document().clone(),
+            working.format.clone(),
+            next,
+            changes,
+        ))
+    });
 }
 
 #[cfg(test)]

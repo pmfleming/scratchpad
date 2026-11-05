@@ -111,6 +111,8 @@ pub(crate) struct AppPersistenceState {
     pub(crate) persist_session_on_drop: bool,
     // A failed restore leaves a fallback/partial workspace, never an authoritative session.
     pub(crate) session_restore_failed: bool,
+    pub(crate) close_queue: VecDeque<crate::app::services::session_manager::CloseAfterPersist>,
+    pub(crate) close_in_flight: bool,
     pub(crate) session_reset: Option<crate::app::services::session_manager::PendingSessionReset>,
     pub(crate) pending_closed_tabs: Vec<crate::app::services::session_store::CapturedClosedTab>,
     pub(crate) pending_activity: Vec<crate::app::services::session_store::activity::ActivityEvent>,
@@ -220,7 +222,7 @@ impl eframe::App for ScratchpadApp {
 impl Drop for ScratchpadApp {
     fn drop(&mut self) {
         if self.state.persistence.persist_session_on_drop {
-            let _ = crate::app::app_state::workspace::accessors::persist_session_now(self);
+            let _ = crate::app::services::session_manager::persist_session_now(self);
         }
     }
 }

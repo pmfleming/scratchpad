@@ -43,8 +43,7 @@ impl ImportContext {
             return Err(cause);
         }
         self.check()?;
-        store.check_bulk_capacity(body.len())?;
-        Ok(Some(store.seal(body, owner)))
+        store.seal_bulk(body, owner).map(Some)
     }
 }
 

@@ -360,6 +360,11 @@ impl FileController {
                     });
                 }
                 Err(error) => {
+                    crate::app::services::session_manager::note_file_refusal(
+                        app,
+                        &shell.path,
+                        &error,
+                    );
                     diagnostics::record_io_error(
                         "open_file_shell",
                         Some(&shell.path),
@@ -574,6 +579,7 @@ impl FileController {
                 summary.record_outcome(OpenPathOutcome::Opened { artifact_warning });
             }
             Err(error) => {
+                crate::app::services::session_manager::note_file_refusal(app, &loaded.path, &error);
                 diagnostics::record_io_error(
                     "open_file",
                     Some(&loaded.path),
@@ -617,6 +623,7 @@ impl FileController {
                 summary.record_outcome(OpenPathOutcome::Opened { artifact_warning });
             }
             Err(error) => {
+                crate::app::services::session_manager::note_file_refusal(app, &loaded.path, &error);
                 diagnostics::record_io_error(
                     "open_large_file",
                     Some(&loaded.path),

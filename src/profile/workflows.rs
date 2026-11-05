@@ -159,6 +159,13 @@ pub fn search_workflow_sample(mode: &str, targets: usize, bytes_per_target: usiz
 /// Headless production paint/input during an injected writer pause. Ends at
 /// tessellation; it does not measure GPU present or physical-device I/O latency.
 pub fn run_live_text_bulk_profile(bytes: usize) -> Value {
+    run_bulk_profile(bytes, false)
+}
+/// UI responsiveness while real batches write against a populated 3 GiB store.
+pub fn run_live_text_io_profile(bytes: usize) -> Value {
+    run_bulk_profile(bytes, true)
+}
+fn run_bulk_profile(bytes: usize, io_stress: bool) -> Value {
     super::support::with_isolated_app("live-text-bulk", |app| {
         let tab = WorkspaceTab::new(BufferState::new("bulk paste".into(), "base".into(), None));
         app.tab_manager.set_tabs(vec![tab], 0);
@@ -169,11 +176,70 @@ pub fn run_live_text_bulk_profile(bytes: usize) -> Value {
         render_app(app, &ctx);
         render_app(app, &ctx);
         let unit = "λ🦀 café\n";
-        let text = unit.repeat(bytes.div_ceil(unit.len()));
+        let text = if io_stress {
+            let mut value = String::with_capacity(bytes);
+            let mut state = 0x3388_121a_u64;
+            for i in 0..bytes {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                value.push(if i % 80 == 79 {
+                    '\n'
+                } else {
+                    (b' ' + (state % 95) as u8) as char
+                });
+            }
+            value
+        } else {
+            unit.repeat(bytes.div_ceil(unit.len()))
+        };
         let expected_bytes = text.len();
         let expected_chars = text.chars().count();
         let store = app.state.persistence.session_store.clone();
         let handle = store.chunk_store_handle().expect("probe store");
+        if io_stress {
+            app.state.app_settings.history.budget = crate::app::domain::TextHistoryBudget {
+                aggregate_byte_budget: 16 * 1024 * 1024,
+                per_file_byte_budget: 4 * 1024 * 1024,
+                derived_from_memory: false,
+            };
+        }
+        app.apply_history_budget_to_open_buffers();
+        let resource_before = crate::profile::process_metrics::process_snapshot();
+        let wal_peak = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let sample_done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sampler = {
+            let peak = wal_peak.clone();
+            let done = sample_done.clone();
+            let path = store.root().join("session.db-wal");
+            std::thread::spawn(move || {
+                while !done.load(std::sync::atomic::Ordering::Acquire) {
+                    if let Ok(metadata) = std::fs::metadata(&path) {
+                        peak.fetch_max(metadata.len(), std::sync::atomic::Ordering::Relaxed);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            })
+        };
+        let _seed = if io_stress {
+            Some(
+                store
+                    .profile_seed_text(3 * 1024 * 1024 * 1024, 0x8172_3719_aa12)
+                    .expect("3 GiB stress seed"),
+            )
+        } else {
+            None
+        };
+        let seed_batch_timing = handle.write_timing();
+        handle.reset_write_timing();
+        let stress = if io_stress {
+            let writing = store.clone();
+            Some(std::thread::spawn(move || {
+                writing.profile_seed_text(3 * 1024 * 1024 * 1024, 0x7119_4472_bb38)
+            }))
+        } else {
+            None
+        };
         let pause = store
             .profile_pause_writer(Duration::from_millis(200))
             .expect("writer pause");
@@ -220,7 +286,23 @@ pub fn run_live_text_bulk_profile(bytes: usize) -> Value {
                 events.push(egui::Event::Text("t".into()));
                 queued_typing = true;
             }
-            if saw_preparing && !preparing && queued_typing && pause.is_finished() {
+            if io_stress && saw_preparing && !preparing && durations.len() % 8 == 0 {
+                events.push(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    source: egui::MouseWheelSource::Unknown,
+                    phase: egui::TouchPhase::Move,
+                    delta: egui::vec2(0., -20_000.),
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            if saw_preparing
+                && !preparing
+                && queued_typing
+                && pause.is_finished()
+                && stress
+                    .as_ref()
+                    .is_none_or(std::thread::JoinHandle::is_finished)
+            {
                 break;
             }
             assert!(
@@ -230,6 +312,12 @@ pub fn run_live_text_bulk_profile(bytes: usize) -> Value {
             std::thread::sleep(Duration::from_millis(2));
         }
         pause.join().expect("pause task").expect("pause result");
+        let _stress_chunks = stress.map(|thread| {
+            thread
+                .join()
+                .expect("stress thread")
+                .expect("stress writes")
+        });
         assert!(saw_preparing && queued_typing);
         let buffer = app.tab_manager.active_tab().unwrap().active_buffer();
         assert_eq!(
@@ -244,9 +332,22 @@ pub fn run_live_text_bulk_profile(bytes: usize) -> Value {
         assert_eq!(tail, "tbase");
         assert_eq!(buffer.document().piece_tree().extract_range(0..6), "prefix");
         store.flush_text_chunks().expect("chunk flush");
+        sample_done.store(true, std::sync::atomic::Ordering::Release);
+        sampler.join().expect("WAL sampler");
+        let resources = crate::profile::process_metrics::ProcessMeasurement::between(
+            resource_before,
+            crate::profile::process_metrics::process_snapshot(),
+        );
+        let file_bytes = |name| {
+            std::fs::metadata(store.root().join(name))
+                .map(|metadata| metadata.len())
+                .ok()
+        };
+        let cache_bytes = handle.cached_bytes();
+        let tail_bytes = buffer.document().piece_tree().ram_tail_bytes();
         durations.sort_unstable();
         paused.sort_unstable();
-        json!({"scope":"production logic/input/layout/tessellation; simulated 200 ms writer job", "bytes":expected_bytes,"frames":durations.len(),"frame_p50_ns":durations[durations.len()/2],"frame_p99_ns":durations[(durations.len()*99).div_ceil(100)-1],"frame_max_ns":durations.last(),"writer_paused_frames":paused.len(),"writer_paused_frame_max_ns":paused.last(),"workflow_ns":started.elapsed().as_nanos(),"peak_pending_bytes":handle.peak_pending_bytes(),"pending_flow_threshold_bytes":crate::app::services::chunk_store::BULK_PENDING_BYTES,"queued_typing_preserved":true})
+        json!({"scope":"production logic/input/layout/tessellation; 200 ms injected pause; real writes when io_stress=true", "bytes":expected_bytes,"frames":durations.len(),"frame_p50_ns":durations[durations.len()/2],"frame_p99_ns":durations[(durations.len()*99).div_ceil(100)-1],"frame_max_ns":durations.last(),"writer_paused_frames":paused.len(),"writer_paused_frame_max_ns":paused.last(),"workflow_ns":started.elapsed().as_nanos(),"peak_pending_bytes":handle.peak_pending_bytes(),"pending_flow_threshold_bytes":crate::app::services::chunk_store::BULK_PENDING_BYTES,"queued_typing_preserved":true,"io_stress":io_stress,"concurrent_write_bytes":if io_stress {3_u64*1024*1024*1024} else {0},"process_resources":resources,"database_bytes":file_bytes("session.db"),"wal_bytes_after_flush":file_bytes("session.db-wal"),"wal_peak_sampled_bytes":wal_peak.load(std::sync::atomic::Ordering::Relaxed),"wal_peak_sample_interval_ms":5,"cache_bytes":cache_bytes,"tail_bytes":tail_bytes,"seed_bytes":if io_stress {3_u64*1024*1024*1024} else {0},"batch_timing":handle.write_timing(),"seed_batch_timing":seed_batch_timing,"measured_batch_overruns":handle.write_timing().2})
     })
 }
 

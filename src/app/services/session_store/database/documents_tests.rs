@@ -173,7 +173,7 @@ fn save_as_over_a_retained_path_transfers_lookup_without_reusing_the_replaced_tr
         let old = db.read_document(&old_id).await.unwrap();
         assert!(old.path.is_none());
         assert!(old.is_dirty);
-        let (tab, _) = db.load_retained_document(&old_id).await.unwrap();
+        let tab = db.load_retained_document(&old_id).await.unwrap();
         assert_eq!(
             tab.buffers[0]
                 .history_document

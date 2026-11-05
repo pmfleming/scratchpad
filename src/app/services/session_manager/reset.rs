@@ -11,6 +11,8 @@ pub(crate) struct PendingSessionReset {
 pub(crate) fn start_new_session(app: &mut ScratchpadApp, ctx: &egui::Context) {
     if !app.state.persistence.session_store.storage_unavailable()
         || app.state.persistence.session_reset.is_some()
+        || app.state.persistence.close_in_flight
+        || !app.state.persistence.close_queue.is_empty()
         || app.state.background_io.has_pending_background_actions()
         || app.tab_manager.tabs.as_slice().iter().any(|tab| {
             tab.buffers().any(|buffer| buffer.is_preparing_text())

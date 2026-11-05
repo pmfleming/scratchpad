@@ -121,10 +121,12 @@ fn only_the_last_display_tab_exits_and_persists_an_empty_workspace() {
         app.tab_manager.create_untitled_tab();
         let ctx = egui::Context::default();
         super::workspace_controller::perform_close_tab(&mut app, 0);
+        super::test_support::wait_for_background_io(&mut app);
         let _ = logic(&mut app, &ctx, &hidden_input());
         assert_eq!(app.tab_manager.tabs.len(), 1);
         assert!(!app.state.window.close_in_progress);
         super::workspace_controller::perform_close_tab(&mut app, 0);
+        super::test_support::wait_for_background_io(&mut app);
         assert!(app.tab_manager.tabs.is_empty());
         if settings_open {
             let _ = logic(&mut app, &ctx, &hidden_input());

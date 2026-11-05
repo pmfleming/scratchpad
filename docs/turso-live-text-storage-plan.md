@@ -1,7 +1,8 @@
 # Turso-backed live text storage
 
-Status: stages 0–6 implemented on Linux, based on commit `087e045`. Native Windows
-runtime validation remains pending under the user's authorization. The user
+Status: stages 0–7 implemented on Linux, based on commit `087e045`. Native Windows
+runtime validation and the independent strict quality gate remain outstanding
+release acceptance items. Windows validation is pending under the user's authorization. The user
 approved standard WAL on both platforms on 2026-11-05, with
 multiprocess WAL to be revisited on later Turso versions. Historical source
 observations below describe the baseline, not claims about later stages.
@@ -252,7 +253,8 @@ The tables for documents, session state, and layouts are under
 ```sql
 CREATE TABLE chunks(id INTEGER PRIMARY KEY, digest BLOB NOT NULL UNIQUE,
     byte_len INTEGER NOT NULL, char_len INTEGER NOT NULL,
-    newline_count INTEGER NOT NULL, is_ascii INTEGER NOT NULL) STRICT;
+    newline_count INTEGER NOT NULL, is_ascii INTEGER NOT NULL,
+    ends_with_lf INTEGER NOT NULL) STRICT;
 CREATE TABLE chunk_bodies(chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id),
     body BLOB NOT NULL) STRICT;
 CREATE TABLE document_text(document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -943,6 +945,13 @@ a running session. Reset preserves live and undo text, and a failed reset leaves
 with saving paused.
 
 ### 7. Validate and remove temporary backing
+
+Implemented on Linux. See [stage 7 evidence](../tools/turso-contract/STAGE-7.md).
+Schema 13 adds verified final-LF metadata; recovery export remains version 10.
+Large history/clipboard/indent actions and close acknowledgements now run off
+the UI thread. Temporary text backing and whole-text restore transport are gone.
+Linux runtime, resource and benchmark evidence is retained with the implementation;
+native Windows and the strict quality-policy findings remain explicit release gates.
 
 Run the full validation below. Then remove `tempfile` use from `storage.rs` and `text_cache.rs`,
 along with the scaffold. Keep `tempfile` where reset and tests still use it. Update

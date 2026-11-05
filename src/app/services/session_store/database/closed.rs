@@ -74,6 +74,7 @@ impl Database {
         let ids: Vec<_> = request
             .tabs
             .iter()
+            .chain(request.closed_tabs.iter().map(|closed| &closed.tab))
             .flat_map(|tab| tab.session_tab.buffers.iter().map(|b| b.temp_id.clone()))
             .chain(request.removed_documents.iter().cloned())
             .collect();
@@ -159,7 +160,7 @@ impl Database {
     pub(in crate::app::services::session_store) async fn read_closed_tab(
         &mut self,
         token: &str,
-    ) -> io::Result<(SessionTab, std::collections::HashMap<String, String>)> {
+    ) -> io::Result<SessionTab> {
         self.ensure_healthy()?;
         let result = self.read_closed_tab_inner(token).await;
         if let Err(cause) = &result
@@ -171,10 +172,7 @@ impl Database {
         result
     }
 
-    async fn read_closed_tab_inner(
-        &mut self,
-        token: &str,
-    ) -> io::Result<(SessionTab, std::collections::HashMap<String, String>)> {
+    async fn read_closed_tab_inner(&mut self, token: &str) -> io::Result<SessionTab> {
         let payload = self
             .query_collect(
                 "SELECT layout_id FROM closed_tabs WHERE token=?",
@@ -185,27 +183,24 @@ impl Database {
             .pop()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "closed tab expired"))?;
         let mut tab = self.read_stored_tab(payload).await?;
-        let contents = match self.read_tab_contents(std::slice::from_ref(&tab)).await {
-            Ok(contents) => contents,
+        match self.validate_tab_text(std::slice::from_ref(&tab)).await {
+            Ok(()) => (),
             Err(cause) => {
                 self.protect_damaged(&cause, std::slice::from_ref(&tab))
                     .await?;
                 return Err(cause);
             }
-        };
+        }
         if let Err(cause) = self.read_histories(std::slice::from_mut(&mut tab)).await {
             self.protect_damaged(&cause, std::slice::from_ref(&tab))
                 .await?;
             return Err(cause);
         }
         for buffer in &tab.buffers {
-            if buffer.path.is_none()
-                && buffer.history_document.is_none()
-                && !contents.contains_key(&buffer.temp_id)
-            {
+            if buffer.path.is_none() && buffer.history_document.is_none() {
                 return Err(invalid("closed tab content is missing"));
             }
         }
-        Ok((tab, contents))
+        Ok(tab)
     }
 }

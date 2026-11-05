@@ -63,15 +63,10 @@ impl SessionStore {
     /// successful session save includes its reopened buffers as live tabs.
     pub fn restore_closed_tab(&self, token: &str) -> io::Result<WorkspaceTab> {
         let token = token.to_owned();
-        let (mut tab, contents) = self
+        let tab = self
             .worker()?
             .call(move |db| block_on(db.read_closed_tab(&token)))?;
-        for buffer in &mut tab.buffers {
-            if contents.contains_key(&buffer.temp_id) {
-                buffer.is_dirty = true;
-            }
-        }
-        let mut tab = Restorer::new(contents).restore_tab_with_summary(tab).0;
+        let mut tab = Restorer::new().restore_tab_with_summary(tab).0;
         self.bind_tab(&mut tab)?;
         Ok(tab)
     }

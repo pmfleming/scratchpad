@@ -34,6 +34,7 @@ pub struct Metadata {
     pub char_len: u64,
     pub newline_count: u64,
     pub is_ascii: bool,
+    pub ends_with_lf: bool,
 }
 impl Metadata {
     pub(crate) fn measure(text: &str) -> Self {
@@ -43,6 +44,7 @@ impl Metadata {
             char_len: text.chars().count() as u64,
             newline_count: text.bytes().filter(|&b| b == b'\n').count() as u64,
             is_ascii: text.is_ascii(),
+            ends_with_lf: text.ends_with('\n'),
         }
     }
 }
@@ -76,6 +78,10 @@ struct Core {
     prefetch: std::sync::mpsc::SyncSender<Weak<Chunk>>,
     epoch: Arc<ReadEpoch>,
     pending: Mutex<VecDeque<Arc<Chunk>>>,
+    admission: Mutex<()>,
+    batch_count: AtomicU64,
+    batch_max_ns: AtomicU64,
+    batch_overruns: AtomicU64,
     pending_bytes: AtomicUsize,
     other_ram_bytes: AtomicUsize,
     bulk_stopped: std::sync::atomic::AtomicBool,
@@ -98,8 +104,8 @@ pub struct Chunk {
     owner: u64,
     len: usize,
     core: Weak<Core>,
-    state: Mutex<State>,
-    changed: Condvar,
+    state: Arc<Mutex<State>>,
+    changed: Arc<Condvar>,
 }
 #[derive(Debug)]
 enum State {
@@ -191,6 +197,10 @@ impl ChunkStoreHandle {
             prefetch,
             epoch,
             pending: Mutex::new(VecDeque::new()),
+            admission: Mutex::new(()),
+            batch_count: AtomicU64::new(0),
+            batch_max_ns: AtomicU64::new(0),
+            batch_overruns: AtomicU64::new(0),
             pending_bytes: AtomicUsize::new(0),
             other_ram_bytes: AtomicUsize::new(0),
             bulk_stopped: std::sync::atomic::AtomicBool::new(false),
@@ -304,7 +314,7 @@ impl ChunkStoreHandle {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         queue.retain(|chunk| {
-            if Arc::strong_count(chunk) == 1 {
+            if Arc::strong_count(chunk) == 1 && Arc::strong_count(&chunk.state) == 1 {
                 self.0.pending_bytes.fetch_sub(chunk.len, Ordering::AcqRel);
                 false
             } else {
@@ -351,6 +361,23 @@ impl ChunkStoreHandle {
     pub fn peak_pending_bytes(&self) -> usize {
         self.0.peak_pending_bytes.load(Ordering::Acquire)
     }
+    pub(crate) fn seal_bulk(&self, body: Arc<String>, owner: u64) -> io::Result<Arc<Chunk>> {
+        let _gate = self
+            .0
+            .admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.wait_for_capacity_while(|| !self.bulk_stopped())
+            .or_else(|cause| {
+                if cause.kind() == io::ErrorKind::Interrupted {
+                    Err(cause)
+                } else {
+                    Ok(())
+                }
+            })?;
+        self.check_bulk_capacity(body.len())?;
+        Ok(self.seal(body, owner))
+    }
     /// Accept an immutable body without hashing or waiting for the writer.
     pub fn seal(&self, body: Arc<String>, owner: u64) -> Arc<Chunk> {
         let chunk = Arc::new(Chunk {
@@ -358,8 +385,8 @@ impl ChunkStoreHandle {
             owner,
             len: body.len(),
             core: Arc::downgrade(&self.0),
-            state: Mutex::new(State::Pending(body)),
-            changed: Condvar::new(),
+            state: Arc::new(Mutex::new(State::Pending(body))),
+            changed: Arc::new(Condvar::new()),
         });
         self.0
             .handles
@@ -481,12 +508,12 @@ impl ChunkStoreHandle {
             owner,
             len: reference.metadata.byte_len,
             core: Arc::downgrade(&self.0),
-            state: Mutex::new(State::Committed {
+            state: Arc::new(Mutex::new(State::Committed {
                 reference,
                 resident: Weak::new(),
                 loading: false,
-            }),
-            changed: Condvar::new(),
+            })),
+            changed: Arc::new(Condvar::new()),
         });
         restored.insert((row, owner), Arc::downgrade(&chunk));
         self.0
@@ -495,6 +522,28 @@ impl ChunkStoreHandle {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(Arc::downgrade(&chunk));
         chunk
+    }
+    pub(crate) fn record_batch(&self, duration: Duration) {
+        let ns = u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
+        self.0.batch_count.fetch_add(1, Ordering::Relaxed);
+        self.0.batch_max_ns.fetch_max(ns, Ordering::Relaxed);
+        if duration > Duration::from_millis(50) {
+            self.0.batch_overruns.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    /// Bounded body-batch counts, longest duration, and 50 ms I/O overruns.
+    #[must_use]
+    pub fn write_timing(&self) -> (u64, u64, u64) {
+        (
+            self.0.batch_count.load(Ordering::Relaxed),
+            self.0.batch_max_ns.load(Ordering::Relaxed),
+            self.0.batch_overruns.load(Ordering::Relaxed),
+        )
+    }
+    pub(crate) fn reset_write_timing(&self) {
+        self.0.batch_count.store(0, Ordering::Relaxed);
+        self.0.batch_max_ns.store(0, Ordering::Relaxed);
+        self.0.batch_overruns.store(0, Ordering::Relaxed);
     }
     /// Bytes hashed by this epoch's writer, including deduplication attempts.
     #[must_use]
@@ -535,17 +584,41 @@ impl ChunkStoreHandle {
     }
 }
 impl Chunk {
+    pub(crate) fn for_owner(self: &Arc<Self>, owner: u64) -> Arc<Self> {
+        if self.owner == owner {
+            return self.clone();
+        }
+        let chunk = Arc::new(Self {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            owner,
+            len: self.len,
+            core: self.core.clone(),
+            state: self.state.clone(),
+            changed: self.changed.clone(),
+        });
+        if let Some(core) = self.core.upgrade() {
+            core.handles
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(Arc::downgrade(&chunk));
+        }
+        chunk
+    }
     /// Queue nearby text without waiting; saturated/stale prefetches are expendable.
     pub fn prefetch(self: &Arc<Self>) {
-        if let Some(core) = self.core.upgrade() {
+        if let Some(core) = self.core.upgrade()
+            && !core.bulk_stopped.load(Ordering::Acquire)
+        {
             let _ = core.prefetch.try_send(Arc::downgrade(self));
         }
     }
     /// Whether this handle represents an empty body.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
     /// UTF-8 byte length; reading this never faults text into memory.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.len
     }
@@ -568,6 +641,32 @@ impl Chunk {
             State::Pending(_) => None,
             State::Committed { reference, .. } => Some(reference.clone()),
         }
+    }
+    // Closing readers deliberately is retryable; a reader panic outside that
+    // window still faults its owner and makes storage unavailable.
+    fn read_committed(
+        &self,
+        reference: &ChunkReference,
+        background: bool,
+    ) -> io::Result<Arc<String>> {
+        reference
+            .epoch
+            .load(reference, background)
+            .map_err(|cause| {
+                if cause.kind() == io::ErrorKind::BrokenPipe
+                    && self
+                        .core
+                        .upgrade()
+                        .is_some_and(|core| core.bulk_stopped.load(Ordering::Acquire))
+                {
+                    io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "Text readers are paused for session reset or shutdown",
+                    )
+                } else {
+                    cause
+                }
+            })
     }
     /// Load verified text through the selected reader. Scans should not retain
     /// bodies in the foreground cache; returned Arcs remain valid through eviction.
@@ -620,8 +719,9 @@ impl Chunk {
                 }
             }
         };
-        let result = reference.epoch.load(&reference, background);
+        let result = self.read_committed(&reference, background);
         if let Err(cause) = &result
+            && cause.kind() != io::ErrorKind::Interrupted
             && let Some(core) = self.core.upgrade()
         {
             core.owner_faults

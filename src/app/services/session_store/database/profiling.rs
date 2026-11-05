@@ -191,3 +191,36 @@ impl SessionStore {
         Ok(task)
     }
 }
+
+impl super::super::SessionStore {
+    /// Production writer stress fixture. Retained handles protect live-only rows
+    /// without a giant RAM text or an unrelated manifest in the measured editor.
+    pub fn profile_seed_text(
+        &self,
+        bytes: usize,
+        seed: u64,
+    ) -> io::Result<Vec<std::sync::Arc<crate::app::services::chunk_store::Chunk>>> {
+        let store = self.chunk_store_handle()?;
+        let mut chunks = Vec::new();
+        let mut state = seed.max(1);
+        let mut remaining = bytes;
+        while remaining > 0 {
+            let take = remaining.min(256 * 1024);
+            let mut text = String::with_capacity(take);
+            for i in 0..take {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                text.push(if i % 80 == 79 {
+                    '\n'
+                } else {
+                    (b' ' + (state % 95) as u8) as char
+                });
+            }
+            chunks.push(store.seal_bulk(std::sync::Arc::new(text), u64::MAX)?);
+            remaining -= take;
+        }
+        self.flush_text_chunks()?;
+        Ok(chunks)
+    }
+}

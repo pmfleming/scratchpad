@@ -72,7 +72,7 @@ fn tree_rows_and_positions_round_trip_transactionally() {
         assert_eq!(document.extract_text(), "abranch");
         document.navigate_history(3).unwrap();
         assert_eq!(document.extract_text(), "abc");
-        assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 12);
+        assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 13);
     });
 }
 

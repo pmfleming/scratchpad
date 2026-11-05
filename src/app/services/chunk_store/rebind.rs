@@ -60,7 +60,7 @@ impl Rebind {
                     .pending
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                queue.retain(|chunk| chunk.id != old.id);
+                queue.retain(|chunk| !Arc::ptr_eq(&chunk.state, &old.state));
                 core.pending_bytes.fetch_sub(old.len, Ordering::AcqRel);
                 core.changed.notify_all();
             }

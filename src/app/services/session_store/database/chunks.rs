@@ -10,7 +10,7 @@ use std::{
 };
 use turso::params;
 pub(super) const SCHEMA:&str="
-CREATE TABLE chunks(id INTEGER PRIMARY KEY,digest BLOB NOT NULL UNIQUE CHECK(length(digest)=32),byte_len INTEGER NOT NULL CHECK(byte_len>=0),char_len INTEGER NOT NULL CHECK(char_len>=0),newline_count INTEGER NOT NULL CHECK(newline_count>=0),is_ascii INTEGER NOT NULL CHECK(is_ascii IN (0,1))) STRICT;
+CREATE TABLE chunks(id INTEGER PRIMARY KEY,digest BLOB NOT NULL UNIQUE CHECK(length(digest)=32),byte_len INTEGER NOT NULL CHECK(byte_len>=0),char_len INTEGER NOT NULL CHECK(char_len>=0),newline_count INTEGER NOT NULL CHECK(newline_count>=0),is_ascii INTEGER NOT NULL CHECK(is_ascii IN (0,1)),ends_with_lf INTEGER NOT NULL CHECK(ends_with_lf IN (0,1))) STRICT;
 CREATE TABLE chunk_bodies(chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id),body BLOB NOT NULL) STRICT;
 CREATE INDEX chunk_sizes ON chunks(byte_len,id);";
 impl Database {
@@ -111,6 +111,7 @@ impl Database {
             .execute("PRAGMA synchronous=FULL", ())
             .await
             .map_err(error);
+        store.record_batch(start.elapsed());
         if let Err(cause) = result {
             if let Err(restore) = &full {
                 self.blocked = Some(restore.to_string());
@@ -162,10 +163,10 @@ impl Database {
             .ok_or_else(|| invalid("chunk state changed during a single-writer batch"))?;
         store.record_hashed(body.len());
         let metadata = Metadata::measure(&body);
-        let inserted=self.execute_count_cached("INSERT INTO chunks(digest,byte_len,char_len,newline_count,is_ascii) VALUES(?,?,?,?,?) ON CONFLICT(digest) DO NOTHING",params![metadata.digest.as_slice(),i64::try_from(metadata.byte_len).map_err(invalid)?,super::document_rows::signed(metadata.char_len)?,super::document_rows::signed(metadata.newline_count)?,i64::from(metadata.is_ascii)]).await?;
+        let inserted=self.execute_count_cached("INSERT INTO chunks(digest,byte_len,char_len,newline_count,is_ascii,ends_with_lf) VALUES(?,?,?,?,?,?) ON CONFLICT(digest) DO NOTHING",params![metadata.digest.as_slice(),i64::try_from(metadata.byte_len).map_err(invalid)?,super::document_rows::signed(metadata.char_len)?,super::document_rows::signed(metadata.newline_count)?,i64::from(metadata.is_ascii),i64::from(metadata.ends_with_lf)]).await?;
         let row = self
             .query_collect(
-                "SELECT id,byte_len,char_len,newline_count,is_ascii FROM chunks WHERE digest=?",
+                "SELECT id,byte_len,char_len,newline_count,is_ascii,ends_with_lf FROM chunks WHERE digest=?",
                 [metadata.digest.as_slice()],
                 |r| {
                     Ok((
@@ -174,6 +175,7 @@ impl Database {
                         r.get::<i64>(2).map_err(error)?,
                         r.get::<i64>(3).map_err(error)?,
                         r.get::<i64>(4).map_err(error)?,
+                        r.get::<i64>(5).map_err(error)?,
                     ))
                 },
             )
@@ -184,6 +186,7 @@ impl Database {
             || row.2 != super::document_rows::signed(metadata.char_len)?
             || row.3 != super::document_rows::signed(metadata.newline_count)?
             || row.4 != i64::from(metadata.is_ascii)
+            || row.5 != i64::from(metadata.ends_with_lf)
         {
             return Err(invalid("chunk digest collision or damaged metadata"));
         }

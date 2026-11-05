@@ -29,6 +29,8 @@ struct Worker {
     blocked: Arc<AtomicBool>,
     chunks: ChunkStoreHandle,
     wake_pending: Arc<AtomicBool>,
+    reset_documents:
+        Mutex<std::collections::HashMap<String, crate::app::domain::buffer::HistorySnapshot>>,
 }
 struct WorkerHealthGuard {
     blocked: Arc<AtomicBool>,
@@ -208,6 +210,7 @@ impl DatabaseWorker {
             blocked,
             chunks: chunks.clone(),
             wake_pending,
+            reset_documents: Mutex::default(),
         }));
         let weak = Arc::downgrade(&worker.0);
         chunks.set_waker(Arc::new(move || {
@@ -235,6 +238,60 @@ impl DatabaseWorker {
     }
     pub fn chunk_store(&self) -> ChunkStoreHandle {
         self.0.chunks.clone()
+    }
+    pub(super) fn prepare_reset_request(
+        &self,
+        mut request: super::super::SessionPersistRequest,
+    ) -> io::Result<super::super::SessionPersistRequest> {
+        let mut cached = self
+            .0
+            .reset_documents
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for tab in request
+            .tabs
+            .iter_mut()
+            .chain(request.closed_tabs.iter_mut().map(|closed| &mut closed.tab))
+        {
+            if tab.preserve_existing
+                && tab
+                    .session_tab
+                    .buffers
+                    .iter()
+                    .all(|b| cached.contains_key(&b.temp_id))
+            {
+                for buffer in &mut tab.session_tab.buffers {
+                    let history = cached[&buffer.temp_id].clone();
+                    tab.buffer_snapshots
+                        .push(super::super::capture::CapturedSessionBuffer {
+                            temp_id: buffer.temp_id.clone(),
+                            snapshot: history.snapshot(),
+                        });
+                    buffer.history_capture = Some(history);
+                }
+                tab.preserve_existing = false;
+            }
+        }
+        if request
+            .tabs
+            .iter()
+            .chain(request.closed_tabs.iter().map(|closed| &closed.tab))
+            .any(|tab| tab.preserve_existing)
+        {
+            request = self.call(move |db| block_on(db.hydrate_reset_request(request)))?;
+            for tab in request
+                .tabs
+                .iter()
+                .chain(request.closed_tabs.iter().map(|closed| &closed.tab))
+            {
+                for buffer in &tab.session_tab.buffers {
+                    if let Some(history) = &buffer.history_capture {
+                        cached.insert(buffer.temp_id.clone(), history.clone());
+                    }
+                }
+            }
+        }
+        Ok(request)
     }
     pub fn call<T: Send + 'static>(
         &self,

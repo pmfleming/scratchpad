@@ -6,6 +6,9 @@ pub(crate) fn clear_text_history(app: &mut ScratchpadApp, buffer_ids: &[BufferId
     let mut cleared = false;
     for tab in app.tab_manager.tabs.as_mut_slice() {
         for buffer in tab.buffers_mut() {
+            if buffer.is_preparing_text() {
+                continue;
+            }
             if buffer_ids.contains(&buffer.id) && !buffer.document().history_entries().is_empty() {
                 buffer.document_mut().clear_operation_history();
                 let document = buffer.temp_id.clone();
@@ -94,6 +97,37 @@ pub(crate) fn navigate_text_history(
         );
         return false;
     };
+    let needs_preparation = app.tab_manager.tabs.as_slice()[tab_index]
+        .buffer_by_id(buffer_id)
+        .is_some_and(|b| {
+            b.document().history_needs_preparation(entry_id)
+                || b.document().piece_tree().len_bytes() >= 256 * 1024
+        });
+    if needs_preparation {
+        let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
+        let view = tab
+            .layout
+            .views()
+            .iter()
+            .find(|v| v.buffer_id == buffer_id)
+            .map(|v| (v.id, v.cursor_range.unwrap_or_default()));
+        let queued = tab.buffer_by_id_mut(buffer_id).is_some_and(|buffer| {
+            buffer.queue_history_preparation(
+                entry_id,
+                view.map_or_else(Default::default, |(_, cursor)| cursor),
+                view.map(|(id, _)| id),
+                crate::app::domain::buffer::TextHistoryEvent::Navigate,
+            )
+        });
+        if queued && follow_focus {
+            app.tab_manager.set_active_tab_index_clamped(tab_index);
+            if let Some((id, _)) = view {
+                app.tab_manager.tabs.as_mut_slice()[tab_index].activate_view(id);
+                crate::app::app_state::workspace::accessors::request_focus_for_view(app, id);
+            }
+        }
+        return queued;
+    }
     let (selection, text_metadata_refresh) = {
         let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
         let Some(buffer) = tab.buffer_by_id_mut(buffer_id) else {

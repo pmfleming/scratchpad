@@ -7,7 +7,12 @@ use std::io::Write;
 fn failed_scan_faults_document_and_refuses_edits_before_mutation() {
     let mut file = tempfile::NamedTempFile::new().unwrap();
     file.write_all("aλ\r\n".repeat(128).as_bytes()).unwrap();
-    let (mut tree, _, _) = PieceTreeLite::from_utf8_file(file.path(), 0, 0).unwrap();
+    let (mut tree, _) = PieceTreeLite::import_utf8_file(
+        file.path(),
+        0,
+        &crate::app::services::chunk_store::ImportContext::default(),
+    )
+    .unwrap();
     let before = tree.metrics();
     let generation = tree.generation();
     tree.inject_read_failure_for_test();
@@ -375,4 +380,16 @@ fn match_char_ranges(text: &str, needle: &str) -> Vec<std::ops::Range<usize>> {
         search_start = start_byte + needle.len();
     }
     ranges
+}
+
+#[test]
+fn partial_ascii_reference_capture_needs_no_body_read() {
+    let tree = PieceTreeLite::from_string("ascii reference text".into());
+    tree.inject_read_failure_for_test();
+    let spans = tree.reference_spans(6..15).unwrap();
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].start_byte, 6);
+    assert_eq!(spans[0].byte_len, 9);
+    assert_eq!(spans[0].char_len, 9);
+    assert!(tree.try_spans_for_range(6..15).next().unwrap().is_err());
 }

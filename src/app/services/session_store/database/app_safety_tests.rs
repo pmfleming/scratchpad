@@ -242,6 +242,7 @@ fn final_split_view_close_retains_latest_text_and_rolls_back_before_removing_the
         db.conn.execute_batch("CREATE TRIGGER refuse_view_archive BEFORE INSERT ON closed_tabs BEGIN SELECT RAISE(ABORT,'transient failure'); END;").await.map_err(database::error)
     })).unwrap();
     crate::app::commands::perform_close_view(&mut app, view);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 2);
     assert_eq!(
         app.tab_manager
@@ -266,6 +267,7 @@ fn final_split_view_close_retains_latest_text_and_rolls_back_before_removing_the
         })
         .unwrap();
     crate::app::commands::perform_close_view(&mut app, view);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 1);
     drop(app);
     drop(store);
@@ -298,6 +300,7 @@ fn failed_archive_commit_leaves_the_live_tab_open() {
     })).unwrap();
     let count = app.tab_manager.tabs.len();
     crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, 0);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.tabs.len(), count);
     assert_eq!(
         app.tab_manager.tabs.as_slice()[0].active_buffer().text(),
@@ -317,6 +320,7 @@ fn failed_archive_commit_leaves_the_live_tab_open() {
         })
         .unwrap();
     crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, 0);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.tabs.len(), count - 1);
     let archive = store.closed_tabs().unwrap().remove(0);
     assert_eq!(
@@ -396,6 +400,7 @@ fn closing_cold_split_retains_both_documents_and_remaining_layout() {
     app.tab_manager.set_tabs(vec![shell], 0);
     app.tab_manager.set_cold_session_tab(0, cold);
     crate::app::commands::perform_close_view(&mut app, view);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 1);
     session_manager::persist_session_now(&mut app).unwrap();
     let restored = store.load().unwrap().unwrap();
@@ -433,8 +438,10 @@ fn unavailable_session_store_does_not_trap_tabs_or_split_panes() {
     app.tab_manager
         .set_tabs(vec![tab, WorkspaceTab::untitled()], 0);
     crate::app::commands::perform_close_view(&mut app, view);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 1);
     crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, 0);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.tabs.len(), 1);
     assert!(
         app.tab_manager.tabs.as_slice()[0]
@@ -446,4 +453,43 @@ fn unavailable_session_store_does_not_trap_tabs_or_split_panes() {
         std::fs::read_to_string(root.path().join("session")).unwrap(),
         "unavailable"
     );
+}
+
+#[test]
+fn cold_documents_survive_a_failed_backup_and_retry_after_writer_retirement() {
+    use super::super::{
+        Restorer, SessionActiveSurface, SessionPersistRequest, cold_tab_from_workspace_tab,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let mut store = SessionStore::new(root.path().to_owned());
+    let text = "retained λ🦀\r\n".repeat(50_000);
+    let tab = WorkspaceTab::new(BufferState::new("cold".into(), text.clone(), None));
+    store
+        .persist(std::slice::from_ref(&tab), 0, 16.0, false)
+        .unwrap();
+    let cold = cold_tab_from_workspace_tab(&tab);
+    let shell = Restorer::cold_tab_shell(&cold);
+    let cold_tabs = std::collections::HashMap::from([(0, cold)]);
+    let capture = || {
+        SessionPersistRequest::capture_with_cold_tabs(
+            std::slice::from_ref(&shell),
+            &cold_tabs,
+            0,
+            SessionActiveSurface::Workspace,
+            16.0,
+            false,
+        )
+    };
+    let obstacle = root.path().join("session.db-journal");
+    std::fs::create_dir(&obstacle).unwrap();
+    assert!(store.start_new_session(capture()).is_err());
+    std::fs::remove_dir(&obstacle).unwrap();
+    let backup = store.start_new_session(capture()).unwrap();
+    assert_eq!(
+        store.load().unwrap().unwrap().tabs[0]
+            .active_buffer()
+            .text(),
+        text
+    );
+    std::fs::remove_dir_all(backup).unwrap();
 }

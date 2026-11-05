@@ -229,7 +229,7 @@ fn finish_rename(
     );
     app.tab_manager.mark_session_dirty();
     app.apply_current_tab_ordering();
-    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+    crate::app::app_state::workspace::accessors::request_session_persist(app);
 }
 
 fn normalize_requested_name(requested_name: &str) -> io::Result<String> {

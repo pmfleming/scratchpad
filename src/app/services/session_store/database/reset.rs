@@ -5,9 +5,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-const SESSION_FILES: [&str; 4] = [
+const SESSION_FILES: [&str; 5] = [
     "session.db-wal",
     "session.db-shm",
+    "session.db-tshm",
     "session.db-journal",
     "session.db",
 ];
@@ -24,8 +25,7 @@ pub(in crate::app::services::session_store) fn start_new_session(
             .chain(request.closed_tabs.iter().map(|closed| &closed.tab))
             .any(|tab| tab.preserve_existing)
     {
-        request = worker
-            .call(move |db| futures_lite::future::block_on(db.hydrate_reset_request(request)))?;
+        request = worker.prepare_reset_request(request)?;
     }
     let old = worker.map(DatabaseWorker::chunk_store);
     let previous_path = old.as_ref().and_then(|store| store.epoch().path());

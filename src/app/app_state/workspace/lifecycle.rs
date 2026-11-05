@@ -110,7 +110,7 @@ pub(crate) fn save_all_files(app: &mut ScratchpadApp) {
             );
         }
         app.tab_manager.mark_session_dirty();
-        let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+        crate::app::app_state::workspace::accessors::request_session_persist(app);
     }
 }
 
@@ -124,9 +124,6 @@ pub(crate) fn save_file_as(app: &mut ScratchpadApp) {
 
 pub(crate) fn perform_close_tab(app: &mut ScratchpadApp, index: usize) {
     perform_close_tab_no_persist(app, index);
-    if let Err(error) = crate::app::app_state::workspace::accessors::persist_session_now(app) {
-        app.state.status.report_session_save_failed(error);
-    }
 }
 
 pub(crate) fn perform_close_tab_no_persist(app: &mut ScratchpadApp, index: usize) {
@@ -134,7 +131,9 @@ pub(crate) fn perform_close_tab_no_persist(app: &mut ScratchpadApp, index: usize
         return;
     }
     if let Err(error) = crate::app::services::session_manager::persist_tab_close(app, index) {
-        app.state.status.report_session_save_failed(error);
+        if error.kind() != std::io::ErrorKind::WouldBlock {
+            app.state.status.report_session_save_failed(error);
+        }
         return;
     }
     close_tab_internal(app, index);
@@ -280,7 +279,7 @@ fn selected_workspace_tab_range(app: &ScratchpadApp) -> (usize, usize) {
     }
 }
 
-fn close_tab_internal(app: &mut ScratchpadApp, index: usize) {
+pub(crate) fn close_tab_internal(app: &mut ScratchpadApp, index: usize) {
     let buffers: Vec<_> = app.tab_manager.tabs.as_slice()[index]
         .buffers()
         .map(|b| b.id)
@@ -346,6 +345,13 @@ pub(crate) fn cancel_loading_previews(app: &mut ScratchpadApp, buffers: &[Buffer
         })
         .collect();
     for (path, key) in cancelled {
+        if let Some(tokens) = app.state.background_io.path_imports.remove(&path) {
+            for token in tokens {
+                if let Some(token) = token.upgrade() {
+                    token.store(true, std::sync::atomic::Ordering::Release);
+                }
+            }
+        }
         app.state.cancelled_loading_previews.insert(path);
         if let Some(key) = key {
             app.state.pending_open_file_paths.remove(&key);

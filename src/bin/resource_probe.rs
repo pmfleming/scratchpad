@@ -46,8 +46,27 @@ const UTF8_SAMPLE_LINE: &str =
 const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
 const FRAGMENT_UNIT: &str = "hay needle café 東京\n";
 
+thread_local! {static FILE_PROBE_STORE:std::cell::RefCell<Option<SessionStore>>=const {std::cell::RefCell::new(None)};}
+fn read_probe_file(
+    path: &Path,
+) -> std::io::Result<scratchpad::app::services::file_service::FileContent> {
+    let store = FILE_PROBE_STORE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .expect("probe store initialized")
+            .clone()
+    });
+    let handle = store.chunk_store_handle()?;
+    FileService::read_file_in_store(path, handle)
+}
 fn main() {
-    if std::env::args().any(|arg| arg == "--live-text-stage-five") {
+    let file_probe_root = tempfile::tempdir().expect("file probe store root");
+    FILE_PROBE_STORE.with(|slot| {
+        *slot.borrow_mut() = Some(SessionStore::new(file_probe_root.path().to_owned()))
+    });
+    if std::env::args().any(|arg| arg == "--live-text-stage-seven") {
+        println!("{}", scratchpad::profile::run_live_text_io_profile(64 * MB));
+    } else if std::env::args().any(|arg| arg == "--live-text-stage-five") {
         live_text::imports();
     } else if std::env::args().any(|arg| arg == "--live-text-stage-three") {
         println!(
@@ -65,6 +84,7 @@ fn main() {
     } else {
         scenarios::run_all();
     }
+    FILE_PROBE_STORE.with(|slot| drop(slot.borrow_mut().take()));
 }
 
 fn run_file_backed_open_first_visible_paint_cycle(path: &Path) -> StepOutcome {
@@ -95,7 +115,7 @@ fn run_file_backed_open_first_visible_paint_cycle(path: &Path) -> StepOutcome {
 }
 
 fn run_large_utf8_load_cycle(path: &Path) -> StepOutcome {
-    let file = FileService::read_file(path).expect("open large UTF-8 file through file service");
+    let file = read_probe_file(path).expect("open large UTF-8 file through file service");
     let disk_state = FileService::read_disk_state(path).ok();
     let buffer = FileService::build_buffer_from_file_content(path, file, disk_state);
     StepOutcome::items(black_box(
@@ -106,7 +126,7 @@ fn run_large_utf8_load_cycle(path: &Path) -> StepOutcome {
 }
 
 fn prepare_file_backed_cache_traversal(path: &Path) -> TextDocument {
-    FileService::read_file(path)
+    read_probe_file(path)
         .expect("open file-backed cache fixture")
         .document
 }

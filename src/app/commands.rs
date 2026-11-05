@@ -9,7 +9,7 @@ mod file;
 mod search;
 mod settings;
 mod tab_transfer;
-mod workspace;
+pub(crate) mod workspace;
 
 pub(crate) use dispatch::handle_command;
 pub(crate) use workspace::{activate_pending_view_command, perform_close_view};

@@ -143,7 +143,7 @@ fn cold_history_is_lazy_and_survives_metadata_saves_and_quarantine() {
         db.persist(captured, 2).await.unwrap();
         let cold = request(&tabs).tabs.pop().unwrap().session_tab;
         assert_eq!(
-            db.hydrate(cold.clone()).await.unwrap().0.buffers[0]
+            db.hydrate(cold.clone()).await.unwrap().buffers[0]
                 .history_document
                 .as_ref()
                 .unwrap()

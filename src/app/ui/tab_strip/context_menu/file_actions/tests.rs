@@ -28,6 +28,7 @@ fn open_file_submenu_contains_closed_files_without_a_separate_menu_item() {
                 buffer.is_dirty = true;
                 app.tab_manager.set_tabs(vec![WorkspaceTab::new(buffer)], 0);
                 lifecycle::perform_close_tab(&mut app, 0);
+                crate::app::app_state::test_support::wait_for_background_io(&mut app);
             }
             let mut harness = Harness::builder()
                 .with_context_setup(|ctx| {
@@ -110,6 +111,7 @@ fn recently_closed_menu_has_single_action_rows_and_reopens_retained_and_disk_ent
         let id = buffer.temp_id.clone();
         app.tab_manager.set_tabs(vec![WorkspaceTab::new(buffer)], 0);
         lifecycle::perform_close_tab(&mut app, 0);
+        crate::app::app_state::test_support::wait_for_background_io(&mut app);
         let disk = FileService::build_buffer_from_file_content(
             &path,
             FileService::read_file(&path).unwrap(),

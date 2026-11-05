@@ -49,25 +49,26 @@ impl PieceTreeLite {
     }
 
     /// Reattach immutable history text without appending a second copy on replay.
-    pub(crate) fn insert_history_spans(&mut self, offset_chars: usize, spans: &[ByteSpan]) {
-        let mut pieces = Vec::new();
-        let mut bytes = 0;
-        for span in spans {
-            let text = self.storage.text_for_span(*span);
-            pieces.extend(build_chunked_pieces(
-                span.buffer,
-                span.start_byte as usize,
-                &text,
-            ));
-            bytes += text.len();
+    pub(crate) fn insert_history_spans(
+        &mut self,
+        offset_chars: usize,
+        spans: &[ByteSpan],
+    ) -> std::io::Result<()> {
+        let pieces = spans
+            .iter()
+            .map(|span| self.storage.pieces_for_span(*span))
+            .collect::<std::io::Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        if pieces.is_empty() {
+            return Ok(());
         }
-        if bytes == 0 {
-            return;
-        }
+        let _pin = self.pin_edit_boundaries(offset_chars..offset_chars)?;
         let edit = self.begin_edit();
         self.insert_pieces_at(offset_chars, pieces, edit);
+        Ok(())
     }
-
     fn insert_pieces_at(
         &mut self,
         offset_chars: usize,
@@ -98,7 +99,7 @@ impl PieceTreeLite {
         if self.read_fault().is_some() {
             return;
         }
-        let Ok(_pin) = self.pin_range(range_chars.clone()) else {
+        let Ok(_pin) = self.pin_edit_boundaries(range_chars.clone()) else {
             return;
         };
         if range_chars.is_empty() {

@@ -91,7 +91,7 @@ pub struct BufferState {
     pub(crate) pending_disk_observation: bool,
     pub(crate) pending_reopen_external: Option<u64>,
     pub(crate) pending_reopen_original: Option<Box<TextDocument>>,
-    pub(crate) loaded_replacement_text: Option<std::sync::Arc<String>>,
+    pub(crate) replacement_ready: bool,
     pub(crate) prepared_history_base: Option<super::HistoryToken>,
     pub freshness: BufferFreshness,
     pub active_selection: Option<Range<usize>>,
@@ -405,26 +405,14 @@ impl BufferState {
         let history = if self.is_loading_preview {
             None
         } else {
-            let text = if let Some(text) = loaded.loaded_replacement_text.take() {
-                text
-            } else {
-                let mut text = String::new();
-                for span in loaded
-                    .document
-                    .piece_tree()
-                    .try_spans_for_range(0..loaded.document.piece_tree().len_chars())
-                {
-                    let Ok(span) = span else { return false };
-                    text.push_str(&span.text);
-                }
-                std::sync::Arc::new(text)
-            };
-            if !self
+            if self
                 .document
-                .replace_exact_with_history_source(&text, source)
+                .replace_document_references(&loaded.document, source)
+                .is_err()
             {
                 return false;
             }
+            loaded.replacement_ready = false;
             Some(self.document.clone())
         };
         *self = loaded;
@@ -588,7 +576,7 @@ impl BufferState {
             pending_disk_observation: false,
             pending_reopen_external: None,
             pending_reopen_original: None,
-            loaded_replacement_text: None,
+            replacement_ready: false,
             prepared_history_base: None,
             freshness: state.freshness,
             active_selection: None,

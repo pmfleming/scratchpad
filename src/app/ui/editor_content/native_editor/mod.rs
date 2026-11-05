@@ -90,7 +90,11 @@ pub fn render_editor_text_edit(
                 _ => false,
             })
         }) {
-        match buffer.document().piece_tree().pin_range(selection) {
+        match buffer
+            .document()
+            .piece_tree()
+            .pin_edit_boundaries(selection)
+        {
             Ok(pin) => Some(pin),
             Err(error) => return render_storage_fault(ui, &error.to_string()),
         }

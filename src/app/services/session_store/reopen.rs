@@ -2,7 +2,7 @@
 use super::{Restorer, SessionStore, model::SessionTab};
 use crate::app::{CanonicalPathKey, domain::WorkspaceTab, services::file_service::FileService};
 use futures_lite::future::block_on;
-use std::{collections::HashMap, io, path::Path};
+use std::{io, path::Path};
 
 #[cfg(test)]
 mod tests;
@@ -14,16 +14,27 @@ pub(crate) enum RetainedTarget {
 }
 
 pub(super) fn restore_reopened(
-    mut tab: SessionTab,
-    contents: HashMap<String, String>,
+    tab: SessionTab,
     claimed: &[CanonicalPathKey],
     store: Option<crate::app::services::chunk_store::ChunkStoreHandle>,
 ) -> io::Result<WorkspaceTab> {
+    let context = crate::app::services::chunk_store::ImportContext {
+        store,
+        ..Default::default()
+    };
+    restore_reopened_with_context(tab, claimed, &context)
+}
+fn restore_reopened_with_context(
+    mut tab: SessionTab,
+    claimed: &[CanonicalPathKey],
+    context: &crate::app::services::chunk_store::ImportContext,
+) -> io::Result<WorkspaceTab> {
+    context.check()?;
     let originals = tab.buffers.clone();
     for buffer in &mut tab.buffers {
         buffer.path = None;
     }
-    let mut restored = Restorer::new(contents).restore_tab_with_summary(tab).0;
+    let mut restored = Restorer::new().restore_tab_with_summary(tab).0;
     for original in originals {
         let Some(buffer) = restored
             .buffers_mut()
@@ -39,8 +50,8 @@ pub(super) fn restore_reopened(
             buffer.recover_as_untitled("recovered");
             continue;
         }
-        match FileService::observe_decoded_digest(&path) {
-            Ok((state, digest)) => {
+        match FileService::observe_decoded_digest_with_context(&path, context) {
+            Ok((state, mut digest)) => {
                 let baseline = original
                     .observed_disk_digest
                     .as_ref()
@@ -54,13 +65,9 @@ pub(super) fn restore_reopened(
                 buffer.disk_state = Some(state);
                 buffer.is_dirty = original.is_dirty;
                 if digest != baseline {
-                    let observed = FileService::read_observed_file_with_context(
-                        &path,
-                        &crate::app::services::chunk_store::ImportContext {
-                            store: store.clone(),
-                            ..Default::default()
-                        },
-                    )?;
+                    let observed = FileService::read_observed_file_with_context(&path, context)?;
+                    digest.clone_from(&observed.digest);
+                    buffer.disk_state = Some(observed.state.clone());
                     let original_document = Box::new(buffer.document().clone());
                     let previous = buffer.document().history_now();
                     let loaded = FileService::buffer_from_observed(&path, observed);
@@ -105,10 +112,10 @@ impl SessionStore {
             RetainedTarget::Cold(tab) => self.restore_cold_session_tab(tab).map(|r| r.0),
             RetainedTarget::Archive(token) => self.reopen_archive_with_claimed(&token, claimed),
             RetainedTarget::Document(id) => {
-                let (tab, contents) = self
+                let tab = self
                     .worker()?
                     .call(move |db| block_on(db.load_retained_document(&id)))?;
-                let mut tab = restore_reopened(tab, contents, claimed, self.opened_chunk_store())?;
+                let mut tab = restore_reopened(tab, claimed, self.opened_chunk_store())?;
                 self.bind_tab(&mut tab)?;
                 Ok(tab)
             }
@@ -125,10 +132,10 @@ impl SessionStore {
         claimed: &[CanonicalPathKey],
     ) -> io::Result<WorkspaceTab> {
         let token = token.to_owned();
-        let (tab, contents) = self
+        let tab = self
             .worker()?
             .call(move |db| block_on(db.read_closed_tab(&token)))?;
-        let mut tab = restore_reopened(tab, contents, claimed, self.opened_chunk_store())?;
+        let mut tab = restore_reopened(tab, claimed, self.opened_chunk_store())?;
         self.bind_tab(&mut tab)?;
         Ok(tab)
     }
@@ -148,18 +155,34 @@ impl SessionStore {
         }))
     }
 
+    #[cfg(test)]
     pub(crate) fn reopen_path_with_claimed(
         &self,
         path: &Path,
         claimed: &[CanonicalPathKey],
+    ) -> io::Result<Option<WorkspaceTab>> {
+        self.reopen_path_with_context(
+            path,
+            claimed,
+            &crate::app::services::chunk_store::ImportContext {
+                store: self.opened_chunk_store(),
+                ..Default::default()
+            },
+        )
+    }
+    pub(crate) fn reopen_path_with_context(
+        &self,
+        path: &Path,
+        claimed: &[CanonicalPathKey],
+        context: &crate::app::services::chunk_store::ImportContext,
     ) -> io::Result<Option<WorkspaceTab>> {
         let key = CanonicalPathKey::from_path(path).as_str().to_owned();
         let retained = self
             .worker()?
             .call(move |db| block_on(db.load_retained_path(&key)))?;
         retained
-            .map(|(tab, contents)| {
-                let mut tab = restore_reopened(tab, contents, claimed, self.opened_chunk_store())?;
+            .map(|tab| {
+                let mut tab = restore_reopened_with_context(tab, claimed, context)?;
                 self.bind_tab(&mut tab)?;
                 Ok(tab)
             })

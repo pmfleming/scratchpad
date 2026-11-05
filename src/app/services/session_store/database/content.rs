@@ -6,10 +6,9 @@ use crate::app::services::{
     chunk_store::{ChunkReference, Metadata},
     session_store::model::SessionTab,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    io,
-};
+#[cfg(test)]
+use std::collections::HashMap;
+use std::{collections::HashSet, io};
 use turso::params;
 
 #[derive(Clone)]
@@ -245,11 +244,11 @@ impl Database {
         };
         let store = self.chunk_store()?;
         let owner = crate::app::domain::buffer::text_cache::new_owner();
-        let blocks = self.query_collect("SELECT t.buffer,t.position,t.start_byte,c.id,c.digest,c.byte_len,c.char_len,c.newline_count,c.is_ascii FROM document_text t LEFT JOIN chunks c ON c.id=t.chunk_id WHERE t.temp_id=? ORDER BY t.buffer,t.position",[id],|r| {
+        let blocks = self.query_collect("SELECT t.buffer,t.position,t.start_byte,c.id,c.digest,c.byte_len,c.char_len,c.newline_count,c.is_ascii,c.ends_with_lf FROM document_text t LEFT JOIN chunks c ON c.id=t.chunk_id WHERE t.temp_id=? ORDER BY t.buffer,t.position",[id],|r| {
             let buffer = match r.get::<i64>(0).map_err(error)? {0=>PieceBuffer::Original,1=>PieceBuffer::Add,_=>return Err(invalid("invalid storage buffer"))};
             let position = r.get::<i64>(1).map_err(error)?;
             let start = usize::try_from(r.get::<i64>(2).map_err(error)?).map_err(invalid)?;
-            let metadata=Metadata {digest:r.get::<Vec<u8>>(4).map_err(error)?.try_into().map_err(|_|invalid("invalid chunk digest"))?,byte_len:usize::try_from(r.get::<i64>(5).map_err(error)?).map_err(invalid)?,char_len:super::document_rows::unsigned(r.get(6).map_err(error)?)?,newline_count:super::document_rows::unsigned(r.get(7).map_err(error)?)?,is_ascii:r.get::<i64>(8).map_err(error)?==1};
+            let metadata=Metadata {digest:r.get::<Vec<u8>>(4).map_err(error)?.try_into().map_err(|_|invalid("invalid chunk digest"))?,byte_len:usize::try_from(r.get::<i64>(5).map_err(error)?).map_err(invalid)?,char_len:super::document_rows::unsigned(r.get(6).map_err(error)?)?,newline_count:super::document_rows::unsigned(r.get(7).map_err(error)?)?,is_ascii:super::document_rows::boolean(r.get::<i64>(8).map_err(error)?)?,ends_with_lf:super::document_rows::boolean(r.get::<i64>(9).map_err(error)?)?};
             Ok((position,StorageBlock {buffer,start,chunk:store.restored(ChunkReference {id:r.get(3).map_err(error)?,metadata,epoch:store.epoch()},owner)}))
         }).await.map_err(|e|damaged(id,e))?;
         let mut positions = [0; 2];
@@ -289,10 +288,7 @@ impl Database {
         }
         Ok(contents)
     }
-    pub(super) async fn read_tab_contents(
-        &self,
-        tabs: &[SessionTab],
-    ) -> io::Result<HashMap<String, String>> {
+    pub(super) async fn validate_tab_text(&self, tabs: &[SessionTab]) -> io::Result<()> {
         if let Some(buffer) = tabs
             .iter()
             .flat_map(|t| &t.buffers)
@@ -306,7 +302,6 @@ impl Database {
         let required: Vec<_> = tabs
             .iter()
             .flat_map(|t| &t.buffers)
-            .filter(|b| super::super::validation::needs_snapshot(b))
             .map(|b| b.temp_id.as_str())
             .collect();
         if !required.is_empty() {
@@ -316,7 +311,7 @@ impl Database {
                 return Err(damaged(id, "required text manifest is missing"));
             }
         }
-        Ok(HashMap::new())
+        Ok(())
     }
     pub(super) async fn write_content(
         &self,

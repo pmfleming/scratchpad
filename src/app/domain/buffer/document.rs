@@ -1,4 +1,5 @@
 mod history_ops;
+mod reference_edits;
 pub(crate) use history_ops::HistorySnapshot;
 mod tree_ops;
 
@@ -29,6 +30,7 @@ pub(crate) enum TextReplacementError {
     NotDescending,
     OverlappingRanges,
     StorageUnreadable,
+    BulkRefused,
 }
 
 pub struct TextDocument {
@@ -112,6 +114,23 @@ impl Default for TextDocumentHistoryState {
 }
 
 impl TextDocument {
+    pub(crate) fn import_utf8_text(
+        text: &str,
+        context: &crate::app::services::chunk_store::ImportContext,
+    ) -> io::Result<Self> {
+        let tree = PieceTreeLite::import_utf8_text(text, context)?;
+        let mut document = Self {
+            identity: next_document_identity(),
+            content: TextDocumentContentState {
+                piece_tree: Arc::new(tree),
+                preferred_line_ending: platform_default_line_ending(),
+            },
+            history: TextDocumentHistoryState::default(),
+        };
+        document.record_initial_content();
+        Ok(document)
+    }
+
     pub(crate) fn import_utf8_file(
         path: &Path,
         offset: u64,
@@ -163,20 +182,6 @@ impl TextDocument {
         };
         document.record_initial_content();
         document
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_utf8_file(
-        path: &Path,
-        file_offset: u64,
-        _sample_limit: usize,
-    ) -> io::Result<(Self, String, usize)> {
-        let (document, inspection) = Self::import_utf8_file(
-            path,
-            file_offset,
-            &crate::app::services::chunk_store::ImportContext::default(),
-        )?;
-        Ok((document, String::new(), inspection.line_count()))
     }
 
     /// Extract the full text content as a new String from the piece tree.
@@ -402,6 +407,18 @@ impl TextDocument {
         validate_replacements(replacements, self.content.piece_tree.len_chars())?;
         if self.piece_tree().read_fault().is_some() {
             return Err(TextReplacementError::StorageUnreadable);
+        }
+        if replacements.len() > 256
+            || replacements
+                .iter()
+                .any(|(range, text)| range.len() >= 64 * 1024 || text.len() >= 256 * 1024)
+        {
+            return self.replace_references(
+                replacements,
+                previous_selection,
+                next_selection,
+                source,
+            );
         }
         let _pins = replacements
             .iter()

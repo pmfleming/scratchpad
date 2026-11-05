@@ -93,3 +93,39 @@ mod admission_tests {
         assert_eq!(&*accepted.load(false, true).unwrap(), "accepted");
     }
 }
+
+#[cfg(test)]
+mod concurrency_tests {
+    use crate::app::services::chunk_store::ChunkStoreHandle;
+    use std::sync::{Arc, Barrier};
+    #[test]
+    fn concurrent_bulk_admission_is_atomic_and_pending_aliases_keep_their_body() {
+        let store = ChunkStoreHandle::unavailable("injected".into());
+        store.set_failure_limit(64 * 1024);
+        let barrier = Arc::new(Barrier::new(8));
+        let threads = (0..8)
+            .map(|owner| {
+                let store = store.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.seal_bulk(Arc::new("x".repeat(16 * 1024)), owner)
+                })
+            })
+            .collect::<Vec<_>>();
+        let accepted = threads
+            .into_iter()
+            .filter_map(|thread| thread.join().unwrap().ok())
+            .collect::<Vec<_>>();
+        assert_eq!(accepted.len(), 4);
+        assert_eq!(store.pending_bytes(), 64 * 1024);
+        let alias = accepted[0].for_owner(99);
+        drop(accepted);
+        store.reap_abandoned();
+        assert_eq!(store.pending_bytes(), 16 * 1024);
+        assert_eq!(alias.load(false, false).unwrap().len(), 16 * 1024);
+        drop(alias);
+        store.reap_abandoned();
+        assert_eq!(store.pending_bytes(), 0);
+    }
+}

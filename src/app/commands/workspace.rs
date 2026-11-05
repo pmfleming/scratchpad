@@ -131,13 +131,29 @@ pub(crate) fn perform_close_view(app: &mut ScratchpadApp, view_id: ViewId) {
     app.reload_settings_if_closing_view(view_id);
 
     if let Err(error) = crate::app::services::session_manager::persist_view_close(app, view_id) {
-        app.state.status.report_session_save_failed(error);
+        if error.kind() != std::io::ErrorKind::WouldBlock {
+            app.state.status.report_session_save_failed(error);
+        }
         return;
     }
+    perform_close_view_committed(app, view_id);
+}
 
+pub(crate) fn perform_close_view_committed(app: &mut ScratchpadApp, view_id: ViewId) {
+    let Some(index) = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .position(|tab| tab.layout.contains_view(view_id))
+    else {
+        return;
+    };
     if let Some(buffer) = app
         .tab_manager
-        .active_tab()
+        .tabs
+        .as_slice()
+        .get(index)
         .and_then(|tab| {
             (tab.is_last_view_for_buffer(view_id) == Some(true))
                 .then(|| tab.buffer_for_view(view_id))
@@ -148,7 +164,6 @@ pub(crate) fn perform_close_view(app: &mut ScratchpadApp, view_id: ViewId) {
         crate::app::app_state::workspace::lifecycle::cancel_loading_previews(app, &[buffer]);
     }
 
-    let index = app.tab_manager.active_tab_index;
     let open_buffer_ids_before = app
         .tab_manager
         .tabs
@@ -194,7 +209,9 @@ pub(crate) fn perform_close_view(app: &mut ScratchpadApp, view_id: ViewId) {
         app.tab_manager.rebuild_buffer_tab_index();
         crate::app::app_state::frame::begin_layout_transition(app);
         crate::app::app_state::search_runtime::mark_search_dirty(app);
-        workspace_accessors::request_focus_for_view(app, next_active_view);
+        if app.tab_manager.active_tab_index == index {
+            workspace_accessors::request_focus_for_view(app, next_active_view);
+        }
         app.tab_manager.mark_session_dirty();
     }
 }

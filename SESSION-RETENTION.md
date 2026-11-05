@@ -10,16 +10,23 @@ this is normally `$XDG_STATE_HOME/scratchpad`, or `~/.local/state/scratchpad`.
 The `documents` table owns metadata, identity and the last observed disk version;
 workspace layouts reference documents without owning their lifetime. `activity`
 stores lifecycle and disk observations without text-state targets. `history` stores the
-edits; `document_history` stores Now, selected tip, and edit recency. Current text
-caches use deduplicated blobs. Everything is local; there is no remote Turso URL.
+edits; `document_history` stores Now, selected tip, and edit recency. Current and historical text
+share immutable, verified chunks. Everything is local; there is no remote Turso URL.
 
-Memory limits evict loaded immutable text chunks, not edits. Cold chunks use
-private temporary backing while the application runs, and are reconstructed from
-the database on restart. The limits exclude tree metadata and the active editable
-chunk. Temporary backing is released on process exit; Forget history removes the
-durable tree without promising immediate reclamation of that temporary space.
+Memory limits evict loaded immutable text chunks, not edits. Sealed text lives in
+the same database during editing and after restart; there is no temporary text
+backing. Mutable tails remain in RAM and are committed as bounded segments.
+A failed store keeps accepted text in RAM and warns in the status bar. History
+settings control a separate failure-only RAM limit: typing continues above it,
+while additional bulk pastes and file imports are refused atomically. Read faults
+make the affected document read-only and show a red circle on its tab.
 
-Schema 11 (session version 9) does not migrate incompatible older or newer session formats. A failed
+Forget history removes unreachable undo references. Bounded collection reuses
+pages once neither durable roots nor live process handles need a chunk. It does
+not promise immediate database-file shrinkage. Cache budgets exclude tree
+metadata, mutable tails and pending uncommitted bodies.
+
+Schema 13 (recovery export version 10) does not migrate incompatible older or newer session formats. A failed
 restore opens Status with the error and a **Start new session** action. The warning
 explains that the old database will move to a temporary backup, which may be
 deleted during temporary-file cleanup. The backup includes database sidecars and
@@ -31,8 +38,8 @@ session containing the current workspace is committed at the original location.
 An unsuccessful reset leaves saving paused and can be retried. Saved files and
 settings remain unchanged; no reset happens without selecting the action.
 
-Closing the final view commits its retained state and Closed event together before
-removing the view. A closed split layout may be consumed when one document reopens;
+Closing the final view commits its retained state and Closed event together in
+the background before removing the view. Newer edits keep that view open. A closed split layout may be consumed when one document reopens;
 its other documents and histories remain retained. Automatic restore and shutdown
 do not manufacture lifecycle events. Blank, never-edited untitled documents and
 cancelled loading previews leave no retained rows.

@@ -1,3 +1,5 @@
+mod replay;
+pub(crate) use replay::coalesce as coalesce_spans;
 mod anchor;
 #[cfg(test)]
 mod byte_slice;
@@ -44,6 +46,31 @@ const MIN_LEAVES_PER_INTERNAL: usize = MAX_LEAVES_PER_INTERNAL / 4;
 const PREVIEW_MAX_CHARS: usize = 96;
 
 impl PieceTreeLite {
+    pub(super) fn snapshot_identity(&self) -> std::sync::Weak<()> {
+        self.runtime.revision()
+    }
+    pub(crate) fn intake_error(&self) -> Option<String> {
+        self.storage.intake_error()
+    }
+    pub(crate) fn import_utf8_text(
+        text: &str,
+        context: &crate::app::services::chunk_store::ImportContext,
+    ) -> io::Result<Self> {
+        let (storage, pieces, _) = PieceTreeStorage::import_reader(
+            text.as_bytes(),
+            std::path::Path::new("decoded text"),
+            context,
+        )?;
+        let mut tree = Self {
+            storage,
+            root: build_root_from_pieces(pieces),
+            runtime: PieceTreeRuntime::default(),
+            anchor_state: PieceTreeAnchorState::default(),
+        };
+        tree.assign_missing_leaf_ids();
+        Ok(tree)
+    }
+
     pub(crate) fn ram_tail_bytes(&self) -> usize {
         self.storage.ram_tail_bytes()
     }
@@ -446,20 +473,6 @@ impl PieceTreeLite {
     }
 
     #[cfg(test)]
-    pub(crate) fn from_utf8_file(
-        path: &Path,
-        file_offset: u64,
-        _sample_limit: usize,
-    ) -> io::Result<(Self, String, usize)> {
-        let (tree, inspection) = Self::import_utf8_file(
-            path,
-            file_offset,
-            &crate::app::services::chunk_store::ImportContext::default(),
-        )?;
-        Ok((tree, String::new(), inspection.line_count()))
-    }
-
-    #[cfg(test)]
     pub(crate) fn add_storage_bytes(&self) -> usize {
         self.storage.add_bytes()
     }
@@ -528,11 +541,6 @@ impl PieceTreeLite {
     #[must_use]
     pub fn len_chars(&self) -> usize {
         self.root.metrics.chars
-    }
-
-    #[must_use]
-    pub fn is_chunked(&self) -> bool {
-        self.storage.is_chunked()
     }
 
     #[must_use]

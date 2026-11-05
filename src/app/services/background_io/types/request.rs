@@ -4,6 +4,10 @@ use crate::app::services::session_store::{ColdSessionTab, SessionPersistRequest,
 use std::path::PathBuf;
 
 pub(crate) enum PathLoadRequest {
+    Cancelable {
+        cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        request: Box<Self>,
+    },
     Reconcile {
         base: Box<crate::app::domain::BufferState>,
         source: Option<crate::app::domain::PieceSource>,
@@ -34,7 +38,9 @@ pub(crate) enum PathLoadRequest {
 impl PathLoadRequest {
     pub(crate) fn path(&self) -> &PathBuf {
         match self {
-            Self::Reconcile { request, .. } | Self::Bound { request, .. } => request.path(),
+            Self::Cancelable { request, .. }
+            | Self::Reconcile { request, .. }
+            | Self::Bound { request, .. } => request.path(),
             Self::Standard(path)
             | Self::Observed { path, .. }
             | Self::WithEncoding { path, .. }

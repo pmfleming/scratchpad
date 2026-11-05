@@ -50,6 +50,7 @@ pub(super) fn update_logic(app: &mut ScratchpadApp, ctx: &egui::Context) {
     FileController::poll_open_file_dialog(app, ctx);
     let background_poll_started_at = Instant::now();
     app.poll_background_io(ctx);
+    crate::app::services::session_manager::poll_close_intents(app);
     if app.state.window.exit_after_input && !pending_accepted_input(app) {
         app.state.window.exit_after_input = false;
         request_exit(app, ctx);
@@ -191,7 +192,7 @@ fn handle_dropped_files(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn persist_with_error_status(app: &mut ScratchpadApp) -> bool {
-    match crate::app::app_state::workspace::accessors::persist_session_now(app) {
+    match crate::app::services::session_manager::persist_session_now(app) {
         Ok(()) => true,
         Err(error) => {
             let protected = app.state.persistence.session_store.writes_blocked();
@@ -248,14 +249,16 @@ pub(crate) fn estimated_tab_strip_width(app: &ScratchpadApp, spacing: f32) -> f3
 }
 
 fn pending_accepted_input(app: &ScratchpadApp) -> bool {
-    app.tab_manager.tabs.as_slice().iter().any(|tab| {
-        tab.buffers().any(|buffer| buffer.is_preparing_text())
-            || tab
-                .layout
-                .views()
-                .iter()
-                .any(|view| !view.deferred_editor_events.is_empty())
-    })
+    app.state.persistence.close_in_flight
+        || !app.state.persistence.close_queue.is_empty()
+        || app.tab_manager.tabs.as_slice().iter().any(|tab| {
+            tab.buffers().any(|buffer| buffer.is_preparing_text())
+                || tab
+                    .layout
+                    .views()
+                    .iter()
+                    .any(|view| !view.deferred_editor_events.is_empty())
+        })
 }
 pub(crate) fn request_exit(app: &mut ScratchpadApp, ctx: &egui::Context) {
     if app.state.persistence.session_reset.is_some() {

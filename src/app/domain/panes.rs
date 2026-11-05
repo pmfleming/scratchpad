@@ -26,7 +26,7 @@ pub enum TileDirection {
 
 pub type SplitPath = Vec<PaneBranch>;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum PaneNode {
     Leaf {
         view_id: ViewId,

@@ -1,0 +1,348 @@
+[0mdirenv: loading ~/Projects/scratchpad/.envrc
+[0mdirenv: using flake
+[0mdirenv: nix-direnv: Using cached dev shell
+Scratchpad dev shell
+Try: cargo check
+    Blocking waiting for file lock on artifact directory
+   Compiling scratchpad v0.4.2 (/home/laufan/Projects/scratchpad)
+    Finished `bench` profile [optimized] target(s) in 56.61s
+     Running benches/frame_budget.rs (target/release/deps/frame_budget-bdd696611f5b7020)
+Gnuplot not found, using plotters backend
+Benchmarking ui_render_frame_120hz/steady_workspace
+Benchmarking ui_render_frame_120hz/steady_workspace: Warming up for 3.0000 s
+Benchmarking ui_render_frame_120hz/steady_workspace: Collecting 10 samples in estimated 5.0027 s (29k iterations)
+Benchmarking ui_render_frame_120hz/steady_workspace: Analyzing
+ui_render_frame_120hz/steady_workspace
+                        time:   [168.12 µs 168.75 µs 169.87 µs]
+                        change: [+9.2868% +9.9149% +10.489%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking viewport_extraction_latency/1048576
+Benchmarking viewport_extraction_latency/1048576: Warming up for 3.0000 s
+Benchmarking viewport_extraction_latency/1048576: Collecting 10 samples in estimated 5.0118 s (4015 iterations)
+Benchmarking viewport_extraction_latency/1048576: Analyzing
+viewport_extraction_latency/1048576
+                        time:   [1.2406 ms 1.2426 ms 1.2466 ms]
+                        change: [−14.303% −13.849% −13.357%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Benchmarking viewport_extraction_latency/4194304
+Benchmarking viewport_extraction_latency/4194304: Warming up for 3.0000 s
+Benchmarking viewport_extraction_latency/4194304: Collecting 10 samples in estimated 5.1679 s (715 iterations)
+Benchmarking viewport_extraction_latency/4194304: Analyzing
+viewport_extraction_latency/4194304
+                        time:   [7.2695 ms 7.3257 ms 7.3539 ms]
+                        change: [−8.9423% −8.3357% −7.7152%] (p = 0.00 < 0.05)
+                        Performance has improved.
+
+Benchmarking scroll_stress_latency/1048576
+Benchmarking scroll_stress_latency/1048576: Warming up for 3.0000 s
+Benchmarking scroll_stress_latency/1048576: Collecting 10 samples in estimated 5.0780 s (1925 iterations)
+Benchmarking scroll_stress_latency/1048576: Analyzing
+scroll_stress_latency/1048576
+                        time:   [2.6070 ms 2.6227 ms 2.6445 ms]
+                        change: [−6.9682% −6.0670% −4.7509%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+Benchmarking scroll_stress_latency/4194304
+Benchmarking scroll_stress_latency/4194304: Warming up for 3.0000 s
+Benchmarking scroll_stress_latency/4194304: Collecting 10 samples in estimated 5.2592 s (605 iterations)
+Benchmarking scroll_stress_latency/4194304: Analyzing
+scroll_stress_latency/4194304
+                        time:   [8.6124 ms 8.6288 ms 8.6452 ms]
+                        change: [−8.9755% −8.6094% −8.2357%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+     Running benches/promise_latency.rs (target/release/deps/promise_latency-f6f198745060635a)
+Gnuplot not found, using plotters backend
+Benchmarking tab_reorder_latency/1000
+Benchmarking tab_reorder_latency/1000: Warming up for 1.0000 s
+Benchmarking tab_reorder_latency/1000: Collecting 10 samples in estimated 2.0008 s (112k iterations)
+Benchmarking tab_reorder_latency/1000: Analyzing
+tab_reorder_latency/1000
+                        time:   [17.726 µs 17.793 µs 17.837 µs]
+                        change: [+37.327% +37.900% +38.486%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Benchmarking tab_reorder_latency/10000
+Benchmarking tab_reorder_latency/10000: Warming up for 1.0000 s
+Benchmarking tab_reorder_latency/10000: Collecting 10 samples in estimated 2.0069 s (9295 iterations)
+Benchmarking tab_reorder_latency/10000: Analyzing
+tab_reorder_latency/10000
+                        time:   [216.49 µs 218.97 µs 224.88 µs]
+                        change: [+43.902% +47.509% +52.580%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking paste_stress_latency/134217728
+Benchmarking paste_stress_latency/134217728: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 2.0s. You may wish to increase target time to 3.0s.
+Benchmarking paste_stress_latency/134217728: Collecting 10 samples in estimated 3.0343 s (10 iterations)
+Benchmarking paste_stress_latency/134217728: Analyzing
+paste_stress_latency/134217728
+                        time:   [216.38 ms 227.97 ms 239.15 ms]
+                        change: [+93.181% +103.46% +113.56%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+Benchmarking paste_insert_phase/134217728
+Benchmarking paste_insert_phase/134217728: Warming up for 1.0000 s
+Benchmarking paste_insert_phase/134217728: Collecting 10 samples in estimated 2.3999 s (20 iterations)
+Benchmarking paste_insert_phase/134217728: Analyzing
+paste_insert_phase/134217728
+                        time:   [52.617 ms 59.145 ms 64.727 ms]
+                        change: [−29.483% −21.451% −13.179%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) low severe
+
+Benchmarking paste_metadata_phase/134217728
+Benchmarking paste_metadata_phase/134217728: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 2.0s. You may wish to increase target time to 2.9s.
+Benchmarking paste_metadata_phase/134217728: Collecting 10 samples in estimated 2.9484 s (10 iterations)
+Benchmarking paste_metadata_phase/134217728: Analyzing
+paste_metadata_phase/134217728
+                        time:   [180.26 ms 182.03 ms 184.38 ms]
+                        change: [+289.33% +295.38% +301.78%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 10 measurements (20.00%)
+  1 (10.00%) high mild
+  1 (10.00%) high severe
+
+Benchmarking snapshot_shared_edit_latency/16777216
+Benchmarking snapshot_shared_edit_latency/16777216: Warming up for 1.0000 s
+Benchmarking snapshot_shared_edit_latency/16777216: Collecting 10 samples in estimated 2.1524 s (715 iterations)
+Benchmarking snapshot_shared_edit_latency/16777216: Analyzing
+snapshot_shared_edit_latency/16777216
+                        time:   [113.84 µs 114.92 µs 116.62 µs]
+                        change: [−9.8140% −8.5115% −7.0550%] (p = 0.00 < 0.05)
+                        Performance has improved.
+
+Benchmarking snapshot_shared_fragmented_edit_latency/20000
+Benchmarking snapshot_shared_fragmented_edit_latency/20000: Warming up for 1.0000 s
+Benchmarking snapshot_shared_fragmented_edit_latency/20000: Collecting 10 samples in estimated 2.0190 s (3190 iterations)
+Benchmarking snapshot_shared_fragmented_edit_latency/20000: Analyzing
+snapshot_shared_fragmented_edit_latency/20000
+                        time:   [632.56 µs 635.96 µs 638.95 µs]
+                        change: [−18.055% −17.229% −16.412%] (p = 0.00 < 0.05)
+                        Performance has improved.
+
+Benchmarking dense_line_lookup_latency/4194304
+Benchmarking dense_line_lookup_latency/4194304: Warming up for 1.0000 s
+Benchmarking dense_line_lookup_latency/4194304: Collecting 10 samples in estimated 2.0010 s (22k iterations)
+Benchmarking dense_line_lookup_latency/4194304: Analyzing
+dense_line_lookup_latency/4194304
+                        time:   [88.575 µs 88.770 µs 89.044 µs]
+                        change: [+0.9224% +1.4772% +2.0164%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+
+Benchmarking reverse_character_walk_latency/8192
+Benchmarking reverse_character_walk_latency/8192: Warming up for 1.0000 s
+Benchmarking reverse_character_walk_latency/8192: Collecting 10 samples in estimated 2.0000 s (39k iterations)
+Benchmarking reverse_character_walk_latency/8192: Analyzing
+reverse_character_walk_latency/8192
+                        time:   [50.745 µs 50.806 µs 50.924 µs]
+                        change: [−1.9831% −1.4473% −0.8843%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+
+Benchmarking fragmented_tree_edit_latency/20000
+Benchmarking fragmented_tree_edit_latency/20000: Warming up for 1.0000 s
+Benchmarking fragmented_tree_edit_latency/20000: Collecting 10 samples in estimated 2.0001 s (361k iterations)
+Benchmarking fragmented_tree_edit_latency/20000: Analyzing
+fragmented_tree_edit_latency/20000
+                        time:   [7.9572 µs 10.916 µs 12.654 µs]
+                        change: [−31.007% −12.282% +9.8996%] (p = 0.36 > 0.05)
+                        No change in performance detected.
+
+Benchmarking large_paste_undo_latency/16777216
+Benchmarking large_paste_undo_latency/16777216: Warming up for 1.0000 s
+Benchmarking large_paste_undo_latency/16777216: Collecting 10 samples in estimated 2.0000 s (240k iterations)
+Benchmarking large_paste_undo_latency/16777216: Analyzing
+large_paste_undo_latency/16777216
+                        time:   [8.1686 µs 8.2059 µs 8.2345 µs]
+                        change: [−99.720% −99.711% −99.702%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) low mild
+
+Benchmarking session_restore_latency/10000
+Benchmarking session_restore_latency/10000: Warming up for 1.0000 s
+Benchmarking session_restore_latency/10000: Collecting 10 samples in estimated 2.5827 s (165 iterations)
+Benchmarking session_restore_latency/10000: Analyzing
+session_restore_latency/10000
+                        time:   [15.698 ms 15.879 ms 16.041 ms]
+                        change: [+5592.9% +5722.5% +5861.2%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking session_restore_background_completion/10000
+Benchmarking session_restore_background_completion/10000: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 2.0s. You may wish to increase target time to 8.4s.
+Benchmarking session_restore_background_completion/10000: Collecting 10 samples in estimated 8.3509 s (10 iterations)
+Benchmarking session_restore_background_completion/10000: Analyzing
+session_restore_background_completion/10000
+                        time:   [841.16 ms 850.87 ms 860.81 ms]
+                        change: [+523.21% +534.87% +549.43%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+Benchmarking session_persist_latency/10000
+Benchmarking session_persist_latency/10000: Warming up for 1.0000 s
+Benchmarking session_persist_latency/10000: Collecting 10 samples in estimated 2.4444 s (30 iterations)
+Benchmarking session_persist_latency/10000: Analyzing
+session_persist_latency/10000
+                        time:   [78.703 ms 79.176 ms 79.860 ms]
+                        change: [+109.47% +111.76% +114.44%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+     Running benches/search_speed.rs (target/release/deps/search_speed-717da36150b3e833)
+Gnuplot not found, using plotters backend
+Benchmarking search_active_file_size/16384
+Benchmarking search_active_file_size/16384: Warming up for 3.0000 s
+Benchmarking search_active_file_size/16384: Collecting 10 samples in estimated 5.0000 s (2.1M iterations)
+Benchmarking search_active_file_size/16384: Analyzing
+search_active_file_size/16384
+                        time:   [2.3512 µs 2.3540 µs 2.3564 µs]
+                        change: [−0.6395% −0.4259% −0.2018%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Benchmarking search_active_file_size/131072
+Benchmarking search_active_file_size/131072: Warming up for 3.0000 s
+Benchmarking search_active_file_size/131072: Collecting 10 samples in estimated 5.0006 s (297k iterations)
+Benchmarking search_active_file_size/131072: Analyzing
+search_active_file_size/131072
+                        time:   [16.799 µs 16.829 µs 16.898 µs]
+                        change: [−4.6853% −4.3209% −3.8794%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) high severe
+Benchmarking search_active_file_size/1048576
+Benchmarking search_active_file_size/1048576: Warming up for 3.0000 s
+Benchmarking search_active_file_size/1048576: Collecting 10 samples in estimated 5.0007 s (38k iterations)
+Benchmarking search_active_file_size/1048576: Analyzing
+search_active_file_size/1048576
+                        time:   [132.85 µs 132.97 µs 133.09 µs]
+                        change: [−0.7212% −0.5730% −0.4355%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+
+Benchmarking search_current_files_completion/1
+Benchmarking search_current_files_completion/1: Warming up for 3.0000 s
+Benchmarking search_current_files_completion/1: Collecting 10 samples in estimated 5.0000 s (2.1M iterations)
+Benchmarking search_current_files_completion/1: Analyzing
+search_current_files_completion/1
+                        time:   [2.4125 µs 2.4359 µs 2.4469 µs]
+                        change: [+3.5957% +4.3629% +5.1629%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Benchmarking search_current_files_completion/8
+Benchmarking search_current_files_completion/8: Warming up for 3.0000 s
+Benchmarking search_current_files_completion/8: Collecting 10 samples in estimated 5.0009 s (235k iterations)
+Benchmarking search_current_files_completion/8: Analyzing
+search_current_files_completion/8
+                        time:   [19.220 µs 19.265 µs 19.343 µs]
+                        change: [−0.1964% +0.1273% +0.4262%] (p = 0.45 > 0.05)
+                        No change in performance detected.
+Benchmarking search_current_files_completion/32
+Benchmarking search_current_files_completion/32: Warming up for 3.0000 s
+Benchmarking search_current_files_completion/32: Collecting 10 samples in estimated 5.0001 s (66k iterations)
+Benchmarking search_current_files_completion/32: Analyzing
+search_current_files_completion/32
+                        time:   [75.251 µs 75.345 µs 75.505 µs]
+                        change: [−3.0853% −2.9466% −2.7853%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking search_current_files_first_response/1
+Benchmarking search_current_files_first_response/1: Warming up for 3.0000 s
+Benchmarking search_current_files_first_response/1: Collecting 10 samples in estimated 5.0001 s (2.1M iterations)
+Benchmarking search_current_files_first_response/1: Analyzing
+search_current_files_first_response/1
+                        time:   [2.3253 µs 2.3275 µs 2.3305 µs]
+                        change: [−2.9926% −2.8666% −2.7304%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking search_current_files_first_response/8
+Benchmarking search_current_files_first_response/8: Warming up for 3.0000 s
+Benchmarking search_current_files_first_response/8: Collecting 10 samples in estimated 5.0001 s (2.1M iterations)
+Benchmarking search_current_files_first_response/8: Analyzing
+search_current_files_first_response/8
+                        time:   [2.3290 µs 2.3364 µs 2.3416 µs]
+                        change: [−10.069% −9.8480% −9.6429%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) high severe
+Benchmarking search_current_files_first_response/32
+Benchmarking search_current_files_first_response/32: Warming up for 3.0000 s
+Benchmarking search_current_files_first_response/32: Collecting 10 samples in estimated 5.0000 s (2.2M iterations)
+Benchmarking search_current_files_first_response/32: Analyzing
+search_current_files_first_response/32
+                        time:   [2.2929 µs 2.2939 µs 2.2952 µs]
+                        change: [−5.2632% −5.1227% −5.0068%] (p = 0.00 < 0.05)
+                        Performance has improved.
+
+Benchmarking search_all_tabs_completion/1
+Benchmarking search_all_tabs_completion/1: Warming up for 3.0000 s
+Benchmarking search_all_tabs_completion/1: Collecting 10 samples in estimated 5.0000 s (2.2M iterations)
+Benchmarking search_all_tabs_completion/1: Analyzing
+search_all_tabs_completion/1
+                        time:   [2.3157 µs 2.3167 µs 2.3187 µs]
+                        change: [+0.3807% +0.5233% +0.6812%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking search_all_tabs_completion/8
+Benchmarking search_all_tabs_completion/8: Warming up for 3.0000 s
+Benchmarking search_all_tabs_completion/8: Collecting 10 samples in estimated 5.0006 s (267k iterations)
+Benchmarking search_all_tabs_completion/8: Analyzing
+search_all_tabs_completion/8
+                        time:   [18.685 µs 18.720 µs 18.762 µs]
+                        change: [−2.1443% −1.9647% −1.7796%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Benchmarking search_all_tabs_completion/32
+Benchmarking search_all_tabs_completion/32: Warming up for 3.0000 s
+Benchmarking search_all_tabs_completion/32: Collecting 10 samples in estimated 5.0036 s (67k iterations)
+Benchmarking search_all_tabs_completion/32: Analyzing
+search_all_tabs_completion/32
+                        time:   [74.498 µs 74.525 µs 74.583 µs]
+                        change: [−0.8429% −0.6023% −0.3493%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 2 outliers among 10 measurements (20.00%)
+  1 (10.00%) high mild
+  1 (10.00%) high severe
+
+Benchmarking search_all_tabs_first_response/1
+Benchmarking search_all_tabs_first_response/1: Warming up for 3.0000 s
+Benchmarking search_all_tabs_first_response/1: Collecting 10 samples in estimated 5.0000 s (2.2M iterations)
+Benchmarking search_all_tabs_first_response/1: Analyzing
+search_all_tabs_first_response/1
+                        time:   [2.3359 µs 2.3396 µs 2.3420 µs]
+                        change: [+2.6336% +2.7747% +2.9058%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) low mild
+Benchmarking search_all_tabs_first_response/8
+Benchmarking search_all_tabs_first_response/8: Warming up for 3.0000 s
+Benchmarking search_all_tabs_first_response/8: Collecting 10 samples in estimated 5.0001 s (2.1M iterations)
+Benchmarking search_all_tabs_first_response/8: Analyzing
+search_all_tabs_first_response/8
+                        time:   [2.6893 µs 3.2875 µs 3.8228 µs]
+                        change: [+8.6303% +26.016% +45.510%] (p = 0.01 < 0.05)
+                        Performance has regressed.
+Benchmarking search_all_tabs_first_response/32
+Benchmarking search_all_tabs_first_response/32: Warming up for 3.0000 s
+Benchmarking search_all_tabs_first_response/32: Collecting 10 samples in estimated 5.0001 s (1.3M iterations)
+Benchmarking search_all_tabs_first_response/32: Analyzing
+search_all_tabs_first_response/32
+                        time:   [4.2716 µs 4.4867 µs 4.7927 µs]
+                        change: [+99.316% +109.94% +122.88%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild

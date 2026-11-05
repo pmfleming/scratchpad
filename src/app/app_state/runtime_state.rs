@@ -15,6 +15,7 @@ pub(crate) struct OpenFileDialogState {
 }
 
 pub(crate) struct BackgroundIoState {
+    pub(crate) path_imports: HashMap<PathBuf, Vec<std::sync::Weak<std::sync::atomic::AtomicBool>>>,
     pub(crate) bound_store_epoch: Option<u64>,
     pub(crate) preparations_pending: bool,
     pub(crate) tx: BackgroundIoDispatcher,
@@ -26,6 +27,7 @@ pub(crate) struct BackgroundIoState {
 impl BackgroundIoState {
     pub(crate) fn new(tx: BackgroundIoDispatcher, rx: Receiver<BackgroundIoResult>) -> Self {
         Self {
+            path_imports: HashMap::new(),
             bound_store_epoch: None,
             preparations_pending: false,
             tx,
@@ -65,10 +67,6 @@ impl BackgroundIoState {
         request_id: u64,
     ) -> Option<&mut PendingBackgroundAction> {
         self.pending_background_actions.get_mut(&request_id)
-    }
-
-    pub(crate) fn drop_pending_background_action(&mut self, request_id: u64) {
-        self.pending_background_actions.remove(&request_id);
     }
 
     pub(crate) fn has_pending_persist(&self) -> bool {

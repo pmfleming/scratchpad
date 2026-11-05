@@ -8,8 +8,8 @@ pub fn user_manual_path(app: &ScratchpadApp) -> &Path {
     &app.state.user_manual_path
 }
 
-pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()> {
-    session_manager::persist_session_now(app)
+pub(crate) fn request_session_persist(app: &mut ScratchpadApp) {
+    session_manager::request_session_persist(app);
 }
 
 pub fn pending_action(app: &ScratchpadApp) -> Option<PendingAction> {

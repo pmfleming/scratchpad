@@ -98,6 +98,15 @@ impl ScratchpadApp {
                 return;
             }
         };
+        if !prepared.changes_document {
+            if let Some(index) = location
+                && let Some(buffer) =
+                    self.tab_manager.tabs.as_mut_slice()[index].buffer_by_id_mut(buffer_id)
+            {
+                buffer.cancel_text_preparation();
+            }
+            return;
+        }
         let Some(index) = location else {
             self.recover_prepared_text(*prepared);
             return;
@@ -223,6 +232,7 @@ impl ScratchpadApp {
         }) {
             return;
         }
+        let store = self.state.persistence.session_store.opened_chunk_store();
         let Some(tab) = self.tab_manager.active_tab_mut() else {
             return;
         };
@@ -234,11 +244,27 @@ impl ScratchpadApp {
         if !ctx.memory(|memory| memory.has_focus(editor_id)) {
             return;
         }
-        let Some((_, view)) = tab.buffer_and_view_mut(id) else {
+        let Some((buffer, view)) = tab.buffer_and_view_mut(id) else {
             return;
         };
         let mut remaining = Vec::new();
+        let mut accepted_bytes = 0usize;
         for event in std::mem::take(&mut input.events) {
+            let incoming = match &event {
+                egui::Event::Text(text)
+                | egui::Event::Paste(text)
+                | egui::Event::Ime(egui::ImeEvent::Commit(text)) => text.len(),
+                _ => 0,
+            };
+            if incoming >= crate::app::domain::buffer::BULK_TEXT_BYTES
+                && let Some(store) = &store
+                && let Err(cause) =
+                    store.check_bulk_capacity(accepted_bytes.saturating_add(incoming))
+            {
+                buffer.storage_refusal = Some(format!("Large paste refused. {cause}"));
+                continue;
+            }
+            accepted_bytes = accepted_bytes.saturating_add(incoming);
             match event {
                 egui::Event::Text(_)
                 | egui::Event::Paste(_)

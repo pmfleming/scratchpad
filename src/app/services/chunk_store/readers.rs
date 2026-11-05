@@ -54,7 +54,7 @@ impl Reader {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-            .ok_or_else(|| failed("chunk reader is closed"))?;
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "chunk reader is closed"))?;
         let (reply, result) = mpsc::sync_channel(1);
         let mut request = Request {
             #[cfg(test)]
@@ -240,9 +240,9 @@ impl ReadEpoch {
                 .readers
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let readers = readers
-                .as_ref()
-                .ok_or_else(|| failed("chunk epoch is closed"))?;
+            let readers = readers.as_ref().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::BrokenPipe, "chunk epoch is closed")
+            })?;
             if background {
                 readers.background.clone()
             } else {
@@ -328,6 +328,7 @@ async fn read(
     if text.chars().count() as u64 != metadata.char_len
         || text.bytes().filter(|&b| b == b'\n').count() as u64 != metadata.newline_count
         || text.is_ascii() != metadata.is_ascii
+        || text.ends_with('\n') != metadata.ends_with_lf
     {
         return Err(turso::Error::ConversionFailure(
             "immutable text metrics mismatch".into(),

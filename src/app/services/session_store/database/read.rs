@@ -6,14 +6,14 @@ use crate::app::services::session_store::{
     model::{SessionManifest, SessionTab},
     validation,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io;
 
 fn validate_required(tabs: &[SessionTab], contains: impl Fn(&str) -> bool) -> io::Result<()> {
     if let Some(buffer) = tabs
         .iter()
         .flat_map(|tab| &tab.buffers)
-        .find(|buffer| validation::needs_snapshot(buffer) && !contains(&buffer.temp_id))
+        .find(|buffer| !contains(&buffer.temp_id))
     {
         return Err(damaged(
             &buffer.temp_id,
@@ -72,8 +72,8 @@ impl Database {
                 "original recovery data is protected",
             ));
         }
-        let contents = match async {
-            let contents = self.read_contents(&manifest, scope).await?;
+        match async {
+            self.validate_contents(&manifest, scope).await?;
             let tabs = if matches!(scope, ReadScope::Shells) {
                 let active = manifest.active_tab_index;
                 manifest
@@ -85,59 +85,58 @@ impl Database {
                 &mut manifest.tabs
             };
             self.read_histories(tabs).await?;
-            Ok(contents)
+            Ok(())
         }
         .await
         {
-            Ok(contents) => contents,
+            Ok(()) => {}
             Err(cause) => {
                 self.protect_damaged(&cause, &manifest.tabs).await?;
                 if !matches!(scope, ReadScope::Shells) || damaged_id(&cause).is_none() {
                     return Err(cause);
                 }
                 // Keep a failed active tab cold, with its original recovery payload.
-                HashMap::new()
             }
-        };
+        }
         if matches!(scope, ReadScope::Active) {
             manifest.active_tab_index = 0;
         }
         Ok(Some(StoredSession {
             manifest,
-            contents,
             quarantined: self.quarantined.keys().cloned().collect(),
         }))
     }
-    async fn read_contents(
+    async fn validate_contents(
         &mut self,
         manifest: &SessionManifest,
         scope: ReadScope,
-    ) -> io::Result<HashMap<String, String>> {
-        let contents = match scope {
+    ) -> io::Result<()> {
+        match scope {
             ReadScope::All => {
                 self.validate_document_pieces(&manifest.tabs).await?;
-                HashMap::new()
             }
-            ReadScope::Active => self.read_tab_contents(&manifest.tabs).await?,
+            ReadScope::Active => {
+                self.validate_tab_text(&manifest.tabs).await?;
+            }
             ReadScope::Shells => {
                 self.validate_document_pieces(&manifest.tabs).await?;
-                self.read_tab_contents(
+                self.validate_tab_text(
                     manifest
                         .tabs
                         .get(manifest.active_tab_index)
                         .map(std::slice::from_ref)
                         .unwrap_or_default(),
                 )
-                .await?
+                .await?;
             }
-        };
+        }
         if matches!(scope, ReadScope::All) {
             let stored = self
                 .string_set("SELECT id FROM document_pieces WHERE part=0")
                 .await?;
             validate_required(&manifest.tabs, |id| stored.contains(id))?;
         }
-        Ok(contents)
+        Ok(())
     }
     async fn read_manifest(&self) -> io::Result<Option<SessionManifest>> {
         let states = self
@@ -231,19 +230,16 @@ impl Database {
         Ok(())
     }
 
-    pub async fn hydrate(
-        &mut self,
-        mut tab: SessionTab,
-    ) -> io::Result<(SessionTab, HashMap<String, String>)> {
+    pub async fn hydrate(&mut self, mut tab: SessionTab) -> io::Result<SessionTab> {
         self.ensure_healthy()?;
         let result = match async {
-            let contents = self.hydrate_contents(&tab).await?;
+            self.validate_hydrated_text(&tab).await?;
             self.read_histories(std::slice::from_mut(&mut tab)).await?;
-            Ok(contents)
+            Ok(())
         }
         .await
         {
-            Ok(contents) => Ok(contents),
+            Ok(()) => Ok(()),
             Err(cause) => {
                 let protected = self.protect_current_buffer(&cause).await;
                 if matches!(&protected, Ok(false)) {
@@ -260,7 +256,8 @@ impl Database {
         {
             self.blocked = Some(error.to_string());
         }
-        Ok((tab, result.map_err(|cause| self.quarantine_error(cause))?))
+        result.map_err(|cause| self.quarantine_error(cause))?;
+        Ok(tab)
     }
     // Jobs can outlive a tab or carry older metadata. Archive the committed
     // metadata, not the queued payload; false means no current buffer reference.
@@ -286,10 +283,10 @@ impl Database {
         self.protect_damaged(cause, &manifest.tabs).await?;
         Ok(true)
     }
-    async fn hydrate_contents(&self, tab: &SessionTab) -> io::Result<HashMap<String, String>> {
+    async fn validate_hydrated_text(&self, tab: &SessionTab) -> io::Result<()> {
         validation::validate_tab(tab)?;
         let tabs = std::slice::from_ref(tab);
-        self.read_tab_contents(tabs).await
+        self.validate_tab_text(tabs).await
     }
     pub(super) async fn validate_document_pieces(&mut self, tabs: &[SessionTab]) -> io::Result<()> {
         let ids = self
@@ -298,7 +295,7 @@ impl Database {
         for buffer in tabs
             .iter()
             .flat_map(|tab| &tab.buffers)
-            .filter(|buffer| validation::needs_snapshot(buffer) && !ids.contains(&buffer.temp_id))
+            .filter(|buffer| !ids.contains(&buffer.temp_id))
         {
             self.protect_damaged(
                 &damaged(&buffer.temp_id, "required recovery content is missing"),

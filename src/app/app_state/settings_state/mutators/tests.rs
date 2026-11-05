@@ -81,7 +81,7 @@ fn startup_keeps_workspace_active_when_settings_tab_is_open() {
     assert!(!crate::app::app_state::settings_state::showing_settings(
         &app
     ));
-    crate::app::app_state::workspace::accessors::persist_session_now(&mut app).unwrap();
+    crate::app::services::session_manager::persist_session_now(&mut app).unwrap();
 
     drop(app); // A restart must release the single database owner.
     let mut restored = app_with_root(&root);
@@ -114,7 +114,7 @@ fn startup_restores_settings_as_active_surface_from_session() {
     assert!(crate::app::app_state::settings_state::showing_settings(
         &app
     ));
-    crate::app::app_state::workspace::accessors::persist_session_now(&mut app).unwrap();
+    crate::app::services::session_manager::persist_session_now(&mut app).unwrap();
 
     drop(app); // A restart must release the single database owner.
     let mut restored = app_with_root(&root);

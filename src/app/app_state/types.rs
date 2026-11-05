@@ -105,6 +105,7 @@ pub(crate) struct PendingSavePathAction {
 }
 
 pub(crate) struct PendingSessionPersistAction {
+    pub(crate) close: Option<crate::app::services::session_manager::CloseAfterPersist>,
     pub(crate) acknowledgement: crate::app::services::session_store::SessionCaptureAck,
 }
 

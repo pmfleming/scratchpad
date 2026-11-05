@@ -81,7 +81,7 @@ fn close_display_slots(
     }
 
     if closed_count > 0 || close_settings {
-        let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+        app.tab_manager.mark_session_dirty();
     }
 
     if skipped_dirty > 0 {

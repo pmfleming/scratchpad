@@ -5,6 +5,32 @@ use super::{
 };
 
 impl TextDocument {
+    pub(crate) fn history_step_target(&self, undo: bool) -> Option<u64> {
+        if undo {
+            self.history.tree.parent(self.history.tree.now())
+        } else {
+            self.history.tree.redo_target()
+        }
+    }
+    pub(crate) fn history_needs_preparation(&self, target: u64) -> bool {
+        let Some(transition) = self.history.tree.navigation(target) else {
+            return false;
+        };
+        if transition.undo.len() + transition.redo.len() > 256 {
+            return true;
+        }
+        let mut cost = 0usize;
+        for id in transition.undo.iter().chain(&transition.redo) {
+            if let Ok(index) = self.history.entries.binary_search_by_key(id, |e| e.id) {
+                cost = cost.saturating_add(self.history.entries[index].byte_cost());
+                if cost >= 256 * 1024 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     #[must_use]
     pub fn history_now(&self) -> u64 {
         self.history.tree.now()
@@ -134,9 +160,9 @@ impl TextDocument {
                         .map(|id| (*id, OperationDirection::Redo)),
                 )
             {
-                let record = self.replay_history_node(id, direction)?;
-                selection = direction.selection(&record);
-                latest_record = super::history_ops::bounded_record(record);
+                let (next, record) = self.replay_history_node(id, direction)?;
+                selection = next;
+                latest_record = record;
             }
             Ok(())
         })();
@@ -165,56 +191,73 @@ impl TextDocument {
         &mut self,
         id: u64,
         direction: OperationDirection,
-    ) -> Result<TextDocumentOperationRecord, TextHistoryApplyError> {
+    ) -> Result<(CursorRange, Option<TextDocumentOperationRecord>), TextHistoryApplyError> {
         let index = self
             .history
             .entries
             .binary_search_by_key(&id, |e| e.id)
             .map_err(|_| TextHistoryApplyError::OutOfBounds)?;
-        if !self.history.entries[index].flags.replayable {
+        let entry = &self.history.entries[index];
+        if !entry.flags.replayable {
             return Err(TextHistoryApplyError::Conflict);
         }
-        let _history_pin = self
-            .piece_tree()
-            .pin_history_spans(
-                self.history.entries[index]
-                    .edits
-                    .iter()
-                    .flat_map(PieceHistoryEdit::spans),
-            )
-            .map_err(|_| TextHistoryApplyError::Conflict)?;
-        let record = self.operation_from_history_entry(&self.history.entries[index]);
-        let stored_edits = self.history.entries[index].edits.clone();
-        let mut edits = record.edits.iter().zip(stored_edits.iter());
-        while let Some((edit, stored)) = match direction {
+        let selection = match direction {
+            OperationDirection::Undo => entry.previous_selection,
+            OperationDirection::Redo => entry.next_selection,
+        };
+        let record = if entry.byte_cost() <= 256 * 1024 {
+            let _pin = self
+                .piece_tree()
+                .pin_history_spans(entry.edits.iter().flat_map(PieceHistoryEdit::spans))
+                .map_err(|_| TextHistoryApplyError::Conflict)?;
+            Some(self.operation_from_history_entry(entry))
+        } else {
+            None
+        };
+        let stored = entry.edits.clone();
+        let mut edits = stored.iter();
+        while let Some(edit) = match direction {
             OperationDirection::Undo => edits.next_back(),
             OperationDirection::Redo => edits.next(),
         } {
-            let expected = edit.expected_text(direction);
-            let end = edit
-                .start_char
-                .checked_add(expected.chars().count())
+            let inserted = edit.inserted_span().into_iter().collect::<Vec<_>>();
+            let (expected, replacement) = match direction {
+                OperationDirection::Undo => (inserted.as_slice(), edit.deleted_spans()),
+                OperationDirection::Redo => (edit.deleted_spans(), inserted.as_slice()),
+            };
+            let start = usize::try_from(edit.start_char())
+                .map_err(|_| TextHistoryApplyError::OutOfBounds)?;
+            let count = expected
+                .iter()
+                .try_fold(0usize, |n, s| {
+                    usize::try_from(s.char_len)
+                        .ok()
+                        .and_then(|v| n.checked_add(v))
+                })
+                .ok_or(TextHistoryApplyError::OutOfBounds)?;
+            let end = start
+                .checked_add(count)
                 .ok_or(TextHistoryApplyError::OutOfBounds)?;
             if end > self.piece_tree().len_chars() {
                 return Err(TextHistoryApplyError::OutOfBounds);
             }
-            let range = edit.start_char..end;
-            let _range_pin = self
+            if !self
                 .piece_tree()
-                .pin_range(range.clone())
-                .map_err(|_| TextHistoryApplyError::Conflict)?;
-            if self.piece_tree().extract_range(range.clone()) != expected {
+                .matches_history_range(start..end, expected)
+                .map_err(|_| TextHistoryApplyError::Conflict)?
+            {
                 return Err(TextHistoryApplyError::Conflict);
             }
-            let spans = match direction {
-                OperationDirection::Undo => stored.deleted_spans().to_vec(),
-                OperationDirection::Redo => stored.inserted_span().into_iter().collect(),
-            };
+            let _pin = self
+                .piece_tree()
+                .pin_edit_boundaries(start..end)
+                .map_err(|_| TextHistoryApplyError::Conflict)?;
             let tree = std::sync::Arc::make_mut(&mut self.content.piece_tree);
-            tree.remove_char_range(range);
-            tree.insert_history_spans(edit.start_char, &spans);
+            tree.remove_char_range(start..end);
+            tree.insert_history_spans(start, replacement)
+                .map_err(|_| TextHistoryApplyError::Conflict)?;
         }
-        Ok(record)
+        Ok((selection, record))
     }
 
     pub(crate) fn replace_exact_with_history(&mut self, text: &str) {

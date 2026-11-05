@@ -281,7 +281,7 @@ impl SessionStore {
         if !on_started(session.active_tab_index, session.active_surface) {
             return Err(receiver_closed());
         }
-        let mut restorer = Restorer::new(stored.contents);
+        let mut restorer = Restorer::new();
         let tabs = restorer.restore_tabs_active_first(
             stored.manifest.tabs,
             session.active_tab_index,
@@ -320,17 +320,34 @@ impl SessionStore {
         tab: ColdSessionTab,
     ) -> io::Result<(WorkspaceTab, Option<RestoreStatus>)> {
         let reopened = tab.reopened;
-        let (tab, contents) = self
-            .worker()?
-            .call(move |db| block_on(db.hydrate(SessionTab::from(tab))))?;
+        let tab = if tab
+            .buffers
+            .iter()
+            .all(|buffer| buffer.history_document.is_some())
+        {
+            SessionTab::from(tab)
+        } else {
+            self.worker()?
+                .call(move |db| block_on(db.hydrate(SessionTab::from(tab))))?
+        };
         if reopened {
-            let mut tab = reopen::restore_reopened(tab, contents, &[], self.opened_chunk_store())?;
+            let mut tab = reopen::restore_reopened(tab, &[], self.opened_chunk_store())?;
             self.bind_tab(&mut tab)?;
             return Ok((tab, None));
         }
-        let (mut tab, summary) = Restorer::new(contents).restore_tab_with_summary(tab);
+        let (mut tab, summary) = Restorer::new().restore_tab_with_summary(tab);
         self.bind_tab(&mut tab)?;
         Ok((tab, summary.into_status()))
+    }
+    pub(crate) fn cold_tab_from_imported(
+        &self,
+        tab: &WorkspaceTab,
+    ) -> (WorkspaceTab, ColdSessionTab) {
+        let mut cold = cold_tab_from_workspace_tab(tab);
+        for metadata in &mut cold.buffers {
+            metadata.history_document = tab.buffer_by_id(metadata.id).map(|b| b.document().clone());
+        }
+        (Restorer::cold_tab_shell(&cold), cold)
     }
     pub fn persist(
         &self,
@@ -358,7 +375,17 @@ impl SessionStore {
         Ok(profile)
     }
     pub(crate) fn persist_request(&self, request: SessionPersistRequest) -> io::Result<()> {
-        self.persist_profiled_request(request).map(|_| ())
+        let closing = !request.closed_tabs.is_empty();
+        self.persist_profiled_request(request).and_then(|profile| {
+            if closing && profile.total_ns == 0 {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "A newer save superseded the close; the tab was kept open",
+                ))
+            } else {
+                Ok(())
+            }
+        })
     }
     fn persist_profiled_request(
         &self,
@@ -391,9 +418,7 @@ impl SessionStore {
 fn restore_session(stored: StoredSession) -> io::Result<Option<RestoredSession>> {
     let mut session = restored_metadata(&stored.manifest);
     let mut summary = restore::RestoreSummary::default();
-    for (tab, tab_summary) in
-        Restorer::new(stored.contents).restore_tabs_ordered(stored.manifest.tabs)?
-    {
+    for (tab, tab_summary) in Restorer::new().restore_tabs_ordered(stored.manifest.tabs)? {
         summary.merge(tab_summary);
         session.tabs.push(tab);
     }

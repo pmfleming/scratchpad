@@ -6,11 +6,15 @@ fn viewport_preflight_reports_unreadable_text_before_building_a_galley() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("source");
     std::fs::write(&path, "viewport λ\r\n".repeat(128)).unwrap();
-    let (document, _, line_count) =
-        crate::app::domain::TextDocument::from_utf8_file(&path, 0, 0).unwrap();
+    let (document, _) = crate::app::domain::TextDocument::import_utf8_file(
+        &path,
+        0,
+        &crate::app::services::chunk_store::ImportContext::default(),
+    )
+    .unwrap();
     let mut buffer = BufferState::new("source".into(), String::new(), Some(path));
     *buffer.document_mut() = document;
-    buffer.line_count = line_count;
+    buffer.line_count = buffer.document().piece_tree().display_line_count();
     buffer
         .document()
         .piece_tree()

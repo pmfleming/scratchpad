@@ -202,15 +202,6 @@ pub(crate) enum OperationDirection {
     Redo,
 }
 
-impl OperationDirection {
-    pub(crate) fn selection(self, record: &TextDocumentOperationRecord) -> CursorRange {
-        match self {
-            OperationDirection::Undo => record.previous_selection,
-            OperationDirection::Redo => record.next_selection,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TextHistoryApplyError {
     OutOfBounds,
@@ -223,17 +214,6 @@ pub struct TextDocumentEditOperation {
     pub deleted_text: String,
     pub inserted_text: String,
     pub deleted_spans: Vec<ByteSpan>,
-}
-
-impl TextDocumentEditOperation {
-    /// Text that is expected to currently exist at `start_char` for the given
-    /// replay direction (the "before" side).
-    pub(crate) fn expected_text(&self, direction: OperationDirection) -> &str {
-        match direction {
-            OperationDirection::Undo => &self.inserted_text,
-            OperationDirection::Redo => &self.deleted_text,
-        }
-    }
 }
 
 /// Editor input before it is recorded in document history.

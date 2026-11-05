@@ -92,7 +92,6 @@ CREATE TABLE document_tail(temp_id TEXT NOT NULL REFERENCES documents(id) ON DEL
 
 pub(super) struct StoredSession {
     pub manifest: SessionManifest,
-    pub contents: HashMap<String, String>,
     pub quarantined: HashSet<String>,
 }
 #[cfg(test)]
@@ -218,7 +217,7 @@ impl Database {
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID && version == 12 {
+        if application == APPLICATION_ID && version == 13 {
             return Ok(());
         }
         if version != 0
@@ -237,7 +236,7 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{} {} {SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=12;",
+            "{} {} {SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=13;",
             document_rows::SCHEMA,
             layouts::SCHEMA,
             quarantine::SCHEMA,

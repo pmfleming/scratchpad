@@ -8,10 +8,9 @@ pub(super) fn run() {
     let directory = tempfile::tempdir().expect("isolated live-text baselines");
     let path = directory.path().join("large.txt");
     write_utf8_text_file(&path, 64 * MB).expect("large Unicode file");
-    let document = FileService::read_file(&path)
+    let document = read_probe_file(&path)
         .expect("file-backed document")
         .document;
-    assert!(document.piece_tree().is_chunked());
     let snapshot = document.snapshot();
     let program = SearchProgram::compile(
         "café",

@@ -36,7 +36,8 @@ fn disk_reconciliation_preserves_dirty_edits_but_reloads_clean_files() {
         }
         let mut buffer = SessionBuffer::from(&live);
         buffer.is_dirty = dirty;
-        let mut restorer = Restorer::new(HashMap::from([(buffer.temp_id.clone(), session.into())]));
+        let mut restorer =
+            Restorer::with_contents(HashMap::from([(buffer.temp_id.clone(), session.into())]));
         let restored = restorer.restore_buffer_content(&mut buffer);
         assert_eq!(
             restored.document.extract_text(),

@@ -56,7 +56,7 @@ pub(super) fn promote_view_to_tab_command(app: &mut ScratchpadApp, view_id: View
 
     crate::app::app_state::frame::begin_layout_transition(app);
     crate::app::app_state::workspace::lifecycle::append_transferred_tab(app, promoted_tab);
-    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+    crate::app::app_state::workspace::accessors::request_session_persist(app);
 }
 
 pub(super) fn promote_tab_files_to_tabs_command(app: &mut ScratchpadApp, index: usize) {
@@ -103,7 +103,7 @@ pub(super) fn promote_tab_files_to_tabs_command(app: &mut ScratchpadApp, index: 
     app.tab_manager.pending_scroll_to_active = true;
     workspace_accessors::request_focus_for_active_view(app);
     app.tab_manager.mark_session_dirty();
-    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+    crate::app::app_state::workspace::accessors::request_session_persist(app);
 }
 
 fn can_combine_tabs(tab_count: usize, source_index: usize, target_index: usize) -> bool {
@@ -168,7 +168,7 @@ pub(super) fn combine_tabs_into_tab_command(
     workspace_accessors::request_focus_for_active_view(app);
     app.tab_manager.mark_session_dirty();
     rebalance_combined_workspace_layout(app, adjusted_target_index, target_index);
-    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+    crate::app::app_state::workspace::accessors::request_session_persist(app);
 }
 
 fn remove_source_tab_for_combine(

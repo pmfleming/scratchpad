@@ -26,6 +26,7 @@ fn ordinary_open_restores_archived_unsaved_text_and_undo_history() {
     buffer.is_dirty = true;
     app.tab_manager.set_tabs(vec![WorkspaceTab::new(buffer)], 0);
     workspace_controller::perform_close_tab(&mut app, 0);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     crate::app::services::file_controller::FileController::open_paths(&mut app, vec![path.clone()]);
     let buffer = app.tab_manager.active_tab().unwrap().active_buffer();
     assert_eq!(buffer.text(), "unsaved");
@@ -129,6 +130,7 @@ fn retained_workspace_reopens_with_undo_and_recovers_versions_without_overwritin
         .unwrap();
     buffer.is_dirty = true;
     workspace_controller::perform_close_tab(&mut app, 0);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert!(app.tab_manager.tabs.is_empty());
     assert!(app.state.persistence.pending_closed_tabs.is_empty());
     drop(app);

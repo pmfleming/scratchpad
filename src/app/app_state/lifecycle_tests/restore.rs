@@ -153,6 +153,7 @@ fn permanently_unavailable_store_does_not_trap_window_or_retry_on_drop() {
     );
     super::super::settings_controller::close_settings(&mut app);
     super::super::workspace_controller::perform_close_tab(&mut app, 0);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     let ctx = egui::Context::default();
     let output = logic(&mut app, &ctx, &hidden_input());
     assert!(
@@ -173,6 +174,7 @@ fn automatic_exit_failure_is_attempted_once_and_explicit_close_can_retry() {
     let mut app = test_app(root.path());
     super::super::settings_controller::close_settings(&mut app);
     super::super::workspace_controller::perform_close_tab(&mut app, 0);
+    crate::app::app_state::test_support::wait_for_background_io(&mut app);
     let settings_root = root.path().join("blocked-settings");
     std::fs::write(&settings_root, b"block directory creation").unwrap();
     app.state.persistence.settings_store = SettingsStore::new(settings_root.clone());

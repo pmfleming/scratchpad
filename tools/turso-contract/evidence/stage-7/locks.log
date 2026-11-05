@@ -1,0 +1,6 @@
+[0mdirenv: loading ~/Projects/scratchpad/.envrc
+[0mdirenv: using flake
+[0mdirenv: nix-direnv: Using cached dev shell
+Scratchpad dev shell
+Try: cargo check
+Turso bindings 0.8.3, engine/SDK 0.8.3: matching lockfile identities

@@ -14,7 +14,6 @@ use turso::params;
 
 struct RecoveryBuffer {
     metadata: super::document_rows::DocumentRow,
-    required: bool,
     // None means cold or quarantined: preserve the committed history.
     history: Option<HistoryRows>,
     history_fingerprints: Option<Vec<super::history::HistoryFingerprint>>,
@@ -88,8 +87,14 @@ impl Prepared {
             .iter()
             .map(|c| c.token.as_str())
             .collect();
+        let closing_layouts: HashSet<_> = request
+            .closed_tabs
+            .iter()
+            .map(|closed| closed.tab.session_tab.layout_id)
+            .collect();
         for old in &old_closed {
             if !pending.contains(old.token.as_str())
+                && !closing_layouts.contains(&old.layout.id)
                 && !old.tab.buffers.iter().any(|b| {
                     live.contains(&b.temp_id) || prepared.removed_documents.contains(&b.temp_id)
                 })
@@ -140,10 +145,8 @@ impl Prepared {
                     std::mem::take(&mut buffer.text_history),
                 )?)
             };
-            let required = validation::needs_snapshot(buffer);
             let policy = RecoveryBuffer {
                 metadata: super::document_rows::DocumentRow::capture(buffer)?,
-                required,
                 changed_history: Vec::new(),
                 history_fingerprints: history.as_ref().map(super::history::fingerprints),
                 history,
@@ -631,9 +634,8 @@ impl Database {
         mut removed_digests: HashSet<Vec<u8>>,
     ) -> io::Result<()> {
         let written: HashSet<_> = prepared.contents.keys().collect();
-        if let Some((id, _)) = prepared.buffers.iter().find(|(id, buffer)| {
-            buffer.required
-                && !inventory.snapshots.contains(*id)
+        if let Some((id, _)) = prepared.buffers.iter().find(|(id, _buffer)| {
+            !inventory.snapshots.contains(*id)
                 && !written.contains(id)
                 && !self.quarantined.contains_key(*id)
         }) {
