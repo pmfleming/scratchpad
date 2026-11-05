@@ -45,7 +45,9 @@ const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
 const FRAGMENT_UNIT: &str = "hay needle café 東京\n";
 
 fn main() {
-    if std::env::args().any(|arg| arg == "--large-dirty-save") {
+    if std::env::args().any(|arg| arg == "--live-text-baseline") {
+        scenarios::run_live_text_baseline();
+    } else if std::env::args().any(|arg| arg == "--large-dirty-save") {
         session_save::run();
     } else if std::env::args().any(|arg| arg == "--session-maintenance") {
         session_maintenance::run();
@@ -109,6 +111,36 @@ fn run_file_backed_cache_traversal_cycle(document: &TextDocument) -> StepOutcome
         tree.file_chunk_cache_limit(),
         visited_bytes,
     )
+}
+
+fn run_file_backed_random_window_cycle(document: &TextDocument) -> StepOutcome {
+    let tree = document.piece_tree();
+    let blocks = tree.len_chars().div_ceil(64 * KB);
+    let mut samples = Vec::with_capacity(512);
+    let mut visited_bytes = 0;
+    for index in 0..512 {
+        // Jumps by roughly 4 Mi characters exceed the original's 8 MiB cache
+        // within a few requests. The OS page cache remains warm after import.
+        let start = (index * 73 % blocks) * 64 * KB;
+        let timer = std::time::Instant::now();
+        let text = tree.extract_range(start..(start + 4096).min(tree.len_chars()));
+        visited_bytes += black_box(text.len());
+        samples.push(timer.elapsed().as_nanos());
+    }
+    samples.sort_unstable();
+    let mut outcome = StepOutcome::file_chunks(
+        tree.loaded_file_chunk_count(),
+        tree.file_chunk_cache_limit(),
+        visited_bytes,
+    );
+    outcome.phase_elapsed_ns = serde_json::json!({
+        "window_samples": samples.len(),
+        "window_p50_ns": samples[samples.len() / 2],
+        "window_p99_ns": samples[(samples.len() * 99).div_ceil(100) - 1],
+        "window_max_ns": samples.last().unwrap(),
+        "os_page_cache": "warm; application-cache misses, not physical cold reads",
+    });
+    outcome
 }
 
 fn render_first_visible_text_paint(buffer: &BufferState) -> usize {

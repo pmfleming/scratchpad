@@ -35,8 +35,14 @@ jobs:
         run: cargo test --locked --manifest-path xtask/Cargo.toml
       - name: Check application and contract engine identities
         run: cargo xtask check-turso-locks
+      - name: Check engine contract formatting
+        run: cargo fmt --manifest-path tools/turso-contract/Cargo.toml --check
+      - name: Lint engine contract
+        run: cargo clippy --locked --manifest-path tools/turso-contract/Cargo.toml --all-targets -- -D warnings
       - name: Run isolated engine contract
         run: cargo run --locked --manifest-path tools/turso-contract/Cargo.toml
+      - name: Run isolated multiprocess WAL contract
+        run: cargo run --locked --manifest-path tools/turso-contract/Cargo.toml -- --wal-mode multiprocess
 
   windows:
     name: Windows native format, lint and tests
@@ -65,6 +71,9 @@ jobs:
 
       - name: Test
         run: cargo test --all-features --locked
+
+      - name: Run native Windows engine contract
+        run: cargo run --locked --manifest-path tools/turso-contract/Cargo.toml -- --wal-mode standard
 
       - name: Documentation
         env:

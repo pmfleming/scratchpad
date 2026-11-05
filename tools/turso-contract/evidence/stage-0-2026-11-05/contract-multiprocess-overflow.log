@@ -1,0 +1,30 @@
+[0mdirenv: loading ~/Projects/scratchpad/.envrc
+[0mdirenv: using flake
+[0mdirenv: nix-direnv: Using cached dev shell
+Scratchpad dev shell
+Try: cargo check
+   Compiling scratchpad-turso-spike v0.1.0 (/home/laufan/Projects/scratchpad/tools/turso-contract)
+    Finished `release` profile [optimized] target(s) in 22.11s
+     Running `tools/turso-contract/target/release/scratchpad-turso-spike --wal-mode multiprocess --wal-overflow`
+CONTRACT wal=multiprocess io=syscall synchronous=FULL cache_kib=8192 foreign_keys=ON
+VACUUM INTO caveat: 0.8.3 retains doubled apostrophes in output filenames; application adoption requires a path workaround
+METRIC wal=multiprocess name=contending_writer_busy elapsed_us=264
+PROGRESS wal=multiprocess chunks=4 wal_bytes=1895232
+PROGRESS wal=multiprocess chunks=260 wal_bytes=70188352
+PROGRESS wal=multiprocess chunks=516 wal_bytes=138481472
+PROGRESS wal=multiprocess chunks=772 wal_bytes=206774592
+PROGRESS wal=multiprocess chunks=1028 wal_bytes=275067712
+PROGRESS wal=multiprocess chunks=1284 wal_bytes=343360832
+PROGRESS wal=multiprocess chunks=1540 wal_bytes=411653952
+PROGRESS wal=multiprocess chunks=1796 wal_bytes=479947072
+PROGRESS wal=multiprocess chunks=2052 wal_bytes=548240192
+PROGRESS wal=multiprocess chunks=2308 wal_bytes=616533312
+PROGRESS wal=multiprocess chunks=2564 wal_bytes=684826432
+PROGRESS wal=multiprocess chunks=2820 wal_bytes=753119552
+PROGRESS wal=multiprocess chunks=3076 wal_bytes=821412672
+PROGRESS wal=multiprocess chunks=3332 wal_bytes=889705792
+PROGRESS wal=multiprocess chunks=3588 wal_bytes=957998912
+PROGRESS wal=multiprocess chunks=3844 wal_bytes=1026292032
+DIAGNOSTIC wal=multiprocess begin_after_snapshot_release=Err(Busy("database is locked")) autocommit=Ok(true)
+DIAGNOSTIC wal=multiprocess reopen_and_verify=Err(Busy("database is locked"))
+Error: "bulk BEGIN at chunk 4049, WAL 1080717232 bytes: Busy(\"database is locked\")"

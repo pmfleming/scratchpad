@@ -1,0 +1,116 @@
+Gnuplot not found, using plotters backend
+Benchmarking search_active_file_size/16384
+Benchmarking search_active_file_size/16384: Warming up for 3.0000 s
+Benchmarking search_active_file_size/16384: Collecting 10 samples in estimated 5.0001 s (834k iterations)
+Benchmarking search_active_file_size/16384: Analyzing
+search_active_file_size/16384
+                        time:   [5.2772 µs 5.4687 µs 5.8451 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+Benchmarking search_active_file_size/131072
+Benchmarking search_active_file_size/131072: Warming up for 3.0000 s
+Benchmarking search_active_file_size/131072: Collecting 10 samples in estimated 5.0003 s (114k iterations)
+Benchmarking search_active_file_size/131072: Analyzing
+search_active_file_size/131072
+                        time:   [46.037 µs 54.841 µs 59.500 µs]
+Benchmarking search_active_file_size/1048576
+Benchmarking search_active_file_size/1048576: Warming up for 3.0000 s
+Benchmarking search_active_file_size/1048576: Collecting 10 samples in estimated 5.0137 s (12k iterations)
+Benchmarking search_active_file_size/1048576: Analyzing
+search_active_file_size/1048576
+                        time:   [341.26 µs 535.87 µs 688.74 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking search_current_files_completion/1
+Benchmarking search_current_files_completion/1: Warming up for 3.0000 s
+Benchmarking search_current_files_completion/1: Collecting 10 samples in estimated 5.0003 s (673k iterations)
+Benchmarking search_current_files_completion/1: Analyzing
+search_current_files_completion/1
+                        time:   [5.3211 µs 7.0464 µs 9.5286 µs]
+Benchmarking search_current_files_completion/8
+Benchmarking search_current_files_completion/8: Warming up for 3.0000 s
+Benchmarking search_current_files_completion/8: Collecting 10 samples in estimated 5.0012 s (110k iterations)
+Benchmarking search_current_files_completion/8: Analyzing
+search_current_files_completion/8
+                        time:   [55.847 µs 68.126 µs 86.987 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking search_current_files_completion/32
+Benchmarking search_current_files_completion/32: Warming up for 3.0000 s
+Benchmarking search_current_files_completion/32: Collecting 10 samples in estimated 5.0121 s (13k iterations)
+Benchmarking search_current_files_completion/32: Analyzing
+search_current_files_completion/32
+                        time:   [254.62 µs 337.67 µs 428.03 µs]
+
+Benchmarking search_current_files_first_response/1
+Benchmarking search_current_files_first_response/1: Warming up for 3.0000 s
+Benchmarking search_current_files_first_response/1: Collecting 10 samples in estimated 5.0003 s (438k iterations)
+Benchmarking search_current_files_first_response/1: Analyzing
+search_current_files_first_response/1
+                        time:   [5.3525 µs 5.7160 µs 6.5691 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking search_current_files_first_response/8
+Benchmarking search_current_files_first_response/8: Warming up for 3.0000 s
+Benchmarking search_current_files_first_response/8: Collecting 10 samples in estimated 5.0003 s (634k iterations)
+Benchmarking search_current_files_first_response/8: Analyzing
+search_current_files_first_response/8
+                        time:   [6.3408 µs 8.9764 µs 13.881 µs]
+Found 2 outliers among 10 measurements (20.00%)
+  1 (10.00%) high mild
+  1 (10.00%) high severe
+Benchmarking search_current_files_first_response/32
+Benchmarking search_current_files_first_response/32: Warming up for 3.0000 s
+Benchmarking search_current_files_first_response/32: Collecting 10 samples in estimated 5.0004 s (533k iterations)
+Benchmarking search_current_files_first_response/32: Analyzing
+search_current_files_first_response/32
+                        time:   [5.5354 µs 6.1695 µs 7.2828 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking search_all_tabs_completion/1
+Benchmarking search_all_tabs_completion/1: Warming up for 3.0000 s
+Benchmarking search_all_tabs_completion/1: Collecting 10 samples in estimated 5.0001 s (573k iterations)
+Benchmarking search_all_tabs_completion/1: Analyzing
+search_all_tabs_completion/1
+                        time:   [6.1886 µs 10.146 µs 16.009 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+Benchmarking search_all_tabs_completion/8
+Benchmarking search_all_tabs_completion/8: Warming up for 3.0000 s
+Benchmarking search_all_tabs_completion/8: Collecting 10 samples in estimated 5.0131 s (19k iterations)
+Benchmarking search_all_tabs_completion/8: Analyzing
+search_all_tabs_completion/8
+                        time:   [77.396 µs 166.42 µs 234.73 µs]
+Benchmarking search_all_tabs_completion/32
+Benchmarking search_all_tabs_completion/32: Warming up for 3.0000 s
+Benchmarking search_all_tabs_completion/32: Collecting 10 samples in estimated 5.0186 s (5005 iterations)
+Benchmarking search_all_tabs_completion/32: Analyzing
+search_all_tabs_completion/32
+                        time:   [282.76 µs 410.70 µs 741.56 µs]
+
+Benchmarking search_all_tabs_first_response/1
+Benchmarking search_all_tabs_first_response/1: Warming up for 3.0000 s
+Benchmarking search_all_tabs_first_response/1: Collecting 10 samples in estimated 5.0002 s (286k iterations)
+Benchmarking search_all_tabs_first_response/1: Analyzing
+search_all_tabs_first_response/1
+                        time:   [11.930 µs 15.262 µs 20.547 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking search_all_tabs_first_response/8
+Benchmarking search_all_tabs_first_response/8: Warming up for 3.0000 s
+Benchmarking search_all_tabs_first_response/8: Collecting 10 samples in estimated 5.0003 s (541k iterations)
+Benchmarking search_all_tabs_first_response/8: Analyzing
+search_all_tabs_first_response/8
+                        time:   [6.6510 µs 8.0880 µs 9.4007 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking search_all_tabs_first_response/32
+Benchmarking search_all_tabs_first_response/32: Warming up for 3.0000 s
+Benchmarking search_all_tabs_first_response/32: Collecting 10 samples in estimated 5.0001 s (751k iterations)
+Benchmarking search_all_tabs_first_response/32: Analyzing
+search_all_tabs_first_response/32
+                        time:   [5.8409 µs 6.5588 µs 7.4840 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe

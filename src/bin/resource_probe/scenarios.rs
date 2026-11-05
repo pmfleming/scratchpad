@@ -7,12 +7,13 @@ use super::{
     combine_first_tabs, file_backed_open_max_bytes, prepare_file_backed_cache_traversal,
     run_anchor_heavy_view_edit_cycle, run_edited_buffer_search_preview_cycle,
     run_file_backed_cache_traversal_cycle, run_file_backed_open_first_visible_paint_cycle,
-    run_fragmented_long_session_mutation_cycle, run_large_utf8_load_cycle,
-    run_many_file_count_cycle, run_many_file_lazy_open_cycle, run_paste_cycle,
-    run_provenance_retained_memory_cycle, run_search_app_result_cycle, run_search_file_size_cycle,
-    run_search_target_count_cycle, run_session_persist_cycle, run_session_restore_cycle,
-    run_startup_visible_restore_cycle, run_tab_count_cycle, run_tab_strip_frame_cycle,
-    run_view_count_cycle, split_tabs_once, unique_probe_root, write_utf8_text_file,
+    run_file_backed_random_window_cycle, run_fragmented_long_session_mutation_cycle,
+    run_large_utf8_load_cycle, run_many_file_count_cycle, run_many_file_lazy_open_cycle,
+    run_paste_cycle, run_provenance_retained_memory_cycle, run_search_app_result_cycle,
+    run_search_file_size_cycle, run_search_target_count_cycle, run_session_persist_cycle,
+    run_session_restore_cycle, run_startup_visible_restore_cycle, run_tab_count_cycle,
+    run_tab_strip_frame_cycle, run_view_count_cycle, split_tabs_once, unique_probe_root,
+    write_utf8_text_file,
 };
 
 pub(super) fn run_all() {
@@ -30,6 +31,19 @@ pub(super) fn run_all() {
     emit_targeted_tab_phase_probes();
     emit_tab_strip_frame_tracking();
     emit_view_count_resource_tracking();
+    emit_session_persist_restore_costs();
+    super::session_save::run();
+}
+
+/// Reuse the existing measured paths without the unrelated many-file/UI cases.
+/// Keep workload sizes and event names identical for performance-lens comparisons.
+pub(super) fn run_live_text_baseline() {
+    emit_large_utf8_load_peak_memory();
+    emit_file_backed_open_allocations();
+    emit_provenance_retained_memory();
+    emit_fragmented_long_session_mutations();
+    emit_paste_allocations();
+    emit_search_file_size_tracking();
     emit_session_persist_restore_costs();
     super::session_save::run();
 }
@@ -74,6 +88,20 @@ fn emit_large_utf8_load_peak_memory() {
                 || prepare_file_backed_cache_traversal(&path),
                 run_file_backed_cache_traversal_cycle,
             );
+            emit_prepared_step(
+                StepDescriptor {
+                    scenario: "file_backed_random_window",
+                    scenario_label: "File-backed cache-miss scroll and jump windows",
+                    workload_family: "file-load",
+                    focus: "cache-miss-latency",
+                    step_index,
+                    workload_value: bytes,
+                    workload_unit: "bytes",
+                    workload_label: human_bytes(bytes),
+                },
+                || prepare_file_backed_cache_traversal(&path),
+                run_file_backed_random_window_cycle,
+            );
         }
     }
 
@@ -111,17 +139,7 @@ fn emit_file_backed_open_allocations() {
 }
 
 fn emit_search_resource_tracking() {
-    emit_workload_steps(
-        [64 * MB, 256 * MB],
-        WorkloadSpec {
-            scenario: "search_file_size_resource_tracking",
-            scenario_label: "Search file-size allocation tracking",
-            workload_family: "search",
-            focus: "allocation",
-            workload_unit: "bytes",
-        },
-        run_search_file_size_cycle,
-    );
+    emit_search_file_size_tracking();
 
     emit_workload_steps(
         [1_000usize, 10_000],
@@ -145,6 +163,20 @@ fn emit_search_resource_tracking() {
             workload_unit: "tabs",
         },
         run_search_app_result_cycle,
+    );
+}
+
+fn emit_search_file_size_tracking() {
+    emit_workload_steps(
+        [64 * MB, 256 * MB],
+        WorkloadSpec {
+            scenario: "search_file_size_resource_tracking",
+            scenario_label: "Search file-size allocation tracking",
+            workload_family: "search",
+            focus: "allocation",
+            workload_unit: "bytes",
+        },
+        run_search_file_size_cycle,
     );
 }
 

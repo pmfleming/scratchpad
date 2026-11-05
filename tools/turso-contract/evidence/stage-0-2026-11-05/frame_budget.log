@@ -1,0 +1,42 @@
+Gnuplot not found, using plotters backend
+Benchmarking ui_render_frame_120hz/steady_workspace
+Benchmarking ui_render_frame_120hz/steady_workspace: Warming up for 3.0000 s
+Benchmarking ui_render_frame_120hz/steady_workspace: Collecting 10 samples in estimated 5.0336 s (8195 iterations)
+Benchmarking ui_render_frame_120hz/steady_workspace: Analyzing
+ui_render_frame_120hz/steady_workspace
+                        time:   [447.49 µs 668.66 µs 874.24 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking viewport_extraction_latency/1048576
+Benchmarking viewport_extraction_latency/1048576: Warming up for 3.0000 s
+Benchmarking viewport_extraction_latency/1048576: Collecting 10 samples in estimated 5.2795 s (495 iterations)
+Benchmarking viewport_extraction_latency/1048576: Analyzing
+viewport_extraction_latency/1048576
+                        time:   [6.1699 ms 9.8663 ms 14.986 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+Benchmarking viewport_extraction_latency/4194304
+Benchmarking viewport_extraction_latency/4194304: Warming up for 3.0000 s
+Benchmarking viewport_extraction_latency/4194304: Collecting 10 samples in estimated 5.6214 s (220 iterations)
+Benchmarking viewport_extraction_latency/4194304: Analyzing
+viewport_extraction_latency/4194304
+                        time:   [20.281 ms 23.044 ms 25.989 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking scroll_stress_latency/1048576
+Benchmarking scroll_stress_latency/1048576: Warming up for 3.0000 s
+Benchmarking scroll_stress_latency/1048576: Collecting 10 samples in estimated 5.0213 s (770 iterations)
+Benchmarking scroll_stress_latency/1048576: Analyzing
+scroll_stress_latency/1048576
+                        time:   [6.8044 ms 7.7694 ms 8.8980 ms]
+Benchmarking scroll_stress_latency/4194304
+Benchmarking scroll_stress_latency/4194304: Warming up for 3.0000 s
+Benchmarking scroll_stress_latency/4194304: Collecting 10 samples in estimated 5.1951 s (165 iterations)
+Benchmarking scroll_stress_latency/4194304: Analyzing
+scroll_stress_latency/4194304
+                        time:   [24.872 ms 32.344 ms 37.924 ms]
+Found 2 outliers among 10 measurements (20.00%)
+  1 (10.00%) high mild
+  1 (10.00%) high severe

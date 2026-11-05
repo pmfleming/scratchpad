@@ -2,7 +2,7 @@
 use super::events::{StepDescriptor, StepOutcome, emit_prepared_operation};
 use super::{
     BufferState, CharCursor, CursorRange, EditOperation, MB, OperationRecord, PieceSource,
-    SessionStore, TextHistoryBudget, WorkspaceTab, unique_probe_root,
+    SessionStore, WorkspaceTab, unique_probe_root,
 };
 use std::time::Instant;
 
@@ -46,17 +46,14 @@ pub(super) fn run() {
     let root = unique_probe_root("large-dirty-save");
     std::fs::create_dir_all(&root).expect("create isolated save fixture");
     let mut buffer = BufferState::new("50-MiB-unsaved".into(), fixture(34 * MB), None);
-    buffer.document_mut().set_history_budget(TextHistoryBudget {
-        per_file_byte_budget: 32 * MB as u64,
-        aggregate_byte_budget: 64 * MB as u64,
-        derived_from_memory: false,
-    });
     let payload = fixture(16 * MB);
     for chunk in payload.as_bytes().chunks(16 * 1024) {
         let at = buffer.document().piece_tree().len_chars();
         insert(&mut buffer, at, std::str::from_utf8(chunk).unwrap());
     }
-    assert_eq!(buffer.document().operation_undo_depth(), 1024);
+    // Initial contents now form a replayable Load entry. Keep the production
+    // history intact and account for its payload instead of hiding that cost.
+    assert_eq!(buffer.document().operation_undo_depth(), 1025);
     assert_eq!(
         buffer
             .document()
@@ -64,7 +61,7 @@ pub(super) fn run() {
             .iter()
             .map(|e| e.payload_bytes())
             .sum::<usize>(),
-        16 * MB
+        50 * MB
     );
     let mut tabs = vec![WorkspaceTab::new(buffer)];
     let store = SessionStore::new(root.clone());
@@ -88,20 +85,20 @@ pub(super) fn run() {
         emit_prepared_operation(
             StepDescriptor {
                 scenario: "large_dirty_buffer_save",
-                scenario_label: "One-character autosave: 50 MiB buffer, 16 MiB history",
+                scenario_label: "One-character autosave: 50 MiB buffer, 50 MiB history",
                 workload_family: "session-persistence",
                 focus: "write-amplification",
                 step_index: step,
                 workload_value: 50 * MB,
                 workload_unit: "bytes",
-                workload_label: format!("50 MiB + 16 MiB history; insertion at {at}"),
+                workload_label: format!("50 MiB + 50 MiB history; insertion at {at}"),
             },
             serde_json::json!({
-                "fixture_revision": 1,
+                "fixture_revision": 2,
                 "buffer_bytes": len + 1,
                 "history_payload_bytes": history_payload_bytes,
                 "history_entries": history_entries,
-                "history_budget_bytes": 16 * MB,
+                "history_retention": "unbounded",
                 "inserted_bytes": 1,
                 "insert_offset": at,
                 "synchronous": "FULL",
@@ -114,7 +111,8 @@ pub(super) fn run() {
                     .expect("autosave");
                 let mut outcome =
                     StepOutcome::items_with_manifest(1, Some(profile.manifest_size_bytes));
-                outcome.result_label = format!("one-character save at {at}; 1024+ history entries");
+                outcome.result_label =
+                    format!("one-character save at {at}; {history_entries} history entries");
                 outcome.phase_elapsed_ns = serde_json::json!({
                     "save_ns": start.elapsed().as_nanos(),
                     "snapshot_capture_ns": profile.snapshot_capture_ns,
@@ -140,7 +138,7 @@ pub(super) fn run() {
             .buffer
             .document()
             .operation_undo_depth(),
-        1033
+        1034
     );
     std::fs::remove_dir_all(root).expect("remove isolated save fixture");
 }

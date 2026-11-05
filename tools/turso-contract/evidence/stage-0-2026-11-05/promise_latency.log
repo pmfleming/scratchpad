@@ -1,0 +1,127 @@
+Gnuplot not found, using plotters backend
+Benchmarking tab_reorder_latency/1000
+Benchmarking tab_reorder_latency/1000: Warming up for 1.0000 s
+Benchmarking tab_reorder_latency/1000: Collecting 10 samples in estimated 2.0024 s (25k iterations)
+Benchmarking tab_reorder_latency/1000: Analyzing
+tab_reorder_latency/1000
+                        time:   [43.987 µs 67.040 µs 93.658 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+Benchmarking tab_reorder_latency/10000
+Benchmarking tab_reorder_latency/10000: Warming up for 1.0000 s
+Benchmarking tab_reorder_latency/10000: Collecting 10 samples in estimated 2.0354 s (880 iterations)
+Benchmarking tab_reorder_latency/10000: Analyzing
+tab_reorder_latency/10000
+                        time:   [3.1221 ms 4.7221 ms 6.9348 ms]
+
+Benchmarking paste_stress_latency/134217728
+Benchmarking paste_stress_latency/134217728: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 2.0s. You may wish to increase target time to 13.1s.
+Benchmarking paste_stress_latency/134217728: Collecting 10 samples in estimated 13.070 s (10 iterations)
+Benchmarking paste_stress_latency/134217728: Analyzing
+paste_stress_latency/134217728
+                        time:   [1.0685 s 1.2738 s 1.5259 s]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking paste_insert_phase/134217728
+Benchmarking paste_insert_phase/134217728: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 2.0s. You may wish to increase target time to 5.7s.
+Benchmarking paste_insert_phase/134217728: Collecting 10 samples in estimated 5.6779 s (10 iterations)
+Benchmarking paste_insert_phase/134217728: Analyzing
+paste_insert_phase/134217728
+                        time:   [337.37 ms 630.58 ms 1.0902 s]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking paste_metadata_phase/134217728
+Benchmarking paste_metadata_phase/134217728: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 2.0s. You may wish to increase target time to 12.5s.
+Benchmarking paste_metadata_phase/134217728: Collecting 10 samples in estimated 12.473 s (10 iterations)
+Benchmarking paste_metadata_phase/134217728: Analyzing
+paste_metadata_phase/134217728
+                        time:   [884.11 ms 1.0805 s 1.2962 s]
+
+Benchmarking snapshot_shared_edit_latency/16777216
+Benchmarking snapshot_shared_edit_latency/16777216: Warming up for 1.0000 s
+Benchmarking snapshot_shared_edit_latency/16777216: Collecting 10 samples in estimated 3.4430 s (20 iterations)
+Benchmarking snapshot_shared_edit_latency/16777216: Analyzing
+snapshot_shared_edit_latency/16777216
+                        time:   [632.47 µs 983.73 µs 1.5064 ms]
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) high severe
+
+Benchmarking snapshot_shared_fragmented_edit_latency/20000
+Benchmarking snapshot_shared_fragmented_edit_latency/20000: Warming up for 1.0000 s
+Benchmarking snapshot_shared_fragmented_edit_latency/20000: Collecting 10 samples in estimated 2.0638 s (220 iterations)
+Benchmarking snapshot_shared_fragmented_edit_latency/20000: Analyzing
+snapshot_shared_fragmented_edit_latency/20000
+                        time:   [7.6353 ms 8.1793 ms 8.5874 ms]
+
+Benchmarking dense_line_lookup_latency/4194304
+Benchmarking dense_line_lookup_latency/4194304: Warming up for 1.0000 s
+Benchmarking dense_line_lookup_latency/4194304: Collecting 10 samples in estimated 2.0478 s (2145 iterations)
+Benchmarking dense_line_lookup_latency/4194304: Analyzing
+dense_line_lookup_latency/4194304
+                        time:   [248.90 µs 943.99 µs 1.5808 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking reverse_character_walk_latency/8192
+Benchmarking reverse_character_walk_latency/8192: Warming up for 1.0000 s
+Benchmarking reverse_character_walk_latency/8192: Collecting 10 samples in estimated 2.0167 s (5335 iterations)
+Benchmarking reverse_character_walk_latency/8192: Analyzing
+reverse_character_walk_latency/8192
+                        time:   [154.14 µs 230.75 µs 364.53 µs]
+
+Benchmarking fragmented_tree_edit_latency/20000
+Benchmarking fragmented_tree_edit_latency/20000: Warming up for 1.0000 s
+Benchmarking fragmented_tree_edit_latency/20000: Collecting 10 samples in estimated 2.0003 s (92k iterations)
+Benchmarking fragmented_tree_edit_latency/20000: Analyzing
+fragmented_tree_edit_latency/20000
+                        time:   [9.0697 µs 12.910 µs 15.397 µs]
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) high mild
+
+Benchmarking large_paste_undo_latency/16777216
+Benchmarking large_paste_undo_latency/16777216: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 2.0s. You may wish to increase target time to 3.0s.
+Benchmarking large_paste_undo_latency/16777216: Collecting 10 samples in estimated 3.0278 s (10 iterations)
+Benchmarking large_paste_undo_latency/16777216: Analyzing
+large_paste_undo_latency/16777216
+                        time:   [261.64 ms 478.90 ms 754.04 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking session_restore_latency/10000
+Benchmarking session_restore_latency/10000: Warming up for 1.0000 s
+Benchmarking session_restore_latency/10000: Collecting 10 samples in estimated 2.6133 s (110 iterations)
+Benchmarking session_restore_latency/10000: Analyzing
+session_restore_latency/10000
+                        time:   [26.597 ms 31.324 ms 37.539 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking session_restore_background_completion/10000
+Benchmarking session_restore_background_completion/10000: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 2.0s. You may wish to increase target time to 161.8s.
+Benchmarking session_restore_background_completion/10000: Collecting 10 samples in estimated 161.82 s (10 iterations)
+Benchmarking session_restore_background_completion/10000: Analyzing
+session_restore_background_completion/10000
+                        time:   [9.4091 s 12.576 s 16.022 s]
+
+Benchmarking session_persist_latency/10000
+Benchmarking session_persist_latency/10000: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 2.0s. You may wish to increase target time to 5.5s.
+Benchmarking session_persist_latency/10000: Collecting 10 samples in estimated 5.4725 s (10 iterations)
+Benchmarking session_persist_latency/10000: Analyzing
+session_persist_latency/10000
+                        time:   [527.06 ms 688.53 ms 899.60 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe

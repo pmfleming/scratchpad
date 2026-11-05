@@ -1,0 +1,19 @@
+CONTRACT wal=multiprocess io=syscall synchronous=FULL cache_kib=8192 foreign_keys=ON
+VACUUM INTO caveat: 0.8.3 retains doubled apostrophes in output filenames; application adoption requires a path workaround
+METRIC wal=multiprocess name=contending_writer_busy elapsed_us=307
+METRIC wal=multiprocess name=four_chunk_full_commit samples=32 p50_us=37089 p99_us=165322 max_us=165322
+METRIC wal=multiprocess name=pinned_reader_hop samples=32 p50_us=3808 p99_us=65697 max_us=65697
+METRIC wal=multiprocess name=pinned_wal bytes=34978832 inserted_bytes=33554432 overflow=false
+CHECK wal=multiprocess name=pinned_truncate result=[Some(1), None, None]
+METRIC wal=multiprocess name=chunk_read_hop_page_cache samples=512 p50_us=4752 p99_us=69419 max_us=115448
+METRIC wal=multiprocess name=chunk_read_direct_page_cache samples=512 p50_us=640 p99_us=10461 max_us=40244
+METRIC wal=multiprocess name=reader_hop_during_commits samples=633 p50_us=600 p99_us=40997 max_us=118932
+METRIC wal=multiprocess name=single_chunk_full_commit_with_reader samples=128 p50_us=13194 p99_us=124798 max_us=125161
+
+thread '<unnamed>' (228027) panicked at src/live_text.rs:56:53:
+injected reader panic
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+CHECK wal=multiprocess name=injected_reader_panic_contained PASS
+CHECK wal=multiprocess name=page_limit_database_full_preserves_text PASS
+CHECK wal=multiprocess name=normal_full_process_exit_and_active_slots PASS (not a power-loss test)
+PASS wal=multiprocess: Turso bindings 0.8.3 transactions, BLOBs, abrupt exit, recovery, VACUUM INTO, concurrent readers, Busy, checkpoints and integrity

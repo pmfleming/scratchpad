@@ -1,45 +1,106 @@
 //! Isolated release-engine contract. Does not open a user's session database.
+mod live_text;
+
 use futures_lite::future::block_on;
 use std::{error::Error, path::Path, process::Command};
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
+
+#[derive(Clone, Copy, Debug)]
+enum WalMode {
+    Standard,
+    Multiprocess,
+}
+
+impl WalMode {
+    fn parse(value: &std::ffi::OsStr) -> Result<Self> {
+        match value.to_str() {
+            Some("standard") => Ok(Self::Standard),
+            Some("multiprocess") if cfg!(target_os = "linux") => Ok(Self::Multiprocess),
+            _ => Err("WAL mode must be standard, or multiprocess on Linux".into()),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Multiprocess => "multiprocess",
+        }
+    }
+}
 
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
-    if args.len() == 3 {
-        block_on(abrupt_writer(Path::new(&args[1]), args[2] == "commit"))?;
-        // Deliberately bypass destructors and connection checkpoint-on-close.
-        std::process::exit(0);
+    if args.get(1).is_some_and(|arg| arg == "--abrupt") {
+        if args.len() != 5 {
+            return Err(
+                "internal usage: --abrupt PATH commit|rollback|normal-full WAL-MODE".into(),
+            );
+        }
+        let mode = WalMode::parse(&args[4])?;
+        match args[3].to_str() {
+            Some("commit") => block_on(abrupt_writer(Path::new(&args[2]), true, mode)),
+            Some("rollback") => block_on(abrupt_writer(Path::new(&args[2]), false, mode)),
+            Some("normal-full") => live_text::abrupt_normal_full(Path::new(&args[2]), mode),
+            _ => Err("unknown abrupt-exit scenario".into()),
+        }?;
+        return Err("abrupt-exit scenario returned without exiting".into());
     }
+    if args.len() != 1 && (args.len() < 3 || args[1] != "--wal-mode" || args.len() > 4) {
+        return Err(
+            "usage: scratchpad-turso-spike --wal-mode standard|multiprocess [--wal-overflow]"
+                .into(),
+        );
+    }
+    let wal_mode = args
+        .get(2)
+        .map_or(Ok(WalMode::Standard), |arg| WalMode::parse(arg))?;
+    let overflow = match args.get(3).map(|arg| arg.to_str()) {
+        None => false,
+        Some(Some("--wal-overflow")) => true,
+        _ => return Err("unknown option (expected --wal-overflow)".into()),
+    };
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("session.db");
-    block_on(check_transactions(&path))?;
-    block_on(check_vacuum_into(&path))?;
-    for mode in ["commit", "rollback"] {
+    println!(
+        "CONTRACT wal={} io=syscall synchronous=FULL cache_kib=8192 foreign_keys=ON",
+        wal_mode.name()
+    );
+    block_on(check_transactions(&path, wal_mode))?;
+    block_on(check_vacuum_into(&path, wal_mode))?;
+    for action in ["commit", "rollback"] {
         let status = Command::new(std::env::current_exe()?)
+            .arg("--abrupt")
             .arg(&path)
-            .arg(mode)
+            .arg(action)
+            .arg(wal_mode.name())
             .status()?;
         assert!(status.success());
-        block_on(check_recovery(&path))?;
+        block_on(check_recovery(&path, wal_mode))?;
     }
+    live_text::check(&directory.path().join("live.db"), wal_mode, overflow)?;
     println!(
-        "PASS: Turso bindings 0.8.3 commit/rollback, 16 MiB BLOB, abrupt exit, WAL recovery, VACUUM INTO, checkpoint and integrity"
+        "PASS wal={}: Turso bindings 0.8.3 transactions, BLOBs, abrupt exit, recovery, VACUUM INTO, concurrent readers, Busy, checkpoints and integrity",
+        wal_mode.name()
     );
     Ok(())
 }
 
-async fn open(path: &Path) -> Result<(turso::Database, turso::Connection)> {
+async fn open(path: &Path, mode: WalMode) -> Result<(turso::Database, turso::Connection)> {
     let database = turso::Builder::new_local(path.to_str().ok_or("non-UTF8 path")?)
+        .with_io(turso::IoBackend::Syscall)
+        .experimental_multiprocess_wal(matches!(mode, WalMode::Multiprocess))
         .build()
         .await?;
     let connection = database.connect()?;
-    connection.execute("PRAGMA synchronous=FULL", ()).await?;
+    connection
+        .execute_batch("PRAGMA synchronous=FULL; PRAGMA cache_size=-8192; PRAGMA foreign_keys=ON;")
+        .await?;
     Ok((database, connection))
 }
 
-async fn check_transactions(path: &Path) -> Result<()> {
-    let (_database, connection) = open(path).await?;
+async fn check_transactions(path: &Path, mode: WalMode) -> Result<()> {
+    let (_database, connection) = open(path, mode).await?;
     connection
         .execute_batch("CREATE TABLE content(id INTEGER PRIMARY KEY, body BLOB); BEGIN IMMEDIATE;")
         .await?;
@@ -62,8 +123,8 @@ async fn check_transactions(path: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn check_vacuum_into(path: &Path) -> Result<()> {
-    let (_database, connection) = open(path).await?;
+async fn check_vacuum_into(path: &Path, mode: WalMode) -> Result<()> {
+    let (_database, connection) = open(path, mode).await?;
     connection.execute_batch(
         "PRAGMA foreign_keys=ON; PRAGMA application_id=1397769040; PRAGMA user_version=9;
          CREATE TABLE parents(id INTEGER PRIMARY KEY) STRICT;
@@ -108,7 +169,7 @@ async fn check_vacuum_into(path: &Path) -> Result<()> {
     eprintln!(
         "VACUUM INTO caveat: 0.8.3 retains doubled apostrophes in output filenames; application adoption requires a path workaround"
     );
-    let (_backup, copy) = open(&actual).await?;
+    let (_backup, copy) = open(&actual, mode).await?;
     for (sql, expected) in [
         ("PRAGMA application_id", 1397769040),
         ("PRAGMA user_version", 9),
@@ -183,8 +244,8 @@ async fn check_vacuum_into(path: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn abrupt_writer(path: &Path, commit: bool) -> Result<()> {
-    let (_database, connection) = open(path).await?;
+async fn abrupt_writer(path: &Path, commit: bool, mode: WalMode) -> Result<()> {
+    let (_database, connection) = open(path, mode).await?;
     connection.execute("BEGIN IMMEDIATE", ()).await?;
     connection
         .execute(
@@ -201,8 +262,8 @@ async fn abrupt_writer(path: &Path, commit: bool) -> Result<()> {
     std::process::exit(0);
 }
 
-async fn check_recovery(path: &Path) -> Result<()> {
-    let (_database, connection) = open(path).await?;
+async fn check_recovery(path: &Path, mode: WalMode) -> Result<()> {
+    let (_database, connection) = open(path, mode).await?;
     let mut rows = connection.query("SELECT body FROM content", ()).await?;
     assert_eq!(
         rows.next()

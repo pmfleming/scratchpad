@@ -1,0 +1,24 @@
+{
+  "captured_at": "2026-11-05T16:32:54.644452+01:00",
+  "application_base": "087e0458cb9fb9f5bfb3182e860f150321a52164",
+  "platform": "Linux-6.18.60-x86_64-with-glibc2.42",
+  "cpu": "AMD Ryzen 7 PRO 8840HS w/ Radeon 780M Graphics",
+  "memory_total": "MemTotal:       61347460 kB",
+  "temp_filesystem": "ext2/ext3",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14) (built from a source tarball)",
+  "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+  "large_file_fixture_cap_bytes": 268435456,
+  "load_note": "Other Rust/Nix builds ran throughout these tests; this is not an uncontended budget confirmation.",
+  "probe_revision_note": "The standard overflow control predates the final error-only recovery diagnostic. Its exercised path is unchanged. Source/binary hashes describe the final probe and application baseline.",
+  "sha256": {
+    "Cargo.lock": "f3eb273d483d6463017093cf98cdcc350c7b0de3f4f4b454884151c783667c82",
+    "tools/turso-contract/Cargo.lock": "f3c6b4d9feaeda635a929f1692c5e351178fd34dac69f06be950232e1bc5a146",
+    "src/bin/resource_probe.rs": "c5cbee0e1154867a312d1f4e1424db54825314261eb28a98d174fef44144975c",
+    "src/bin/resource_probe/scenarios.rs": "9a28e03317245dd420cf7d3c3f1313b421a48dcfc29b999db46ba04abf442c8b",
+    "src/bin/resource_probe/session_save.rs": "ae73f7bef8707f0136c53e494a4899c093c3525cd9b946f5b8f02272c872cf94",
+    "tools/turso-contract/src/main.rs": "14d508ae3f88f3fb8fd15443fd80b971d6b73eb6e74b025e805855d92509c7b8",
+    "tools/turso-contract/src/live_text.rs": "6e374b2b3af6b2717c1e909f14e523ec2aa05c8ac97b617220cda2d30e1bbe77",
+    "target/release/resource_probe": "65ee9f02783a0866fd9736da535686766cfd60e232b1b9a74177e4f17e588332",
+    "tools/turso-contract/target/release/scratchpad-turso-spike": "8e54d4439664c5f56721ef78b35eafffc0114474181c010e864b6cf423f4c9c5"
+  }
+}

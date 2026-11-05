@@ -1,0 +1,35 @@
+{
+  "resource_events": 36,
+  "all_resource_events_ok": true,
+  "scenario_counts": {
+    "file_backed_chunk_cache_tracking": 2,
+    "file_backed_random_window": 2,
+    "fragmented_long_session_mutation": 3,
+    "large_dirty_buffer_save": 9,
+    "large_file_first_visible_paint": 2,
+    "large_utf8_load_peak_memory": 2,
+    "paste_allocation": 3,
+    "provenance_retained_memory": 2,
+    "search_file_size_resource_tracking": 2,
+    "session_persist_cost": 3,
+    "session_restore_cost": 3,
+    "startup_visible_restore_cost": 3
+  },
+  "criterion_cases": 34,
+  "regular_contract_standard": "passed on Linux",
+  "regular_contract_multiprocess": "passed on Linux",
+  "overflow_standard": "passed on Linux",
+  "overflow_multiprocess": "failed at chunk 4049, WAL 1080717232 bytes; snapshot release and same-process reopen also Busy",
+  "native_windows": "not run locally; CI configured",
+  "budget_confirmation": "deferred; competing builds and failed multiprocess gate",
+  "validation": {
+    "release_resource_and_bench_builds": "passed",
+    "cargo fmt --all -- --check": "passed",
+    "cargo fmt --manifest-path tools/turso-contract/Cargo.toml --check": "passed",
+    "cargo clippy --release --locked --bin resource_probe -- -D warnings": "passed",
+    "cargo clippy --release --locked --manifest-path tools/turso-contract/Cargo.toml --all-targets -- -D warnings": "passed",
+    "cargo xtask check-turso-locks": "passed",
+    "actionlint": "passed",
+    "full_application_regression_suite": "not rerun; production source unchanged"
+  }
+}
