@@ -7,7 +7,7 @@ use crate::app::theme::{
 };
 use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
-use crate::app::ui::tab_strip::tab_cell::{TabPresentation, attention_color, tab_presentation};
+use crate::app::ui::tab_strip::tab_cell::{TabPresentation, attention_marker, tab_presentation};
 use crate::app::ui::widget_ids;
 use eframe::egui::{self, Stroke};
 use std::collections::{HashMap, HashSet};
@@ -448,7 +448,7 @@ fn show_overflow_row(
             TabButtonOptions::with_actions(
                 menu.row_width,
                 row_state.presentation.can_promote_all_files,
-                row_state.presentation.attention_state.map(attention_color),
+                row_state.presentation.attention_state.map(attention_marker),
             )
             .with_label_font_id(tab_label_font_id(app.state.app_settings.font_size())),
         );

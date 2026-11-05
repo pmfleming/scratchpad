@@ -10,6 +10,11 @@ use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui::{self, Rect, Sense, Stroke, Vec2};
 use std::hash::Hash;
 
+#[derive(Clone, Copy)]
+pub struct TabAttention {
+    pub color: egui::Color32,
+    pub circle: bool,
+}
 struct TabButtonFrame {
     rect: Rect,
     response: egui::Response,
@@ -19,7 +24,7 @@ struct TabButtonFrame {
 
 pub struct TabButtonOptions {
     pub show_promote_all: bool,
-    pub attention_color: Option<egui::Color32>,
+    pub attention: Option<TabAttention>,
     pub width: f32,
     pub label_font_id: Option<egui::FontId>,
 }
@@ -62,7 +67,7 @@ impl TabButtonOptions {
     pub fn new(width: f32) -> Self {
         Self {
             show_promote_all: false,
-            attention_color: None,
+            attention: None,
             width,
             label_font_id: None,
         }
@@ -72,11 +77,11 @@ impl TabButtonOptions {
     pub fn with_actions(
         width: f32,
         show_promote_all: bool,
-        attention_color: Option<egui::Color32>,
+        attention: Option<TabAttention>,
     ) -> Self {
         Self {
             show_promote_all,
-            attention_color,
+            attention,
             width,
             label_font_id: None,
         }
@@ -107,7 +112,7 @@ pub fn tab_button(
     active: bool,
     selected: bool,
     show_promote_all: bool,
-    attention_color: Option<egui::Color32>,
+    attention: Option<TabAttention>,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
     tab_button_with_actions(
         ui,
@@ -115,7 +120,7 @@ pub fn tab_button(
         label,
         active,
         selected,
-        TabButtonOptions::with_actions(TAB_BUTTON_WIDTH, show_promote_all, attention_color),
+        TabButtonOptions::with_actions(TAB_BUTTON_WIDTH, show_promote_all, attention),
     )
 }
 
@@ -150,7 +155,7 @@ pub fn tab_button_with_actions(
         frame.rect,
         label,
         options.show_promote_all,
-        options.attention_color,
+        options.attention,
         label_font_id.as_ref(),
     );
     let promote_response = promote_rect.map(|promote_rect| {
@@ -294,12 +299,17 @@ fn paint_tab_label(
     rect: Rect,
     label: &str,
     show_promote_all: bool,
-    attention_color: Option<egui::Color32>,
+    attention: Option<TabAttention>,
     label_font_id: Option<&egui::FontId>,
 ) -> bool {
     let right_padding = label_right_padding(show_promote_all);
-    let left_padding = if let Some(color) = attention_color {
-        paint_attention_square(ui, rect, color);
+    let left_padding = if let Some(color) = attention {
+        if color.circle {
+            ui.painter()
+                .circle_filled(rect.left_center() + Vec2::new(11.0, 0.0), 4.0, color.color);
+        } else {
+            paint_attention_square(ui, rect, color.color);
+        }
         22.0
     } else {
         8.0

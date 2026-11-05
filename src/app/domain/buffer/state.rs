@@ -25,12 +25,49 @@ static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TEMP_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
 
 pub type BufferId = u64;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum StorageAttention {
+    Unsaved,
+    Unreadable(String),
+}
+impl BufferState {
+    pub(crate) fn storage_revision(&self) -> super::SnapshotRevision {
+        self.document.snapshot().revision_key()
+    }
+    pub(crate) fn acknowledge_storage(&mut self, revision: &super::SnapshotRevision) {
+        self.storage_committed_revision = Some(revision.clone());
+        if self.storage_revision() == *revision
+            && matches!(self.storage_attention, Some(StorageAttention::Unsaved))
+        {
+            self.storage_attention = None;
+        }
+    }
+    pub(crate) fn update_storage_attention(&mut self, failing: bool) {
+        if let Some(cause) = self.document.piece_tree().read_fault() {
+            self.storage_attention = Some(StorageAttention::Unreadable(cause));
+            return;
+        }
+        let changed = self.storage_committed_revision.as_ref() != Some(&self.storage_revision());
+        let edited = self
+            .document
+            .history_entries()
+            .iter()
+            .any(|e| e.source != super::PieceSource::Load)
+            || self.document.history_now() != self.document.history_tip()
+            || (self.path.is_none() && self.document.piece_tree().len_bytes() > 0);
+        self.storage_attention =
+            (failing && changed && edited).then_some(StorageAttention::Unsaved);
+    }
+}
 
 #[derive(Clone)]
 pub struct BufferState {
     pub id: BufferId,
     document: TextDocument,
     pub name: String,
+    pub(crate) storage_attention: Option<StorageAttention>,
+    pub(crate) storage_committed_revision: Option<super::SnapshotRevision>,
+    pub(crate) storage_refusal: Option<String>,
     pub path: Option<PathBuf>,
     pub path_key: Option<CanonicalPathKey>,
     pub is_dirty: bool,
@@ -529,6 +566,9 @@ impl BufferState {
             id,
             document,
             name: state.name,
+            storage_attention: None,
+            storage_committed_revision: None,
+            storage_refusal: None,
             path: state.path,
             path_key: state.path_key,
             is_dirty: state.is_dirty,

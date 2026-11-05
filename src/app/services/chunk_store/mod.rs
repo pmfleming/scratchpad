@@ -1,4 +1,8 @@
 //! Immutable text handles shared by domain clones and the single database writer.
+mod rebind;
+pub(crate) use rebind::Rebind;
+mod budget;
+pub use budget::{FailureRamBudget, total_memory};
 mod import;
 mod readers;
 pub(crate) use import::{ImportContext, Utf8Chunks};
@@ -73,14 +77,19 @@ struct Core {
     epoch: Arc<ReadEpoch>,
     pending: Mutex<VecDeque<Arc<Chunk>>>,
     pending_bytes: AtomicUsize,
+    other_ram_bytes: AtomicUsize,
+    bulk_stopped: std::sync::atomic::AtomicBool,
+    failure_limit: AtomicUsize,
     hashed_bytes: AtomicU64,
+    faults: AtomicU64,
+    owner_faults: Mutex<HashMap<u64, String>>,
     peak_pending_bytes: AtomicUsize,
     changed: Condvar,
     health: Mutex<Health>,
     wake: Mutex<Option<Waker>>,
     cache: Mutex<Cache>,
     handles: Mutex<Vec<Weak<Chunk>>>,
-    restored: Mutex<HashMap<i64, Weak<Chunk>>>,
+    restored: Mutex<HashMap<(i64, u64), Weak<Chunk>>>,
 }
 #[derive(Debug)]
 /// Shared immutable text. Accepted pending bodies remain readable after a write failure.
@@ -163,15 +172,35 @@ impl ChunkStoreHandle {
                 })?,
         );
         let epoch = ReadEpoch::open(path, NEXT_EPOCH.fetch_add(1, Ordering::Relaxed))?;
-        Ok(Self(Arc::new(Core {
+        Ok(Self::with_epoch(epoch, prefetch, Health::Healthy))
+    }
+    pub(crate) fn unavailable(cause: String) -> Self {
+        let (prefetch, _incoming) = std::sync::mpsc::sync_channel(2);
+        Self::with_epoch(
+            ReadEpoch::empty(NEXT_EPOCH.fetch_add(1, Ordering::Relaxed)),
+            prefetch,
+            Health::Unavailable(cause),
+        )
+    }
+    fn with_epoch(
+        epoch: Arc<ReadEpoch>,
+        prefetch: std::sync::mpsc::SyncSender<Weak<Chunk>>,
+        health: Health,
+    ) -> Self {
+        Self(Arc::new(Core {
             prefetch,
             epoch,
             pending: Mutex::new(VecDeque::new()),
             pending_bytes: AtomicUsize::new(0),
+            other_ram_bytes: AtomicUsize::new(0),
+            bulk_stopped: std::sync::atomic::AtomicBool::new(false),
+            failure_limit: AtomicUsize::new(FailureRamBudget::default().bytes as usize),
             hashed_bytes: AtomicU64::new(0),
+            faults: AtomicU64::new(0),
+            owner_faults: Mutex::default(),
             peak_pending_bytes: AtomicUsize::new(0),
             changed: Condvar::new(),
-            health: Mutex::new(Health::Healthy),
+            health: Mutex::new(health),
             wake: Mutex::new(None),
             handles: Mutex::default(),
             restored: Mutex::default(),
@@ -180,7 +209,7 @@ impl ChunkStoreHandle {
                 per_owner: 4 * 1024 * 1024,
                 ..Cache::default()
             }),
-        })))
+        }))
     }
     #[must_use]
     /// The epoch used to interpret committed row references from this store.
@@ -203,17 +232,85 @@ impl ChunkStoreHandle {
             .clone()
     }
     pub(crate) fn set_health(&self, health: Health) {
-        let mut state = self
+        let changed = {
+            let mut state = self
+                .0
+                .health
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let changed = std::mem::discriminant(&*state) != std::mem::discriminant(&health);
+            *state = health.clone();
+            changed
+        };
+        if changed {
+            log::warn!("text store epoch {} health: {:?}", self.0.epoch.id, health);
+        }
+        self.0.changed.notify_all();
+    }
+    pub(crate) fn owner_fault(&self, owner: u64) -> Option<String> {
+        self.0
+            .owner_faults
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&owner)
+            .cloned()
+    }
+    pub(crate) fn fault_epoch(&self) -> u64 {
+        self.0.faults.load(Ordering::Acquire)
+    }
+    pub(crate) fn set_other_ram_bytes(&self, bytes: usize) {
+        self.0.other_ram_bytes.store(bytes, Ordering::Release);
+    }
+    pub(crate) fn set_failure_limit(&self, bytes: usize) {
+        self.0.failure_limit.store(bytes, Ordering::Release);
+        self.0.changed.notify_all();
+    }
+    pub(crate) fn failure_limit(&self) -> usize {
+        self.0.failure_limit.load(Ordering::Acquire)
+    }
+    pub(crate) fn ram_only_bytes(&self) -> usize {
+        self.pending_bytes()
+            .saturating_add(self.0.other_ram_bytes.load(Ordering::Acquire))
+    }
+    pub(crate) fn set_bulk_stopped(&self, stopped: bool) {
+        self.0.bulk_stopped.store(stopped, Ordering::Release);
+        self.0.changed.notify_all();
+    }
+    pub(crate) fn bulk_stopped(&self) -> bool {
+        self.0.bulk_stopped.load(Ordering::Acquire)
+    }
+    pub(crate) fn check_bulk_capacity(&self, incoming: usize) -> io::Result<()> {
+        if self.bulk_stopped() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Bulk text intake is paused for session reset or shutdown",
+            ));
+        }
+        if !matches!(self.health(), Health::Healthy)
+            && self.ram_only_bytes().saturating_add(incoming) > self.failure_limit()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::OutOfMemory,
+                "Session not saving. Memory limit reached; this large paste or file open was refused. Save to files, free disk space, or raise the memory limit in Settings.",
+            ));
+        }
+        Ok(())
+    }
+    /// Abandoned unpublished imports have no owner outside this queue.
+    pub(crate) fn reap_abandoned(&self) {
+        let mut queue = self
             .0
-            .health
+            .pending
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if *state != health {
-            if std::mem::discriminant(&*state) != std::mem::discriminant(&health) {
-                log::warn!("text store epoch {} health: {:?}", self.0.epoch.id, health);
+        queue.retain(|chunk| {
+            if Arc::strong_count(chunk) == 1 {
+                self.0.pending_bytes.fetch_sub(chunk.len, Ordering::AcqRel);
+                false
+            } else {
+                true
             }
-            *state = health;
-        }
+        });
         self.0.changed.notify_all();
     }
     #[must_use]
@@ -371,7 +468,11 @@ impl ChunkStoreHandle {
             .restored
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(chunk) = restored.get(&reference.id).and_then(Weak::upgrade) {
+        if let Some(chunk) = restored.get(&(reference.id, owner)).and_then(Weak::upgrade)
+            && chunk.reference().is_some_and(|old| {
+                old.epoch.id == reference.epoch.id && old.metadata == reference.metadata
+            })
+        {
             return chunk;
         }
         let row = reference.id;
@@ -387,7 +488,7 @@ impl ChunkStoreHandle {
             }),
             changed: Condvar::new(),
         });
-        restored.insert(row, Arc::downgrade(&chunk));
+        restored.insert((row, owner), Arc::downgrade(&chunk));
         self.0
             .handles
             .lock()
@@ -411,18 +512,12 @@ impl ChunkStoreHandle {
             .handles
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut ids = std::collections::HashSet::new();
-        handles.retain(|handle| {
-            if let Some(chunk) = handle.upgrade() {
-                if let Some(reference) = chunk.reference() {
-                    ids.insert(reference.id);
-                }
-                true
-            } else {
-                false
-            }
-        });
-        ids
+        let live: Vec<_> = handles.iter().filter_map(Weak::upgrade).collect();
+        handles.retain(|handle| handle.strong_count() > 0);
+        drop(handles);
+        live.into_iter()
+            .filter_map(|chunk| chunk.reference().map(|r| r.id))
+            .collect()
     }
     /// Apply aggregate and per-document cache budgets immediately.
     pub fn set_limits(&self, limit: usize, per_owner: usize) {
@@ -526,6 +621,19 @@ impl Chunk {
             }
         };
         let result = reference.epoch.load(&reference, background);
+        if let Err(cause) = &result
+            && let Some(core) = self.core.upgrade()
+        {
+            core.owner_faults
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(self.owner)
+                .or_insert_with(|| cause.to_string());
+            core.faults.fetch_add(1, Ordering::AcqRel);
+            if cause.kind() == io::ErrorKind::BrokenPipe {
+                ChunkStoreHandle(core).set_health(Health::Unavailable(cause.to_string()));
+            }
+        }
         {
             let mut state = self
                 .state

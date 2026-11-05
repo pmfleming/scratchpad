@@ -9,12 +9,21 @@ pub(crate) struct PendingSessionReset {
 }
 
 pub(crate) fn start_new_session(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if !app.state.persistence.session_restore_failed
+    if !app.state.persistence.session_store.storage_unavailable()
         || app.state.persistence.session_reset.is_some()
         || app.state.background_io.has_pending_background_actions()
+        || app.tab_manager.tabs.as_slice().iter().any(|tab| {
+            tab.buffers().any(|buffer| buffer.is_preparing_text())
+                || tab
+                    .layout
+                    .views()
+                    .iter()
+                    .any(|view| !view.deferred_editor_events.is_empty())
+        })
     {
         return;
     }
+    app.state.persistence.session_store.set_bulk_stopped(true);
     let request = capture_session(app);
     let acknowledgement = request.acknowledgement();
     let mut store = app.state.persistence.session_store.clone();
@@ -56,6 +65,7 @@ pub(crate) fn poll_session_reset(app: &mut ScratchpadApp) {
     match result {
         Ok(backup) => {
             app.state.persistence.session_restore_failed = false;
+            app.apply_history_budget_to_open_buffers();
             super::acknowledge_capture(app, &acknowledgement);
             app.state.persistence.last_session_persist = Instant::now();
             // Edits made while the reset was running must still be saved.
@@ -74,6 +84,7 @@ pub(crate) fn poll_session_reset(app: &mut ScratchpadApp) {
 }
 
 fn report_reset_failure(app: &mut ScratchpadApp, error: String) {
+    app.state.persistence.session_store.set_bulk_stopped(false);
     app.state.status.set_error_status_with_detail(
         StatusDomain::Session,
         "Could not start a new session. Session saving is still paused. You can try again.",

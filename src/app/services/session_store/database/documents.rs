@@ -93,3 +93,79 @@ fn single_tab(buffer: SessionBuffer) -> SessionTab {
         views: vec![view],
     }
 }
+
+impl Database {
+    pub(in crate::app::services::session_store) async fn recovery_metadata(
+        &mut self,
+    ) -> io::Result<(
+        super::StoredSession,
+        Vec<SessionBuffer>,
+        Vec<(String, i64, SessionTab)>,
+    )> {
+        let stored = self.load(super::ReadScope::All).await?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "no committed session to export")
+        })?;
+        let live: std::collections::HashSet<_> = stored
+            .manifest
+            .tabs
+            .iter()
+            .flat_map(|t| &t.buffers)
+            .map(|b| b.temp_id.clone())
+            .collect();
+        let ids = self
+            .query_collect("SELECT id FROM documents ORDER BY rowid", (), |row| {
+                row.get::<String>(0).map_err(error)
+            })
+            .await?;
+        let mut retained = Vec::new();
+        for id in ids {
+            if !live.contains(&id) {
+                let (mut tab, _) = self.load_retained_document(&id).await?;
+                super::super::validation::validate_tab(&tab)?;
+                retained.append(&mut tab.buffers);
+            }
+        }
+        let closed = self
+            .closed_rows()
+            .await?
+            .into_iter()
+            .map(|row| (row.token, row.closed_at, row.tab))
+            .collect();
+        Ok((stored, retained, closed))
+    }
+}
+
+impl Database {
+    pub(in crate::app::services::session_store) async fn hydrate_reset_request(
+        &self,
+        mut request: crate::app::services::session_store::SessionPersistRequest,
+    ) -> io::Result<crate::app::services::session_store::SessionPersistRequest> {
+        for tab in request
+            .tabs
+            .iter_mut()
+            .chain(request.closed_tabs.iter_mut().map(|closed| &mut closed.tab))
+        {
+            if !tab.preserve_existing {
+                continue;
+            }
+            self.read_histories(std::slice::from_mut(&mut tab.session_tab))
+                .await?;
+            for buffer in &mut tab.session_tab.buffers {
+                let document = buffer.history_document.take().ok_or_else(|| {
+                    io::Error::other(format!(
+                        "Cannot copy unreadable document {} during reset",
+                        buffer.temp_id
+                    ))
+                })?;
+                tab.buffer_snapshots
+                    .push(super::super::capture::CapturedSessionBuffer {
+                        temp_id: buffer.temp_id.clone(),
+                        snapshot: document.snapshot(),
+                    });
+                buffer.history_capture = Some(document.history_snapshot());
+            }
+            tab.preserve_existing = false;
+        }
+        Ok(request)
+    }
+}

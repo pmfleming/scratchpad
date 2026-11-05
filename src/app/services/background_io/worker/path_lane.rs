@@ -26,7 +26,12 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
                 request_id,
                 buffer_id,
                 result: request
-                    .prepare_with_store(session_store.chunk_store_handle().ok())
+                    .prepare_with_store(
+                        session_store
+                            .chunk_store_handle()
+                            .ok()
+                            .or_else(|| session_store.opened_chunk_store()),
+                    )
                     .map(Box::new)
                     .map_err(|cause| cause.to_string()),
             }),
@@ -255,7 +260,10 @@ fn load_one_with_context(
             claimed,
         } => {
             if context.store.is_none() {
-                context.store = session_store.chunk_store_handle().ok();
+                context.store = session_store
+                    .chunk_store_handle()
+                    .ok()
+                    .or_else(|| session_store.opened_chunk_store());
             }
             match session_store.reopen_path_with_claimed(&path, &claimed) {
                 Ok(Some(tab)) => LoadedPathResult {

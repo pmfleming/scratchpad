@@ -20,6 +20,7 @@ pub(crate) struct SessionPersistRequest {
 
 #[derive(Clone, Default)]
 pub(crate) struct SessionCaptureAck {
+    pub revisions: Vec<(String, crate::app::domain::buffer::SnapshotRevision)>,
     pub closed_tokens: Vec<String>,
     pub activity_sequences: Vec<u64>,
     pub forgotten: Vec<(String, u64)>,
@@ -48,8 +49,47 @@ pub(super) struct CapturedSessionBuffer {
 }
 
 impl SessionPersistRequest {
+    pub(crate) fn copy_to_store(
+        &mut self,
+        copy: &mut crate::app::services::chunk_store::Rebind,
+    ) -> std::io::Result<()> {
+        for tab in self
+            .tabs
+            .iter_mut()
+            .chain(self.closed_tabs.iter_mut().map(|c| &mut c.tab))
+        {
+            for buffer in &mut tab.session_tab.buffers {
+                if let Some(history) = &buffer.history_capture {
+                    let history = history.copy_to_store(copy)?;
+                    let snapshot = history.snapshot();
+                    if let Some(captured) = tab
+                        .buffer_snapshots
+                        .iter_mut()
+                        .find(|b| b.temp_id == buffer.temp_id)
+                    {
+                        captured.snapshot = snapshot;
+                    } else {
+                        tab.buffer_snapshots.push(CapturedSessionBuffer {
+                            temp_id: buffer.temp_id.clone(),
+                            snapshot,
+                        });
+                    }
+                    buffer.history_capture = Some(history);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn acknowledgement(&self) -> SessionCaptureAck {
         SessionCaptureAck {
+            revisions: self
+                .tabs
+                .iter()
+                .chain(self.closed_tabs.iter().map(|closed| &closed.tab))
+                .flat_map(|tab| &tab.buffer_snapshots)
+                .map(|buffer| (buffer.temp_id.clone(), buffer.snapshot.revision_key()))
+                .collect(),
             closed_tokens: self.closed_tabs.iter().map(|c| c.token.clone()).collect(),
             activity_sequences: self.activity.iter().map(|e| e.sequence).collect(),
             forgotten: self.forgotten.clone(),

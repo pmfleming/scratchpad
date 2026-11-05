@@ -103,6 +103,7 @@ impl ScratchpadApp {
                     settings_store,
                     session_store,
                     persist_session_on_drop: true,
+                    storage: crate::app::services::session_manager::StorageStatus::default(),
                     session_restore_failed: false,
                     session_reset: None,
                     pending_closed_tabs: Vec::new(),

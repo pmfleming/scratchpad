@@ -46,6 +46,7 @@ pub struct SessionStore {
     root: PathBuf,
     worker: Arc<OnceLock<Result<DatabaseWorker, String>>>,
     history_epoch: Arc<AtomicU64>,
+    fallback: Arc<OnceLock<crate::app::services::chunk_store::ChunkStoreHandle>>,
     commit_epoch: Arc<AtomicU64>,
 }
 impl Default for SessionStore {
@@ -60,6 +61,7 @@ impl SessionStore {
             root,
             worker: Arc::new(OnceLock::new()),
             history_epoch: Arc::new(AtomicU64::new(0)),
+            fallback: Arc::new(OnceLock::new()),
             commit_epoch: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -87,15 +89,57 @@ impl SessionStore {
         })
     }
 
+    pub(crate) fn set_bulk_stopped(&self, stopped: bool) {
+        if let Some(store) = self.opened_chunk_store() {
+            store.set_bulk_stopped(stopped);
+        }
+    }
+    pub(crate) fn shutdown(&self) -> io::Result<()> {
+        let Some(Ok(worker)) = self.worker.get() else {
+            return Ok(());
+        };
+        worker.call(|db| {
+            let store = db.chunk_store()?;
+            store.close_readers();
+            let result = block_on(db.checkpoint());
+            if result.is_err()
+                && let Some(path) = store.epoch().path()
+            {
+                let _ = store.epoch().reopen(&path);
+            }
+            result
+        })
+    }
     pub(crate) fn opened_chunk_store(
         &self,
     ) -> Option<crate::app::services::chunk_store::ChunkStoreHandle> {
-        self.worker
-            .get()
-            .and_then(|w| w.as_ref().ok())
-            .map(DatabaseWorker::chunk_store)
+        match self.worker.get() {
+            Some(Ok(worker)) => Some(worker.chunk_store()),
+            Some(Err(cause)) => Some(
+                self.fallback
+                    .get_or_init(|| {
+                        crate::app::services::chunk_store::ChunkStoreHandle::unavailable(
+                            cause.clone(),
+                        )
+                    })
+                    .clone(),
+            ),
+            None => None,
+        }
     }
 
+    pub(crate) fn storage_health(&self) -> crate::app::services::chunk_store::Health {
+        self.opened_chunk_store().map_or(
+            crate::app::services::chunk_store::Health::Healthy,
+            |store| store.health(),
+        )
+    }
+    pub(crate) fn storage_unavailable(&self) -> bool {
+        matches!(
+            self.storage_health(),
+            crate::app::services::chunk_store::Health::Unavailable(_)
+        )
+    }
     pub(crate) fn history_epoch(&self) -> u64 {
         self.history_epoch.load(Ordering::Acquire)
     }
@@ -123,9 +167,11 @@ impl SessionStore {
     ) -> io::Result<PathBuf> {
         self.invalidate_history();
         // Retire the cached open failure or old worker, including stale clones.
-        let previous = std::mem::replace(&mut self.worker, Arc::new(OnceLock::new()));
+        let previous = self.worker.clone();
         let worker = previous.get().and_then(|result| result.as_ref().ok());
         let (worker, backup) = database::start_new_session(&self.root, worker, request)?;
+        self.worker = Arc::new(OnceLock::new());
+        self.fallback = Arc::new(OnceLock::new());
         let _ = self.worker.set(Ok(worker));
         Ok(backup)
     }

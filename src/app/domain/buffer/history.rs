@@ -14,7 +14,6 @@ pub use provenance::{ByteSpan, PieceSource};
 use super::piece_tree::PieceTreeLite;
 use crate::app::domain::CursorRange;
 use smallvec::SmallVec;
-use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub type PieceHistoryEdits = SmallVec<[PieceHistoryEdit; 1]>;
@@ -181,12 +180,16 @@ pub(crate) fn preview_text_parts(parts: impl IntoIterator<Item = impl AsRef<str>
 }
 
 pub(crate) fn fingerprint_parts(parts: impl IntoIterator<Item = impl AsRef<str>>) -> u64 {
-    let mut hasher = rustc_hash::FxHasher::default();
+    let mut hasher = blake3::Hasher::new();
     for part in parts {
-        part.as_ref().hash(&mut hasher);
-        0xff_u8.hash(&mut hasher);
+        hasher.update(part.as_ref().as_bytes());
+        hasher.update(&[255]);
     }
-    hasher.finish()
+    u64::from_le_bytes(
+        hasher.finalize().as_bytes()[..8]
+            .try_into()
+            .expect("eight digest bytes"),
+    )
 }
 
 // =============================================================================

@@ -91,3 +91,42 @@ fn unreliable_artifact_evidence_keeps_line_endings_and_defers_rescan() {
 fn cursor(index: usize) -> CursorRange {
     CursorRange::one(CharCursor::new(index))
 }
+
+#[test]
+fn failed_store_refuses_large_preparation_atomically_and_old_ack_cannot_clear_new_edit() {
+    let store = crate::app::services::chunk_store::ChunkStoreHandle::unavailable(
+        "injected full disk".into(),
+    );
+    store.set_failure_limit(1024);
+    let mut buffer = super::BufferState::new("note".into(), "original".into(), None);
+    buffer.document_mut().bind_store(store).unwrap();
+    let previous = buffer.storage_revision();
+    assert!(!buffer.queue_text_preparation(
+        vec![(0..0, "λ".repeat(200_000))],
+        crate::app::domain::CursorRange::default(),
+        None,
+        crate::app::domain::PieceSource::Paste,
+        None
+    ));
+    assert_eq!(buffer.text(), "original");
+    assert!(buffer.storage_refusal.is_some());
+    buffer.document_mut().insert_direct(0, "typing");
+    buffer.acknowledge_storage(&previous);
+    buffer.update_storage_attention(true);
+    assert!(matches!(
+        buffer.storage_attention,
+        Some(super::StorageAttention::Unsaved)
+    ));
+    let current = buffer.storage_revision();
+    buffer.acknowledge_storage(&current);
+    assert!(buffer.storage_attention.is_none());
+    buffer
+        .document()
+        .piece_tree()
+        .inject_read_failure_for_test();
+    buffer.update_storage_attention(false);
+    assert!(matches!(
+        buffer.storage_attention,
+        Some(super::StorageAttention::Unreadable(_))
+    ));
+}

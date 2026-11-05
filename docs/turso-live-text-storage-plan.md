@@ -1,6 +1,6 @@
 # Turso-backed live text storage
 
-Status: stages 0–5 implemented on Linux, based on commit `087e045`. Native Windows
+Status: stages 0–6 implemented on Linux, based on commit `087e045`. Native Windows
 runtime validation remains pending under the user's authorization. The user
 approved standard WAL on both platforms on 2026-11-05, with
 multiprocess WAL to be revisited on later Turso versions. Historical source
@@ -927,6 +927,11 @@ special cases and `initial_file_history` payload duplication.
 writes only new bytes, and observation of an unchanged large file writes nothing.
 
 ### 6. Lifecycle and degraded operation
+
+Implemented on Linux. See [stage 6 evidence](../tools/turso-contract/STAGE-6.md).
+Health, failure RAM settings, storage status and attention, revision-aware
+acknowledgements, backup-reader reset/rebinding, shutdown and streaming recovery
+export are in place. Final large-action/UI validation follows in stage 7.
 
 Implement store health, the RAM limit and its setting, the status bar segment, the red dot, the
 Unavailable gate on **Start new session**, reset, shutdown order, and recovery export.

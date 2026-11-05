@@ -24,6 +24,7 @@ pub enum TabAttentionState {
     AutoEdit,
     Dirty,
     DiskProblem,
+    StorageProblem,
 }
 
 static NEXT_LAYOUT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);

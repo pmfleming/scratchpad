@@ -184,6 +184,27 @@ impl Prepared {
 impl Database {
     pub async fn persist(
         &mut self,
+        request: SessionPersistRequest,
+        generation: u64,
+    ) -> io::Result<SessionPersistProfile> {
+        let result = self.persist_inner(request, generation).await;
+        if let Some(store) = &self.chunks {
+            let health = if let Some(cause) = &self.blocked {
+                crate::app::services::chunk_store::Health::Unavailable(cause.clone())
+            } else {
+                match &result {
+                    Ok(_) => crate::app::services::chunk_store::Health::Healthy,
+                    Err(cause) => {
+                        crate::app::services::chunk_store::Health::Failing(cause.to_string())
+                    }
+                }
+            };
+            store.set_health(health);
+        }
+        result
+    }
+    async fn persist_inner(
+        &mut self,
         mut request: SessionPersistRequest,
         generation: u64,
     ) -> io::Result<SessionPersistProfile> {

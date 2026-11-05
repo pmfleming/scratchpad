@@ -68,7 +68,10 @@ impl Reader {
             match sender.try_send(request) {
                 Ok(()) => break,
                 Err(mpsc::TrySendError::Disconnected(_)) => {
-                    return Err(failed("chunk reader stopped or panicked"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        "chunk reader stopped or panicked",
+                    ));
                 }
                 Err(mpsc::TrySendError::Full(queued)) => request = queued,
             }
@@ -86,7 +89,10 @@ impl Reader {
                 mpsc::RecvTimeoutError::Timeout => {
                     io::Error::new(io::ErrorKind::TimedOut, "chunk read deadline exceeded")
                 }
-                mpsc::RecvTimeoutError::Disconnected => failed("chunk reader stopped or panicked"),
+                mpsc::RecvTimeoutError::Disconnected => io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "chunk reader stopped or panicked",
+                ),
             })?
     }
     fn close(&self) {
@@ -118,6 +124,7 @@ pub struct ReadEpoch {
     pub id: u64,
     reads: std::sync::atomic::AtomicU64,
     readers: Mutex<Option<Readers>>,
+    path: Mutex<Option<std::path::PathBuf>>,
 }
 impl std::fmt::Debug for ReadEpoch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -163,19 +170,51 @@ impl ReadEpoch {
             id,
             reads: std::sync::atomic::AtomicU64::new(0),
             readers: Mutex::new(None),
+            path: Mutex::new(None),
         });
         epoch.reopen(path)?;
         Ok(epoch)
+    }
+    pub(crate) fn empty(id: u64) -> Arc<Self> {
+        Arc::new(Self {
+            id,
+            reads: std::sync::atomic::AtomicU64::new(0),
+            readers: Mutex::new(None),
+            path: Mutex::new(None),
+        })
+    }
+    pub(crate) fn ensure_open(&self) -> io::Result<()> {
+        let closed = self
+            .readers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_none();
+        if closed && let Some(path) = self.path() {
+            self.reopen(&path)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn path(&self) -> Option<std::path::PathBuf> {
+        self.path
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
     pub(crate) fn reopen(&self, path: &Path) -> io::Result<()> {
         let readers = Readers {
             foreground: Reader::open(path, "text-foreground")?,
             background: Reader::open(path, "text-background")?,
         };
-        *self
+        let previous = self
             .readers
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(readers);
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .replace(readers);
+        drop(previous);
+        *self
+            .path
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(path.to_owned());
         Ok(())
     }
     pub(crate) fn close(&self) {

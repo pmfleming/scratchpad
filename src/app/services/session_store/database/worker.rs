@@ -96,6 +96,7 @@ impl Actor {
         let mut retry_at = Instant::now();
         let mut backoff = Duration::from_millis(100);
         loop {
+            chunks.reap_abandoned();
             let drain = chunks.pending_bytes() > 0
                 && !matches!(chunks.health(), Health::Unavailable(_))
                 && Instant::now() >= retry_at;
@@ -240,9 +241,13 @@ impl DatabaseWorker {
         operation: impl FnOnce(&mut Database) -> io::Result<T> + Send + 'static,
     ) -> io::Result<T> {
         let (sender, receiver) = mpsc::sync_channel(1);
+        let chunks = self.0.chunks.clone();
         let job = Job::Call(Box::new(move |database, blocked| {
             let result = operation(database);
             blocked.store(database.blocked.is_some(), Ordering::Release);
+            if let Some(cause) = &database.blocked {
+                chunks.set_health(Health::Unavailable(cause.clone()));
+            }
             let _ = sender.send(result);
         }));
         self.0

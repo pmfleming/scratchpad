@@ -42,10 +42,10 @@ pub use piece_tree::{
 pub(crate) use piece_tree::{PieceBuffer, StorageBlock};
 pub(crate) use snapshot::SnapshotRevision;
 pub use snapshot::{DocumentChunk, DocumentSnapshot};
-pub(crate) use state::TextHistoryEvent;
 pub use state::{
     BufferFreshness, BufferId, BufferState, BufferViewStatus, DiskFileState, RestoredBufferState,
 };
+pub(crate) use state::{StorageAttention, TextHistoryEvent};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct BufferLength {

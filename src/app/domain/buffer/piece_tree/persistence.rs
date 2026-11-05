@@ -5,6 +5,23 @@ use super::{
 use crate::app::services::chunk_store::ChunkStoreHandle;
 
 impl PieceTreeLite {
+    pub(crate) fn visit_history_span(
+        &self,
+        span: ByteSpan,
+        visit: impl FnMut(&str) -> io::Result<()>,
+    ) -> io::Result<()> {
+        self.storage.visit_span(span, visit)
+    }
+
+    pub(crate) fn copy_to_store(
+        &self,
+        copy: &mut crate::app::services::chunk_store::Rebind,
+    ) -> io::Result<Self> {
+        let mut tree = self.clone_without_anchors();
+        tree.storage = self.storage.copy_to_store(copy)?;
+        Ok(tree)
+    }
+
     pub(crate) fn reference_spans(
         &self,
         range: std::ops::Range<usize>,

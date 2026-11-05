@@ -154,6 +154,31 @@ pub(super) fn text_history_budget(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         4,
         4096,
     );
+    let original_failure = app.state.app_settings.history.failure_ram;
+    let mut failure = original_failure;
+    byte_budget_row(
+        ui,
+        "Memory while session is not saving",
+        &mut failure.bytes,
+        64,
+        (crate::app::services::chunk_store::total_memory() / (1024 * 1024)).max(64),
+    );
+    if failure.bytes != original_failure.bytes {
+        failure.automatic = false;
+    }
+    if ui
+        .button("Reset failure memory limit to automatic")
+        .clicked()
+    {
+        failure = crate::app::services::chunk_store::FailureRamBudget::default();
+    }
+    if failure != original_failure {
+        app.state.app_settings.history.failure_ram = failure;
+        if let Some(store) = app.state.persistence.session_store.opened_chunk_store() {
+            store.set_failure_limit(failure.bytes as usize);
+        }
+        crate::app::app_state::settings_controller::persist_settings_or_error(app);
+    }
     if budget != original {
         crate::app::app_state::settings_controller::set_history_budget(app, budget);
     }

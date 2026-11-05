@@ -105,6 +105,7 @@ pub struct ScratchpadApp {
 }
 
 pub(crate) struct AppPersistenceState {
+    pub(crate) storage: crate::app::services::session_manager::StorageStatus,
     pub(crate) settings_store: SettingsStore,
     pub(crate) session_store: SessionStore,
     pub(crate) persist_session_on_drop: bool,
@@ -120,6 +121,7 @@ pub(crate) struct AppPersistenceState {
 #[derive(Default)]
 pub(crate) struct WindowRuntimeState {
     pub(crate) close_in_progress: bool,
+    pub(crate) exit_after_input: bool,
     pub(crate) empty_workspace_exit_attempted: bool,
     pub(crate) lifecycle: window_lifecycle::WindowLifecycle,
     // Include lifecycle work in frame timings after splitting logic from UI.

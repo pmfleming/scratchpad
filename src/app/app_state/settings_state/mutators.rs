@@ -14,7 +14,7 @@ mod model;
 #[cfg(test)]
 mod tests;
 
-pub(super) fn persist_settings_or_error(app: &mut ScratchpadApp) {
+pub(crate) fn persist_settings_or_error(app: &mut ScratchpadApp) {
     if let Err(error) = crate::app::app_state::settings_state::persist_settings_now(app) {
         app.state.status.report_settings_save_failed(error);
     }

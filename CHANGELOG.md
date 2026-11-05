@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Session storage failures show a persistent warning and affected-file dots. Small edits keep working; a configurable RAM limit controls large operations while saving is unavailable. Reset preserves live text and undo through a private backup, and recovery export includes retained and closed documents.
+
 - Large UTF-8 files stream into session chunks with bounded pending memory. Their text stays stable if the source changes, and unchanged disk observations write no text.
 
 - Session recovery stores text and undo as shared chunk references. Restoring a document loads its text on demand, and disk changes are checked in the background after restore.

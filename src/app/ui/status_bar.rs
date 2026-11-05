@@ -59,6 +59,9 @@ pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
                 if let Some(details) = collect_active_status_details(app, ui.visuals().dark_mode) {
                     render_active_status(ui, app, &details, &mut actions);
+                } else {
+                    show_status_history_button(ui, app, &mut actions);
+                    show_storage_health(ui, app, &mut actions);
                 }
 
                 apply_status_actions(app, actions);
@@ -74,6 +77,7 @@ fn render_active_status(
     actions: &mut StatusBarActions,
 ) {
     show_status_history_button(ui, app, actions);
+    show_storage_health(ui, app, actions);
     ui.separator();
 
     let path_min_width = status_path_min_width(ui, app);
@@ -97,6 +101,7 @@ fn render_settings_status(
     actions: &mut StatusBarActions,
 ) {
     show_status_history_button(ui, app, actions);
+    show_storage_health(ui, app, actions);
     ui.separator();
     ui.label("Settings");
     ui.separator();
@@ -104,6 +109,36 @@ fn render_settings_status(
     let path_min_width = status_path_min_width(ui, app);
     let layout = status_bar_path_layout(ui.available_width(), path_min_width, &[]);
     show_copyable_path_sized(ui, &path_label, layout.path_width);
+}
+
+fn show_storage_health(ui: &mut egui::Ui, app: &ScratchpadApp, actions: &mut StatusBarActions) {
+    let Some(warning) = &app.state.persistence.storage.warning else {
+        return;
+    };
+    ui.separator();
+    let color = if warning.red {
+        egui::Color32::from_rgb(220, 64, 64)
+    } else {
+        status_attention_color(ui.visuals().dark_mode)
+    };
+    let action_width = if warning.unavailable { 120. } else { 0. };
+    let width = (ui.available_width() - action_width).clamp(0., 360.);
+    let response =
+        widget_ids::surface_response(ui, "storage_health", widget_ids::WidgetRole::Label, |ui| {
+            ui.add_sized(
+                [width, 22.],
+                egui::Label::new(egui::RichText::new(&warning.message).color(color))
+                    .truncate()
+                    .sense(egui::Sense::click()),
+            )
+        })
+        .on_hover_text(format!("{}\n{}", warning.message, warning.detail));
+    if response.clicked() {
+        actions.open_status_history = true;
+    }
+    if warning.unavailable && ui.small_button("Start new session").clicked() {
+        actions.open_status_history = true;
+    }
 }
 
 fn show_copyable_path_sized(ui: &mut egui::Ui, label: &str, width: f32) {

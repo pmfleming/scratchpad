@@ -82,6 +82,13 @@ impl ScratchpadApp {
                         self.tab_manager.tabs.as_mut_slice()[index].buffer_by_id_mut(buffer_id)
                 {
                     buffer.cancel_text_preparation();
+                    if !matches!(
+                        self.state.persistence.session_store.storage_health(),
+                        crate::app::services::chunk_store::Health::Healthy
+                    ) {
+                        buffer.storage_refusal =
+                            Some(format!("Large paste or replacement refused. {cause}"));
+                    }
                 }
                 self.state.status.set_error_status_with_detail(
                     super::super::StatusDomain::File,
@@ -162,6 +169,35 @@ impl ScratchpadApp {
         ctx: &egui::Context,
         input: &mut egui::RawInput,
     ) {
+        if self.state.persistence.session_reset.is_some() {
+            if let Some(tab) = self.tab_manager.active_tab_mut() {
+                let id = tab.layout.active_view_id();
+                let editor = crate::app::ui::widget_ids::surface_role(
+                    ("native_editor", id),
+                    crate::app::ui::widget_ids::WidgetRole::TextEdit,
+                );
+                if ctx.memory(|memory| memory.has_focus(editor))
+                    && let Some((_, view)) = tab.buffer_and_view_mut(id)
+                {
+                    let mut remaining = Vec::new();
+                    for event in std::mem::take(&mut input.events) {
+                        match event {
+                            egui::Event::Text(_)
+                            | egui::Event::Paste(_)
+                            | egui::Event::Copy
+                            | egui::Event::Cut
+                            | egui::Event::Ime(_)
+                            | egui::Event::Key { pressed: true, .. } => {
+                                view.deferred_editor_events.push(event);
+                            }
+                            _ => remaining.push(event),
+                        }
+                    }
+                    input.events = remaining;
+                }
+            }
+            return;
+        }
         let bulk=input.events.iter().any(|event|matches!(event,egui::Event::Paste(text)|egui::Event::Text(text)|egui::Event::Ime(egui::ImeEvent::Commit(text)) if text.len()>=crate::app::domain::buffer::BULK_TEXT_BYTES));
         if !bulk
             || self.state.dialogs.any_modal_open()

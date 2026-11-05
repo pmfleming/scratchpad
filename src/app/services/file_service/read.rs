@@ -212,7 +212,7 @@ fn read_document_with_encoding(
     } else {
         encoding.new_decoder_without_bom_handling()
     };
-    let mut document = StagedDocument::with_capacity(decoded_capacity);
+    let mut document = StagedDocument::with_capacity(decoded_capacity.min(16 * 1024 * 1024));
     let mut raw = [0u8; RAW_READ_BYTES];
     let mut pending = Vec::new();
     let mut decoded = [0u8; DECODED_CHUNK_BYTES];
@@ -224,6 +224,11 @@ fn read_document_with_encoding(
         pending.extend_from_slice(&raw[..read]);
         let consumed = decode_pending(&mut decoder, &pending, &mut decoded, eof, &mut document)?;
         pending.drain(..consumed);
+        if document.content.len() >= CHUNKED_UTF8_MIN_BYTES as usize
+            && let Some(store) = &context.store
+        {
+            store.check_bulk_capacity(document.content.len())?;
+        }
         if eof {
             return Ok(document.finish());
         }
@@ -258,10 +263,7 @@ fn decode_pending(
 fn read_utf8_document_fast_path(path: &Path, has_bom: bool) -> io::Result<Option<LoadedDocument>> {
     const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
-    // Intentional capacity tradeoff: `read_to_string` can transiently keep more
-    // memory live for huge UTF-8 files, but measured 2 GB opens are materially
-    // faster than the lower-memory staged decode path. Do not slow this path
-    // down just to reduce peak memory unless speed measurements stay healthy.
+    // The small-file owned path avoids streaming overhead below the import threshold.
     let mut content = match std::fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::InvalidData => return Ok(None),

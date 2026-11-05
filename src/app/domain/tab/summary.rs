@@ -39,6 +39,12 @@ pub(crate) fn can_promote_all_files(tab: &WorkspaceTab) -> bool {
 }
 
 pub(crate) fn attention_state(tab: &WorkspaceTab) -> Option<TabAttentionState> {
+    if tab
+        .buffers()
+        .any(|buffer| buffer.storage_attention.is_some())
+    {
+        return Some(TabAttentionState::StorageProblem);
+    }
     let mut has_auto_edit = false;
     let mut has_dirty = false;
 

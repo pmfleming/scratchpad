@@ -52,6 +52,9 @@ impl Database {
                 .chunk
                 .reference()
                 .ok_or_else(|| invalid("capture body did not commit"))?;
+            if reference.epoch.id != store.epoch().id {
+                return Err(invalid("chunk reference belongs to another database epoch"));
+            }
             blocks.push((
                 buffer as i64,
                 positions[buffer],

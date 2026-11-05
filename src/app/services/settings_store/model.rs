@@ -364,6 +364,8 @@ impl Default for UiSettings {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct HistorySettings {
+    #[serde(default)]
+    pub failure_ram: crate::app::services::chunk_store::FailureRamBudget,
     #[serde(default, flatten)]
     pub budget: TextHistoryBudget,
 }

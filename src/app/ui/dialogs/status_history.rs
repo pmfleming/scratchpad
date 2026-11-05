@@ -110,7 +110,7 @@ fn render_status_history_window(
         *close_requested = true;
     }
 
-    if app.state.persistence.session_restore_failed {
+    if app.state.persistence.session_store.storage_unavailable() {
         history_dialog_card(ui, STATUS_CARD_CORNER_RADIUS, |ui| {
             ui.heading("Start a new session");
             if let Some(detail) = rows
@@ -398,6 +398,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_app(root.path());
         app.state.persistence.session_restore_failed = true;
+        app.state
+            .persistence
+            .session_store
+            .chunk_store_handle()
+            .unwrap()
+            .set_health(crate::app::services::chunk_store::Health::Unavailable(
+                "injected format failure".into(),
+            ));
         let message = "Could not restore your previous session. Start a new session to resume session saving. This complete message should wrap rather than being cut off.";
         let detail =
             "Session format version 999 is incompatible with this build (expected version 10).";

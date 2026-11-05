@@ -40,6 +40,7 @@ pub(super) fn handle_pending_close_request(app: &mut ScratchpadApp, ctx: &egui::
 /// when minimized/occluded, without consuming the last visible frame's UI input.
 pub(super) fn update_logic(app: &mut ScratchpadApp, ctx: &egui::Context) {
     crate::app::services::session_manager::poll_session_reset(app);
+    crate::app::services::session_manager::poll_storage_health(app);
     app.state.window.lifecycle.update(ctx);
     if handle_pending_close_request(app, ctx) || app.state.window.close_in_progress {
         return;
@@ -49,6 +50,13 @@ pub(super) fn update_logic(app: &mut ScratchpadApp, ctx: &egui::Context) {
     FileController::poll_open_file_dialog(app, ctx);
     let background_poll_started_at = Instant::now();
     app.poll_background_io(ctx);
+    if app.state.window.exit_after_input && !pending_accepted_input(app) {
+        app.state.window.exit_after_input = false;
+        request_exit(app, ctx);
+        if app.state.window.close_in_progress {
+            return;
+        }
+    }
     crate::app::services::session_manager::report_database_notices(app);
     app.apply_pending_broker_launches(ctx);
     record_frame_phase(
@@ -239,6 +247,16 @@ pub(crate) fn estimated_tab_strip_width(app: &ScratchpadApp, spacing: f32) -> f3
     }
 }
 
+fn pending_accepted_input(app: &ScratchpadApp) -> bool {
+    app.tab_manager.tabs.as_slice().iter().any(|tab| {
+        tab.buffers().any(|buffer| buffer.is_preparing_text())
+            || tab
+                .layout
+                .views()
+                .iter()
+                .any(|view| !view.deferred_editor_events.is_empty())
+    })
+}
 pub(crate) fn request_exit(app: &mut ScratchpadApp, ctx: &egui::Context) {
     if app.state.persistence.session_reset.is_some() {
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -248,16 +266,33 @@ pub(crate) fn request_exit(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
+    if pending_accepted_input(app) {
+        app.state.window.exit_after_input = true;
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        ctx.request_repaint();
+        return;
+    }
+    app.state.persistence.session_store.set_bulk_stopped(true);
     app.record_window_state(ctx);
     if !persist_settings_with_error_status(app) {
+        app.state.persistence.session_store.set_bulk_stopped(false);
         return;
     }
 
     if persist_with_error_status(app) {
+        if !app.state.persistence.session_store.writes_blocked()
+            && let Err(cause) = app.state.persistence.session_store.shutdown()
+        {
+            app.state.status.report_session_save_failed(cause);
+            app.state.persistence.session_store.set_bulk_stopped(false);
+            return;
+        }
         app.state.window.close_in_progress = true;
         // The exit save was completed or deliberately skipped. Drop must not retry it.
         app.state.persistence.persist_session_on_drop = false;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    } else {
+        app.state.persistence.session_store.set_bulk_stopped(false);
     }
 }
 

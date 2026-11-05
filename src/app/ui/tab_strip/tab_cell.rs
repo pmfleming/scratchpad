@@ -8,6 +8,7 @@ use crate::app::ui::tab_strip::context_menu::attach_tab_context_menu;
 use crate::app::ui::widget_ids;
 use eframe::egui;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 pub(crate) struct TabPresentation {
     pub display_name: String,
@@ -39,7 +40,25 @@ pub(crate) fn tab_presentation(
         > 1;
     let display_name = crate::app::domain::tab::summary::full_display_name(tab, has_duplicate);
     Some(TabPresentation {
-        tooltip: display_name.clone(),
+        tooltip: {
+            let mut tooltip = display_name.clone();
+            for buffer in tab
+                .buffers()
+                .filter(|buffer| buffer.storage_attention.is_some())
+            {
+                let cause = match &buffer.storage_attention {
+                    Some(crate::app::domain::buffer::StorageAttention::Unsaved) => {
+                        "Changes are in memory only; session is not saving.".to_owned()
+                    }
+                    Some(crate::app::domain::buffer::StorageAttention::Unreadable(cause)) => {
+                        format!("Text is unreadable: {cause}")
+                    }
+                    None => String::new(),
+                };
+                let _ = write!(tooltip, "\n{}: {cause}", buffer.display_name());
+            }
+            tooltip
+        },
         display_name,
         can_promote_all_files: crate::app::domain::tab::summary::can_promote_all_files(tab),
         attention_state: crate::app::domain::tab::summary::attention_state(tab),
@@ -190,23 +209,28 @@ fn tab_button_with_width(
     index: usize,
     props: &TabCellProps<'_>,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    let attention_color = props.attention_state.map(attention_color);
+    let attention_marker = props.attention_state.map(attention_marker);
     tab_button_with_actions(
         ui,
         ("tab_strip.slot", index),
         props.display_name,
         props.is_active,
         props.is_selected,
-        TabButtonOptions::with_actions(props.width, props.can_promote_all_files, attention_color)
+        TabButtonOptions::with_actions(props.width, props.can_promote_all_files, attention_marker)
             .with_label_font_id(props.label_font_id.clone()),
     )
 }
 
-pub(crate) fn attention_color(state: TabAttentionState) -> egui::Color32 {
-    match state {
-        TabAttentionState::AutoEdit => egui::Color32::from_rgb(230, 132, 46),
-        TabAttentionState::Dirty => egui::Color32::from_rgb(70, 176, 96),
-        TabAttentionState::DiskProblem => egui::Color32::from_rgb(220, 64, 64),
+pub(crate) fn attention_marker(state: TabAttentionState) -> crate::app::chrome::TabAttention {
+    crate::app::chrome::TabAttention {
+        circle: state == TabAttentionState::StorageProblem,
+        color: match state {
+            TabAttentionState::AutoEdit => egui::Color32::from_rgb(230, 132, 46),
+            TabAttentionState::Dirty => egui::Color32::from_rgb(70, 176, 96),
+            TabAttentionState::StorageProblem | TabAttentionState::DiskProblem => {
+                egui::Color32::from_rgb(220, 64, 64)
+            }
+        },
     }
 }
 

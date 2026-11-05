@@ -39,6 +39,8 @@ impl PrepareTextRequest {
         store: Option<crate::app::services::chunk_store::ChunkStoreHandle>,
     ) -> io::Result<PreparedText> {
         if let Some(store) = store {
+            store
+                .check_bulk_capacity(self.replacements.iter().map(|(_, text)| text.len()).sum())?;
             self.document.set_bulk_intake(true);
             self.document.bind_store(store)?;
         }
@@ -122,6 +124,13 @@ impl BufferState {
         source: PieceSource,
         origin_view: Option<u64>,
     ) -> bool {
+        if let Some(store) = self.document.piece_tree().store()
+            && let Err(cause) =
+                store.check_bulk_capacity(replacements.iter().map(|(_, text)| text.len()).sum())
+        {
+            self.storage_refusal = Some(cause.to_string());
+            return false;
+        }
         if self.is_loading_preview
             || self.is_preparing_text()
             || replacements.is_empty()

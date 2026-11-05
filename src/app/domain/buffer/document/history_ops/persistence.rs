@@ -1,3 +1,4 @@
+mod export;
 use super::super::super::history::{persist_cursor_range, restore_cursor_range};
 use super::super::super::{
     PersistedHistoryEdit, PersistedHistoryEntry, PieceHistoryEdit, PieceHistoryEdits,
@@ -92,6 +93,18 @@ pub(crate) struct HistorySnapshot {
     last_edit: (u64, u64),
 }
 impl HistorySnapshot {
+    pub(crate) fn copy_to_store(
+        &self,
+        copy: &mut crate::app::services::chunk_store::Rebind,
+    ) -> std::io::Result<Self> {
+        let mut snapshot = self.clone();
+        snapshot.tree = Arc::new(self.tree.copy_to_store(copy)?);
+        Ok(snapshot)
+    }
+    pub(crate) fn snapshot(&self) -> crate::app::domain::DocumentSnapshot {
+        crate::app::domain::DocumentSnapshot::from_shared(self.tree.clone())
+    }
+
     pub(crate) fn reference_entry(&self, index: usize) -> &PieceHistoryEntry {
         &self.entries[index]
     }

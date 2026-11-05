@@ -33,6 +33,9 @@ pub(in crate::app::services::session_store) enum ReadScope {
 impl Database {
     pub async fn load(&mut self, scope: ReadScope) -> io::Result<Option<StoredSession>> {
         self.ensure_healthy()?;
+        let store = self.chunk_store()?;
+        store.epoch().ensure_open()?;
+        store.set_bulk_stopped(false);
         let result = self
             .read_session(scope)
             .await

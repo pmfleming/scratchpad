@@ -6,6 +6,8 @@ use crate::app::services::session_store::{
 use eframe::egui;
 use std::time::Instant;
 
+mod storage_health;
+pub(crate) use storage_health::{StorageStatus, poll_storage_health};
 mod reset;
 pub(crate) use reset::{PendingSessionReset, poll_session_reset, start_new_session};
 
@@ -154,6 +156,18 @@ pub(crate) fn acknowledge_capture(
     app: &mut ScratchpadApp,
     ack: &crate::app::services::session_store::SessionCaptureAck,
 ) {
+    let revisions: std::collections::HashMap<_, _> = ack
+        .revisions
+        .iter()
+        .map(|(id, revision)| (id.as_str(), revision))
+        .collect();
+    for tab in app.tab_manager.tabs.as_mut_slice() {
+        for buffer in tab.buffers_mut() {
+            if let Some(revision) = revisions.get(buffer.temp_id.as_str()) {
+                buffer.acknowledge_storage(revision);
+            }
+        }
+    }
     let sequences: std::collections::HashSet<_> = ack.activity_sequences.iter().copied().collect();
     app.state
         .persistence

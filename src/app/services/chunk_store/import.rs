@@ -17,9 +17,13 @@ pub(crate) struct ImportContext {
 impl ImportContext {
     pub(crate) fn check(&self) -> io::Result<()> {
         if self
-            .cancelled
+            .store
             .as_ref()
-            .is_some_and(|flag| flag.load(Ordering::Acquire))
+            .is_some_and(super::ChunkStoreHandle::bulk_stopped)
+            || self
+                .cancelled
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Acquire))
         {
             return Err(io::Error::new(
                 io::ErrorKind::Interrupted,
@@ -39,6 +43,7 @@ impl ImportContext {
             return Err(cause);
         }
         self.check()?;
+        store.check_bulk_capacity(body.len())?;
         Ok(Some(store.seal(body, owner)))
     }
 }

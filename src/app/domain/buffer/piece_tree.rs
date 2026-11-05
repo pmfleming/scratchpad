@@ -44,6 +44,9 @@ const MIN_LEAVES_PER_INTERNAL: usize = MAX_LEAVES_PER_INTERNAL / 4;
 const PREVIEW_MAX_CHARS: usize = 96;
 
 impl PieceTreeLite {
+    pub(crate) fn ram_tail_bytes(&self) -> usize {
+        self.storage.ram_tail_bytes()
+    }
     pub(crate) fn import_utf8_file(
         path: &Path,
         offset: u64,

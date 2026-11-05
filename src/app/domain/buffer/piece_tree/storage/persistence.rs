@@ -16,6 +16,35 @@ pub(crate) struct StorageCapture {
     pub tail: Option<(usize, Arc<String>)>,
 }
 impl PieceTreeStorage {
+    pub(crate) fn copy_to_store(
+        &self,
+        copy: &mut crate::app::services::chunk_store::Rebind,
+    ) -> io::Result<Self> {
+        let mut storage = self.clone();
+        let mut convert = |text: &mut ChunkText| -> io::Result<()> {
+            match text {
+                ChunkText::Stored(chunk) => *chunk = copy.copy(chunk)?,
+                ChunkText::Memory(body) => {
+                    copy.store.wait_for_capacity()?;
+                    *text = ChunkText::Stored(copy.store.seal(body.clone(), self.add.owner));
+                }
+                ChunkText::Inline(_) | ChunkText::Missing(_) => {}
+            }
+            Ok(())
+        };
+        if let OriginalTextStorage::Chunked(original) = &mut storage.original {
+            for chunk in &mut Arc::make_mut(original).chunks {
+                convert(&mut chunk.text)?;
+            }
+        }
+        for index in 0..storage.add.chunks.len() {
+            convert(&mut storage.add.chunks[index].text)?;
+        }
+        storage.add.store = Some(copy.store.clone());
+        storage.durable_original = Arc::default();
+        Ok(storage)
+    }
+
     pub(crate) fn span_char_len(&self, span: ByteSpan) -> io::Result<u64> {
         if !self.contains_span(span) {
             return Err(io::Error::other("history span exceeds storage"));
@@ -388,6 +417,72 @@ impl AddTextStorage {
                 start_byte: self.len(),
                 text: ChunkText::Missing(length - self.len()),
             });
+        }
+        Ok(())
+    }
+}
+
+impl PieceTreeStorage {
+    pub(crate) fn visit_span(
+        &self,
+        span: ByteSpan,
+        mut visit: impl FnMut(&str) -> io::Result<()>,
+    ) -> io::Result<()> {
+        if !self.contains_span(span) {
+            return Err(io::Error::other("history range exceeds storage"));
+        }
+        let start = span.start_byte as usize;
+        let end = span.byte_end() as usize;
+        let mut body = |base: usize, text: &str| -> io::Result<()> {
+            let lo = start.saturating_sub(base);
+            let hi = end.saturating_sub(base).min(text.len());
+            if lo >= hi {
+                return Ok(());
+            }
+            let mut text = text
+                .get(lo..hi)
+                .ok_or_else(|| io::Error::other("history range splits UTF-8"))?;
+            while !text.is_empty() {
+                let mut cut = text.len().min(256 * 1024);
+                while !text.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                visit(&text[..cut])?;
+                text = &text[cut..];
+            }
+            Ok(())
+        };
+        match (&self.original, span.buffer) {
+            (OriginalTextStorage::Owned(text), PieceBuffer::Original) => body(0, text)?,
+            (OriginalTextStorage::Chunked(original), PieceBuffer::Original) => {
+                for chunk in original
+                    .chunks
+                    .iter()
+                    .skip(
+                        original
+                            .chunks
+                            .partition_point(|c| c.logical_start + c.byte_len <= start),
+                    )
+                    .take_while(|c| c.logical_start < end)
+                {
+                    body(chunk.logical_start, &chunk.text.try_load_for_scan(false)?)?;
+                }
+            }
+            (_, PieceBuffer::Add) => {
+                for chunk in self
+                    .add
+                    .chunks
+                    .iter()
+                    .skip(
+                        self.add
+                            .chunks
+                            .partition_point(|c| c.start_byte + c.text.len() <= start),
+                    )
+                    .take_while(|c| c.start_byte < end)
+                {
+                    body(chunk.start_byte, &chunk.text.try_load_for_scan(false)?)?;
+                }
+            }
         }
         Ok(())
     }

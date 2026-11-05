@@ -205,3 +205,42 @@ fn path_width_only_shrinks_below_floor_when_no_space_remains() {
 fn status_item(kind: StatusBarItemKind, width: f32) -> StatusBarItem {
     StatusBarItem { kind, width }
 }
+
+#[test]
+fn storage_warning_is_visible_in_settings_and_empty_workspaces_at_narrow_width() {
+    use crate::app::services::{chunk_store::Health, session_manager};
+    use eframe::egui;
+    use egui_kittest::{Harness, kittest::Queryable};
+    for settings in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::app::app_state::test_support::test_app(root.path());
+        app.tab_manager.set_tabs(Vec::new(), 0);
+        if settings {
+            app.state
+                .chrome
+                .set_active_surface(crate::app::app_state::AppSurface::Settings);
+        }
+        app.state
+            .persistence
+            .session_store
+            .chunk_store_handle()
+            .unwrap()
+            .set_health(Health::Unavailable("injected writer failure".into()));
+        session_manager::poll_storage_health(&mut app);
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(400., 300.))
+            .with_context_setup(|ctx| {
+                let mut fonts = egui::FontDefinitions::default();
+                egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+                ctx.set_fonts(fonts);
+            })
+            .build_ui_state(super::show_status_bar, app);
+        harness.run();
+        assert!(
+            harness
+                .query_by_label("Session not saving. Text is in memory only.")
+                .is_some()
+        );
+        assert!(harness.query_by_label("Start new session").is_some());
+    }
+}

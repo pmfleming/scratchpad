@@ -147,13 +147,44 @@ impl PieceTreeStorage {
         store: crate::app::services::chunk_store::ChunkStoreHandle,
     ) -> io::Result<()> {
         if let Some(previous) = &self.add.store {
-            return if previous.epoch().id == store.epoch().id {
-                Ok(())
-            } else {
-                Err(io::Error::other(
-                    "text belongs to another store epoch; explicit copy/rebind required",
-                ))
+            if previous.epoch().id == store.epoch().id {
+                return Ok(());
+            }
+            let valid = |text: &ChunkText| match text {
+                ChunkText::Stored(chunk) => chunk
+                    .reference()
+                    .is_some_and(|r| r.epoch.id == store.epoch().id),
+                ChunkText::Inline(_) | ChunkText::Memory(_) | ChunkText::Missing(_) => true,
             };
+            let originals = match &self.original {
+                OriginalTextStorage::Owned(_) => true,
+                OriginalTextStorage::Chunked(original) => {
+                    original.chunks.iter().all(|c| valid(&c.text))
+                }
+            };
+            if !originals || !self.add.chunks.iter().all(|c| valid(&c.text)) {
+                return Err(io::Error::other(
+                    "text belongs to another store epoch; explicit copy/rebind required",
+                ));
+            }
+            let rebind = |text: &mut ChunkText| {
+                if let ChunkText::Stored(chunk) = text {
+                    *chunk = store.restored(
+                        chunk.reference().expect("validated migrated reference"),
+                        self.add.owner,
+                    );
+                }
+            };
+            if let OriginalTextStorage::Chunked(original) = &mut self.original {
+                for chunk in &mut Arc::make_mut(original).chunks {
+                    rebind(&mut chunk.text);
+                }
+            }
+            for index in 0..self.add.chunks.len() {
+                rebind(&mut self.add.chunks[index].text);
+            }
+            self.durable_original = Arc::default();
+            self.add.store = None;
         }
         if let OriginalTextStorage::Chunked(original) = &mut self.original {
             for chunk in &mut Arc::make_mut(original).chunks {
@@ -173,6 +204,25 @@ impl PieceTreeStorage {
         }
         self.add.store = Some(store);
         Ok(())
+    }
+    pub(super) fn ram_tail_bytes(&self) -> usize {
+        let original = match &self.original {
+            OriginalTextStorage::Owned(text) if text.len() >= 16 * 1024 * 1024 => text.len(),
+            _ => 0,
+        };
+        original.saturating_add(
+            self.add
+                .chunks
+                .iter()
+                .filter_map(|chunk| {
+                    if let ChunkText::Inline(text) = &chunk.text {
+                        Some(text.len())
+                    } else {
+                        None
+                    }
+                })
+                .sum::<usize>(),
+        )
     }
     pub(super) fn store(&self) -> Option<&crate::app::services::chunk_store::ChunkStoreHandle> {
         self.add.store.as_ref()
@@ -256,6 +306,12 @@ impl PieceTreeStorage {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+            .or_else(|| {
+                self.add
+                    .store
+                    .as_ref()
+                    .and_then(|store| store.owner_fault(self.add.owner))
+            })
     }
 
     pub(super) fn pin_span(&self, span: ByteSpan, retain: bool) -> io::Result<TextPin> {

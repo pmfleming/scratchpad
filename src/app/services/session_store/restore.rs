@@ -212,6 +212,7 @@ impl Restorer {
                     restored.text_metadata,
                 );
                 state.disk_content_digest = buffer.disk_content_digest;
+                state.storage_committed_revision = Some(state.storage_revision());
                 state.pending_source_check = state.path.is_some();
                 state.is_settings_file = buffer.is_settings_file;
                 state.observed_disk_digest = buffer.observed_disk_digest;

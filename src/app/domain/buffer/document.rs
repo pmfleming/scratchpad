@@ -133,6 +133,13 @@ impl TextDocument {
         &mut self,
         store: crate::app::services::chunk_store::ChunkStoreHandle,
     ) -> io::Result<()> {
+        if self
+            .piece_tree()
+            .store()
+            .is_some_and(|current| current.epoch().id == store.epoch().id)
+        {
+            return Ok(());
+        }
         self.piece_tree_mut().bind_store(store)
     }
 
