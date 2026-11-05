@@ -324,3 +324,51 @@ fn deferred_save_survives_superseded_observations_or_reports_failure() {
         }
     }
 }
+
+#[test]
+fn saving_pasted_newlines_does_not_create_false_external_changes() {
+    use crate::app::domain::CursorRange;
+    for original in [
+        "one\ntwo\n",
+        "one\r\ntwo\r\n",
+        "one\rtwo\r",
+        "one\r\ntwo\nthree\r",
+    ] {
+        for encoding_save in [false, true] {
+            let mut f = SavedBufferFixture::new("newlines.txt", original, original);
+            let buffer = f.app.tab_manager.tabs.as_mut_slice()[0].active_buffer_mut();
+            let end = buffer.document().piece_tree().len_chars();
+            buffer
+                .document_mut()
+                .replace_char_ranges_with_undo(
+                    &[(end..end, "pasted\nwith\r\nvaried\rendings".into())],
+                    CursorRange::default(),
+                    CursorRange::default(),
+                )
+                .unwrap();
+            buffer.refresh_text_metadata();
+            buffer.is_dirty = true;
+            let expected = buffer.text();
+            let history = buffer.document().history_entries().len();
+            if encoding_save {
+                assert!(FileController::save_file_with_encoding_at(
+                    &mut f.app, 0, "UTF-8"
+                ));
+            } else {
+                assert!(FileController::save_file_at(&mut f.app, 0));
+            }
+            wait_for_background_io(&mut f.app);
+            assert_eq!(std::fs::read_to_string(&f.path).unwrap(), expected);
+            // Force an observation, as if only the file timestamp changed.
+            f.app.tab_manager.tabs.as_mut_slice()[0]
+                .active_buffer_mut()
+                .disk_state = None;
+            observe(&mut f);
+            let buffer = f.app.tab_manager.tabs.as_slice()[0].active_buffer();
+            assert_eq!(buffer.text(), expected);
+            assert_eq!(buffer.document().history_entries().len(), history);
+            assert!(!buffer.is_dirty);
+            assert_eq!(rows(&f, ActivityKind::DiskConflict), 0);
+        }
+    }
+}
