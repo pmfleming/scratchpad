@@ -244,3 +244,83 @@ fn explicit_reload_of_saved_text_discards_local_work_without_an_external_label()
     doc.undo_last_operation().unwrap();
     assert_eq!(doc.extract_text(), "local");
 }
+
+#[test]
+fn deferred_save_survives_superseded_observations_or_reports_failure() {
+    use crate::app::{
+        app_state::{DeferredSave, PendingReloadBufferAction, PendingReloadMode},
+        services::{background_io::LoadedPathResult, file_service::FileService},
+    };
+    for case in ["epoch", "digest", "baseline", "renamed", "error", "empty"] {
+        let mut f = SavedBufferFixture::new("tracked.txt", "saved", "saved");
+        let buffer = f.app.tab_manager.tabs.as_mut_slice()[0].active_buffer_mut();
+        buffer.document_mut().replace_exact_with_history("local");
+        buffer.is_dirty = true;
+        let mut action = PendingReloadBufferAction::new(
+            f.app.tab_manager.tabs.as_slice()[0].active_buffer(),
+            PendingReloadMode::ObserveDiskChange,
+        )
+        .unwrap();
+        action.expected_epoch = f.app.state.persistence.session_store.history_epoch();
+        action.resume_save = Some(DeferredSave {
+            encoding: Some("UTF-8".into()),
+        });
+        let observed = FileService::read_observed_file(&f.path).unwrap();
+        let state = Some(observed.state.clone());
+        let loaded = FileService::buffer_from_observed(&f.path, observed);
+        match case {
+            "epoch" => {
+                f.app.state.persistence.session_store.invalidate_history();
+            }
+            "digest" => action.expected_observed_digest = Some("obsolete observation".into()),
+            "baseline" => {
+                f.app.tab_manager.tabs.as_mut_slice()[0]
+                    .active_buffer_mut()
+                    .disk_state = None
+            }
+            "renamed" => f.app.tab_manager.tabs.as_mut_slice()[0]
+                .active_buffer_mut()
+                .set_path(Some(f.path.with_extension("renamed"))),
+            _ => {}
+        }
+        let results = if case == "empty" {
+            vec![]
+        } else {
+            vec![LoadedPathResult {
+                path: f.path.clone(),
+                retained_tab: None,
+                disk_state: state,
+                missing: false,
+                result: if case == "error" {
+                    Err("temporary read failure".into())
+                } else {
+                    Ok(loaded)
+                },
+            }]
+        };
+        FileController::apply_async_reload_buffer_result(&mut f.app, action, results);
+        wait_for_background_io(&mut f.app);
+        if matches!(case, "renamed" | "error") {
+            assert_eq!(std::fs::read_to_string(&f.path).unwrap(), "saved", "{case}");
+            assert!(
+                f.app
+                    .state
+                    .status
+                    .current
+                    .as_ref()
+                    .unwrap()
+                    .text
+                    .contains("did not complete"),
+                "{case}"
+            );
+        } else {
+            assert_eq!(std::fs::read_to_string(&f.path).unwrap(), "local", "{case}");
+            assert!(
+                !f.app.tab_manager.tabs.as_slice()[0]
+                    .active_buffer()
+                    .is_dirty,
+                "{case}"
+            );
+        }
+    }
+}
