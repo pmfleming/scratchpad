@@ -39,7 +39,7 @@ fn forgetting_history_rejects_a_delayed_reopen_result() {
     );
     let live = app.tab_manager.active_tab().unwrap().active_buffer().id;
     assert!(crate::app::app_state::workspace::mutation::clear_text_history(&mut app, &[live]));
-    app.apply_retained_reopened_result(731, Ok(Box::new(closed)));
+    app.apply_retained_reopened_result(731, Ok((Box::new(closed), None)));
     assert_eq!(app.tab_manager.tabs.len(), 1);
     assert_eq!(
         app.tab_manager.active_tab().unwrap().active_buffer().text(),
@@ -320,4 +320,99 @@ fn unknown_background_result_is_ignored() {
 
     assert_eq!(app.tab_manager.tabs.as_slice().len(), original_tabs);
     assert!(app.state.status.current.is_none());
+}
+
+#[test]
+fn timeline_cold_hydration_runs_conflict_search_and_restore_status_updates() {
+    use crate::app::services::{
+        file_service::FileService,
+        session_store::{RestoreStatus, RestoreStatusLevel, activity::ActivityKind},
+    };
+    for missing in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("tracked.txt");
+        std::fs::write(&path, "saved").unwrap();
+        let mut app = test_support::test_app(root.path());
+        let mut buffer = FileService::buffer_from_observed(
+            &path,
+            FileService::read_observed_file(&path).unwrap(),
+        );
+        buffer
+            .document_mut()
+            .replace_exact_with_history("local unsaved");
+        buffer.is_dirty = true;
+        let id = buffer.temp_id.clone();
+        let tab = WorkspaceTab::new(buffer);
+        let cold = crate::app::services::session_store::cold_tab_from_workspace_tab(&tab);
+        let store = app.state.persistence.session_store.clone();
+        store.persist(&[tab], 0, 14.0, false).unwrap();
+        // Obtain a real unloaded shell using the streaming restore API.
+        let mut shell = None;
+        store
+            .load_streaming(
+                |_, _, _| true,
+                |_, tab, _| {
+                    shell = Some(tab);
+                    true
+                },
+            )
+            .unwrap();
+        let mut shell = shell.unwrap();
+        shell.active_buffer_mut().replace_text(String::new());
+        app.tab_manager.set_tabs(vec![shell], 0);
+        app.tab_manager.set_cold_session_tab(0, cold.clone());
+        if missing {
+            std::fs::remove_file(&path).unwrap();
+        } else {
+            std::fs::write(&path, "external").unwrap();
+        }
+        let (tab, _) = store.restore_cold_session_tab(cold).unwrap();
+        app.state.search_state.panel.open = true;
+        app.state.search_state.runtime.dirty = false;
+        app.state.background_io.insert_pending_background_action(
+            736,
+            PendingBackgroundAction::ReopenRetained(
+                crate::app::app_state::PendingRetainedOpenAction {
+                    expected_epoch: store.history_epoch(),
+                    document: Some(id),
+                    node: None,
+                },
+            ),
+        );
+        app.apply_retained_reopened_result(
+            736,
+            Ok((
+                Box::new(tab),
+                Some(RestoreStatus {
+                    level: RestoreStatusLevel::Warning,
+                    message: "Hydration warning".into(),
+                }),
+            )),
+        );
+        assert!(app.tab_manager.cold_session_tabs().is_empty());
+        assert!(app.state.search_state.runtime.dirty);
+        assert!(
+            app.state
+                .status
+                .history
+                .iter()
+                .any(|entry| entry.text == "Hydration warning")
+        );
+        assert!(
+            app.state
+                .persistence
+                .pending_activity
+                .iter()
+                .any(|event| event.kind
+                    == if missing {
+                        ActivityKind::Missing
+                    } else {
+                        ActivityKind::DiskConflict
+                    })
+        );
+        assert_eq!(
+            app.tab_manager.active_tab().unwrap().active_buffer().text(),
+            "local unsaved"
+        );
+    }
 }

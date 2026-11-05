@@ -11,7 +11,7 @@ use std::path::PathBuf;
 pub(crate) enum BackgroundIoResult {
     RetainedReopened {
         request_id: u64,
-        result: Result<Box<WorkspaceTab>, String>,
+        result: Result<(Box<WorkspaceTab>, Option<RestoreStatus>), String>,
     },
     PathsLoaded {
         request_id: u64,

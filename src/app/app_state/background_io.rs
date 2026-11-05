@@ -26,7 +26,13 @@ impl ScratchpadApp {
     fn apply_retained_reopened_result(
         &mut self,
         request_id: u64,
-        result: Result<Box<crate::app::domain::WorkspaceTab>, String>,
+        result: Result<
+            (
+                Box<crate::app::domain::WorkspaceTab>,
+                Option<crate::app::services::session_store::RestoreStatus>,
+            ),
+            String,
+        >,
     ) {
         let Some(action) = self.take_pending_action(
             request_id,
@@ -42,8 +48,8 @@ impl ScratchpadApp {
             );
             return;
         }
-        let tab = match result {
-            Ok(tab) => tab,
+        let (tab, restore_status) = match result {
+            Ok(restored) => restored,
             Err(error) => {
                 self.state.status.report_session_restore_failed(error);
                 return;
@@ -64,8 +70,7 @@ impl ScratchpadApp {
                 .then_some(index)
             });
         if let Some(index) = cold_index {
-            self.tab_manager.replace_restored_tab(index, *tab);
-            self.tab_manager.take_cold_session_tab(index);
+            self.install_hydrated_tab(index, *tab, restore_status);
         } else if !self
             .tab_manager
             .tabs
@@ -475,17 +480,7 @@ impl ScratchpadApp {
             return;
         };
 
-        if self
-            .tab_manager
-            .replace_restored_tab(current_tab_index, *tab)
-        {
-            let _ = self.tab_manager.take_cold_session_tab(current_tab_index);
-            if let Some(status) = restore_status {
-                self.apply_session_restore_status(status);
-            }
-            workspace_restore_conflict::refresh_startup_restore_conflicts(self);
-            crate::app::app_state::search_runtime::mark_search_dirty(self);
-        }
+        self.install_hydrated_tab(current_tab_index, *tab, restore_status);
         if action.progressive {
             self.queue_next_progressive_session_hydration();
         }
@@ -647,13 +642,23 @@ impl ScratchpadApp {
                 return false;
             }
         };
-        if !self.tab_manager.replace_restored_tab(index, restored_tab) {
+        self.install_hydrated_tab(index, restored_tab, restore_status)
+    }
+
+    fn install_hydrated_tab(
+        &mut self,
+        index: usize,
+        tab: crate::app::domain::WorkspaceTab,
+        restore_status: Option<crate::app::services::session_store::RestoreStatus>,
+    ) -> bool {
+        if !self.tab_manager.replace_restored_tab(index, tab) {
             return false;
         }
         self.tab_manager.take_cold_session_tab(index);
         if let Some(status) = restore_status {
             self.apply_session_restore_status(status);
         }
+        workspace_restore_conflict::refresh_startup_restore_conflicts(self);
         crate::app::app_state::search_runtime::mark_search_dirty(self);
         true
     }

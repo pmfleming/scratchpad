@@ -24,10 +24,16 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
                 claimed,
             } => LaneOutcome::result(BackgroundIoResult::RetainedReopened {
                 request_id,
-                result: session_store
-                    .reopen_target(target, &claimed)
-                    .map(Box::new)
-                    .map_err(|e| e.to_string()),
+                result: match target {
+                    crate::app::services::session_store::RetainedTarget::Cold(cold) => {
+                        session_store.restore_cold_session_tab(cold)
+                    }
+                    target => session_store
+                        .reopen_target(target, &claimed)
+                        .map(|tab| (tab, None)),
+                }
+                .map(|(tab, status)| (Box::new(tab), status))
+                .map_err(|e| e.to_string()),
             }),
             BackgroundIoRequest::LoadPaths {
                 request_id,
