@@ -1,6 +1,4 @@
-use crate::app::app_state::{
-    ScratchpadApp, workspace::accessors as workspace_accessors, workspace_controller,
-};
+use crate::app::app_state::{ScratchpadApp, workspace::accessors as workspace_accessors};
 use crate::app::domain::{SplitAxis, ViewId, WorkspaceTab};
 
 struct TabCombineContext {
@@ -57,7 +55,7 @@ pub(super) fn promote_view_to_tab_command(app: &mut ScratchpadApp, view_id: View
     };
 
     crate::app::app_state::frame::begin_layout_transition(app);
-    workspace_controller::append_tab(app, promoted_tab);
+    crate::app::app_state::workspace::lifecycle::append_transferred_tab(app, promoted_tab);
     let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
 }
 

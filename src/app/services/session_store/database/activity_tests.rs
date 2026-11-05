@@ -311,3 +311,45 @@ fn closing_a_cold_blank_untitled_document_removes_its_creation_without_hydrating
     );
     assert!(!app.state.background_io.has_pending_session_hydration());
 }
+
+#[test]
+fn promoting_an_open_split_pane_does_not_record_another_open() {
+    use crate::app::{
+        commands::{AppCommand, WorkspaceCommand, handle_command},
+        domain::{BufferState, SplitAxis, WorkspaceTab},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let mut app = test_support::test_app(root.path());
+    let mut tab = WorkspaceTab::new(BufferState::new("first".into(), "first".into(), None));
+    let view = tab
+        .open_buffer_as_split(
+            BufferState::new("second".into(), "second".into(), None),
+            SplitAxis::Vertical,
+            true,
+            0.5,
+        )
+        .unwrap();
+    workspace_controller::append_tab(&mut app, tab);
+    session_manager::persist_session_now(&mut app).unwrap();
+    let store = app.state.persistence.session_store.clone();
+    let before = store
+        .timeline_page(None, vec![], String::new())
+        .unwrap()
+        .rows
+        .len();
+    let tabs = app.tab_manager.tabs.len();
+    handle_command(
+        &mut app,
+        AppCommand::Workspace(WorkspaceCommand::PromoteViewToTab { view_id: view }),
+    );
+    assert_eq!(app.tab_manager.tabs.len(), tabs + 1);
+    assert!(app.state.persistence.pending_activity.is_empty());
+    assert_eq!(
+        store
+            .timeline_page(None, vec![], String::new())
+            .unwrap()
+            .rows
+            .len(),
+        before
+    );
+}

@@ -18,7 +18,7 @@ pub(crate) fn append_created_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
     create_workspace_tab(
         app,
         tab,
-        crate::app::services::session_store::activity::ActivityKind::Created,
+        Some(crate::app::services::session_store::activity::ActivityKind::Created),
     );
 }
 
@@ -197,7 +197,7 @@ pub(crate) fn install_archive(app: &mut ScratchpadApp, mut tab: WorkspaceTab) ->
     create_workspace_tab(
         app,
         tab,
-        crate::app::services::session_store::activity::ActivityKind::Opened,
+        Some(crate::app::services::session_store::activity::ActivityKind::Opened),
     );
     true
 }
@@ -206,14 +206,18 @@ pub(crate) fn append_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
     create_workspace_tab(
         app,
         tab,
-        crate::app::services::session_store::activity::ActivityKind::Opened,
+        Some(crate::app::services::session_store::activity::ActivityKind::Opened),
     );
+}
+
+pub(crate) fn append_transferred_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
+    create_workspace_tab(app, tab, None);
 }
 
 fn create_workspace_tab(
     app: &mut ScratchpadApp,
     tab: WorkspaceTab,
-    kind: crate::app::services::session_store::activity::ActivityKind,
+    kind: Option<crate::app::services::session_store::activity::ActivityKind>,
 ) {
     let documents: Vec<_> = tab
         .buffers()
@@ -224,7 +228,9 @@ fn create_workspace_tab(
     crate::app::app_state::frame::begin_layout_transition(app);
     let index = new_tab_insert_index(app);
     app.tab_manager.insert_tab(index, tab);
-    crate::app::services::session_store::activity::record_installed(app, &documents, kind);
+    if let Some(kind) = kind {
+        crate::app::services::session_store::activity::record_installed(app, &documents, kind);
+    }
     app.apply_history_budget_to_open_buffers();
     app.apply_current_tab_ordering();
     settings_controller::activate_workspace_surface(app);
