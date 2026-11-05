@@ -1,6 +1,9 @@
 //! Production-path fixture for Scratchpad Performance Lens; no timing budgets here.
 use super::super::{CapturedClosedTab, SessionPersistRequest, SessionStore};
 use crate::app::domain::{BufferState, WorkspaceTab};
+use crate::app::ui::editor_content::native_editor::{
+    CharCursor, CursorRange, EditOperation, OperationRecord,
+};
 use std::{io, path::PathBuf, time::Instant};
 
 pub struct SessionMaintenanceFixture {
@@ -109,5 +112,57 @@ impl SessionMaintenanceFixture {
             return Err(io::Error::other("profile session text mismatch"));
         }
         Ok(())
+    }
+
+    /// Capture before the worker starts, then time mutation and the frame's
+    /// storage-health query while that exact captured revision is saved.
+    pub fn typing_sample(&mut self, saving: bool) -> io::Result<(Vec<u128>, u128)> {
+        let request = SessionPersistRequest::capture(&self.tabs, 0, 16.0, false);
+        let store = &self.store;
+        let buffer = self.tabs[0].active_buffer_mut();
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let job = saving.then(|| {
+                scope.spawn(|| {
+                    barrier.wait();
+                    let timer = Instant::now();
+                    store.persist_request(request)?;
+                    Ok::<_, io::Error>(timer.elapsed().as_nanos())
+                })
+            });
+            if saving {
+                barrier.wait();
+            }
+            let mut times = Vec::new();
+            for _ in 0..128 {
+                let timer = Instant::now();
+                std::hint::black_box(store.writes_blocked());
+                let at = buffer.document().piece_tree().len_chars();
+                let document = buffer.document_mut();
+                document.insert_direct(at, "x");
+                document.push_edit_operation_with_source(
+                    OperationRecord {
+                        previous_cursor: CursorRange::one(CharCursor::new(at)),
+                        next_cursor: CursorRange::one(CharCursor::new(at + 1)),
+                        edits: vec![EditOperation {
+                            start_char: at,
+                            deleted_text: String::new(),
+                            inserted_text: "x".into(),
+                            deleted_spans: Vec::new(),
+                        }],
+                    },
+                    crate::app::domain::PieceSource::Edit,
+                );
+                buffer.is_dirty = true;
+                times.push(timer.elapsed().as_nanos());
+            }
+            let save_ns = match job {
+                Some(job) => job
+                    .join()
+                    .map_err(|_| io::Error::other("profile save panicked"))??,
+                None => 0,
+            };
+            Ok((times, save_ns))
+        })
     }
 }

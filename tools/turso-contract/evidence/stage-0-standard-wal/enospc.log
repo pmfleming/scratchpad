@@ -1,0 +1,2 @@
+ENOSPC observed IoError(StorageFull, "pwritev"); autocommit=Ok(true)
+PASS actual isolated-filesystem exhaustion retains committed text

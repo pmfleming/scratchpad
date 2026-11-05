@@ -2,6 +2,8 @@
 mod alloc_metrics;
 #[path = "resource_probe/events.rs"]
 mod events;
+#[path = "resource_probe/live_text.rs"]
+mod live_text;
 #[path = "resource_probe/scenarios.rs"]
 mod scenarios;
 #[path = "resource_probe/session_maintenance.rs"]
@@ -45,7 +47,9 @@ const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
 const FRAGMENT_UNIT: &str = "hay needle café 東京\n";
 
 fn main() {
-    if std::env::args().any(|arg| arg == "--live-text-baseline") {
+    if std::env::args().any(|arg| arg == "--live-text-stage-zero") {
+        live_text::run();
+    } else if std::env::args().any(|arg| arg == "--live-text-baseline") {
         scenarios::run_live_text_baseline();
     } else if std::env::args().any(|arg| arg == "--large-dirty-save") {
         session_save::run();

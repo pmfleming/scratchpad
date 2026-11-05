@@ -13,7 +13,7 @@ use std::{
 const CHUNK_BYTES: usize = 256 * 1024;
 const DEADLINE: Duration = Duration::from_secs(30);
 
-enum Request {
+pub(super) enum Request {
     Read(i64),
     Begin,
     End,
@@ -22,14 +22,14 @@ enum Request {
 
 /// A bounded hop with its own connection, matching the proposed reader boundary.
 /// Dropping the sender joins the reader before any writer/database is closed.
-struct Reader {
+pub(super) struct Reader {
     requests: Option<SyncSender<Request>>,
     replies: Receiver<Result<Vec<u8>>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Reader {
-    fn new(path: &Path, mode: WalMode) -> Result<Self> {
+    pub(super) fn new(path: &Path, mode: WalMode) -> Result<Self> {
         let (requests, incoming) = mpsc::sync_channel(1);
         let (outgoing, replies) = mpsc::sync_channel(1);
         let path = path.to_owned();
@@ -78,7 +78,7 @@ impl Reader {
         Ok(reader)
     }
 
-    fn call(&self, request: Request) -> Result<Vec<u8>> {
+    pub(super) fn call(&self, request: Request) -> Result<Vec<u8>> {
         self.requests
             .as_ref()
             .ok_or("reader stopped")?
@@ -417,6 +417,9 @@ pub(super) fn check(path: &Path, mode: WalMode, overflow: bool) -> Result<()> {
         let (_database, connection) = open(path, mode).await?;
         assert_eq!(body(&connection, -1).await?, b"normal chunk");
         assert_eq!(body(&connection, -2).await?, b"full manifest");
+        for id in 1_000_000..1_000_128_i64 {
+            assert_eq!(body(&connection, id).await?, vec![b'n'; CHUNK_BYTES]);
+        }
         assert_eq!(
             scalar(&connection, "SELECT count(*) FROM live_chunks WHERE id=-3").await?,
             0,
@@ -446,9 +449,19 @@ pub(super) fn abrupt_normal_full(path: &Path, mode: WalMode) -> Result<()> {
     block_on(async {
         let (_database, connection) = open(path, mode).await?;
         let reader = Reader::new(path, mode)?;
-        reader.call(Request::Begin)?;
-        reader.call(Request::Read(0))?;
         connection.execute("PRAGMA synchronous=NORMAL", ()).await?;
+        for id in 1_000_000..1_000_128_i64 {
+            if id == 1_000_064 {
+                reader.call(Request::Begin)?;
+                reader.call(Request::Read(0))?;
+            }
+            connection
+                .execute(
+                    "INSERT INTO live_chunks VALUES(?,?)",
+                    (id, vec![b'n'; CHUNK_BYTES]),
+                )
+                .await?;
+        }
         connection
             .execute(
                 "INSERT INTO live_chunks VALUES(-1,?)",

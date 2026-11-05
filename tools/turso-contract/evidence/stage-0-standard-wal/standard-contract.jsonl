@@ -1,0 +1,16 @@
+{"cdc":false,"chunks":33,"edited_bytes":8388619,"elapsed_ns":2542940,"name":"utf8_import_chunking","new_unique_bytes":5767179,"original_bytes":8388608}
+{"cdc":true,"chunks":100,"edited_bytes":8388619,"elapsed_ns":7274664,"name":"utf8_import_chunking","new_unique_bytes":113785,"original_bytes":8388608}
+{"many_entries":true,"name":"history_spans_encoding","packed":false,"restore_ns":26689277,"spans":100000,"write_ns":411253216}
+{"many_entries":true,"name":"history_spans_encoding","packed":true,"restore_ns":14172479,"spans":100000,"write_ns":435129715}
+{"many_entries":false,"name":"history_spans_encoding","packed":false,"restore_ns":26701129,"spans":100000,"write_ns":393429874}
+{"many_entries":false,"name":"history_spans_encoding","packed":true,"restore_ns":12714749,"spans":100000,"write_ns":116809699}
+{"close_first_ns":21392460,"cursor_commit_ns":1519556,"name":"layout_rows_prototype","reserve_ids_ns":16792905,"restore_ns":17662299,"scope":"structurally equivalent fixture, not complete production SessionBuffer schema","tabs":10000,"typed":false,"write_ns":35198110}
+{"close_first_ns":23316607,"cursor_commit_ns":1275488,"name":"layout_rows_prototype","reserve_ids_ns":230463,"restore_ns":6394088,"scope":"structurally equivalent fixture, not complete production SessionBuffer schema","tabs":10000,"typed":true,"write_ns":58119273}
+{"max_ns":112460343,"name":"single_chunk_normal_batch","p50_ns":169228,"p99_ns":24724233,"samples":12288}
+{"bytes":3221225472,"database_bytes":3227545600,"elapsed_ns":16444981740,"name":"large_database_insert","wal_bytes":4152}
+{"max_ns":92381852,"name":"normal_chunk_commit_during_reads","p50_ns":191070,"p99_ns":54463961,"samples":256}
+{"io_overrun":true,"name":"batch_scheduling_target","observed_max_ns":92381852,"policy":"user-approved scheduling target; bounded batches yield before taking more work; UI responsiveness validated separately","target_ns":50000000}
+{"max_ns":372129,"name":"temporary_file_256k_page_cache","p50_ns":48611,"p99_ns":82605,"samples":1024}
+{"max_ns":1617390,"name":"three_gib_database_reader_verified","p50_ns":186872,"p99_ns":396174,"samples":1024}
+{"io":"rchar: 1684997990\nwchar: 6980592233\nsyscr: 343086\nsyscw: 81175\nread_bytes: 0\nwrite_bytes: 7547179008\ncancelled_write_bytes: 6066176\n","name":"large_database_resources","page_cache_kib":{"reader":512,"writer":8192},"scope":"process lifetime high water; OS page cache not counted as RSS","status":["VmHWM:\t   77796 kB","VmRSS:\t   42656 kB"]}
+PASS stage_zero standard WAL; native Windows validation pending separately

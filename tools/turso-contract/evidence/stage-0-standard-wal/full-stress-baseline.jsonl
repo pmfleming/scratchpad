@@ -1,0 +1,14 @@
+{"cdc":false,"chunks":33,"edited_bytes":8388619,"elapsed_ns":3995898,"name":"utf8_import_chunking","new_unique_bytes":5767179,"original_bytes":8388608}
+{"cdc":true,"chunks":100,"edited_bytes":8388619,"elapsed_ns":14202422,"name":"utf8_import_chunking","new_unique_bytes":113785,"original_bytes":8388608}
+{"many_entries":true,"name":"history_spans_encoding","packed":false,"restore_ns":48795710,"spans":100000,"write_ns":878680272}
+{"many_entries":true,"name":"history_spans_encoding","packed":true,"restore_ns":24542206,"spans":100000,"write_ns":931673785}
+{"many_entries":false,"name":"history_spans_encoding","packed":false,"restore_ns":48810387,"spans":100000,"write_ns":842414530}
+{"many_entries":false,"name":"history_spans_encoding","packed":true,"restore_ns":18990360,"spans":100000,"write_ns":259171058}
+{"close_first_ns":41546580,"cursor_commit_ns":1927888,"name":"layout_rows_prototype","reserve_ids_ns":25445876,"restore_ns":25411872,"scope":"structurally equivalent fixture, not complete production SessionBuffer schema","tabs":10000,"typed":false,"write_ns":60176201}
+{"close_first_ns":50784491,"cursor_commit_ns":1712051,"name":"layout_rows_prototype","reserve_ids_ns":1517245,"restore_ns":12150992,"scope":"structurally equivalent fixture, not complete production SessionBuffer schema","tabs":10000,"typed":true,"write_ns":130162290}
+{"max_ns":82909106,"name":"single_chunk_full_batch","p50_ns":3012628,"p99_ns":22475144,"samples":12288}
+{"bytes":3221225472,"database_bytes":3227545600,"elapsed_ns":56096763081,"name":"large_database_insert","wal_bytes":4367232}
+{"max_ns":81375375,"name":"chunk_commit_during_reads","p50_ns":10964316,"p99_ns":67682085,"samples":256}
+{"max_ns":678106,"name":"temporary_file_256k_page_cache","p50_ns":72797,"p99_ns":100689,"samples":1024}
+{"max_ns":3781443,"name":"three_gib_database_reader_verified","p50_ns":406875,"p99_ns":1726097,"samples":1024}
+PASS stage_zero standard WAL; native Windows validation pending separately

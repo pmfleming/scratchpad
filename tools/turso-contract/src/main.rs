@@ -1,5 +1,6 @@
 //! Isolated release-engine contract. Does not open a user's session database.
 mod live_text;
+mod stage_zero;
 
 use futures_lite::future::block_on;
 use std::{error::Error, path::Path, process::Command};
@@ -31,6 +32,14 @@ impl WalMode {
 
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
+    if args.get(1).is_some_and(|arg| arg == "--stage-zero") {
+        return stage_zero::run();
+    }
+    if args.get(1).is_some_and(|arg| arg == "--enospc") {
+        return stage_zero::enospc(Path::new(
+            args.get(2).ok_or("missing isolated filesystem path")?,
+        ));
+    }
     if args.get(1).is_some_and(|arg| arg == "--abrupt") {
         if args.len() != 5 {
             return Err(

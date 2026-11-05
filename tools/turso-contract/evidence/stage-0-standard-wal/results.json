@@ -1,0 +1,24 @@
+{
+  "decision": "proceed with standard WAL",
+  "native_windows": "pending; user explicitly authorized continuing implementation",
+  "writer_batch_target": "50 ms scheduling target with reported I/O overruns; user approved 2026-11-05",
+  "reader_p99_gate_ns": 4000000,
+  "verified_reader_p99_ns": 396174,
+  "max_observed_concurrent_normal_batch_ns": 92381852,
+  "initial_pending_flow_bytes": 33554432,
+  "initial_batch_max_chunks": 4,
+  "initial_batch_work_target_ns": 4000000,
+  "normal_full_protocol": "NORMAL chunk-only transactions; FULL manifest commits; checkpoint ordering inspected in pinned 0.8.3; 128-chunk abrupt-exit recovery passed",
+  "import_boundaries": "UTF-8-adjusted CDC; append log fixed rollover",
+  "history_encoding": "typed metadata; packed span fallback favored for very large entries",
+  "typed_metadata_scope": "10,000-tab structural prototype; complete production-field round trips and full-schema cost are stage 2 checks",
+  "resource_events_ok": 9,
+  "enospc": "private 24 MiB tmpfs; actual StorageFull; exact committed Unicode text preserved",
+  "enospc_command": "unshare --user --map-root-user --mount --propagation private --fork sh -c 'mount -t tmpfs -o size=24m tmpfs \"$1\" && \"$2\" --enospc \"$1\"' sh TEMP_DIRECTORY ABSOLUTE_PROBE_PATH",
+  "source_sha256": {
+    "tools/turso-contract/src/stage_zero.rs": "957acd1e8293f0617482f652bd7dd488206d5dadce3449c63b26ab2ca263877d",
+    "tools/turso-contract/src/live_text.rs": "be902942645b89e123a2fdfebc5c26f4b9677ba251e828b89321e3bfe9292c5c",
+    "src/bin/resource_probe/live_text.rs": "3fa8ae341a1dd21c707d6737a7c0e41bb15daa6ef6bece23dd742560ec5cb2e3",
+    "src/app/services/session_store/database/profiling.rs": "cc44d48acce94e0d19b5268ce42e29bc20d3fecb43ed002478e86f8c42311207"
+  }
+}

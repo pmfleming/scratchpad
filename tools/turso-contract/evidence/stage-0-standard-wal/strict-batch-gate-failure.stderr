@@ -1,0 +1,12 @@
+[0mdirenv: loading ~/Projects/scratchpad/.envrc
+[0mdirenv: using flake
+[0mdirenv: nix-direnv: Using cached dev shell
+Scratchpad dev shell
+Try: cargo check
+   Compiling scratchpad-turso-spike v0.1.0 (/home/laufan/Projects/scratchpad/tools/turso-contract)
+    Finished `release` profile [optimized] target(s) in 5.05s
+     Running `tools/turso-contract/target/release/scratchpad-turso-spike --stage-zero`
+
+thread 'main' (308872) panicked at src/stage_zero.rs:398:9:
+chunk batch exceeded the unchanged 50 ms gate: 80934947 ns
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

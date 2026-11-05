@@ -3,7 +3,54 @@
 Date: 2026-11-05. Application baseline: `087e045`. Implementation plan:
 `docs/turso-live-text-storage-plan.md`, reviewed against that same commit.
 
-## Decision: no-go for stage 1
+## Revised decision: proceed with standard WAL
+
+On 2026-11-05 the user approved standard WAL on both platforms, continued
+implementation with native Windows validation pending, and a 50 ms writer
+scheduling target with I/O overruns recorded and UI responsiveness validated
+separately. These replace the original experimental-mode gate and strict batch
+wall-time limit. All other performance targets remain unchanged.
+
+The remaining Linux probes passed. The 3 GiB database's verified dedicated-reader
+p99 was 0.40 ms during writes, below 4 ms. Actual tmpfs exhaustion returned
+`IoError(StorageFull, "pwritev")` and preserved committed exact Unicode text.
+NORMAL-to-FULL recovery now covers 128 chunks across automatic checkpoints,
+with both unpinned and pinned-reader phases, before abrupt process exit. Source
+inspection confirms WAL synchronization before checkpoint backfill, database
+synchronization before truncation, and the final FULL commit's write/sync barrier.
+This supports NORMAL chunk-only transactions with FULL manifest publication;
+it does not claim a physical power-loss experiment.
+
+The sustained-write probe recorded approximately 92 ms I/O overruns, including
+under NORMAL. Routine four-chunk FULL transactions were below 8 ms. Select a
+maximum of four 256 KiB chunks or 4 ms of batching work before yielding to jobs,
+with 32 MiB of pending text as the initial healthy bulk-flow threshold. Never
+block UI health checks or paint on the writer. Preserve the stress results as
+regression evidence, including overruns rather than only reporting percentiles.
+
+The additional production-path baselines include three exact-match file-backed
+Unicode searches and typing with/without a captured save. They expose the queued
+health-check stall (one measured edit waited about 644 ms), motivating the
+non-queued `writes_blocked` refactor. All nine resource cases completed without
+panic or altered text.
+
+The 8 MiB edited-version experiment supports UTF-8-adjusted CDC for imports:
+approximately 114 KiB of new unique chunks versus 5.8 MiB for fixed 256 KiB cuts.
+Keep fixed rollover chunks for the append-only add log. The 100,000-span
+replace-all prototype favors packed spans; normal single-span entries have
+similar write cost in either representation. Keep metadata typed and use the
+plan's packed-span fallback where needed. The 10,000-tab structural prototype
+shows lower typed restore/ID-reservation/cursor costs and avoids copying layout
+content when closing the first tab. Its fixture is intentionally identified as
+a table-shape comparison, not full production metadata round-trip validation;
+stage 2 must validate every real field and repeat those measurements.
+
+See `evidence/stage-0-standard-wal/` for the additional raw runs and decisions.
+Native Windows runtime validation remains an explicit release acceptance item.
+Multiprocess WAL is to be revisited on later Turso versions against the retained
+overflow/recovery reproducer, not automatically enabled after an upgrade.
+
+## Initial decision (superseded by the approved standard-WAL revision)
 
 Do not enable multiprocess WAL in the application or begin the dependent storage
 rewrite yet. The optional frame-index overflow contract fails reproducibly on

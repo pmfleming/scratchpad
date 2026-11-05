@@ -16,8 +16,9 @@ On Linux, also run:
 cargo run --release --locked --manifest-path tools/turso-contract/Cargo.toml -- --wal-mode multiprocess
 ```
 
-The regular contract runs in Linux and native Windows CI, with multiprocess WAL
-tested on Linux only. It asserts correctness, without timing gates tied to CI
+The standard-WAL contract runs in Linux and native Windows CI. The experimental
+Linux contract is retained for manual reassessment on later Turso versions; it
+is not a production gate. It asserts correctness, without timing gates tied to CI
 hardware. Set an external process timeout when running against a suspect engine;
 the reader response timeout cannot interrupt a stuck engine call or destructor.
 
@@ -104,3 +105,17 @@ exact text and 1,034 entries after reopen. This corrects the old fixture's stale
 Also run the unchanged `promise_latency`, `frame_budget`, and `search_speed`
 Criterion suites and preserve their output/baseline estimates. Measurement
 orchestration and budget policy remain in Scratchpad Performance Lens.
+
+## Remaining standard-WAL stage 0 experiments
+
+Run `cargo run --release --locked --manifest-path tools/turso-contract/Cargo.toml -- --stage-zero`
+for UTF-8 chunking, 100,000 spans, 10,000 layouts, and a 3 GiB read/write fixture.
+The 4 ms verified-reader p99 gate remains enforced. A 50 ms chunk batch duration
+is a scheduling target, approved by the user after measured kernel/engine I/O
+overruns; every overrun is reported. It is not represented as a hard deadline.
+
+`resource_probe --live-text-stage-zero` records file-backed search and typing
+with captured saves, including the UI's storage-health query. The separate
+`--enospc PATH` internal command requires a fresh, size-limited filesystem in a
+private mount namespace; never point it at a user directory. The report records
+the isolated Linux tmpfs invocation and its actual StorageFull result.
