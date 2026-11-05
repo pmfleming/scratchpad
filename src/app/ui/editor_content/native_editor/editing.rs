@@ -5,6 +5,60 @@ use crate::app::domain::{BufferState, PieceSource};
 use crate::app::services::settings_store::IndentationStyle;
 use std::borrow::Cow;
 
+/// Read requirements collected without cloning events or holding egui's input
+/// lock while pinning storage. Every input event is inspected once.
+#[derive(Default)]
+pub(super) struct InputRead {
+    indent: bool,
+    read: bool,
+    bulk: bool,
+}
+impl InputRead {
+    pub(super) fn from_events(events: &[eframe::egui::Event]) -> Self {
+        use eframe::egui::{Event, Key};
+        let mut needs = Self::default();
+        for event in events {
+            match event {
+                Event::Text(text) | Event::Paste(text) => {
+                    needs.read = true;
+                    needs.bulk |= text.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES;
+                }
+                Event::Copy | Event::Cut => needs.read = true,
+                Event::Key {
+                    key, pressed: true, ..
+                } => {
+                    needs.read = true;
+                    needs.indent |= *key == Key::Tab;
+                }
+                _ => {}
+            }
+        }
+        needs
+    }
+    pub(super) fn pin(
+        self,
+        buffer: &BufferState,
+        cursor: &CursorRange,
+    ) -> std::io::Result<Option<crate::app::domain::buffer::TextPin>> {
+        if !self.read || self.bulk || buffer.is_preparing_text() {
+            return Ok(None);
+        }
+        let (start, end) = cursor.sorted_indices();
+        let selection = start..end;
+        if selection.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES / 4
+            || (self.indent && indentation_needs_preparation(buffer, cursor))
+        {
+            return Ok(None);
+        }
+        let range = if self.indent {
+            indentation_range(buffer, cursor)
+        } else {
+            selection
+        };
+        buffer.document().piece_tree().pin_range(range).map(Some)
+    }
+}
+
 struct RecordedEdit {
     new_cursor: CursorRange,
     start_char: usize,

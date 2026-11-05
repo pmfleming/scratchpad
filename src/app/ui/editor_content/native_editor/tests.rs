@@ -8,8 +8,86 @@ use crate::app::ui::editor_content::native_editor::{EditorHighlightStyle, TextEd
 use eframe::egui;
 
 #[test]
-fn editor_keeps_tab_for_indentation() {
+fn editor_keeps_tab_and_pins_only_bounded_synchronous_input() {
+    use super::editing::InputRead;
+    use crate::app::domain::{PieceSource, buffer::BULK_TEXT_BYTES};
     assert!(editor_focus_lock_filter().tab);
+    let key = |pressed| egui::Event::Key {
+        key: egui::Key::Tab,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let buffer = BufferState::new("input".into(), "λ\nline".into(), None);
+    let cursor = CursorRange::two(0, 2);
+    for (event, pin) in [
+        (egui::Event::Text("λ".into()), true),
+        (egui::Event::Paste("small".into()), true),
+        (egui::Event::Copy, true),
+        (egui::Event::Cut, true),
+        (key(true), true),
+        (key(false), false),
+        (egui::Event::PointerGone, false),
+        (egui::Event::Ime(egui::ImeEvent::Commit("λ".into())), false),
+        (egui::Event::Paste("x".repeat(BULK_TEXT_BYTES)), false),
+    ] {
+        assert_eq!(
+            InputRead::from_events(&[event])
+                .pin(&buffer, &cursor)
+                .unwrap()
+                .is_some(),
+            pin
+        );
+    }
+    for (text, cursor) in [
+        (
+            "x".repeat(BULK_TEXT_BYTES / 4),
+            CursorRange::two(0, BULK_TEXT_BYTES / 4),
+        ),
+        (
+            "x".repeat(80_000),
+            CursorRange::one(CharCursor::new(79_000)),
+        ),
+        ("x\n".repeat(300), CursorRange::two(0, 599)),
+    ] {
+        let buffer = BufferState::new("large".into(), text, None);
+        assert!(
+            InputRead::from_events(&[key(true)])
+                .pin(&buffer, &cursor)
+                .unwrap()
+                .is_none()
+        );
+    }
+    let mut pending = buffer.clone();
+    assert!(pending.queue_text_preparation(
+        vec![(0..0, "pending".into())],
+        cursor,
+        None,
+        PieceSource::Paste,
+        None
+    ));
+    assert!(
+        InputRead::from_events(&[egui::Event::Copy])
+            .pin(&pending, &cursor)
+            .unwrap()
+            .is_none()
+    );
+    buffer
+        .document()
+        .piece_tree()
+        .inject_read_failure_for_test();
+    assert!(
+        InputRead::from_events(&[egui::Event::Copy])
+            .pin(&buffer, &cursor)
+            .is_err()
+    );
+    assert!(
+        InputRead::from_events(&[])
+            .pin(&buffer, &cursor)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]

@@ -73,53 +73,10 @@ pub fn render_editor_text_edit(
     if let Some(fault) = buffer.document().piece_tree().read_fault() {
         return render_storage_fault(ui, &fault);
     }
-    let cursor = view.cursor_range.unwrap_or_default();
-    let selection = cursor.primary.index.min(cursor.secondary.index)
-        ..cursor.primary.index.max(cursor.secondary.index);
-    let indent = ui.input(|input| {
-        input.events.iter().any(|event| {
-            matches!(
-                event,
-                egui::Event::Key {
-                    key: egui::Key::Tab,
-                    pressed: true,
-                    ..
-                }
-            )
-        })
-    });
-    let bulk_edit = selection.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES / 4
-        || (indent && editing::indentation_needs_preparation(buffer, &cursor))
-        || ui.input(|input| {
-            input.events.iter().any(|event| {
-                matches!(event, egui::Event::Text(text) | egui::Event::Paste(text)
-                if text.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES)
-            })
-        });
-    let input_range = if indent {
-        editing::indentation_range(buffer, &cursor)
-    } else {
-        selection
-    };
-    let _input_pin = if !buffer.is_preparing_text()
-        && !bulk_edit
-        && ui.input(|input| {
-            input.events.iter().any(|event| match event {
-                egui::Event::Text(text) | egui::Event::Paste(text) => {
-                    text.len() < crate::app::domain::buffer::BULK_TEXT_BYTES
-                }
-                egui::Event::Copy | egui::Event::Cut | egui::Event::Key { pressed: true, .. } => {
-                    true
-                }
-                _ => false,
-            })
-        }) {
-        match buffer.document().piece_tree().pin_range(input_range) {
-            Ok(pin) => Some(pin),
-            Err(error) => return render_storage_fault(ui, &error.to_string()),
-        }
-    } else {
-        None
+    let input_read = ui.input(|input| editing::InputRead::from_events(&input.events));
+    let _input_pin = match input_read.pin(buffer, &view.cursor_range.unwrap_or_default()) {
+        Ok(pin) => pin,
+        Err(error) => return render_storage_fault(ui, &error.to_string()),
     };
 
     let row_height = editor_row_height(ui, options.editor_font_id);
