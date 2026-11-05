@@ -12,6 +12,7 @@ use crate::app::services::file_service::FileService;
 use std::path::{Path, PathBuf};
 
 mod disk_state;
+mod observation;
 mod reload;
 mod result;
 
@@ -20,7 +21,7 @@ struct SaveWriteRequest {
     path: PathBuf,
     previous_path: Option<PathBuf>,
     buffer_name: String,
-    revision: u64,
+    revision: crate::app::domain::buffer::DocumentRevision,
     snapshot: DocumentSnapshot,
     format: TextFormatMetadata,
 }
@@ -44,6 +45,9 @@ impl FileController {
         }
 
         let _ = Self::refresh_buffer_disk_state(app, index);
+        if Self::defer_save_for_observation(app, index, None) {
+            return false;
+        }
 
         if let Some(path) = Self::buffer_path(app, index) {
             Self::save_existing_path(app, index, path, None)
@@ -69,6 +73,9 @@ impl FileController {
         }
 
         let _ = Self::refresh_buffer_disk_state(app, index);
+        if Self::defer_save_for_observation(app, index, Some(encoding_name.to_owned())) {
+            return false;
+        }
         let format = match Self::format_with_selected_encoding(app, index, encoding_name) {
             Ok(format) => format,
             Err(error) => {
@@ -199,18 +206,6 @@ impl FileController {
         })
     }
 
-    fn sync_buffer_disk_state(
-        app: &mut ScratchpadApp,
-        index: usize,
-        buffer_id: BufferId,
-        disk_state: Option<DiskFileState>,
-    ) {
-        if let Some(buffer) = app.tab_manager.tabs.as_mut_slice()[index].buffer_by_id_mut(buffer_id)
-        {
-            buffer.sync_to_disk_state(disk_state);
-        }
-    }
-
     fn save_buffer_to_path(
         app: &mut ScratchpadApp,
         index: usize,
@@ -245,7 +240,7 @@ impl FileController {
                 path: path.clone(),
                 previous_path: buffer.path.clone(),
                 buffer_name: buffer.name.clone(),
-                revision: buffer.document_revision(),
+                revision: buffer.document().revision_key(),
                 snapshot: buffer.document_snapshot(),
                 format: format_override
                     .clone()

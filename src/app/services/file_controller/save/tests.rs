@@ -2,6 +2,7 @@ use super::{FileController, FileService, PathBuf, ScratchpadApp, default_save_as
 use crate::app::app_state::test_support::{test_app, wait_for_background_io};
 use crate::app::domain::{BufferFreshness, BufferState, PendingAction, TabManager, WorkspaceTab};
 
+mod observation;
 mod reload;
 
 struct SavedBufferFixture {
@@ -88,6 +89,7 @@ fn save_existing_path_stops_when_dirty_buffer_conflicts_with_disk() {
     std::fs::write(&fixture.path, "theirs").unwrap();
 
     assert!(!FileController::save_file_at(&mut fixture.app, 0));
+    wait_for_background_io(&mut fixture.app);
 
     assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), "theirs");
     assert_eq!(

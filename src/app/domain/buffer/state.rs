@@ -327,7 +327,8 @@ impl BufferState {
         let source = if self
             .disk_content_digest
             .as_ref()
-            .is_some_and(|digest| *digest != loaded.document.content_digest())
+            .zip(loaded.disk_content_digest.as_ref())
+            .is_some_and(|(saved, digest)| saved != digest)
         {
             super::PieceSource::External
         } else {

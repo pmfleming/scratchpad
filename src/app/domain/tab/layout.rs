@@ -36,6 +36,15 @@ impl WorkspaceTab {
         buffer_id: BufferId,
         loaded: BufferState,
     ) -> Option<&mut BufferState> {
+        self.replace_buffer_from_loaded_source(buffer_id, loaded, None)
+    }
+
+    pub(crate) fn replace_buffer_from_loaded_source(
+        &mut self,
+        buffer_id: BufferId,
+        loaded: BufferState,
+        source: Option<crate::app::domain::buffer::PieceSource>,
+    ) -> Option<&mut BufferState> {
         let buffer = self.buffers.by_id_mut(buffer_id)?;
         for view in self
             .layout
@@ -52,7 +61,11 @@ impl WorkspaceTab {
                     .release_anchor(anchor);
             }
         }
-        buffer.replace_from_loaded_buffer(loaded);
+        if let Some(source) = source {
+            buffer.replace_from_loaded_buffer_source(loaded, source);
+        } else {
+            buffer.replace_from_loaded_buffer(loaded);
+        }
         Some(buffer)
     }
 

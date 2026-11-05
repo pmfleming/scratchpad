@@ -181,8 +181,9 @@ impl ScratchpadApp {
                 request_id,
                 path,
                 disk_state,
+                digest,
                 result,
-            } => self.apply_path_saved_result(request_id, path, disk_state, result),
+            } => self.apply_path_saved_result(request_id, path, disk_state, digest, result),
             BackgroundIoResult::SessionRestored { request_id, result } => {
                 self.apply_session_restored_result(request_id, result);
             }
@@ -317,6 +318,7 @@ impl ScratchpadApp {
         request_id: u64,
         path: PathBuf,
         disk_state: Option<crate::app::domain::DiskFileState>,
+        digest: Option<String>,
         result: Result<(), String>,
     ) {
         let Some(action) = self.take_pending_action(
@@ -326,7 +328,7 @@ impl ScratchpadApp {
         ) else {
             return;
         };
-        FileController::apply_async_save_result(self, action, path, disk_state, result);
+        FileController::apply_async_save_result(self, action, path, disk_state, digest, result);
     }
 
     fn apply_partial_paths_loaded_result(

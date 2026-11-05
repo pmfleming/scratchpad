@@ -24,10 +24,11 @@ impl Restorer {
                 BufferFreshness::InSync,
             );
         };
-        match FileService::read_file(&path) {
-            Ok(file) => {
-                let digest = file.document.content_digest();
-                let state = FileService::read_disk_state(&path).ok();
+        match FileService::read_observed_file(&path) {
+            Ok(observed) => {
+                let file = observed.content;
+                let digest = observed.digest;
+                let state = Some(observed.state);
                 let same_text = content
                     .as_ref()
                     .is_some_and(|text| blake3::hash(text.as_bytes()).to_hex().as_str() == digest);
@@ -35,14 +36,17 @@ impl Restorer {
                     || !same_text && state != session_disk_state(buffer),
                     |baseline| *baseline != digest,
                 );
-                let conflict = buffer.is_dirty && changed;
-                buffer.pending_disk_observation = conflict
-                    && (buffer.observed_disk_missing
-                        || buffer
-                            .observed_disk_digest
-                            .as_ref()
-                            .or(buffer.disk_content_digest.as_ref())
-                            != Some(&digest));
+                let newly_observed = buffer.observed_disk_missing
+                    || buffer
+                        .observed_disk_digest
+                        .as_ref()
+                        .or(buffer.disk_content_digest.as_ref())
+                        .is_some_and(|previous| previous != &digest)
+                    || (buffer.observed_disk_digest.is_none()
+                        && buffer.disk_content_digest.is_none()
+                        && changed);
+                let conflict = buffer.is_dirty && !same_text && (changed || newly_observed);
+                buffer.pending_disk_observation = buffer.is_dirty && !same_text && newly_observed;
                 buffer.observed_disk_digest = Some(digest);
                 buffer.observed_disk_missing = false;
                 match content {

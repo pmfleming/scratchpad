@@ -11,6 +11,19 @@ pub(crate) fn refresh_startup_restore_conflicts(app: &mut ScratchpadApp) {
         .iter_mut()
         .flat_map(WorkspaceTab::buffers_mut)
     {
+        if std::mem::take(&mut buffer.pending_disk_observation) {
+            use crate::app::services::session_store::activity::{ActivityEvent, ActivityKind};
+            let kind = if buffer.observed_disk_missing {
+                ActivityKind::Missing
+            } else {
+                ActivityKind::DiskConflict
+            };
+            app.state
+                .persistence
+                .pending_activity
+                .push(ActivityEvent::new(kind, buffer));
+            changed = true;
+        }
         let recover = buffer.freshness == BufferFreshness::MissingOnDisk && buffer.is_dirty;
         if !recover || buffer.path.is_none() {
             continue;

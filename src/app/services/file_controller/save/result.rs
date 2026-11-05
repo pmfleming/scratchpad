@@ -11,6 +11,7 @@ impl FileController {
         index: usize,
         path: PathBuf,
         disk_state: Option<DiskFileState>,
+        digest: Option<String>,
         action: PendingSavePathAction,
     ) {
         let settings_path = crate::app::app_state::settings_state::settings_path(app).to_path_buf();
@@ -32,10 +33,15 @@ impl FileController {
             if action.update_buffer_path {
                 Self::assign_saved_path(buffer, &path);
             }
-            if buffer.document_revision() == action.saved_revision {
+            if buffer.document().revision_key() == action.saved_revision {
                 buffer.is_dirty = false;
             }
-            buffer.sync_to_disk_state(disk_state);
+            buffer.document_mut().seal_history_group();
+            buffer.disk_state = disk_state;
+            buffer.disk_content_digest.clone_from(&digest);
+            buffer.observed_disk_digest = digest;
+            buffer.observed_disk_missing = false;
+            buffer.freshness = crate::app::domain::BufferFreshness::InSync;
             buffer.is_settings_file = buffer
                 .path
                 .as_ref()
@@ -60,6 +66,7 @@ impl FileController {
         action: PendingSavePathAction,
         path: PathBuf,
         disk_state: Option<DiskFileState>,
+        digest: Option<String>,
         result: Result<(), String>,
     ) {
         if !crate::app::paths_match(&path, &action.expected_path) {
@@ -78,7 +85,7 @@ impl FileController {
 
         match result {
             Ok(()) => {
-                Self::finalize_save(app, index, path, disk_state, action);
+                Self::finalize_save(app, index, path, disk_state, digest, action);
             }
             Err(error) => {
                 diagnostics::record_background_failure(

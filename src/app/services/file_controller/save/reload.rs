@@ -66,6 +66,10 @@ impl FileController {
         action: PendingReloadBufferAction,
         results: Vec<LoadedPathResult>,
     ) {
+        if action.mode == PendingReloadMode::ObserveDiskChange {
+            Self::apply_disk_observation(app, action, results);
+            return;
+        }
         let Some((index, result)) = Self::resolve_background_result(app, &action, results) else {
             return;
         };
@@ -83,7 +87,7 @@ impl FileController {
         let changed = buffer.document().revision_key() != action.expected_revision;
         let requires_clean = action.mode != PendingReloadMode::ExplicitReload;
         if changed || (requires_clean && buffer.is_dirty) {
-            if action.mode == PendingReloadMode::AutoRefreshCleanBuffer {
+            if action.mode == PendingReloadMode::ObserveDiskChange {
                 buffer.mark_conflict_on_disk(result.disk_state);
                 app.tab_manager.mark_session_dirty();
             }
@@ -105,7 +109,7 @@ impl FileController {
                     action.buffer_id,
                     loaded,
                     result.disk_state,
-                    action.mode == PendingReloadMode::AutoRefreshCleanBuffer,
+                    action.mode == PendingReloadMode::ObserveDiskChange,
                 )
                 .is_some()
                 {
@@ -126,7 +130,7 @@ impl FileController {
         }
     }
 
-    fn replace_buffer_from_loaded_buffer(
+    pub(super) fn replace_buffer_from_loaded_buffer(
         app: &mut ScratchpadApp,
         index: usize,
         buffer_id: BufferId,
@@ -135,12 +139,16 @@ impl FileController {
         mark_auto_reloaded: bool,
     ) -> Option<()> {
         let tab = app.tab_manager.tabs.as_mut_slice().get_mut(index)?;
-        let buffer = tab.replace_buffer_from_loaded(buffer_id, loaded)?;
+        let source =
+            mark_auto_reloaded.then_some(crate::app::domain::buffer::PieceSource::External);
+        let buffer = tab.replace_buffer_from_loaded_source(buffer_id, loaded, source)?;
         buffer.is_dirty = false;
         if mark_auto_reloaded {
-            buffer.mark_auto_reloaded_from_disk(disk_state);
+            buffer.disk_state = disk_state;
+            buffer.freshness = crate::app::domain::BufferFreshness::AutoReloaded;
         } else {
-            buffer.sync_to_disk_state(disk_state);
+            buffer.disk_state = disk_state;
+            buffer.freshness = crate::app::domain::BufferFreshness::InSync;
         }
         let refresh = Self::deferred_buffer_refresh(buffer);
         app.tab_manager.rebuild_buffer_tab_index();
@@ -150,7 +158,7 @@ impl FileController {
         Some(())
     }
 
-    fn resolve_background_result(
+    pub(super) fn resolve_background_result(
         app: &mut ScratchpadApp,
         action: &PendingReloadBufferAction,
         results: Vec<LoadedPathResult>,
@@ -185,7 +193,7 @@ impl FileController {
         disk_state: Option<DiskFileState>,
         error: String,
     ) {
-        if action.mode == PendingReloadMode::AutoRefreshCleanBuffer {
+        if action.mode == PendingReloadMode::ObserveDiskChange {
             let Some(buffer) = app
                 .tab_manager
                 .tabs
@@ -226,7 +234,7 @@ impl PendingReloadMode {
 
     fn success_message(self, name: &str, loaded: &BufferState) -> String {
         match self {
-            Self::AutoRefreshCleanBuffer => format!("Reloaded {name} because it changed on disk."),
+            Self::ObserveDiskChange => format!("Reloaded {name} because it changed on disk."),
             Self::ExplicitReload => format!("Reloaded {name} from disk."),
             Self::ReopenWithEncoding => {
                 format!("Reopened {name} with {}.", loaded.format.encoding_label())

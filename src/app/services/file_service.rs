@@ -10,6 +10,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 mod document_write;
+mod observation;
 mod read;
 #[cfg(test)]
 mod tests;
@@ -202,6 +203,18 @@ impl FileService {
         file_content: FileContent,
         disk_state: Option<DiskFileState>,
     ) -> BufferState {
+        let digest = disk_state
+            .as_ref()
+            .map(|_| file_content.document.content_digest());
+        Self::build_buffer_with_digest(path, file_content, disk_state, digest)
+    }
+
+    fn build_buffer_with_digest(
+        path: &Path,
+        file_content: FileContent,
+        disk_state: Option<DiskFileState>,
+        digest: Option<String>,
+    ) -> BufferState {
         let name = path.file_name().map_or_else(
             || path.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
@@ -220,7 +233,9 @@ impl FileService {
             text_metadata,
             true,
         );
-        buffer.sync_to_disk_state(disk_state);
+        buffer.disk_state = disk_state;
+        buffer.disk_content_digest.clone_from(&digest);
+        buffer.observed_disk_digest = digest;
         buffer
     }
 

@@ -109,6 +109,23 @@ impl BackgroundIoState {
         })
     }
 
+    pub(crate) fn defer_save_until_observed(
+        &mut self,
+        buffer_id: BufferId,
+        save: super::DeferredSave,
+    ) -> bool {
+        for action in self.pending_background_actions.values_mut() {
+            if let PendingBackgroundAction::ReloadBuffer(reload) = action
+                && reload.buffer_id == buffer_id
+                && reload.mode == super::PendingReloadMode::ObserveDiskChange
+            {
+                reload.resume_save = Some(save);
+                return true;
+            }
+        }
+        false
+    }
+
     pub(crate) fn has_pending_reopen_with_encoding_for_buffer(&self, buffer_id: BufferId) -> bool {
         self.pending_background_actions.values().any(|action| {
             matches!(

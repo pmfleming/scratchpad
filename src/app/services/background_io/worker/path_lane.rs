@@ -182,12 +182,14 @@ fn load_paths(requests: Vec<PathLoadRequest>) -> Vec<LoadedPathResult> {
 
 fn load_one(request: PathLoadRequest) -> LoadedPathResult {
     match request {
+        PathLoadRequest::Observed(path) => load_observed(path),
         PathLoadRequest::Retained {
             path,
             session_store,
             claimed,
         } => match session_store.reopen_path_with_claimed(&path, &claimed) {
             Ok(Some(tab)) => LoadedPathResult {
+                missing: false,
                 path,
                 disk_state: tab.active_buffer().disk_state.clone(),
                 result: Ok(tab.active_buffer().clone()),
@@ -195,6 +197,7 @@ fn load_one(request: PathLoadRequest) -> LoadedPathResult {
             },
             Ok(None) => load_path_result(path, FileService::read_file),
             Err(error) => LoadedPathResult {
+                missing: error.kind() == io::ErrorKind::NotFound,
                 path,
                 disk_state: None,
                 result: Err(error.to_string()),
@@ -236,6 +239,7 @@ fn load_path_result(
         })
         .map_err(|error| error.to_string());
     LoadedPathResult {
+        missing: false,
         retained_tab: None,
         path,
         disk_state,
@@ -255,11 +259,35 @@ fn save_path(
         .as_ref()
         .ok()
         .and_then(|()| FileService::read_disk_state(&path).ok());
+    let digest = result.as_ref().ok().map(|()| snapshot.content_digest());
     BackgroundIoResult::PathSaved {
         request_id,
         path,
         disk_state,
+        digest,
         result,
+    }
+}
+
+fn load_observed(path: PathBuf) -> LoadedPathResult {
+    match FileService::read_observed_file(&path) {
+        Ok(observed) => {
+            let state = observed.state.clone();
+            LoadedPathResult {
+                path: path.clone(),
+                disk_state: Some(state),
+                result: Ok(FileService::buffer_from_observed(&path, observed)),
+                missing: false,
+                retained_tab: None,
+            }
+        }
+        Err(error) => LoadedPathResult {
+            path,
+            disk_state: None,
+            missing: error.kind() == io::ErrorKind::NotFound,
+            result: Err(error.to_string()),
+            retained_tab: None,
+        },
     }
 }
 

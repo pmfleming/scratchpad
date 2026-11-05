@@ -222,6 +222,7 @@ fn open_results_preserve_identity_release_reservations_and_handle_failures() {
             &mut app,
             &mut summary,
             LoadedPathResult {
+                missing: false,
                 retained_tab: None,
                 disk_state: FileService::read_disk_state(&path).ok(),
                 result: if succeeds {

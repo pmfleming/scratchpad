@@ -29,6 +29,7 @@ pub(crate) enum BackgroundIoResult {
         request_id: u64,
         path: PathBuf,
         disk_state: Option<DiskFileState>,
+        digest: Option<String>,
         result: Result<(), String>,
     },
     SessionRestored {
@@ -76,6 +77,7 @@ pub(crate) struct ColdFileShellResult {
 }
 
 pub(crate) struct LoadedPathResult {
+    pub(crate) missing: bool,
     pub(crate) retained_tab: Option<WorkspaceTab>,
     pub(crate) path: PathBuf,
     pub(crate) disk_state: Option<DiskFileState>,

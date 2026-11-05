@@ -437,12 +437,14 @@ mod tests {
             Some(anchor_view_id),
             vec![
                 LoadedPathResult {
+                    missing: false,
                     retained_tab: None,
                     path: one.clone(),
                     disk_state: FileService::read_disk_state(&one).ok(),
                     result: Ok(disk_buffer(&one, "one")),
                 },
                 LoadedPathResult {
+                    missing: false,
                     retained_tab: None,
                     path: two.clone(),
                     disk_state: FileService::read_disk_state(&two).ok(),

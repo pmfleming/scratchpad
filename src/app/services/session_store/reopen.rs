@@ -38,9 +38,9 @@ pub(super) fn restore_reopened(
             buffer.recover_as_untitled("recovered");
             continue;
         }
-        match FileService::read_file(&path) {
-            Ok(file) => {
-                let digest = file.document.content_digest();
+        match FileService::read_observed_file(&path) {
+            Ok(observed) => {
+                let digest = observed.digest.clone();
                 let baseline = original
                     .observed_disk_digest
                     .as_ref()
@@ -51,15 +51,11 @@ pub(super) fn restore_reopened(
                 buffer
                     .disk_content_digest
                     .clone_from(&original.disk_content_digest);
-                buffer.disk_state = FileService::read_disk_state(&path).ok();
+                buffer.disk_state = Some(observed.state.clone());
                 buffer.is_dirty = original.is_dirty;
                 if digest != baseline {
                     let previous = buffer.document().history_now();
-                    let loaded = FileService::build_buffer_from_file_content(
-                        &path,
-                        file,
-                        buffer.disk_state.clone(),
-                    );
+                    let loaded = FileService::buffer_from_observed(&path, observed);
                     buffer.replace_from_loaded_buffer_source(
                         loaded,
                         crate::app::domain::buffer::PieceSource::External,

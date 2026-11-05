@@ -57,6 +57,10 @@ pub(crate) struct PendingSessionHydrationAction {
 }
 
 pub(crate) struct PendingReloadBufferAction {
+    pub(crate) expected_observed_digest: Option<String>,
+    pub(crate) expected_missing: bool,
+    pub(crate) expected_epoch: u64,
+    pub(crate) resume_save: Option<DeferredSave>,
     pub(crate) buffer_id: BufferId,
     pub(crate) expected_path: PathBuf,
     pub(crate) buffer_name: String,
@@ -71,6 +75,10 @@ impl PendingReloadBufferAction {
         mode: PendingReloadMode,
     ) -> Option<Self> {
         Some(Self {
+            expected_observed_digest: buffer.observed_disk_digest.clone(),
+            expected_missing: buffer.observed_disk_missing,
+            expected_epoch: 0,
+            resume_save: None,
             buffer_id: buffer.id,
             expected_path: buffer.path.clone()?,
             buffer_name: buffer.name.clone(),
@@ -81,12 +89,17 @@ impl PendingReloadBufferAction {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct DeferredSave {
+    pub(crate) encoding: Option<String>,
+}
+
 pub(crate) struct PendingSavePathAction {
     pub(crate) buffer_id: BufferId,
     pub(crate) expected_path: PathBuf,
     pub(crate) previous_path: Option<PathBuf>,
     pub(crate) buffer_name: String,
-    pub(crate) saved_revision: u64,
+    pub(crate) saved_revision: crate::app::domain::buffer::DocumentRevision,
     pub(crate) update_buffer_path: bool,
     pub(crate) format_override: Option<TextFormatMetadata>,
 }
@@ -107,7 +120,7 @@ pub(crate) struct PendingTextMetadataAction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PendingReloadMode {
-    AutoRefreshCleanBuffer,
+    ObserveDiskChange,
     ExplicitReload,
     ReopenWithEncoding,
 }

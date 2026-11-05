@@ -20,7 +20,11 @@ acknowledgements, informational rows, pending-event projection and deduplication
 blank untitled cleanup, cancellation of loading previews, and split/cold-shell
 installation guards. Opens use the normal session durability boundary. Validation:
 636 library tests passed (6 ignored), all-feature library Clippy and formatting
-passed. Stages 5–6 remain.
+passed. Stage 5 is complete: background stable reads/digests for clean and dirty
+files, per-version conflict observations, missing/return handling, deferred Save
+conflict checks, startup observation deduplication, and saved-snapshot digests.
+Validation: 641 library tests passed (6 ignored), formatting and strict all-feature
+library Clippy passed. Stage 6 remains.
 
 Replace History's **All files** view with **Timeline**, showing recorded text
 changes, file opens, file closes, and external changes discovered by Scratchpad.

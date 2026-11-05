@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 pub(crate) enum PathLoadRequest {
     Standard(PathBuf),
+    Observed(PathBuf),
     Retained {
         path: PathBuf,
         session_store: SessionStore,
@@ -20,6 +21,7 @@ impl PathLoadRequest {
     pub(crate) fn path(&self) -> &PathBuf {
         match self {
             Self::Standard(path)
+            | Self::Observed(path)
             | Self::WithEncoding { path, .. }
             | Self::Retained { path, .. } => path,
         }

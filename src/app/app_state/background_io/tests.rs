@@ -191,6 +191,7 @@ fn partial_open_tabs_result_keeps_action_until_terminal_result() {
     app.apply_paths_loaded_result(
         3,
         vec![LoadedPathResult {
+            missing: false,
             retained_tab: None,
             path,
             disk_state: None,

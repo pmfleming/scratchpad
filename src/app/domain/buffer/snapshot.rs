@@ -92,6 +92,17 @@ impl DocumentSnapshot {
         self.length.bytes
     }
 
+    pub(crate) fn content_digest(&self) -> String {
+        let mut hash = blake3::Hasher::new();
+        for start in (0..self.len_chars()).step_by(64 * 1024) {
+            hash.update(
+                self.extract_range(start..(start + 64 * 1024).min(self.len_chars()))
+                    .as_bytes(),
+            );
+        }
+        hash.finalize().to_hex().to_string()
+    }
+
     #[must_use]
     pub fn line_count(&self) -> usize {
         self.length.lines

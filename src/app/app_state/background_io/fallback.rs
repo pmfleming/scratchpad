@@ -33,6 +33,7 @@ impl BackgroundIoFallback for BackgroundIoRequest {
                 requests
                     .into_iter()
                     .map(|request| LoadedPathResult {
+                        missing: false,
                         retained_tab: None,
                         path: request.path().clone(),
                         disk_state: None,
@@ -67,12 +68,14 @@ impl BackgroundIoFallback for BackgroundIoRequest {
                 request_id,
                 path,
                 disk_state: None,
+                digest: None,
                 result: Err("Background file saver unavailable.".to_owned()),
             },
             _ => BackgroundIoResult::PathSaved {
                 request_id: 0,
                 path: PathBuf::new(),
                 disk_state: None,
+                digest: None,
                 result: Err("Background file saver unavailable.".to_owned()),
             },
         }

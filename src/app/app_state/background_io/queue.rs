@@ -98,11 +98,15 @@ impl ScratchpadApp {
     fn queue_background_path_loads_inner(
         &mut self,
         paths: Vec<PathBuf>,
-        action: PendingBackgroundAction,
+        mut action: PendingBackgroundAction,
         streaming: bool,
     ) {
         if paths.is_empty() {
             return;
+        }
+        let observe = matches!(&action,PendingBackgroundAction::ReloadBuffer(load) if load.mode==crate::app::app_state::PendingReloadMode::ObserveDiskChange);
+        if let PendingBackgroundAction::ReloadBuffer(load) = &mut action {
+            load.expected_epoch = self.state.persistence.session_store.history_epoch();
         }
 
         let retained = !self.state.persistence.session_restore_failed
@@ -134,6 +138,8 @@ impl ScratchpadApp {
                             session_store: self.state.persistence.session_store.clone(),
                             claimed: claimed.clone(),
                         }
+                    } else if observe {
+                        PathLoadRequest::Observed(path)
                     } else {
                         PathLoadRequest::Standard(path)
                     }
