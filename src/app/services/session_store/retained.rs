@@ -71,6 +71,8 @@ impl SessionStore {
                 buffer.is_dirty = true;
             }
         }
-        Ok(Restorer::new(contents).restore_tab_with_summary(tab).0)
+        let mut tab = Restorer::new(contents).restore_tab_with_summary(tab).0;
+        self.bind_tab(&mut tab)?;
+        Ok(tab)
     }
 }

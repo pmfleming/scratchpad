@@ -76,18 +76,20 @@ pub fn render_editor_text_edit(
     let cursor = view.cursor_range.unwrap_or_default();
     let selection = cursor.primary.index.min(cursor.secondary.index)
         ..cursor.primary.index.max(cursor.secondary.index);
-    let _input_pin = if ui.input(|input| {
-        input.events.iter().any(|event| {
-            matches!(
-                event,
-                egui::Event::Text(_)
-                    | egui::Event::Paste(_)
-                    | egui::Event::Copy
-                    | egui::Event::Cut
-                    | egui::Event::Key { pressed: true, .. }
-            )
-        })
-    }) {
+    let bulk_edit=ui.input(|input|input.events.iter().any(|event|matches!(event,egui::Event::Text(text)|egui::Event::Paste(text) if text.len()>=crate::app::domain::buffer::BULK_TEXT_BYTES || selection.len()>=crate::app::domain::buffer::BULK_TEXT_BYTES/4))) || (selection.len()>=crate::app::domain::buffer::BULK_TEXT_BYTES/4 && ui.input(|input|input.events.iter().any(|event|matches!(event,egui::Event::Key{key:egui::Key::Backspace|egui::Key::Delete|egui::Key::Enter,pressed:true,..}))));
+    let _input_pin = if !buffer.is_preparing_text()
+        && !bulk_edit
+        && ui.input(|input| {
+            input.events.iter().any(|event| match event {
+                egui::Event::Text(text) | egui::Event::Paste(text) => {
+                    text.len() < crate::app::domain::buffer::BULK_TEXT_BYTES
+                }
+                egui::Event::Copy | egui::Event::Cut | egui::Event::Key { pressed: true, .. } => {
+                    true
+                }
+                _ => false,
+            })
+        }) {
         match buffer.document().piece_tree().pin_range(selection) {
             Ok(pin) => Some(pin),
             Err(error) => return render_storage_fault(ui, &error.to_string()),
@@ -152,6 +154,12 @@ pub fn render_editor_text_edit(
             display_map: galley_context.display_map.as_ref(),
         },
     );
+
+    if buffer.is_preparing_text() {
+        ui.label("Preparing text…");
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(16));
+    }
 
     if should_rebuild_galley_after_input(
         input.changed,

@@ -59,6 +59,8 @@ struct FileBackedChunk {
 struct AddTextStorage {
     owner: u64,
     chunks: PersistentVector<AddTextChunk>,
+    store: Option<crate::app::services::chunk_store::ChunkStoreHandle>,
+    bulk_intake: bool,
 }
 
 impl Default for AddTextStorage {
@@ -66,6 +68,8 @@ impl Default for AddTextStorage {
         Self {
             owner: text_cache::new_owner(),
             chunks: PersistentVector::default(),
+            store: None,
+            bulk_intake: false,
         }
     }
 }
@@ -91,6 +95,58 @@ impl AddTextSpan {
 }
 
 impl PieceTreeStorage {
+    pub(super) fn prefetch_span(&self, span: ByteSpan) {
+        if span.buffer != PieceBuffer::Add {
+            return;
+        }
+        let start = span.start_byte as usize;
+        let end = start.saturating_add(span.byte_len as usize);
+        for chunk in self
+            .add
+            .chunks
+            .iter()
+            .skip(
+                self.add
+                    .chunks
+                    .partition_point(|c| c.start_byte + c.text.len() <= start),
+            )
+            .take_while(|c| c.start_byte < end)
+        {
+            if let ChunkText::Stored(chunk) = &chunk.text {
+                chunk.prefetch();
+            }
+        }
+    }
+    pub(super) fn bind_store(
+        &mut self,
+        store: crate::app::services::chunk_store::ChunkStoreHandle,
+    ) -> io::Result<()> {
+        if let Some(previous) = &self.add.store {
+            return if previous.epoch().id == store.epoch().id {
+                Ok(())
+            } else {
+                Err(io::Error::other(
+                    "text belongs to another store epoch; explicit copy/rebind required",
+                ))
+            };
+        }
+        for index in 0..self.add.chunks.len() {
+            if self.add.bulk_intake {
+                let _ = store.wait_for_capacity();
+            }
+            self.add.chunks[index]
+                .text
+                .bind_store(self.add.owner, &store);
+        }
+        self.add.store = Some(store);
+        Ok(())
+    }
+    pub(super) fn store(&self) -> Option<&crate::app::services::chunk_store::ChunkStoreHandle> {
+        self.add.store.as_ref()
+    }
+    pub(super) fn set_bulk_intake(&mut self, enabled: bool) {
+        self.add.bulk_intake = enabled;
+    }
     #[cfg(test)]
     pub(super) fn truncate_backing_for_test(&self) -> io::Result<()> {
         let OriginalTextStorage::FileBacked(original) = &self.original else {
@@ -356,31 +412,43 @@ impl PieceTreeStorage {
         retain: bool,
     ) -> io::Result<PieceTreeText<'_>> {
         let pin = self.pin_span(span, retain)?;
-        if span.byte_len == 0 {
+        let start = span.start_byte as usize;
+        let end = start + span.byte_len as usize;
+        if start == end {
             return Ok(PieceTreeText::owned(String::new()));
         }
-        if span.buffer == PieceBuffer::Original
-            && matches!(self.original, OriginalTextStorage::FileBacked(_))
-            && pin.bodies.len() > 1
-        {
-            let OriginalTextStorage::FileBacked(original) = &self.original else {
-                unreachable!()
-            };
-            let start = span.start_byte as usize;
-            let end = start + span.byte_len as usize;
-            let first = original
-                .chunks
-                .partition_point(|chunk| chunk.logical_start + chunk.byte_len <= start);
-            let mut result = String::with_capacity(span.byte_len as usize);
-            for (chunk, body) in original.chunks.iter().skip(first).zip(&pin.bodies) {
-                result.push_str(
-                    &body[start.saturating_sub(chunk.logical_start)
-                        ..(end - chunk.logical_start).min(body.len())],
-                );
+        let first = match (&self.original, span.buffer) {
+            (OriginalTextStorage::Owned(text), PieceBuffer::Original) => {
+                return Ok(PieceTreeText::borrowed(&text[start..end]));
             }
-            return Ok(PieceTreeText::owned(result));
+            (OriginalTextStorage::FileBacked(original), PieceBuffer::Original) => {
+                let index = original
+                    .chunks
+                    .partition_point(|c| c.logical_start + c.byte_len <= start);
+                original.chunks[index].logical_start
+            }
+            (_, PieceBuffer::Add) => {
+                let index = self
+                    .add
+                    .chunks
+                    .partition_point(|c| c.start_byte + c.text.len() <= start);
+                self.add.chunks[index].start_byte
+            }
+        };
+        if pin.bodies.len() == 1 {
+            return Ok(PieceTreeText::shared(
+                pin.bodies[0].clone(),
+                start - first..end - first,
+            ));
         }
-        Ok(self.text_for_span(span))
+        let mut result = String::with_capacity(end - start);
+        let mut position = first;
+        for body in pin.bodies {
+            result
+                .push_str(&body[start.saturating_sub(position)..(end - position).min(body.len())]);
+            position += body.len();
+        }
+        Ok(PieceTreeText::owned(result))
     }
 
     #[cfg(test)]
@@ -458,7 +526,7 @@ impl AddTextStorage {
                 .last()
                 .and_then(|tail| match &tail.text {
                     ChunkText::Inline(text) => Some(ADD_TAIL_BYTES.saturating_sub(text.len())),
-                    ChunkText::Sealed(_) => None,
+                    ChunkText::Sealed(_) | ChunkText::Memory(_) | ChunkText::Stored(_) => None,
                 })
                 .unwrap_or(0);
             let mut take = remaining.len().min(capacity);
@@ -466,8 +534,15 @@ impl AddTextStorage {
                 take -= 1;
             }
             if take == 0 {
+                if self.bulk_intake
+                    && let Some(store) = &self.store
+                {
+                    // Healthy bulk work waits here only on its background lane.
+                    // Accepted bodies stay in RAM after a write failure.
+                    let _ = store.wait_for_capacity();
+                }
                 if let Some(tail) = self.chunks.last_mut() {
-                    tail.text.spill(self.owner);
+                    tail.text.seal(self.owner, self.store.as_ref());
                 }
                 let start_byte = self.len();
                 self.chunks.push(AddTextChunk {

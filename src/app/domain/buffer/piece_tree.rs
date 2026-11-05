@@ -41,6 +41,21 @@ const MAX_LEAF_PIECES: usize = 16;
 const MAX_LEAVES_PER_INTERNAL: usize = 16;
 const MIN_LEAVES_PER_INTERNAL: usize = MAX_LEAVES_PER_INTERNAL / 4;
 const PREVIEW_MAX_CHARS: usize = 96;
+
+impl PieceTreeLite {
+    pub(crate) fn bind_store(
+        &mut self,
+        store: crate::app::services::chunk_store::ChunkStoreHandle,
+    ) -> io::Result<()> {
+        self.storage.bind_store(store)
+    }
+    pub(crate) fn store(&self) -> Option<&crate::app::services::chunk_store::ChunkStoreHandle> {
+        self.storage.store()
+    }
+    pub(crate) fn set_bulk_intake(&mut self, enabled: bool) {
+        self.storage.set_bulk_intake(enabled);
+    }
+}
 const LINE_SAMPLE_STRIDE: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

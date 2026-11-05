@@ -47,7 +47,12 @@ const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
 const FRAGMENT_UNIT: &str = "hay needle café 東京\n";
 
 fn main() {
-    if std::env::args().any(|arg| arg == "--live-text-stage-zero") {
+    if std::env::args().any(|arg| arg == "--live-text-stage-three") {
+        println!(
+            "{}",
+            scratchpad::profile::run_live_text_bulk_profile(64 * MB)
+        );
+    } else if std::env::args().any(|arg| arg == "--live-text-stage-zero") {
         live_text::run();
     } else if std::env::args().any(|arg| arg == "--live-text-baseline") {
         scenarios::run_live_text_baseline();

@@ -14,12 +14,16 @@ CREATE TABLE chunks(id INTEGER PRIMARY KEY,digest BLOB NOT NULL UNIQUE CHECK(len
 CREATE TABLE chunk_bodies(chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id),body BLOB NOT NULL) STRICT;
 CREATE INDEX chunk_sizes ON chunks(byte_len,id);";
 impl Database {
-    pub(super) fn chunk_store(&self) -> io::Result<ChunkStoreHandle> {
+    pub(in crate::app::services::session_store) fn chunk_store(
+        &self,
+    ) -> io::Result<ChunkStoreHandle> {
         self.chunks
             .clone()
             .ok_or_else(|| invalid("chunk readers have not opened"))
     }
-    pub(super) async fn drain_chunk_batch(&mut self) -> io::Result<()> {
+    pub(in crate::app::services::session_store) async fn drain_chunk_batch(
+        &mut self,
+    ) -> io::Result<()> {
         let store = self.chunk_store()?;
         self.ensure_healthy()?;
         let Some(first) = store.pop_pending() else {

@@ -1,0 +1,1 @@
+{"bytes":67108873,"frame_max_ns":29599037,"frame_p50_ns":201369,"frame_p99_ns":4601419,"frames":242,"peak_pending_bytes":33816496,"pending_flow_threshold_bytes":33554432,"queued_typing_preserved":true,"scope":"production logic/input/layout/tessellation; simulated 200 ms writer job","workflow_ns":591499931,"writer_paused_frame_max_ns":29599037,"writer_paused_frames":73}

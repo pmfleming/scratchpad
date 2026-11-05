@@ -164,7 +164,8 @@ impl Default for ScratchpadApp {
 }
 
 impl eframe::App for ScratchpadApp {
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, input: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        self.intercept_bulk_text_input(ctx, input);
         let viewport = input.viewport();
         log::trace!(target: "scratchpad::window",
             "input focused={:?} minimized={:?} occluded={:?} maximized={:?} size={:?} events={}",

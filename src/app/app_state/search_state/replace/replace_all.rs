@@ -251,6 +251,26 @@ fn apply_replacement_target(app: &mut ScratchpadApp, target: &ReplacementTargetP
     let Some(buffer) = tab.buffer_by_id_mut(target.buffer_id) else {
         return false;
     };
+    if target.replacements.len() > 256
+        || target
+            .replacements
+            .iter()
+            .map(|(range, text)| text.len().max(range.len().saturating_mul(4)))
+            .sum::<usize>()
+            >= crate::app::domain::buffer::BULK_TEXT_BYTES
+    {
+        let queued = buffer.queue_text_preparation(
+            target.replacements.clone(),
+            previous_selection,
+            Some(next_selection),
+            crate::app::domain::PieceSource::SearchReplace,
+            Some(target.view_id),
+        );
+        if queued {
+            app.queue_text_preparations();
+        }
+        return queued;
+    }
     if buffer
         .replace_char_ranges_with_undo(&target.replacements, previous_selection, next_selection)
         .is_err()

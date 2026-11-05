@@ -245,6 +245,27 @@ impl PieceTreeLite {
         Ok(pin)
     }
 
+    pub(crate) fn prefetch_range(&self, range: Range<usize>) {
+        if range.start > range.end || range.end > self.len_chars() {
+            return;
+        }
+        let address = self.find_leaf_for_char_offset(range.start);
+        let mut position = address.leaf_start_char;
+        for piece in Pieces::new(self, address.node_index, address.leaf_index) {
+            if position > range.end {
+                break;
+            }
+            if position + piece.char_len >= range.start {
+                self.storage.prefetch_span(ByteSpan {
+                    buffer: piece.buffer,
+                    start_byte: piece.start_byte as u64,
+                    byte_len: piece.byte_len as u64,
+                });
+            }
+            position += piece.char_len;
+        }
+    }
+
     pub fn read_fault(&self) -> Option<String> {
         self.storage.read_fault()
     }

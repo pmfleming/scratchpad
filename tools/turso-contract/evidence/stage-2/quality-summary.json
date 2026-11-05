@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "source_revision": "d769a41b7de1054d930d91cf51028476f81d8d20",
+  "source_blake3_before": "4f3d91efd41b578fdd9ef0e70e8dbd0511882aff2d7b0c8b5ad37192f7ef0690",
+  "source_blake3_after": "4f3d91efd41b578fdd9ef0e70e8dbd0511882aff2d7b0c8b5ad37192f7ef0690",
+  "tool_blake3": "e787f452a76ccce3b00f21f7ef5f3619abd0e7ef74ba07b9b346e370dd421b46",
+  "tool_unchanged": true,
+  "passed": false,
+  "required_evidence_complete": false,
+  "commands": {
+    "audit-tool": {
+      "status": "passed"
+    },
+    "cargo": {
+      "status": "passed"
+    },
+    "check": {
+      "exit_code": 1,
+      "status": "failed"
+    },
+    "coverage-tool": {
+      "status": "passed"
+    },
+    "feature-tool": {
+      "status": "passed"
+    },
+    "measure": {
+      "status": "passed"
+    },
+    "rqlens-version": {
+      "status": "passed"
+    },
+    "rustc": {
+      "status": "passed"
+    },
+    "verify": {
+      "status": "passed"
+    }
+  },
+  "failed_policies": [
+    "configured-rules",
+    "partial",
+    "reliability-finding",
+    "test-failure"
+  ],
+  "policy_rule_violations": [
+    {
+      "counting_unit": "unmet-required-human-review-obligation",
+      "evaluation_complete": true,
+      "excess": 3,
+      "excluded": 0,
+      "level": "error",
+      "maximum": 0,
+      "observed": 3,
+      "observed_findings": 3,
+      "reason": null,
+      "rule_id": "rust.design.required-review",
+      "status": "exceeded"
+    }
+  ],
+  "partial_evidence_count": 17,
+  "threshold_violations": [
+    {
+      "maximum": 600,
+      "module": "scratchpad::capacity_probe::bin::capacity_probe",
+      "score": 789.98
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::resource_probe::bin::resource_probe",
+      "score": 811.52
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app",
+      "score": 643.58
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state",
+      "score": 690.92
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::background_io",
+      "score": 850.44
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::background_io::tests",
+      "score": 602.35
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::frame",
+      "score": 1036.89
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::api",
+      "score": 627.25
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::helpers",
+      "score": 795.72
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::replace",
+      "score": 909.16
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::runtime",
+      "score": 682.1
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::visual",
+      "score": 643.85
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::search_state::worker",
+      "score": 621.28
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::settings_state",
+      "score": 851.03
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::settings_state::mutators",
+      "score": 920.96
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::settings_state::tab_order",
+      "score": 727.35
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::workspace::lifecycle",
+      "score": 914.57
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::app_state::workspace::mutation",
+      "score": 917.13
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::commands::file",
+      "score": 703.53
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::commands::search",
+      "score": 651.1
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::commands::tab_transfer",
+      "score": 603.41
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::commands::workspace",
+      "score": 708.7
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::domain::buffer::state",
+      "score": 693.94
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::domain::view",
+      "score": 637.26
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::file_controller::open",
+      "score": 1011.61
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::file_controller::open::tests",
+      "score": 608.47
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::file_controller::open_here",
+      "score": 856.45
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::file_controller::save",
+      "score": 727.87
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::file_service",
+      "score": 857.67
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::search",
+      "score": 678.25
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::session_manager",
+      "score": 636.9
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::session_store",
+      "score": 732.26
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::services::settings_store::model",
+      "score": 675.47
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::ui::dialogs::text_history",
+      "score": 621.41
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::ui::editor_content::native_editor",
+      "score": 703.82
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::app::ui::tab_strip::actions::vertical",
+      "score": 635.28
+    },
+    {
+      "maximum": 600,
+      "module": "scratchpad::shared::profile",
+      "score": 673.85
+    }
+  ],
+  "practice_failures": [],
+  "test_failures": []
+}

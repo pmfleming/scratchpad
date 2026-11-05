@@ -31,8 +31,11 @@ impl FileService {
         }
         for _ in 0..3 {
             let observed = Self::read_observed_file(path)?;
-            let text = (materialize && Some(observed.digest.as_str()) != known_digest)
-                .then(|| observed.content.document.extract_text());
+            let text = if materialize && Some(observed.digest.as_str()) != known_digest {
+                Some(observed.content.document.try_extract_text()?)
+            } else {
+                None
+            };
             if let Some(text) = &text
                 && (blake3::hash(text.as_bytes()).to_hex().as_str() != observed.digest
                     || Self::read_disk_state(path)? != observed.state)

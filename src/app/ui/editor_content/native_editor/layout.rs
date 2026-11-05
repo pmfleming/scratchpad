@@ -131,22 +131,41 @@ pub(super) fn build_editor_galley(
                 crate::app::memory_budget::BudgetCategory::Layout,
             )
         {
-            warm_nearby_layout_slices(ui, buffer, view, options, effective_viewport, wrap_width);
+            warm_nearby_layout_slices(
+                ui,
+                buffer,
+                view,
+                options,
+                effective_viewport,
+                wrap_width,
+                slice.char_range.clone(),
+            );
         }
         galley
     };
-    let slice_chars = slice.char_range.end.saturating_sub(slice.char_range.start);
-    Ok(EditorGalleyContext {
-        _pin: slice.pin,
-        galley,
-        char_offset_base: slice.char_range.start,
-        logical_line_base: slice.start_line,
-        display_column_base: slice.display_column_base,
-        virtual_width: slice.virtual_width,
-        slice_chars,
-        display_map,
-        tab_offsets,
-    })
+    Ok(slice.into_context(galley, display_map, tab_offsets))
+}
+
+impl ViewportTextSlice<'_> {
+    fn into_context(
+        self,
+        galley: Arc<egui::Galley>,
+        display_map: Option<DisplayTextMap>,
+        tab_offsets: Vec<usize>,
+    ) -> EditorGalleyContext {
+        let slice_chars = self.char_range.end.saturating_sub(self.char_range.start);
+        EditorGalleyContext {
+            _pin: self.pin,
+            galley,
+            char_offset_base: self.char_range.start,
+            logical_line_base: self.start_line,
+            display_column_base: self.display_column_base,
+            virtual_width: self.virtual_width,
+            slice_chars,
+            display_map,
+            tab_offsets,
+        }
+    }
 }
 
 struct LayoutCacheKeyInput<'a> {
@@ -351,7 +370,17 @@ fn warm_nearby_layout_slices(
     options: TextEditOptions<'_>,
     viewport: egui::Rect,
     wrap_width: f32,
+    range: std::ops::Range<usize>,
 ) {
+    let tree = buffer.document().piece_tree();
+    if tree.store().is_some() {
+        let length = range.len().clamp(4096, 256 * 1024);
+        tree.prefetch_range(
+            range.start.saturating_sub(length)
+                ..range.end.saturating_add(length).min(tree.len_chars()),
+        );
+        return;
+    }
     let row_height = editor_row_height(ui, options.editor_font_id);
     let visible_lines =
         super::interactions::viewport_line_capacity(viewport, row_height).unwrap_or(1) as f32;

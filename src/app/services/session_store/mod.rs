@@ -75,8 +75,40 @@ impl SessionStore {
         self.worker().map(DatabaseWorker::chunk_store)
     }
 
+    /// Background/shutdown barrier. Paint and input must never call this.
+    pub fn flush_text_chunks(&self) -> io::Result<()> {
+        self.worker()?.call(|db| {
+            block_on(async {
+                while db.chunk_store()?.pending_bytes() > 0 {
+                    db.drain_chunk_batch().await?;
+                }
+                Ok(())
+            })
+        })
+    }
+
+    pub(crate) fn opened_chunk_store(
+        &self,
+    ) -> Option<crate::app::services::chunk_store::ChunkStoreHandle> {
+        self.worker
+            .get()
+            .and_then(|w| w.as_ref().ok())
+            .map(DatabaseWorker::chunk_store)
+    }
+
     pub(crate) fn history_epoch(&self) -> u64 {
         self.history_epoch.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn bind_tab(&self, tab: &mut WorkspaceTab) -> io::Result<()> {
+        let store = self.chunk_store_handle()?;
+        for buffer in tab.buffers_mut() {
+            buffer.document_mut().set_bulk_intake(true);
+            let result = buffer.document_mut().bind_store(store.clone());
+            buffer.document_mut().set_bulk_intake(false);
+            result?;
+        }
+        Ok(())
     }
     pub(crate) fn commit_epoch(&self) -> u64 {
         self.commit_epoch.load(Ordering::Acquire)
@@ -172,15 +204,24 @@ impl SessionStore {
     fn restore_guarded(&self, stored: StoredSession) -> io::Result<Option<RestoredSession>> {
         // Content failures are quarantined by the database before reaching here.
         // An unscoped worker spawn/panic failure still protects the whole manifest.
-        restore_session(stored).inspect_err(|error| {
-            let reason = error.to_string();
-            if let Ok(worker) = self.worker() {
-                let _ = worker.call(move |db| {
-                    db.blocked = Some(reason);
-                    Ok(())
-                });
-            }
-        })
+        restore_session(stored)
+            .and_then(|mut restored| {
+                if let Some(session) = &mut restored {
+                    for tab in &mut session.tabs {
+                        self.bind_tab(tab)?;
+                    }
+                }
+                Ok(restored)
+            })
+            .inspect_err(|error| {
+                let reason = error.to_string();
+                if let Ok(worker) = self.worker() {
+                    let _ = worker.call(move |db| {
+                        db.blocked = Some(reason);
+                        Ok(())
+                    });
+                }
+            })
     }
     pub(crate) fn load_streaming(
         &self,
@@ -204,7 +245,8 @@ impl SessionStore {
             return Ok(None);
         }
         let mut summary = restore::RestoreSummary::default();
-        for (index, tab, cold_tab, tab_summary) in tabs {
+        for (index, mut tab, cold_tab, tab_summary) in tabs {
+            self.bind_tab(&mut tab)?;
             summary.merge(tab_summary);
             if !on_tab(index, tab, cold_tab) {
                 return Err(receiver_closed());
@@ -236,9 +278,12 @@ impl SessionStore {
             .worker()?
             .call(move |db| block_on(db.hydrate(SessionTab::from(tab))))?;
         if reopened {
-            return Ok((reopen::restore_reopened(tab, contents, &[])?, None));
+            let mut tab = reopen::restore_reopened(tab, contents, &[])?;
+            self.bind_tab(&mut tab)?;
+            return Ok((tab, None));
         }
-        let (tab, summary) = Restorer::new(contents).restore_tab_with_summary(tab);
+        let (mut tab, summary) = Restorer::new(contents).restore_tab_with_summary(tab);
+        self.bind_tab(&mut tab)?;
         Ok((tab, summary.into_status()))
     }
     pub fn persist(

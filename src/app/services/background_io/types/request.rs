@@ -4,6 +4,16 @@ use crate::app::services::session_store::{ColdSessionTab, SessionPersistRequest,
 use std::path::PathBuf;
 
 pub(crate) enum PathLoadRequest {
+    Reconcile {
+        base: Box<crate::app::domain::BufferState>,
+        source: Option<crate::app::domain::PieceSource>,
+        materialized_only: bool,
+        request: Box<Self>,
+    },
+    Bound {
+        store: crate::app::services::chunk_store::ChunkStoreHandle,
+        request: Box<Self>,
+    },
     Standard(PathBuf),
     Observed {
         path: PathBuf,
@@ -24,6 +34,7 @@ pub(crate) enum PathLoadRequest {
 impl PathLoadRequest {
     pub(crate) fn path(&self) -> &PathBuf {
         match self {
+            Self::Reconcile { request, .. } | Self::Bound { request, .. } => request.path(),
             Self::Standard(path)
             | Self::Observed { path, .. }
             | Self::WithEncoding { path, .. }
@@ -33,6 +44,12 @@ impl PathLoadRequest {
 }
 
 pub(crate) enum BackgroundIoRequest {
+    PrepareText {
+        request_id: u64,
+        buffer_id: u64,
+        session_store: SessionStore,
+        request: Box<crate::app::domain::buffer::PrepareTextRequest>,
+    },
     ReopenRetained {
         request_id: u64,
         session_store: SessionStore,
@@ -93,6 +110,7 @@ pub(crate) enum BackgroundIoRequest {
 impl BackgroundIoRequest {
     pub(in crate::app::services::background_io) fn kind(&self) -> &'static str {
         match self {
+            Self::PrepareText { .. } => "prepare_text",
             Self::ReopenRetained { .. } => "reopen_retained",
             Self::LoadPaths { .. } => "load_paths",
             Self::BuildColdFileShells { .. } => "build_cold_file_shells",
@@ -107,7 +125,8 @@ impl BackgroundIoRequest {
 
     pub(in crate::app::services::background_io) fn lane(&self) -> BackgroundIoLane {
         match self {
-            Self::LoadPaths { .. }
+            Self::PrepareText { .. }
+            | Self::LoadPaths { .. }
             | Self::BuildColdFileShells { .. }
             | Self::SavePath { .. }
             | Self::ReopenRetained { .. } => BackgroundIoLane::Path,

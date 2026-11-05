@@ -1,0 +1,288 @@
+//! Bulk text is normalized, edited, measured, and sealed on the path lane.
+use super::{BufferState, TextDocument, TextFormatMetadata};
+use crate::app::domain::buffer::{
+    BufferTextMetadata, HistoryToken, PieceSource, normalize_inserted_text_line_endings,
+    try_analyze_piece_tree_text,
+};
+use crate::app::domain::{CharCursor, CursorRange};
+use std::{
+    io,
+    ops::Range,
+    sync::{Arc, Mutex},
+};
+pub(crate) const BULK_TEXT_BYTES: usize = 256 * 1024;
+#[derive(Clone)]
+pub(crate) struct Preparation(Arc<Mutex<Option<PrepareTextRequest>>>);
+pub(crate) struct PrepareTextRequest {
+    base: HistoryToken,
+    document: TextDocument,
+    format: TextFormatMetadata,
+    replacements: Vec<(Range<usize>, String)>,
+    previous: CursorRange,
+    next: Option<CursorRange>,
+    source: PieceSource,
+    origin_view: Option<u64>,
+}
+pub(crate) struct PreparedText {
+    base: HistoryToken,
+    pub document: TextDocument,
+    pub format: TextFormatMetadata,
+    pub metadata: BufferTextMetadata,
+    pub selection: CursorRange,
+    pub origin_view: Option<u64>,
+    pub previous: CursorRange,
+    changes: Vec<(Range<usize>, usize)>,
+}
+impl PrepareTextRequest {
+    pub(crate) fn prepare_with_store(
+        mut self,
+        store: Option<crate::app::services::chunk_store::ChunkStoreHandle>,
+    ) -> io::Result<PreparedText> {
+        if let Some(store) = store {
+            self.document.set_bulk_intake(true);
+            self.document.bind_store(store)?;
+        }
+        self.prepare()
+    }
+    pub(crate) fn prepare(mut self) -> io::Result<PreparedText> {
+        for (_, text) in &mut self.replacements {
+            let normalized = normalize_inserted_text_line_endings(
+                text,
+                self.format.preferred_line_ending_style(),
+            );
+            if matches!(normalized, std::borrow::Cow::Owned(_)) {
+                *text = normalized.into_owned();
+            }
+        }
+        let next = self.next.unwrap_or_else(|| {
+            let (range, text) = &self.replacements[0];
+            CursorRange::one(CharCursor::new(range.start + text.chars().count()))
+        });
+        self.document.set_bulk_intake(true);
+        self.document
+            .replace_char_ranges_with_source(&self.replacements, self.previous, next, self.source)
+            .map_err(|cause| io::Error::other(format!("Could not prepare text: {cause:?}")))?;
+        self.document.set_bulk_intake(false);
+        if self.document.piece_tree().read_fault().is_some() {
+            return Err(io::Error::other(
+                "Text became unreadable during preparation",
+            ));
+        }
+        self.document.piece_tree_mut().clear_anchors();
+        let analysis = try_analyze_piece_tree_text(self.document.piece_tree(), &mut self.format)?;
+        Ok(PreparedText {
+            base: self.base,
+            document: self.document,
+            format: self.format,
+            metadata: analysis.metadata,
+            selection: next,
+            origin_view: self.origin_view,
+            previous: self.previous,
+            changes: self
+                .replacements
+                .iter()
+                .map(|(range, text)| (range.clone(), text.chars().count()))
+                .collect(),
+        })
+    }
+}
+impl BufferState {
+    pub(crate) fn prepare_loaded_replacement(
+        mut self,
+        loaded: Self,
+        source: Option<PieceSource>,
+    ) -> io::Result<Self> {
+        let base = self
+            .prepared_history_base
+            .take()
+            .unwrap_or_else(|| self.document.history_token());
+        self.document.set_bulk_intake(true);
+        let replaced = match source {
+            Some(source) => self.replace_from_loaded_buffer_source(loaded, source),
+            None => self.replace_from_loaded_buffer(loaded),
+        };
+        if !replaced {
+            return Err(io::Error::other(
+                "Could not prepare loaded text; current text was kept",
+            ));
+        }
+        self.document.set_bulk_intake(false);
+        self.prepared_history_base = Some(base);
+        Ok(self)
+    }
+    #[must_use]
+    pub fn is_preparing_text(&self) -> bool {
+        self.preparation.is_some()
+    }
+    pub(crate) fn queue_text_preparation(
+        &mut self,
+        replacements: Vec<(Range<usize>, String)>,
+        previous: CursorRange,
+        next: Option<CursorRange>,
+        source: PieceSource,
+        origin_view: Option<u64>,
+    ) -> bool {
+        if self.is_loading_preview
+            || self.is_preparing_text()
+            || replacements.is_empty()
+            || self.document.piece_tree().read_fault().is_some()
+            || self
+                .document
+                .validate_char_replacements(&replacements)
+                .is_err()
+        {
+            return false;
+        }
+        let request = PrepareTextRequest {
+            base: self.document.history_token(),
+            document: self.document.clone(),
+            format: self.format.clone(),
+            replacements,
+            previous,
+            next,
+            source,
+            origin_view,
+        };
+        self.preparation = Some(Preparation(Arc::new(Mutex::new(Some(request)))));
+        true
+    }
+    pub(crate) fn take_text_preparation(&mut self) -> Option<PrepareTextRequest> {
+        self.preparation
+            .as_ref()?
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+    pub(crate) fn retry_text_preparation(&mut self, request: PrepareTextRequest) {
+        if let Some(preparation) = &self.preparation {
+            *preparation
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(request);
+        }
+    }
+    pub(crate) fn cancel_text_preparation(&mut self) {
+        self.preparation = None;
+    }
+    pub(crate) fn install_prepared_text(
+        &mut self,
+        prepared: PreparedText,
+    ) -> Result<CursorRange, Box<PreparedText>> {
+        self.preparation = None;
+        if self.document.history_token() != prepared.base {
+            return Err(Box::new(prepared));
+        }
+        let selection = prepared.selection;
+        self.document = prepared.document;
+        self.format = prepared.format;
+        self.apply_text_metadata_refresh(
+            self.document_revision(),
+            prepared.metadata.line_count,
+            prepared.metadata.artifact_summary,
+            self.format.clone(),
+        );
+        self.active_selection = None;
+        self.is_dirty = true;
+        self.note_text_history_event(super::TextHistoryEvent::Edit);
+        Ok(selection)
+    }
+}
+
+impl PreparedText {
+    pub(crate) fn transformed_selection(
+        &self,
+        view: u64,
+        selection: Option<CursorRange>,
+    ) -> CursorRange {
+        let mut selection = selection.unwrap_or(self.previous);
+        if self.origin_view == Some(view) && selection == self.previous {
+            return self.selection;
+        }
+        for (range, inserted) in &self.changes {
+            for cursor in [&mut selection.primary, &mut selection.secondary] {
+                if cursor.index >= range.end {
+                    cursor.index = cursor
+                        .index
+                        .saturating_sub(range.len())
+                        .saturating_add(*inserted);
+                } else if cursor.index >= range.start {
+                    cursor.index = range.start + inserted;
+                }
+            }
+        }
+        selection
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::services::session_store::SessionStore;
+    #[test]
+    fn prepared_unicode_is_atomic_undoable_bound_and_scan_preserves_the_viewport_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let store = SessionStore::new(root.path().into());
+        let handle = store.chunk_store_handle().unwrap();
+        let mut buffer = BufferState::new("paste".into(), "base".into(), None);
+        buffer.document.bind_store(handle.clone()).unwrap();
+        let snapshot = buffer.document.snapshot();
+        let text = "λ🦀\n".repeat(400_000);
+        let previous = CursorRange::one(CharCursor::new(0));
+        assert!(buffer.queue_text_preparation(
+            vec![(0..0, text.clone())],
+            previous,
+            None,
+            PieceSource::Paste,
+            None
+        ));
+        assert_eq!(buffer.text(), "base");
+        assert!(buffer.is_preparing_text());
+        let prepared = buffer
+            .take_text_preparation()
+            .unwrap()
+            .prepare_with_store(Some(handle.clone()))
+            .unwrap();
+        let selection = prepared.selection;
+        assert!(buffer.install_prepared_text(prepared).is_ok());
+        let expected = normalize_inserted_text_line_endings(
+            &text,
+            buffer.format.preferred_line_ending_style(),
+        )
+        .into_owned();
+        assert_eq!(selection.primary.index, expected.chars().count());
+        assert!(!buffer.is_preparing_text());
+        assert_eq!(buffer.text(), format!("{expected}base"));
+        assert_eq!(snapshot.extract_text(), "base");
+        store.flush_text_chunks().unwrap();
+        handle.set_limits(0, 0);
+        handle.set_limits(4 * 1024 * 1024, 1024 * 1024);
+        let _pin = buffer.document.piece_tree().pin_range(0..1).unwrap();
+        let cached = handle.cached_bytes();
+        assert!(cached > 0);
+        buffer.document.try_content_digest().unwrap();
+        assert_eq!(
+            handle.cached_bytes(),
+            cached,
+            "scan must not populate or evict viewport bodies"
+        );
+        let mut restored = buffer.document.clone();
+        restored.undo_last_operation().unwrap();
+        assert_eq!(restored.extract_text(), "base");
+        restored.redo_last_operation().unwrap();
+        assert_eq!(restored.extract_text(), format!("{expected}base"));
+    }
+    #[test]
+    fn unbound_sealed_text_and_divergent_clones_remain_readable() {
+        let mut document = TextDocument::new(String::new());
+        let text = "λ".repeat(300_000);
+        document.insert_direct(0, &text);
+        let original = document.snapshot();
+        let mut clone = document.clone();
+        document.insert_direct(0, "first");
+        clone.insert_direct(0, "second");
+        assert_eq!(original.extract_text(), text);
+        assert_eq!(document.extract_text(), format!("first{text}"));
+        assert_eq!(clone.extract_text(), format!("second{text}"));
+    }
+}

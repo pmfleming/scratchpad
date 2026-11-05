@@ -20,6 +20,8 @@ pub(super) fn new_owner() -> u64 {
 pub(super) enum ChunkText {
     Inline(Arc<String>),
     Sealed(Arc<Chunk>),
+    Memory(Arc<String>),
+    Stored(Arc<crate::app::services::chunk_store::Chunk>),
 }
 
 #[derive(Debug)]
@@ -56,18 +58,11 @@ pub(super) struct Chunk {
     ready: Condvar,
 }
 #[derive(Debug)]
-enum ChunkState {
-    Pending(Arc<String>),
-    Committed {
-        backing: Arc<Backing>,
-        offset: u64,
-        resident: Weak<String>,
-        loading: bool,
-    },
-    Failed {
-        body: Arc<String>,
-        _cause: String,
-    },
+struct ChunkState {
+    backing: Arc<Backing>,
+    offset: u64,
+    resident: Weak<String>,
+    loading: bool,
 }
 
 #[derive(Default)]
@@ -89,23 +84,6 @@ fn cache() -> &'static Mutex<Cache> {
             ..Default::default()
         })
     })
-}
-fn temporary_backing() -> io::Result<Arc<Backing>> {
-    static FILE: Mutex<Option<Arc<Backing>>> = Mutex::new(None);
-    if let Some(backing) = FILE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
-    {
-        return Ok(backing);
-    }
-    // Creation can fail or race; neither path holds the cache or a chunk lock.
-    let fresh = Backing::new(tempfile::tempfile()?);
-    Ok(FILE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get_or_insert(fresh)
-        .clone())
 }
 impl Cache {
     fn remove(&mut self, key: u64) {
@@ -156,36 +134,24 @@ impl Chunk {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             loop {
-                match &mut *state {
-                    ChunkState::Pending(body) | ChunkState::Failed { body, .. } => {
-                        return Ok(body.clone());
+                if let Some(body) = state.resident.upgrade() {
+                    if retain {
+                        cache()
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .touch(self.id);
                     }
-                    ChunkState::Committed {
-                        backing,
-                        offset,
-                        resident,
-                        loading,
-                    } => {
-                        if let Some(body) = resident.upgrade() {
-                            if retain {
-                                cache()
-                                    .lock()
-                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                    .touch(self.id);
-                            }
-                            return Ok(body);
-                        }
-                        if *loading {
-                            state = self
-                                .ready
-                                .wait(state)
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            continue;
-                        }
-                        *loading = true;
-                        break (backing.clone(), *offset);
-                    }
+                    return Ok(body);
                 }
+                if state.loading {
+                    state = self
+                        .ready
+                        .wait(state)
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    continue;
+                }
+                state.loading = true;
+                break (state.backing.clone(), state.offset);
             }
         };
         let result = (|| {
@@ -206,14 +172,9 @@ impl Chunk {
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let ChunkState::Committed {
-                resident, loading, ..
-            } = &mut *state
-            {
-                *loading = false;
-                if let Ok(body) = &result {
-                    *resident = Arc::downgrade(body);
-                }
+            state.loading = false;
+            if let Ok(body) = &result {
+                state.resident = Arc::downgrade(body);
             }
             self.ready.notify_all();
         }
@@ -232,14 +193,12 @@ impl ChunkText {
         let Self::Sealed(chunk) = self else {
             return Err(io::Error::other("chunk is still inline"));
         };
-        let backing = match &*chunk
+        let backing = chunk
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-        {
-            ChunkState::Committed { backing, .. } => backing.clone(),
-            _ => return Err(io::Error::other("chunk not committed")),
-        };
+            .backing
+            .clone();
         backing.file.set_len(0)?;
         cache()
             .lock()
@@ -259,7 +218,7 @@ impl ChunkText {
             owner,
             len,
             digest,
-            state: Mutex::new(ChunkState::Committed {
+            state: Mutex::new(ChunkState {
                 backing,
                 offset,
                 resident: Weak::new(),
@@ -270,57 +229,29 @@ impl ChunkText {
     }
     pub(super) fn len(&self) -> usize {
         match self {
-            Self::Inline(body) => body.len(),
+            Self::Inline(body) | Self::Memory(body) => body.len(),
+            Self::Stored(chunk) => chunk.len(),
             Self::Sealed(chunk) => chunk.len,
         }
     }
-    pub(super) fn spill(&mut self, owner: u64) {
+    pub(super) fn seal(
+        &mut self,
+        owner: u64,
+        store: Option<&crate::app::services::chunk_store::ChunkStoreHandle>,
+    ) {
         let Self::Inline(body) = self else { return };
-        let body = body.clone();
-        let chunk = Arc::new(Chunk {
-            id: new_owner(),
-            owner,
-            len: body.len(),
-            digest: blake3::hash(body.as_bytes()),
-            state: Mutex::new(ChunkState::Pending(body.clone())),
-            ready: Condvar::new(),
-        });
-        *self = Self::Sealed(chunk.clone());
-        match temporary_backing().and_then(|backing| {
-            backing
-                .append(body.as_bytes())
-                .map(|offset| (backing, offset))
-        }) {
-            Ok((backing, offset)) => {
-                *chunk
-                    .state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = ChunkState::Committed {
-                    backing,
-                    offset,
-                    resident: Arc::downgrade(&body),
-                    loading: false,
-                };
-                cache()
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(chunk.id, owner, body);
-            }
-            Err(error) => {
-                let cause = format!("Text cache could not spill: {error}. Text remains in memory.");
-                log::warn!("{cause}");
-                *chunk
-                    .state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = ChunkState::Failed {
-                    body,
-                    _cause: cause.clone(),
-                };
-                cache()
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .error = Some(cause);
-            }
+        *self = match store {
+            Some(store) => Self::Stored(store.seal(body.clone(), owner)),
+            None => Self::Memory(body.clone()),
+        };
+    }
+    pub(super) fn bind_store(
+        &mut self,
+        owner: u64,
+        store: &crate::app::services::chunk_store::ChunkStoreHandle,
+    ) {
+        if let Self::Memory(body) = self {
+            *self = Self::Stored(store.seal(body.clone(), owner));
         }
     }
     pub(super) fn try_load(&self) -> io::Result<Arc<String>> {
@@ -328,7 +259,8 @@ impl ChunkText {
     }
     pub(super) fn try_load_for_scan(&self, retain: bool) -> io::Result<Arc<String>> {
         match self {
-            Self::Inline(body) => Ok(body.clone()),
+            Self::Inline(body) | Self::Memory(body) => Ok(body.clone()),
+            Self::Stored(chunk) => chunk.load(!retain, retain),
             Self::Sealed(chunk) => chunk.load(retain),
         }
     }
@@ -434,7 +366,7 @@ mod tests {
         let pin = chunk.try_load().unwrap();
         let chunk_id = match &chunk {
             ChunkText::Sealed(chunk) => chunk.id,
-            ChunkText::Inline(_) => unreachable!(),
+            ChunkText::Inline(_) | ChunkText::Memory(_) | ChunkText::Stored(_) => unreachable!(),
         };
         cache().lock().unwrap().remove(chunk_id);
         backing.file.set_len(0).unwrap();

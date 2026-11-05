@@ -101,7 +101,9 @@ impl SessionStore {
                 let (tab, contents) = self
                     .worker()?
                     .call(move |db| block_on(db.load_retained_document(&id)))?;
-                restore_reopened(tab, contents, claimed)
+                let mut tab = restore_reopened(tab, contents, claimed)?;
+                self.bind_tab(&mut tab)?;
+                Ok(tab)
             }
         }
     }
@@ -119,7 +121,9 @@ impl SessionStore {
         let (tab, contents) = self
             .worker()?
             .call(move |db| block_on(db.read_closed_tab(&token)))?;
-        restore_reopened(tab, contents, claimed)
+        let mut tab = restore_reopened(tab, contents, claimed)?;
+        self.bind_tab(&mut tab)?;
+        Ok(tab)
     }
 
     pub(crate) fn cold_tab_for_path(
@@ -147,7 +151,11 @@ impl SessionStore {
             .worker()?
             .call(move |db| block_on(db.load_retained_path(&key)))?;
         retained
-            .map(|(tab, contents)| restore_reopened(tab, contents, claimed))
+            .map(|(tab, contents)| {
+                let mut tab = restore_reopened(tab, contents, claimed)?;
+                self.bind_tab(&mut tab)?;
+                Ok(tab)
+            })
             .transpose()
     }
 }

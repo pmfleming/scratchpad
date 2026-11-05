@@ -67,9 +67,11 @@ impl std::fmt::Debug for ChunkStoreHandle {
 }
 type Waker = Arc<dyn Fn() + Send + Sync>;
 struct Core {
+    prefetch: std::sync::mpsc::SyncSender<Weak<Chunk>>,
     epoch: Arc<ReadEpoch>,
     pending: Mutex<VecDeque<Arc<Chunk>>>,
     pending_bytes: AtomicUsize,
+    peak_pending_bytes: AtomicUsize,
     changed: Condvar,
     health: Mutex<Health>,
     wake: Mutex<Option<Waker>>,
@@ -141,11 +143,27 @@ impl Cache {
 }
 impl ChunkStoreHandle {
     pub(crate) fn open(path: &Path) -> io::Result<Self> {
+        let (prefetch, incoming) = std::sync::mpsc::sync_channel::<Weak<Chunk>>(2);
+        // The bounded coordinator holds only weak handles. Closing the store's
+        // sender stops it; epoch closure joins the actual engine reader threads.
+        drop(
+            std::thread::Builder::new()
+                .name("text-prefetch".into())
+                .spawn(move || {
+                    while let Ok(chunk) = incoming.recv() {
+                        if let Some(chunk) = chunk.upgrade() {
+                            let _ = chunk.load(true, true);
+                        }
+                    }
+                })?,
+        );
         let epoch = ReadEpoch::open(path, NEXT_EPOCH.fetch_add(1, Ordering::Relaxed))?;
         Ok(Self(Arc::new(Core {
+            prefetch,
             epoch,
             pending: Mutex::new(VecDeque::new()),
             pending_bytes: AtomicUsize::new(0),
+            peak_pending_bytes: AtomicUsize::new(0),
             changed: Condvar::new(),
             health: Mutex::new(Health::Healthy),
             wake: Mutex::new(None),
@@ -195,6 +213,22 @@ impl ChunkStoreHandle {
     pub fn pending_bytes(&self) -> usize {
         self.0.pending_bytes.load(Ordering::Acquire)
     }
+
+    /// Resident cached bytes, excluding pinned-only and pending bodies.
+    #[must_use]
+    pub fn cached_bytes(&self) -> usize {
+        self.0
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .bytes
+    }
+
+    /// High-water mark for pending sealed bodies in this store epoch.
+    #[must_use]
+    pub fn peak_pending_bytes(&self) -> usize {
+        self.0.peak_pending_bytes.load(Ordering::Acquire)
+    }
     /// Accept an immutable body without hashing or waiting for the writer.
     pub fn seal(&self, body: Arc<String>, owner: u64) -> Arc<Chunk> {
         let chunk = Arc::new(Chunk {
@@ -205,7 +239,10 @@ impl ChunkStoreHandle {
             state: Mutex::new(State::Pending(body)),
             changed: Condvar::new(),
         });
-        self.0.pending_bytes.fetch_add(chunk.len, Ordering::AcqRel);
+        let pending = self.0.pending_bytes.fetch_add(chunk.len, Ordering::AcqRel) + chunk.len;
+        self.0
+            .peak_pending_bytes
+            .fetch_max(pending, Ordering::AcqRel);
         self.0
             .pending
             .lock()
@@ -319,6 +356,12 @@ impl ChunkStoreHandle {
     }
 }
 impl Chunk {
+    /// Queue nearby text without waiting; saturated/stale prefetches are expendable.
+    pub fn prefetch(self: &Arc<Self>) {
+        if let Some(core) = self.core.upgrade() {
+            let _ = core.prefetch.try_send(Arc::downgrade(self));
+        }
+    }
     /// Whether this handle represents an empty body.
     pub fn is_empty(&self) -> bool {
         self.len == 0

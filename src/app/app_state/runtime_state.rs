@@ -15,6 +15,8 @@ pub(crate) struct OpenFileDialogState {
 }
 
 pub(crate) struct BackgroundIoState {
+    pub(crate) bound_store_epoch: Option<u64>,
+    pub(crate) preparations_pending: bool,
     pub(crate) tx: BackgroundIoDispatcher,
     pub(crate) rx: Receiver<BackgroundIoResult>,
     pub(crate) next_request_id: u64,
@@ -24,6 +26,8 @@ pub(crate) struct BackgroundIoState {
 impl BackgroundIoState {
     pub(crate) fn new(tx: BackgroundIoDispatcher, rx: Receiver<BackgroundIoResult>) -> Self {
         Self {
+            bound_store_epoch: None,
+            preparations_pending: false,
             tx,
             rx,
             next_request_id: 1,

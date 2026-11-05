@@ -112,6 +112,16 @@ impl Default for TextDocumentHistoryState {
 }
 
 impl TextDocument {
+    pub fn bind_store(
+        &mut self,
+        store: crate::app::services::chunk_store::ChunkStoreHandle,
+    ) -> io::Result<()> {
+        self.piece_tree_mut().bind_store(store)
+    }
+
+    pub(crate) fn set_bulk_intake(&mut self, enabled: bool) {
+        self.piece_tree_mut().set_bulk_intake(enabled);
+    }
     #[must_use]
     pub fn new(text: String) -> Self {
         Self::with_preferred_line_ending(text, platform_default_line_ending())
@@ -151,6 +161,19 @@ impl TextDocument {
     }
 
     /// Extract the full text content as a new String from the piece tree.
+    pub fn try_extract_text(&self) -> io::Result<String> {
+        let mut text = String::with_capacity(self.piece_tree().metrics().bytes);
+        for span in self
+            .piece_tree()
+            .try_spans_for_range(0..self.piece_tree().len_chars())
+        {
+            text.push_str(&span?.text);
+        }
+        capacity_metrics::record_full_text_flatten(text.len());
+        Ok(text)
+    }
+
+    /// Infallible access for callers that already hold a complete text pin.
     #[must_use]
     pub fn extract_text(&self) -> String {
         let text = self.content.piece_tree.extract_text();
@@ -345,8 +368,14 @@ impl TextDocument {
     }
 
     pub fn replace_text(&mut self, text: String) {
+        let store = self.piece_tree().store().cloned();
         self.identity = next_document_identity();
         self.content.piece_tree = Arc::new(PieceTreeLite::from_string(text));
+        if let Some(store) = store
+            && let Err(cause) = self.bind_store(store)
+        {
+            log::warn!("Text binding failed after replacement; text remains in RAM: {cause}");
+        }
         self.clear_operation_history();
     }
 

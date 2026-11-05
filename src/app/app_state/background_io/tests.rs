@@ -416,3 +416,107 @@ fn timeline_cold_hydration_runs_conflict_search_and_restore_status_updates() {
         );
     }
 }
+
+#[test]
+fn large_prepared_paste_publishes_atomically_and_undo_keeps_the_original_text() {
+    use crate::app::domain::{CharCursor, CursorRange};
+    let mut app = app_with_buffer(BufferState::new("paste".into(), "base".into(), None));
+    let selection = CursorRange::one(CharCursor::new(0));
+    app.tab_manager.active_tab_mut().unwrap().layout.views_mut()[0].cursor_range = Some(selection);
+    let text = "λ🦀\n".repeat(50_000);
+    assert!(crate::app::app_state::workspace::editing::insert_text_in_active_view(&mut app, &text));
+    assert_eq!(
+        app.tab_manager.active_tab().unwrap().active_buffer().text(),
+        "base"
+    );
+    assert!(app.wait_for_background_io_idle_timeout(std::time::Duration::from_secs(10)));
+    let buffer = app
+        .tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut();
+    let normalized = crate::app::domain::buffer::normalize_inserted_text_line_endings(
+        &text,
+        buffer.format.preferred_line_ending_style(),
+    )
+    .into_owned();
+    assert_eq!(buffer.text(), format!("{normalized}base"));
+    assert!(buffer.is_dirty);
+    buffer.undo_last_text_operation().unwrap();
+    assert_eq!(buffer.text(), "base");
+}
+
+#[test]
+fn raw_bulk_input_is_left_with_a_focused_non_editor_widget() {
+    let mut app = app_with_buffer(BufferState::new("paste".into(), "base".into(), None));
+    let ctx = eframe::egui::Context::default();
+    let other = crate::app::ui::widget_ids::ctx_key("search-query-test");
+    ctx.memory_mut(|memory| memory.request_focus(other));
+    let mut input = eframe::egui::RawInput {
+        events: vec![eframe::egui::Event::Paste("x".repeat(300_000))],
+        ..Default::default()
+    };
+    eframe::App::raw_input_hook(&mut app, &ctx, &mut input);
+    assert_eq!(input.events.len(), 1);
+    assert!(
+        !app.tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .is_preparing_text()
+    );
+}
+
+#[test]
+fn large_prepared_paste_preserves_independent_split_carets() {
+    use crate::app::domain::{CharCursor, CursorRange, SplitAxis};
+    let mut app = app_with_buffer(BufferState::new("split".into(), "base".into(), None));
+    let tab = app.tab_manager.active_tab_mut().unwrap();
+    let origin = tab.layout.active_view_id();
+    let other = tab.split_active_view(SplitAxis::Vertical).unwrap();
+    tab.activate_view(origin);
+    for (id, index) in [(origin, 0), (other, 3)] {
+        let (buffer, view) = tab.buffer_and_view_mut(id).unwrap();
+        view.set_cursor_range_anchored(buffer, CursorRange::one(CharCursor::new(index)));
+    }
+    let text = "λ".repeat(150_000);
+    assert!(crate::app::app_state::workspace::editing::insert_text_in_active_view(&mut app, &text));
+    assert!(app.wait_for_background_io_idle_timeout(std::time::Duration::from_secs(10)));
+    let tab = app.tab_manager.active_tab().unwrap();
+    assert_eq!(
+        tab.layout
+            .view(origin)
+            .unwrap()
+            .cursor_range
+            .unwrap()
+            .primary
+            .index,
+        150_000
+    );
+    assert_eq!(
+        tab.layout
+            .view(other)
+            .unwrap()
+            .cursor_range
+            .unwrap()
+            .primary
+            .index,
+        150_003
+    );
+}
+
+#[test]
+fn a_close_keeps_input_waiting_for_its_view_to_replay() {
+    let mut app = app_with_buffer(BufferState::new("queued".into(), "base".into(), None));
+    app.tab_manager.active_tab_mut().unwrap().layout.views_mut()[0]
+        .deferred_editor_events
+        .push(eframe::egui::Event::Text("kept".into()));
+    assert!(crate::app::services::session_manager::persist_tab_close(&mut app, 0).is_err());
+    assert_eq!(app.tab_manager.tabs.len(), 1);
+    assert_eq!(
+        app.tab_manager.active_tab().unwrap().layout.views()[0]
+            .deferred_editor_events
+            .len(),
+        1
+    );
+}

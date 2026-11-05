@@ -166,3 +166,28 @@ impl SessionMaintenanceFixture {
         })
     }
 }
+
+impl SessionStore {
+    /// Production probe boundary: hold one writer job while measuring UI frames.
+    /// This injects a scheduling stall, not a claim about physical device latency.
+    pub fn profile_pause_writer(
+        &self,
+        duration: std::time::Duration,
+    ) -> io::Result<std::thread::JoinHandle<io::Result<()>>> {
+        let worker = self.worker()?.clone();
+        let (started, ready) = std::sync::mpsc::sync_channel(1);
+        let task = std::thread::Builder::new()
+            .name("profile-writer-pause".into())
+            .spawn(move || {
+                worker.call(move |_| {
+                    started.send(()).map_err(io::Error::other)?;
+                    std::thread::sleep(duration);
+                    Ok(())
+                })
+            })?;
+        ready
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(io::Error::other)?;
+        Ok(task)
+    }
+}

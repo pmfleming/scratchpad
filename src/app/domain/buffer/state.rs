@@ -16,6 +16,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 mod disk;
 mod metadata;
+mod preparation;
+pub(crate) use preparation::{BULK_TEXT_BYTES, PrepareTextRequest, PreparedText};
 #[cfg(test)]
 mod tests;
 
@@ -52,10 +54,12 @@ pub struct BufferState {
     pub(crate) pending_reopen_external: Option<u64>,
     pub(crate) pending_reopen_original: Option<Box<TextDocument>>,
     pub(crate) loaded_replacement_text: Option<std::sync::Arc<String>>,
+    pub(crate) prepared_history_base: Option<super::HistoryToken>,
     pub freshness: BufferFreshness,
     pub active_selection: Option<Range<usize>>,
     pub has_non_compliant_characters: bool,
     refresh: BufferRefreshState,
+    preparation: Option<preparation::Preparation>,
 }
 
 #[derive(Clone)]
@@ -344,8 +348,22 @@ impl BufferState {
         mut loaded: BufferState,
         source: super::PieceSource,
     ) -> bool {
+        if self.is_preparing_text() {
+            return false;
+        }
         let id = self.id;
         let temp_id = self.temp_id.clone();
+        if let Some(base) = loaded.prepared_history_base.take() {
+            if base != self.document.history_token() {
+                return false;
+            }
+            *self = loaded;
+            self.id = id;
+            self.temp_id = temp_id;
+            self.active_selection = None;
+            self.refresh.pending_text_history_event = None;
+            return true;
+        }
         let history = if self.is_loading_preview {
             None
         } else {
@@ -455,6 +473,9 @@ impl BufferState {
     }
 
     pub fn undo_last_text_operation(&mut self) -> Option<CursorRange> {
+        if self.is_preparing_text() {
+            return None;
+        }
         let selection = self.document.undo_last_operation()?;
         self.note_text_history_event(TextHistoryEvent::Replay);
         let latest_edit = self.document.latest_operation_record().cloned();
@@ -466,6 +487,9 @@ impl BufferState {
         &mut self,
         target: u64,
     ) -> Result<CursorRange, TextHistoryApplyError> {
+        if self.is_preparing_text() {
+            return Err(TextHistoryApplyError::Conflict);
+        }
         let selection = self.document.navigate_history(target)?;
         self.note_text_history_event(TextHistoryEvent::Navigate);
         self.refresh_text_metadata();
@@ -474,6 +498,9 @@ impl BufferState {
     }
 
     pub fn redo_last_text_operation(&mut self) -> Option<CursorRange> {
+        if self.is_preparing_text() {
+            return None;
+        }
         let selection = self.document.redo_last_operation()?;
         self.note_text_history_event(TextHistoryEvent::Replay);
         let latest_edit = self.document.latest_operation_record().cloned();
@@ -520,9 +547,11 @@ impl BufferState {
             pending_reopen_external: None,
             pending_reopen_original: None,
             loaded_replacement_text: None,
+            prepared_history_base: None,
             freshness: state.freshness,
             active_selection: None,
             has_non_compliant_characters: text_metadata.has_non_compliant_characters,
+            preparation: None,
             refresh: BufferRefreshState {
                 text_metadata_refresh_stale: state.text_metadata_refresh_stale,
                 line_ending_metadata_exact: !state.text_metadata_refresh_stale,

@@ -52,6 +52,11 @@ These include the unchanged old text/history path and are not directly comparabl
 to stage 0's structural metadata prototype. Stage 4 must remove history-payload
 work before judging final save cost.
 
-Fresh RQL is run against an immutable commit checkout, with its local archive at
-`target/quality-runs/live-text-stage-2-frozen`. Strict incomplete evidence and
-existing policy findings are reported; budgets are not raised to hide them.
+Fresh RQL completed against immutable commit `d769a41`, with matching source
+hashes. Measurement, verification, audit, and feature-tool commands passed.
+The strict gate remains failing on partial analysis, existing hotspot findings,
+and three pending required human reviews. No new chunk-store/document-row/layout
+module exceeded a hotspot limit. The compact summary is in
+`evidence/stage-2/quality-summary.json`; the complete local archive is
+`target/quality-runs/live-text-stage-2-frozen`. No budgets were raised or findings
+suppressed.

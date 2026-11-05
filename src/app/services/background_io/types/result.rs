@@ -8,6 +8,11 @@ use crate::app::services::session_store::{
 use std::path::PathBuf;
 
 pub(crate) enum BackgroundIoResult {
+    TextPrepared {
+        request_id: u64,
+        buffer_id: u64,
+        result: Result<Box<crate::app::domain::buffer::PreparedText>, String>,
+    },
     RetainedReopened {
         request_id: u64,
         result: Result<(Box<WorkspaceTab>, Option<RestoreStatus>), String>,

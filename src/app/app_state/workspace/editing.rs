@@ -125,6 +125,26 @@ pub(crate) fn insert_text_in_active_view(app: &mut ScratchpadApp, text: &str) ->
         Some(tab) => tab.layout.active_view_id,
         None => return false,
     };
+    if text.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES {
+        let tab = &mut app.tab_manager.tabs.as_mut_slice()[active_tab_index];
+        let Some((buffer, view)) = tab.buffer_and_view_mut(active_view_id) else {
+            return false;
+        };
+        let selection = view.cursor_range.unwrap_or_else(|| {
+            CursorRange::one(CharCursor::new(buffer.current_file_length().chars))
+        });
+        let queued = buffer.queue_text_preparation(
+            vec![(selection.as_sorted_char_range(), text.to_owned())],
+            selection,
+            None,
+            crate::app::domain::PieceSource::Paste,
+            Some(active_view_id),
+        );
+        if queued {
+            app.queue_text_preparations();
+        }
+        return queued;
+    }
     let inserted_chars = text.chars().count();
     let next_selection = {
         let tab = &mut app.tab_manager.tabs.as_mut_slice()[active_tab_index];

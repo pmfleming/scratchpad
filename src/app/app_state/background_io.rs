@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 const BACKGROUND_IO_POLL_INTERVAL: Duration = Duration::from_millis(16);
 
 mod fallback;
+mod preparation;
 mod queue;
 
 impl ScratchpadApp {
@@ -113,8 +114,24 @@ impl ScratchpadApp {
 
     pub(crate) fn poll_background_io(&mut self, ctx: &egui::Context) {
         self.drain_background_io_results();
+        if let Some(store) = self.state.persistence.session_store.opened_chunk_store()
+            && self.state.background_io.bound_store_epoch != Some(store.epoch().id)
+        {
+            self.apply_history_budget_to_open_buffers();
+            self.state.background_io.bound_store_epoch = Some(store.epoch().id);
+        }
+        if self.state.background_io.preparations_pending
+            || self
+                .tab_manager
+                .active_tab()
+                .is_some_and(|t| t.active_buffer().is_preparing_text())
+        {
+            self.queue_text_preparations();
+        }
 
-        if self.state.background_io.has_pending_background_actions() {
+        if self.state.background_io.has_pending_background_actions()
+            || self.state.background_io.preparations_pending
+        {
             ctx.request_repaint_after(BACKGROUND_IO_POLL_INTERVAL);
         }
     }
@@ -137,7 +154,17 @@ impl ScratchpadApp {
         let deadline = Instant::now() + timeout;
         loop {
             self.drain_background_io_results();
-            if !self.state.background_io.has_pending_background_actions() {
+            if self.state.background_io.preparations_pending
+                || self
+                    .tab_manager
+                    .active_tab()
+                    .is_some_and(|t| t.active_buffer().is_preparing_text())
+            {
+                self.queue_text_preparations();
+            }
+            if !self.state.background_io.has_pending_background_actions()
+                && !self.state.background_io.preparations_pending
+            {
                 return true;
             }
             if Instant::now() >= deadline {
@@ -171,6 +198,11 @@ impl ScratchpadApp {
 
     fn apply_background_io_result(&mut self, result: BackgroundIoResult) {
         match result {
+            BackgroundIoResult::TextPrepared {
+                request_id,
+                buffer_id,
+                result,
+            } => self.apply_text_prepared(request_id, buffer_id, result),
             BackgroundIoResult::RetainedReopened { request_id, result } => {
                 self.apply_retained_reopened_result(request_id, result);
             }
@@ -301,6 +333,7 @@ impl ScratchpadApp {
             }
             Some(
                 action @ (PendingBackgroundAction::SavePath(_)
+                | PendingBackgroundAction::PrepareText
                 | PendingBackgroundAction::ReopenRetained(_)
                 | PendingBackgroundAction::StartupRestore(_)
                 | PendingBackgroundAction::HydrateSessionTab(_)

@@ -242,6 +242,33 @@ impl DocumentSnapshot {
         (self.borrow_or_flatten_range(normalized), start)
     }
 
+    /// A bounded search window on the background reader, without changing the
+    /// viewport cache. The returned shared/owned text is its own read pin.
+    pub fn try_search_text(
+        &self,
+        range: Option<Range<usize>>,
+    ) -> std::io::Result<(super::piece_tree::PieceTreeText<'_>, usize)> {
+        let range = range.map_or(0..self.len_chars(), |range| {
+            self.normalize_char_range(range)
+        });
+        let offset = range.start;
+        let mut spans = self.piece_tree.try_spans_for_range(range.clone());
+        let Some(first) = spans.next().transpose()? else {
+            return Ok((
+                super::piece_tree::PieceTreeText::owned(String::new()),
+                offset,
+            ));
+        };
+        if first.char_len == range.len() {
+            return Ok((first.text, offset));
+        }
+        let mut text = first.text.to_string();
+        for span in spans {
+            text.push_str(&span?.text);
+        }
+        Ok((super::piece_tree::PieceTreeText::owned(text), offset))
+    }
+
     fn full_char_range(&self) -> Range<usize> {
         0..self.document_length().chars
     }

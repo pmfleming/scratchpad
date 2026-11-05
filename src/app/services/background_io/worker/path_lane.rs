@@ -17,6 +17,19 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
         endpoints.result_tx,
         endpoints.lane_depths,
         |request, result_tx| match request {
+            BackgroundIoRequest::PrepareText {
+                request_id,
+                buffer_id,
+                session_store,
+                request,
+            } => LaneOutcome::result(BackgroundIoResult::TextPrepared {
+                request_id,
+                buffer_id,
+                result: request
+                    .prepare_with_store(session_store.chunk_store_handle().ok())
+                    .map(Box::new)
+                    .map_err(|cause| cause.to_string()),
+            }),
             BackgroundIoRequest::ReopenRetained {
                 request_id,
                 session_store,
@@ -188,6 +201,39 @@ fn load_paths(requests: Vec<PathLoadRequest>) -> Vec<LoadedPathResult> {
 
 fn load_one(request: PathLoadRequest) -> LoadedPathResult {
     match request {
+        PathLoadRequest::Reconcile {
+            base,
+            source,
+            materialized_only,
+            request,
+        } => {
+            let mut loaded = load_one(*request);
+            loaded.result = loaded.result.and_then(|loaded| {
+                if materialized_only && loaded.loaded_replacement_text.is_none() {
+                    Ok(loaded)
+                } else {
+                    base.prepare_loaded_replacement(loaded, source)
+                        .map_err(|cause| cause.to_string())
+                }
+            });
+            loaded
+        }
+        PathLoadRequest::Bound { store, request } => {
+            let mut loaded = load_one(*request);
+            if let Ok(buffer) = &mut loaded.result
+                && let Err(cause) = buffer.document_mut().bind_store(store.clone())
+            {
+                loaded.result = Err(cause.to_string());
+            }
+            if let Some(tab) = &mut loaded.retained_tab {
+                for buffer in tab.buffers_mut() {
+                    if let Err(cause) = buffer.document_mut().bind_store(store.clone()) {
+                        loaded.result = Err(cause.to_string());
+                    }
+                }
+            }
+            loaded
+        }
         PathLoadRequest::Observed {
             path,
             materialize,

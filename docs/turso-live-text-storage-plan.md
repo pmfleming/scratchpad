@@ -883,6 +883,9 @@ without a damage error.
 
 ### 3. Back live text with the store
 
+Implemented on 2026-11-05; see [stage 3 evidence](../tools/turso-contract/STAGE-3.md).
+The remaining shutdown and degraded-operation integration belongs to stage 6.
+
 Replace rollover spills with sealing, and add viewport pinning, prefetch, flow control, and
 `PreparedText`. Large imports may still use the temporary path until stage 5.
 

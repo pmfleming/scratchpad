@@ -126,6 +126,7 @@ pub(crate) enum PendingReloadMode {
 }
 
 pub(crate) enum PendingBackgroundAction {
+    PrepareText,
     ReopenRetained(PendingRetainedOpenAction),
     OpenTabs(PendingOpenTabsAction),
     OpenHere(PendingOpenHereAction),
@@ -141,6 +142,7 @@ pub(crate) enum PendingBackgroundAction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PendingActionKind {
+    PrepareText,
     ReopenRetained,
     OpenTabs,
     OpenHere,
@@ -170,6 +172,7 @@ macro_rules! pending_action_extractors {
 impl PendingBackgroundAction {
     pub(crate) fn kind(&self) -> PendingActionKind {
         match self {
+            Self::PrepareText => PendingActionKind::PrepareText,
             Self::ReopenRetained(_) => PendingActionKind::ReopenRetained,
             Self::OpenTabs(_) => PendingActionKind::OpenTabs,
             Self::OpenHere(_) => PendingActionKind::OpenHere,

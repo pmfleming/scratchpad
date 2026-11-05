@@ -80,14 +80,21 @@ fn handle_keyboard_events_with(
         Option<f32>,
     ) -> Option<cursor::CursorMovementResult>,
 ) -> bool {
-    let events = relevant_input_events(ui);
+    let events = relevant_input_events(ui, view);
     let context = KeyboardInputContext {
         total_chars: buffer.current_file_length().chars,
         indentation,
     };
     let mut changed = false;
 
-    for event in events {
+    for raw in events {
+        if buffer.is_preparing_text() {
+            view.deferred_editor_events.push(raw);
+            continue;
+        }
+        let Some(event) = relevant_input_event(raw) else {
+            continue;
+        };
         let scrubber_visibility = scrubber_visibility_for_event(&event);
         changed |= handle_relevant_input_event(
             ui,
@@ -145,6 +152,21 @@ fn handle_relevant_input_event(
     let cursor = view.cursor_range.unwrap_or_default();
 
     match event {
+        RelevantInputEvent::Text(text)
+            if text.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES
+                || cursor.as_sorted_char_range().len()
+                    >= crate::app::domain::buffer::BULK_TEXT_BYTES / 4 =>
+        {
+            let (start, end) = cursor.sorted_indices();
+            buffer.queue_text_preparation(
+                vec![(start..end, text)],
+                cursor,
+                None,
+                PieceSource::Edit,
+                Some(view.id),
+            );
+            false
+        }
         RelevantInputEvent::Text(text) => insert_text(buffer, view, &cursor, &text),
         RelevantInputEvent::ImePreedit {
             text,
@@ -175,6 +197,20 @@ fn handle_relevant_input_event(
         }
         RelevantInputEvent::Cut => false,
         RelevantInputEvent::Paste(text) => {
+            if text.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES
+                || cursor.as_sorted_char_range().len()
+                    >= crate::app::domain::buffer::BULK_TEXT_BYTES / 4
+            {
+                let (start, end) = cursor.sorted_indices();
+                buffer.queue_text_preparation(
+                    vec![(start..end, text)],
+                    cursor,
+                    None,
+                    PieceSource::Paste,
+                    Some(view.id),
+                );
+                return false;
+            }
             insert_text_with_source(buffer, view, &cursor, &text, PieceSource::Paste)
         }
     }
@@ -194,6 +230,26 @@ fn handle_key_event(
         Option<f32>,
     ) -> Option<cursor::CursorMovementResult>,
 ) -> bool {
+    if cursor.as_sorted_char_range().len() >= crate::app::domain::buffer::BULK_TEXT_BYTES / 4
+        && matches!(
+            key_event.key,
+            egui::Key::Backspace | egui::Key::Delete | egui::Key::Enter
+        )
+    {
+        let text = if key_event.key == egui::Key::Enter {
+            buffer.document().preferred_line_ending_str().to_owned()
+        } else {
+            String::new()
+        };
+        buffer.queue_text_preparation(
+            vec![(cursor.as_sorted_char_range(), text)],
+            *cursor,
+            None,
+            PieceSource::Edit,
+            Some(view.id),
+        );
+        return false;
+    }
     if let Some(handled) =
         handle_non_movement_key_event(ui, key_event, buffer, view, cursor, context)
     {
@@ -204,61 +260,57 @@ fn handle_key_event(
     apply_cursor_update(view, buffer, movement)
 }
 
-fn relevant_input_events(ui: &egui::Ui) -> Vec<RelevantInputEvent> {
-    // Collect while the input lock is held, then consult context data after it
-    // has been released. Both `Context::input` and `Context::data` lock the
-    // same egui context, so looking up the runtime keymap inside `ui.input`
-    // deadlocks the UI thread as soon as a key event arrives.
-    let mut events: Vec<_> = ui.input(|input| {
-        input
-            .events
-            .iter()
-            .filter_map(relevant_input_event)
-            .collect()
-    });
-    events.retain(|event| {
-        !matches!(
-            event,
-            RelevantInputEvent::Key(key_event)
-                if crate::app::shortcut_tooltips::is_app_shortcut(
-                    ui.ctx(),
-                    key_event.modifiers,
-                    key_event.key,
-                )
-        )
-    });
-    events
+fn relevant_input_events(ui: &egui::Ui, view: &mut EditorViewState) -> Vec<egui::Event> {
+    // Move committed text out of egui's focused input stream. Cloning a large
+    // paste here would consume the frame budget before preparation even starts.
+    let mut raw = std::mem::take(&mut view.deferred_editor_events);
+    raw.extend(ui.input_mut(|input| {
+        let mut owned = Vec::new();
+        let mut remaining = Vec::new();
+        for event in std::mem::take(&mut input.events) {
+            match event {
+                egui::Event::Text(_)
+                | egui::Event::Paste(_)
+                | egui::Event::Copy
+                | egui::Event::Cut
+                | egui::Event::Ime(_) => owned.push(event),
+                egui::Event::Key { pressed: true, .. } => {
+                    owned.push(event.clone());
+                    remaining.push(event);
+                }
+                _ => remaining.push(event),
+            }
+        }
+        input.events = remaining;
+        owned
+    }));
+    // Runtime keymap lookups take the same egui context lock, so run them only
+    // after the input lock has been released.
+    raw.retain(|event|!matches!(event,egui::Event::Key {key,modifiers,..} if crate::app::shortcut_tooltips::is_app_shortcut(ui.ctx(),*modifiers,*key)));
+    raw
 }
 
-fn relevant_input_event(event: &egui::Event) -> Option<RelevantInputEvent> {
+fn relevant_input_event(event: egui::Event) -> Option<RelevantInputEvent> {
     match event {
-        egui::Event::Text(text) => {
-            is_insertable_text(text).then(|| RelevantInputEvent::Text(text.clone()))
+        egui::Event::Text(text) | egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
+            is_insertable_text(&text).then_some(RelevantInputEvent::Text(text))
         }
         egui::Event::Ime(egui::ImeEvent::Preedit {
             text,
             active_range_chars,
         }) => Some(RelevantInputEvent::ImePreedit {
-            text: text.clone(),
-            active_range_chars: active_range_chars.clone(),
+            text,
+            active_range_chars,
         }),
-        egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
-            is_insertable_text(text).then(|| RelevantInputEvent::Text(text.clone()))
-        }
         egui::Event::Key {
             key,
             pressed: true,
             modifiers,
             ..
-        } => Some(RelevantInputEvent::Key(PressedKeyEvent {
-            key: *key,
-            modifiers: *modifiers,
-        })),
+        } => Some(RelevantInputEvent::Key(PressedKeyEvent { key, modifiers })),
         egui::Event::Copy => Some(RelevantInputEvent::Copy),
         egui::Event::Cut => Some(RelevantInputEvent::Cut),
-        egui::Event::Paste(text) if !text.is_empty() => {
-            Some(RelevantInputEvent::Paste(text.clone()))
-        }
+        egui::Event::Paste(text) if !text.is_empty() => Some(RelevantInputEvent::Paste(text)),
         _ => None,
     }
 }
@@ -448,6 +500,9 @@ fn apply_history(
 fn copy_selection(ui: &mut egui::Ui, buffer: &BufferState, cursor: &CursorRange) {
     if !cursor.is_empty() {
         let (start, end) = cursor.sorted_indices();
+        let Ok(_pin) = buffer.document().piece_tree().pin_range(start..end) else {
+            return;
+        };
         ui.copy_text(buffer.document().piece_tree().extract_range(start..end));
     }
 }
@@ -486,7 +541,7 @@ mod tests {
         });
 
         assert!(matches!(
-            relevant_input_event(&event),
+            relevant_input_event(event),
             Some(RelevantInputEvent::ImePreedit { text, active_range_chars })
                 if text == "kana" && active_range_chars == Some(1..3)
         ));
@@ -497,7 +552,7 @@ mod tests {
         let event = egui::Event::Ime(egui::ImeEvent::Commit("かな".to_owned()));
 
         assert!(matches!(
-            relevant_input_event(&event),
+            relevant_input_event(event),
             Some(RelevantInputEvent::Text(text)) if text == "かな"
         ));
     }
@@ -525,7 +580,7 @@ mod tests {
         };
 
         assert!(matches!(
-            relevant_input_event(&event),
+            relevant_input_event(event),
             Some(RelevantInputEvent::Key(_))
         ));
     }
@@ -550,7 +605,10 @@ mod tests {
         };
 
         let mut events = None;
-        let mut output = ctx.run_ui(input, |ui| events = Some(relevant_input_events(ui)));
+        let mut view = crate::app::domain::EditorViewState::new(1);
+        let mut output = ctx.run_ui(input, |ui| {
+            events = Some(relevant_input_events(ui, &mut view));
+        });
         output.textures_delta.clear();
 
         assert!(events.is_some_and(|events| events.is_empty()));

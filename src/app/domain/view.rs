@@ -84,6 +84,8 @@ pub struct EditorViewState {
     pub show_line_numbers: bool,
     pub right_to_left_reading_order: bool,
     pub editor_has_focus: bool,
+    /// Input accepted while a bulk edit is prepared, replayed after publication.
+    pub(crate) deferred_editor_events: Vec<egui::Event>,
     /// Wrap-aware display-row snapshot derived from the most recently painted
     /// galley. Single source of truth for wrap-aware row data on the view.
     /// None until the first frame paints.
@@ -136,6 +138,7 @@ impl EditorViewState {
             show_line_numbers,
             right_to_left_reading_order: false,
             editor_has_focus: false,
+            deferred_editor_events: Vec::new(),
             latest_display_snapshot: None,
             latest_display_snapshot_revision: None,
             layout_cache: LayoutCache::default(),

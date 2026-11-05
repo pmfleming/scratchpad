@@ -33,20 +33,18 @@ pub(super) fn search_target_ranges(
         .unwrap_or(0..snapshot.document_length().chars);
 
     if snapshot.piece_tree().metrics().pieces <= 1 {
-        let _pin = snapshot.piece_tree().pin_range(normalized.clone()).ok()?;
-        if let Some(text) = snapshot.piece_tree().borrow_range(normalized.clone()) {
-            let outcome = search::search_program_interruptible(&text, program, || {
-                latest_generation.load(Ordering::Relaxed) == generation
-            })?;
-            debug_assert!(outcome.error.is_none());
-            return Some(
-                outcome
-                    .matches
-                    .into_iter()
-                    .map(|range| range.start + normalized.start..range.end + normalized.start)
-                    .collect(),
-            );
-        }
+        let (text, _) = snapshot.try_search_text(Some(normalized.clone())).ok()?;
+        let outcome = search::search_program_interruptible(&text, program, || {
+            latest_generation.load(Ordering::Relaxed) == generation
+        })?;
+        debug_assert!(outcome.error.is_none());
+        return Some(
+            outcome
+                .matches
+                .into_iter()
+                .map(|range| range.start + normalized.start..range.end + normalized.start)
+                .collect(),
+        );
     }
 
     let context = FragmentSearchContext {
@@ -127,14 +125,10 @@ fn search_fragmented(
         context.generation,
         context.latest_generation,
         |chunk| {
-            let _pin = context
-                .snapshot
-                .piece_tree()
-                .pin_range(chunk.window_range.clone())
-                .ok()?;
             let (window_text, window_offset) = context
                 .snapshot
-                .search_text_cow(Some(chunk.window_range.clone()));
+                .try_search_text(Some(chunk.window_range.clone()))
+                .ok()?;
             let outcome = search::search_program_interruptible(
                 window_text.as_ref(),
                 context.program,

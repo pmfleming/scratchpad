@@ -136,6 +136,25 @@ pub(super) fn replace_ranges_in_active_buffer(
     let replaced = {
         let tab = &mut app.tab_manager.tabs.as_mut_slice()[active_tab_index];
         let buffer = tab.buffer_by_id_mut(buffer_id)?;
+        if replacements.len() > 256
+            || replacements
+                .iter()
+                .map(|(range, text)| text.len().max(range.len().saturating_mul(4)))
+                .sum::<usize>()
+                >= crate::app::domain::buffer::BULK_TEXT_BYTES
+        {
+            if !buffer.queue_text_preparation(
+                replacements.to_vec(),
+                previous_selection,
+                Some(next_selection),
+                crate::app::domain::PieceSource::SearchReplace,
+                Some(view_id),
+            ) {
+                return None;
+            }
+            app.queue_text_preparations();
+            return Some(buffer_label);
+        }
         if buffer
             .replace_char_ranges_with_undo(replacements, previous_selection, next_selection)
             .is_err()

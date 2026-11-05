@@ -2,6 +2,7 @@ pub mod process_metrics;
 mod render;
 mod support;
 mod workflows;
+pub use workflows::run_live_text_bulk_profile;
 pub use workflows::{run_file_first_render_preparation, search_workflow_sample};
 
 use crate::ScratchpadApp;

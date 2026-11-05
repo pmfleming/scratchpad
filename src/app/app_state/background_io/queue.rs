@@ -75,6 +75,37 @@ impl ScratchpadApp {
         self.queue_background_encoding_compliance_refresh(buffer_id, revision, snapshot, format);
     }
 
+    fn reload_preparation_base(
+        &self,
+        action: &PendingBackgroundAction,
+    ) -> Option<(
+        crate::app::domain::BufferState,
+        Option<crate::app::domain::PieceSource>,
+    )> {
+        let (PendingBackgroundAction::ReloadBuffer(load)
+        | PendingBackgroundAction::ReopenWithEncoding(load)) = action
+        else {
+            return None;
+        };
+        let original = self
+            .tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .find_map(|tab| tab.buffer_by_id(load.buffer_id))?;
+        let mut buffer = original.clone();
+        buffer.prepared_history_base = Some(original.document().history_token());
+        let source = match load.mode {
+            crate::app::app_state::PendingReloadMode::ObserveDiskChange => {
+                Some(crate::app::domain::PieceSource::External)
+            }
+            crate::app::app_state::PendingReloadMode::ReopenWithEncoding => {
+                Some(crate::app::domain::PieceSource::Load)
+            }
+            crate::app::app_state::PendingReloadMode::ExplicitReload => None,
+        };
+        Some((buffer, source))
+    }
     pub(crate) fn queue_background_path_loads(
         &mut self,
         paths: Vec<PathBuf>,
@@ -132,10 +163,12 @@ impl ScratchpadApp {
             .filter(|b| !b.is_loading_preview)
             .filter_map(|b| b.path_key.clone())
             .collect();
+        let base = self.reload_preparation_base(&action);
         let request_id = self.state.background_io.allocate_background_request_id();
         self.state
             .background_io
             .insert_pending_background_action(request_id, action);
+        let store = self.state.persistence.session_store.opened_chunk_store();
         let request = BackgroundIoRequest::LoadPaths {
             request_id,
             requests: paths
@@ -156,6 +189,22 @@ impl ScratchpadApp {
                     } else {
                         PathLoadRequest::Standard(path)
                     }
+                })
+                .map(|request| match &base {
+                    Some((base, source)) => PathLoadRequest::Reconcile {
+                        base: Box::new(base.clone()),
+                        source: *source,
+                        materialized_only: true,
+                        request: Box::new(request),
+                    },
+                    None => request,
+                })
+                .map(|request| match &store {
+                    Some(store) => PathLoadRequest::Bound {
+                        store: store.clone(),
+                        request: Box::new(request),
+                    },
+                    None => request,
                 })
                 .collect(),
             streaming,
@@ -201,17 +250,28 @@ impl ScratchpadApp {
         encoding_name: String,
         action: PendingBackgroundAction,
     ) {
+        let base = self.reload_preparation_base(&action);
         let request_id = self.state.background_io.allocate_background_request_id();
         self.state
             .background_io
             .insert_pending_background_action(request_id, action);
 
+        let request = PathLoadRequest::WithEncoding {
+            path,
+            encoding_name,
+        };
+        let request = match base {
+            Some((base, source)) => PathLoadRequest::Reconcile {
+                base: Box::new(base),
+                source,
+                materialized_only: false,
+                request: Box::new(request),
+            },
+            None => request,
+        };
         let request = BackgroundIoRequest::LoadPaths {
             request_id,
-            requests: vec![PathLoadRequest::WithEncoding {
-                path,
-                encoding_name,
-            }],
+            requests: vec![request],
             streaming: false,
         };
         self.send_background_request_or_apply(request_id, request, |app, request_id, request| {

@@ -136,6 +136,13 @@ impl FileController {
 
     fn can_save_existing_path(app: &mut ScratchpadApp, index: usize) -> bool {
         let buffer = app.tab_manager.tabs.as_slice()[index].active_buffer();
+        if buffer.is_preparing_text() {
+            app.state.status.set_info_status_in_domain(
+                StatusDomain::File,
+                "Wait for text preparation to finish before saving.",
+            );
+            return false;
+        }
         if buffer.is_loading_preview {
             app.state.status.set_info_status_in_domain(
                 StatusDomain::File,
