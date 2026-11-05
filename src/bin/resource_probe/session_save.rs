@@ -57,7 +57,8 @@ pub(super) fn run() {
     assert_eq!(
         buffer
             .document()
-            .exported_history()
+            .try_exported_history()
+            .expect("readable fixture history")
             .iter()
             .map(|e| e.payload_bytes())
             .sum::<usize>(),
@@ -78,7 +79,12 @@ pub(super) fn run() {
             _ => len,
         };
         insert(&mut tabs[0].buffers.buffer, at, "x");
-        let history = tabs[0].buffers.buffer.document().exported_history();
+        let history = tabs[0]
+            .buffers
+            .buffer
+            .document()
+            .try_exported_history()
+            .expect("readable fixture history");
         let history_payload_bytes = history.iter().map(|e| e.payload_bytes()).sum::<usize>();
         let history_entries = history.len();
         drop(history);

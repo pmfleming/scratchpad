@@ -3,6 +3,22 @@ use crate::app::domain::{EncodingSource, LineEndingStyle, TextDocument, TextForm
 use std::io;
 
 #[test]
+fn unreadable_snapshot_save_preserves_the_existing_destination() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    std::fs::write(&source, "aλ\r\n".repeat(128)).unwrap();
+    std::fs::write(&target, "keep this exact destination").unwrap();
+    let (document, _, _) = TextDocument::from_utf8_file(&source, 0, 0).unwrap();
+    document.piece_tree().truncate_backing_for_test().unwrap();
+    assert!(FileService::write_snapshot_utf8(&target, &document.snapshot()).is_err());
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "keep this exact destination"
+    );
+}
+
+#[test]
 fn large_utf8_file_uses_lazy_file_backed_piece_tree_chunks() {
     const MB: usize = 1024 * 1024;
     let directory = tempfile::tempdir().unwrap();

@@ -1,29 +1,57 @@
-use super::{
-    AnchorBias, AnchorOwner, AnchorOwnerKind, PIECE_PROVENANCE_ENTRY_LIMIT, PieceSource,
-    PieceTreeLite,
-};
+use super::{AnchorBias, AnchorOwner, AnchorOwnerKind, PieceSource, PieceTreeLite};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use std::io::Write;
+
+#[test]
+fn failed_scan_faults_document_and_refuses_edits_before_mutation() {
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all("aλ\r\n".repeat(128).as_bytes()).unwrap();
+    let (mut tree, _, _) = PieceTreeLite::from_utf8_file(file.path(), 0, 0).unwrap();
+    let before = tree.metrics();
+    let generation = tree.generation();
+    tree.truncate_backing_for_test().unwrap();
+    assert!(
+        tree.try_spans_for_range(0..tree.len_chars())
+            .next()
+            .unwrap()
+            .is_err()
+    );
+    assert!(tree.read_fault().is_some());
+    assert_eq!(tree.insert_with_source(1, "refused", PieceSource::Edit), 0);
+    tree.remove_char_range(0..1);
+    assert_eq!(tree.metrics(), before);
+    assert_eq!(tree.generation(), generation);
+}
+
+#[test]
+fn add_offsets_stay_stable_across_deletion_and_divergent_clones() {
+    let mut tree = PieceTreeLite::from_string("base".into());
+    let span = tree.append_history_text("λ\r\n", PieceSource::Paste);
+    let mut divergent = tree.clone();
+    tree.insert_with_source(0, &"x".repeat(512 * 1024), PieceSource::Paste);
+    divergent.insert_with_source(0, &"y".repeat(512 * 1024), PieceSource::Paste);
+    tree.remove_char_range(0..tree.len_chars());
+    assert_eq!(tree.text_for_span(span).as_ref(), "λ\r\n");
+    assert_eq!(divergent.text_for_span(span).as_ref(), "λ\r\n");
+}
 
 #[test]
 fn cloned_tree_keeps_add_tail_stable_when_current_tree_appends() {
     for length in [0, 1, 256 * 1024 - 1, 256 * 1024, 256 * 1024 + 1] {
         let first = "x".repeat(length);
         let mut tree = PieceTreeLite::from_string("base".to_owned());
-        tree.compact_add_buffer(&mut []);
         assert_eq!(tree.append_history_text("", PieceSource::Edit).byte_len, 0);
         tree.insert_with_source(4, &first, PieceSource::Edit);
         let snapshot = tree.clone();
         tree.insert_with_source(tree.len_chars(), " second", PieceSource::Edit);
-        tree.compact_add_buffer(&mut []);
         assert_eq!(snapshot.extract_text(), format!("base{first}"));
         assert_eq!(tree.extract_text(), format!("base{first} second"));
     }
 }
 
 #[test]
-fn cloned_tree_line_cache_stays_revision_local_across_compaction() {
+fn cloned_tree_line_cache_stays_revision_local_across_replacement() {
     let old_text = "aa\n".repeat(128);
     let new_text = format!("{}{}", "a\n".repeat(64), "aaa\n".repeat(64));
     assert_eq!(old_text.len(), new_text.len());
@@ -35,7 +63,6 @@ fn cloned_tree_line_cache_stays_revision_local_across_compaction() {
 
     current.remove_char_range(0..current.len_chars());
     current.insert_with_source(0, &new_text, PieceSource::Edit);
-    current.compact_add_buffer(&mut []);
 
     assert_eq!(snapshot.line_info(70).start_char, 210);
     assert_eq!(current.line_info(70).start_char, 152);
@@ -119,11 +146,8 @@ fn file_backed_chunk_cache_is_bounded_without_invalidating_active_text() {
     }
 
     assert_eq!(pinned.as_ref(), "a");
-    assert_eq!(
-        tree.loaded_file_chunk_count(),
-        tree.file_chunk_cache_limit()
-    );
-    assert_eq!(tree.file_chunk_cache_limit() * CHUNK_BYTES, 8 * 1024 * 1024);
+    assert!(tree.loaded_file_chunk_count() <= tree.file_chunk_cache_limit());
+    // Originals now share the configured per-owner/aggregate cache budget.
 }
 
 #[test]
@@ -234,63 +258,6 @@ fn batched_previews_match_single_preview_on_edited_tree() {
 }
 
 #[test]
-fn provenance_tracks_insert_source() {
-    let mut tree = PieceTreeLite::from_string("ab".to_owned());
-
-    tree.insert_with_source(1, "paste", PieceSource::Paste);
-    let span = tree
-        .spans_for_range(1..6)
-        .next()
-        .expect("inserted span")
-        .byte_span;
-
-    assert_eq!(tree.provenance_for_span(span).source, PieceSource::Paste);
-}
-
-#[test]
-fn compaction_preserves_visible_text_and_relocates_history_provenance() {
-    for remove_insert in [false, true] {
-        let mut tree = PieceTreeLite::from_string("ab".to_owned());
-        tree.insert_with_source(1, "XX", PieceSource::Paste);
-        let mut spans = vec![tree.append_history_text("history", PieceSource::SearchReplace)];
-        if remove_insert {
-            tree.remove_char_range(1..3);
-        }
-        tree.compact_add_buffer(&mut spans);
-        assert_eq!(
-            tree.extract_text(),
-            if remove_insert { "ab" } else { "aXXb" }
-        );
-        assert_eq!(tree.text_for_span(spans[0]).as_ref(), "history");
-        assert_eq!(
-            tree.provenance_for_span(spans[0]).source,
-            PieceSource::SearchReplace
-        );
-        if remove_insert {
-            assert_eq!(tree.provenance_entry_count(), 1);
-        }
-    }
-}
-
-#[test]
-fn provenance_store_caps_cold_entries() {
-    let mut tree = PieceTreeLite::from_string(String::new());
-    let mut spans = Vec::new();
-
-    for _ in 0..PIECE_PROVENANCE_ENTRY_LIMIT + 4 {
-        spans.push(tree.append_history_text("x", PieceSource::Edit));
-    }
-
-    assert_eq!(tree.provenance_entry_count(), PIECE_PROVENANCE_ENTRY_LIMIT);
-    assert_eq!(tree.provenance_for_span(spans[0]).source, PieceSource::Load);
-    assert_eq!(
-        tree.provenance_for_span(*spans.last().expect("latest span"))
-            .source,
-        PieceSource::Edit
-    );
-}
-
-#[test]
 fn randomized_edits_match_string_model() {
     let mut rng = StdRng::seed_from_u64(0x5eed_2026);
     let mut tree = PieceTreeLite::from_string(String::new());
@@ -350,7 +317,10 @@ fn assert_spans_match(tree: &PieceTreeLite, text: &str, range: std::ops::Range<u
     let mut byte_spans = tree.byte_spans(start..end);
     let actual: Vec<_> = byte_spans
         .by_ref()
-        .flat_map(|(text, range)| text.as_bytes()[range].to_vec())
+        .flat_map(|span| {
+            let (text, range) = span.unwrap();
+            text.as_bytes()[range].to_vec()
+        })
         .collect();
     assert!(byte_spans.next().is_none());
     assert_eq!(actual, bytes[start..end]);

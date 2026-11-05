@@ -125,7 +125,7 @@ fn damaged_active_tab_stays_cold_while_other_tabs_restore_and_save() {
     let mut restored = Vec::new();
     let status = store
         .load_streaming(
-            |_, _, _| true,
+            |_, _| true,
             |index, tab, cold| {
                 restored.push((index, tab, cold));
                 true

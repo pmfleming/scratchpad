@@ -61,12 +61,12 @@ impl WorkspaceTab {
                     .release_anchor(anchor);
             }
         }
-        if let Some(source) = source {
-            buffer.replace_from_loaded_buffer_source(loaded, source);
+        let replaced = if let Some(source) = source {
+            buffer.replace_from_loaded_buffer_source(loaded, source)
         } else {
-            buffer.replace_from_loaded_buffer(loaded);
-        }
-        Some(buffer)
+            buffer.replace_from_loaded_buffer(loaded)
+        };
+        replaced.then_some(buffer)
     }
 
     pub fn close_view(&mut self, view_id: ViewId) -> bool {
@@ -176,7 +176,9 @@ impl WorkspaceTab {
         ratio: f32,
     ) -> Option<ViewId> {
         let target_view_id = self.layout.active_view_id();
-        let WorkspaceTab { buffers, layout } = source;
+        let WorkspaceTab {
+            buffers, layout, ..
+        } = source;
         let (buffer, extra_buffers) = buffers.into_parts();
         let (views, root_pane, active_view_id) = layout.into_parts();
 

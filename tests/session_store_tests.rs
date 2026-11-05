@@ -27,8 +27,6 @@ fn persists_and_restores_open_tabs() {
     assert_eq!(restored.tabs.len(), 2);
     assert_eq!(restored.tabs[0].buffers.buffer.text(), "one");
     assert_eq!(restored.tabs[1].buffers.buffer.text(), "two");
-    assert_eq!(restored.legacy_settings.editor.font_size, 17.0);
-    assert!(!restored.legacy_settings.editor.word_wrap);
 }
 
 #[test]

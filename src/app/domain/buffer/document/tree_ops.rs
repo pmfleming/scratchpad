@@ -57,7 +57,7 @@ impl TextDocument {
                         start_char: start,
                         span,
                     };
-                    start += self.piece_tree().text_for_span(span).chars().count() as u32;
+                    start += self.piece_tree().text_for_span(span).chars().count() as u64;
                     edit
                 })
                 .collect();
@@ -73,15 +73,13 @@ impl TextDocument {
             edited_at: 0,
             global_seq: next_text_history_global_seq(),
             source: PieceSource::Load,
-            visible_generation_before: 0,
-            visible_generation_after: self.visible_generation(),
+
             fingerprint,
             summary: "Initial contents".into(),
             edits,
             flags: PieceHistoryFlags {
                 undone: false,
                 replayable: true,
-                persisted: false,
             },
             previous_selection: CursorRange::default(),
             next_selection: CursorRange::default(),
@@ -163,7 +161,6 @@ impl TextDocument {
         }
         self.history.tree.commit(transition);
         self.history.latest_operation_record = latest_record;
-        self.history.pending_generation_before = None;
         self.seal_history_group();
         self.advance_history_revision();
         Ok(selection)
@@ -182,18 +179,15 @@ impl TextDocument {
         if !self.history.entries[index].flags.replayable {
             return Err(TextHistoryApplyError::Conflict);
         }
-        for edit in &self.history.entries[index].edits {
-            for span in edit
-                .deleted_spans()
-                .iter()
-                .copied()
-                .chain(edit.inserted_span())
-            {
-                self.piece_tree()
-                    .check_history_span(span)
-                    .map_err(|_| TextHistoryApplyError::Conflict)?;
-            }
-        }
+        let _history_pin = self
+            .piece_tree()
+            .pin_history_spans(
+                self.history.entries[index]
+                    .edits
+                    .iter()
+                    .flat_map(PieceHistoryEdit::spans),
+            )
+            .map_err(|_| TextHistoryApplyError::Conflict)?;
         let record = self.operation_from_history_entry(&self.history.entries[index]);
         let stored_edits = self.history.entries[index].edits.clone();
         let mut edits = record.edits.iter().zip(stored_edits.iter());
@@ -210,6 +204,10 @@ impl TextDocument {
                 return Err(TextHistoryApplyError::OutOfBounds);
             }
             let range = edit.start_char..end;
+            let _range_pin = self
+                .piece_tree()
+                .pin_range(range.clone())
+                .map_err(|_| TextHistoryApplyError::Conflict)?;
             if self.piece_tree().extract_range(range.clone()) != expected {
                 return Err(TextHistoryApplyError::Conflict);
             }
@@ -241,10 +239,23 @@ impl TextDocument {
         }
     }
 
-    pub(crate) fn replace_exact_with_history_source(&mut self, text: &str, source: PieceSource) {
+    pub(crate) fn replace_exact_with_history_source(
+        &mut self,
+        text: &str,
+        source: PieceSource,
+    ) -> bool {
+        if self.piece_tree().read_fault().is_some() {
+            return false;
+        }
+        let Ok(_pin) = self
+            .piece_tree()
+            .pin_range(0..self.piece_tree().len_chars())
+        else {
+            return false;
+        };
         let before = self.extract_text();
         if before == text {
-            return;
+            return true;
         }
         self.seal_history_group();
         let deleted_spans = self.byte_spans_for_range(0..self.piece_tree().len_chars());
@@ -264,5 +275,6 @@ impl TextDocument {
             source,
         );
         self.seal_history_group();
+        true
     }
 }

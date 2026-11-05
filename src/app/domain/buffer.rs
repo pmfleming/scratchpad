@@ -12,9 +12,9 @@ pub(crate) use state::register_existing_buffer_id;
 
 pub(crate) use analysis::display_line_count_from_piece_tree;
 pub(crate) use analysis::{
-    BufferTextMetadata, accumulate_line_count, analyze_piece_tree_text, buffer_text_metadata,
+    BufferTextMetadata, accumulate_line_count, buffer_text_metadata,
     buffer_text_metadata_from_piece_tree, detected_text_format_and_metadata,
-    normalize_inserted_text_line_endings,
+    normalize_inserted_text_line_endings, try_analyze_piece_tree_text,
 };
 pub use analysis::{
     EncodingSource, LineEndingCounts, LineEndingStyle, TextArtifactSummary, TextFormatMetadata,
@@ -37,7 +37,7 @@ pub(crate) use piece_tree::ByteSlice;
 pub use piece_tree::{
     AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharCursor, PieceTreeCharPosition,
     PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics,
-    PieceTreeSlice, PieceTreeSpan, PieceTreeText,
+    PieceTreeSlice, PieceTreeSpan, PieceTreeText, TextPin, TryPieceTreeSlice,
 };
 pub(crate) use snapshot::SnapshotRevision;
 pub use snapshot::{DocumentChunk, DocumentSnapshot};

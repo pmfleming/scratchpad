@@ -26,7 +26,7 @@ fn fingerprint(entry: &PersistedHistoryEntry) -> io::Result<HistoryFingerprint> 
 
 pub(super) fn fingerprints(entries: &HistoryRows) -> io::Result<Vec<HistoryFingerprint>> {
     (0..entries.len())
-        .map(|index| fingerprint(&entries.entry(index)))
+        .map(|index| fingerprint(&entries.entry(index)?))
         .collect()
 }
 
@@ -293,7 +293,7 @@ impl Database {
             {
                 continue;
             }
-            let entry = entries.entry(index);
+            let entry = entries.entry(index)?;
             let bytes = serde_json::to_vec(&entry).map_err(invalid)?;
             self.execute_cached("INSERT INTO history(temp_id, seq, global_seq, entry, bytes, parent_id, edited_at, source, summary) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(temp_id, seq) DO UPDATE SET global_seq=excluded.global_seq, entry=excluded.entry, bytes=excluded.bytes, parent_id=excluded.parent_id, edited_at=excluded.edited_at,source=excluded.source,summary=excluded.summary",
                 params![id, entry.id as i64, entry.global_seq as i64, bytes.as_slice(), bytes.len() as i64, entry.parent_id as i64, entry.edited_at as i64, serde_json::to_value(entry.source).map_err(invalid)?.as_str().ok_or_else(|| invalid("invalid history source"))?, entry.summary.as_str()]).await?;

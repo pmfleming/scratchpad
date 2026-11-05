@@ -29,14 +29,13 @@ fn compact_history_cache_persists_complete_row_changes_and_survives_reopen() {
 
         // Verify real writes, not just two calls to the hash function. These fields
         // can change while the stable row ID and document revision remain equal.
-        let mutations: [fn(&mut PersistedHistoryEntry); 5] = [
+        let mutations: [fn(&mut PersistedHistoryEntry); 4] = [
             |entry| entry.global_seq += 1,
             |entry| entry.summary.push_str(" changed"),
             |entry| {
                 entry.next_selection.primary_prefer_next_row =
                     !entry.next_selection.primary_prefer_next_row;
             },
-            |entry| entry.flags.persisted = !entry.flags.persisted,
             |entry| {
                 entry.previous_selection.secondary_prefer_next_row =
                     !entry.previous_selection.secondary_prefer_next_row;

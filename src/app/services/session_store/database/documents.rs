@@ -177,6 +177,7 @@ impl Database {
             buffers.push(buffer);
         }
         let tab = SessionTab {
+            layout_id: 0,
             buffers,
             active_view_id: stored.active_view_id,
             views: stored.views,
@@ -197,6 +198,7 @@ fn single_tab(buffer: SessionBuffer) -> SessionTab {
         show_control_chars: false,
     };
     SessionTab {
+        layout_id: 0,
         buffers: vec![buffer],
         active_view_id: view.id,
         root_pane: SessionPaneNode::Leaf { view_id: view.id },

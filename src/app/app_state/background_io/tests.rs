@@ -229,7 +229,7 @@ fn progressive_session_hydration_replaces_matching_cold_shell_after_index_shift(
     let mut cold_payload = None;
     store
         .load_streaming(
-            |_, _, _| true,
+            |_, _| true,
             |tab_index, tab, cold_session_tab| {
                 if let Some(tab) = cold_session_tab {
                     cold_payload = Some(tab);
@@ -350,7 +350,7 @@ fn timeline_cold_hydration_runs_conflict_search_and_restore_status_updates() {
         let mut shell = None;
         store
             .load_streaming(
-                |_, _, _| true,
+                |_, _| true,
                 |_, tab, _| {
                     shell = Some(tab);
                     true

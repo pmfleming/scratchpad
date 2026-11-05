@@ -132,16 +132,12 @@ impl ScratchpadApp {
             },
         };
 
-        let loaded_from_settings = settings_state::load_settings_from_store(&mut app);
+        settings_state::load_settings_from_store(&mut app);
         let restore = app.should_restore_session(&startup_options);
         if restore && execution == StartupExecution::Background {
-            app.queue_background_session_restore(startup_options, loaded_from_settings);
+            app.queue_background_session_restore(startup_options);
         } else {
-            let legacy = restore
-                .then(|| session_manager::restore_session_state(&mut app))
-                .flatten();
-            let restored = legacy.is_some();
-            app.adopt_legacy_startup_settings(loaded_from_settings, legacy);
+            let restored = restore && session_manager::restore_session_state(&mut app).is_some();
             app.finish_startup(startup_options, restored, execution);
         }
 
@@ -149,17 +145,6 @@ impl ScratchpadApp {
         app.tab_manager.pending_scroll_to_active = false;
 
         app
-    }
-
-    pub(super) fn adopt_legacy_startup_settings(
-        &mut self,
-        loaded_from_settings: bool,
-        legacy: Option<AppSettings>,
-    ) {
-        if !loaded_from_settings && let Some(settings) = legacy {
-            settings_state::apply_settings(self, settings);
-            let _ = settings_state::persist_settings_now(self);
-        }
     }
 
     pub(super) fn finish_startup(

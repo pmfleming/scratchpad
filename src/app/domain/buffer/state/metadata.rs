@@ -6,8 +6,11 @@ use super::{
 
 impl BufferState {
     pub fn refresh_text_metadata(&mut self) {
-        let metadata =
-            buffer_text_metadata_from_piece_tree(self.document.piece_tree(), &mut self.format);
+        let Ok(metadata) =
+            buffer_text_metadata_from_piece_tree(self.document.piece_tree(), &mut self.format)
+        else {
+            return;
+        };
         self.apply_text_metadata(metadata);
     }
 

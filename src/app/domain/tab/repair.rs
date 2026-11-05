@@ -45,7 +45,9 @@ impl WorkspaceTab {
         &mut self,
         view_id: ViewId,
     ) -> Option<(&mut BufferState, &mut EditorViewState)> {
-        let Self { layout, buffers } = self;
+        let Self {
+            layout, buffers, ..
+        } = self;
         let view_index = layout.views.iter().position(|view| view.id == view_id)?;
         let buffer_id = layout.views[view_index].buffer_id;
         let view = &mut layout.views[view_index];

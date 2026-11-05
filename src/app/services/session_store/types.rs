@@ -1,11 +1,9 @@
 use super::model::SessionActiveSurface;
 use crate::app::domain::WorkspaceTab;
-use crate::app::services::settings_store::AppSettings;
 pub struct RestoredSession {
     pub tabs: Vec<WorkspaceTab>,
     pub active_tab_index: usize,
     pub active_surface: SessionActiveSurface,
-    pub legacy_settings: AppSettings,
     pub restore_status: Option<RestoreStatus>,
 }
 

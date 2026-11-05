@@ -163,7 +163,7 @@ impl Read for SnapshotReader<'_> {
                     return Ok(len);
                 }
             }
-            self.current = self.spans.next();
+            self.current = self.spans.next().transpose()?;
             if self.current.is_none() {
                 return Ok(0);
             }

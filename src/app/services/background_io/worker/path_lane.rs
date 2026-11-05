@@ -266,13 +266,18 @@ fn save_path(
     snapshot: DocumentSnapshot,
     format: TextFormatMetadata,
 ) -> BackgroundIoResult {
-    let result = FileService::write_snapshot_with_format(&path, &snapshot, &format)
+    let digest = snapshot
+        .try_content_digest()
         .map_err(|error| error.to_string());
+    let result = digest.as_ref().map_err(Clone::clone).and_then(|_| {
+        FileService::write_snapshot_with_format(&path, &snapshot, &format)
+            .map_err(|error| error.to_string())
+    });
     let disk_state = result
         .as_ref()
         .ok()
         .and_then(|()| FileService::read_disk_state(&path).ok());
-    let digest = result.as_ref().ok().map(|()| snapshot.content_digest());
+    let digest = if result.is_ok() { digest.ok() } else { None };
     BackgroundIoResult::PathSaved {
         request_id,
         path,

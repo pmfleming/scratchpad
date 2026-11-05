@@ -13,7 +13,7 @@ pub(super) fn write_content_to_writer(
     content: &str,
     format: &TextFormatMetadata,
 ) -> io::Result<()> {
-    write_with_format(writer, std::iter::once(content), format)
+    write_with_format(writer, std::iter::once(Ok(content)), format)
 }
 
 pub(super) fn write_snapshot_to_writer(
@@ -24,8 +24,8 @@ pub(super) fn write_snapshot_to_writer(
     let tree = snapshot.piece_tree();
     write_with_format(
         writer,
-        tree.spans_for_range(0..tree.len_chars())
-            .map(|span| span.text),
+        tree.try_spans_for_range(0..tree.len_chars())
+            .map(|span| span.map(|span| span.text)),
         format,
     )
 }
@@ -35,8 +35,8 @@ pub(super) fn write_snapshot_utf8_to_writer(
     snapshot: &DocumentSnapshot,
 ) -> io::Result<()> {
     let tree = snapshot.piece_tree();
-    for span in tree.spans_for_range(0..tree.len_chars()) {
-        writer.write_all(span.text.as_bytes())?;
+    for span in tree.try_spans_for_range(0..tree.len_chars()) {
+        writer.write_all(span?.text.as_bytes())?;
     }
     Ok(())
 }
@@ -44,7 +44,7 @@ pub(super) fn write_snapshot_utf8_to_writer(
 // Accept borrowed strings and piece-tree text without flattening the snapshot.
 fn write_with_format<S: Deref<Target = str>>(
     writer: &mut dyn Write,
-    spans: impl IntoIterator<Item = S>,
+    spans: impl IntoIterator<Item = io::Result<S>>,
     format: &TextFormatMetadata,
 ) -> io::Result<()> {
     let encoding = resolve_encoding(&format.encoding_name)?;
@@ -87,12 +87,13 @@ fn write_with_format<S: Deref<Target = str>>(
 }
 
 fn write_serialized_spans<S: Deref<Target = str>>(
-    spans: impl IntoIterator<Item = S>,
+    spans: impl IntoIterator<Item = io::Result<S>>,
     format: &TextFormatMetadata,
     mut write_span: impl FnMut(&str) -> io::Result<()>,
 ) -> io::Result<()> {
     let mut serializer = NewlineSerializer::new(format.preferred_line_ending_style());
     for span in spans {
+        let span = span?;
         if preserves_raw_line_endings(format) {
             write_span(&span)?;
         } else {

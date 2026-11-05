@@ -15,7 +15,9 @@ pub(super) fn request(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
         .flat_map(|tab| &mut tab.session_tab.buffers)
     {
         if let Some(capture) = buffer.history_capture.take() {
-            buffer.text_history = (0..capture.len()).map(|i| capture.entry(i)).collect();
+            buffer.text_history = (0..capture.len())
+                .map(|i| capture.entry(i).unwrap())
+                .collect();
         }
     }
     request

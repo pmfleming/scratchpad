@@ -21,7 +21,7 @@ pub(in crate::app::services::background_io) fn spawn_analysis_lane(endpoints: La
                 request_id,
                 buffer_id,
                 revision,
-                result: Ok(refresh_text_metadata(snapshot, format)),
+                result: refresh_text_metadata(snapshot, format).map_err(|error| error.to_string()),
             }),
             BackgroundIoRequest::RefreshEncodingCompliance {
                 request_id,
@@ -33,7 +33,8 @@ pub(in crate::app::services::background_io) fn spawn_analysis_lane(endpoints: La
                 request_id,
                 buffer_id,
                 revision,
-                result: Ok(refresh_encoding_compliance(snapshot, format)),
+                result: refresh_encoding_compliance(snapshot, format)
+                    .map_err(|error| error.to_string()),
             }),
             _ => LaneOutcome::Skip,
         },
@@ -43,24 +44,32 @@ pub(in crate::app::services::background_io) fn spawn_analysis_lane(endpoints: La
 fn refresh_text_metadata(
     snapshot: DocumentSnapshot,
     mut format: TextFormatMetadata,
-) -> (BufferLength, usize, TextArtifactSummary, TextFormatMetadata) {
-    let analysis =
-        crate::app::domain::buffer::analyze_piece_tree_text(snapshot.piece_tree(), &mut format);
-    (
+) -> std::io::Result<(BufferLength, usize, TextArtifactSummary, TextFormatMetadata)> {
+    let analysis = crate::app::domain::buffer::try_analyze_piece_tree_text(
+        snapshot.piece_tree(),
+        &mut format,
+    )?;
+    Ok((
         analysis.length,
         analysis.metadata.line_count,
         analysis.metadata.artifact_summary,
         format,
-    )
+    ))
 }
 
-fn refresh_encoding_compliance(snapshot: DocumentSnapshot, format: TextFormatMetadata) -> bool {
-    format.has_non_compliant_characters_spans(
-        snapshot
-            .piece_tree()
-            .spans_for_range(0..snapshot.document_length().chars)
-            .map(|span| span.text),
-    )
+fn refresh_encoding_compliance(
+    snapshot: DocumentSnapshot,
+    format: TextFormatMetadata,
+) -> std::io::Result<bool> {
+    for span in snapshot
+        .piece_tree()
+        .try_spans_for_range(0..snapshot.len_chars())
+    {
+        if format.has_non_compliant_characters(&span?.text) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -75,7 +84,7 @@ mod tests {
         let format = buffer.format;
 
         let (length, line_count, artifact_summary, refreshed_format) =
-            refresh_text_metadata(snapshot, format);
+            refresh_text_metadata(snapshot, format).unwrap();
 
         assert_eq!(length.lines, 2);
         assert_eq!(length.chars, "one\n\u{200e}two".chars().count());
@@ -96,6 +105,6 @@ mod tests {
             false,
         );
 
-        assert!(refresh_encoding_compliance(snapshot, format));
+        assert!(refresh_encoding_compliance(snapshot, format).unwrap());
     }
 }

@@ -28,6 +28,7 @@ pub(crate) enum TextReplacementError {
     OutOfBounds,
     NotDescending,
     OverlappingRanges,
+    StorageUnreadable,
 }
 
 pub struct TextDocument {
@@ -93,7 +94,6 @@ pub(super) struct TextDocumentHistoryState {
     pub(super) budget: TextHistoryBudget,
     pub(super) latest_operation_record: Option<TextDocumentOperationRecord>,
     pub(super) latest_update_at: Option<Instant>,
-    pub(super) pending_generation_before: Option<u32>,
 }
 
 impl Default for TextDocumentHistoryState {
@@ -107,7 +107,6 @@ impl Default for TextDocumentHistoryState {
             budget: TextHistoryBudget::default(),
             latest_operation_record: None,
             latest_update_at: None,
-            pending_generation_before: None,
         }
     }
 }
@@ -188,8 +187,8 @@ impl TextDocument {
     }
 
     /// Hash decoded text in bounded pieces, without a full-document allocation.
-    pub(crate) fn content_digest(&self) -> String {
-        self.snapshot().content_digest()
+    pub(crate) fn try_content_digest(&self) -> io::Result<String> {
+        self.snapshot().try_content_digest()
     }
 
     #[must_use]
@@ -250,11 +249,15 @@ impl TextDocument {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn exported_history(&self) -> Vec<PersistedHistoryEntry> {
-        self.history
-            .entries
-            .iter()
-            .map(|entry| self.export_history_entry(entry))
+        self.try_exported_history().unwrap()
+    }
+
+    pub fn try_exported_history(&self) -> io::Result<Vec<PersistedHistoryEntry>> {
+        let snapshot = self.history_snapshot();
+        (0..snapshot.len())
+            .map(|index| snapshot.entry(index))
             .collect()
     }
 
@@ -373,7 +376,14 @@ impl TextDocument {
         }
 
         validate_replacements(replacements, self.content.piece_tree.len_chars())?;
-        self.capture_pending_history_generation_before();
+        if self.piece_tree().read_fault().is_some() {
+            return Err(TextReplacementError::StorageUnreadable);
+        }
+        let _pins = replacements
+            .iter()
+            .map(|(range, _)| self.piece_tree().pin_range(range.clone()))
+            .collect::<io::Result<Vec<_>>>()
+            .map_err(|_| TextReplacementError::StorageUnreadable)?;
         let mut operation_record = TextDocumentOperationRecord {
             previous_selection,
             next_selection,
@@ -426,7 +436,6 @@ impl TextDocument {
 
     /// Insert text directly via piece tree.
     pub fn insert_direct(&mut self, char_index: usize, text: &str) {
-        self.capture_pending_history_generation_before();
         self.insert_raw_text_with_source(text, char_index, PieceSource::Edit);
     }
 
@@ -436,7 +445,6 @@ impl TextDocument {
         text: &str,
         source: PieceSource,
     ) {
-        self.capture_pending_history_generation_before();
         self.insert_raw_text_with_source(text, char_index, source);
     }
 
@@ -451,7 +459,6 @@ impl TextDocument {
 
     /// Delete a char range directly via piece tree.
     pub fn delete_char_range_direct(&mut self, char_range: Range<usize>) {
-        self.capture_pending_history_generation_before();
         self.delete_char_range_internal(char_range);
     }
 
@@ -474,10 +481,22 @@ impl TextDocument {
     }
 
     fn insert_raw_text_with_source(&mut self, text: &str, char_index: usize, source: PieceSource) {
+        if self.piece_tree().read_fault().is_some() {
+            return;
+        }
+        let Ok(_pin) = self.piece_tree().pin_range(char_index..char_index) else {
+            return;
+        };
         Arc::make_mut(&mut self.content.piece_tree).insert_with_source(char_index, text, source);
     }
 
     fn delete_char_range_internal(&mut self, char_range: Range<usize>) {
+        if self.piece_tree().read_fault().is_some() {
+            return;
+        }
+        let Ok(_pin) = self.piece_tree().pin_range(char_range.clone()) else {
+            return;
+        };
         assert!(
             char_range.start <= char_range.end,
             "start must be <= end, but got {char_range:?}"
@@ -501,17 +520,9 @@ impl TextDocument {
         }))
     }
 
-    fn visible_generation(&self) -> u32 {
-        self.content
-            .piece_tree
-            .generation()
-            .min(u64::from(u32::MAX)) as u32
-    }
-
-    fn capture_pending_history_generation_before(&mut self) {
-        if self.history.pending_generation_before.is_none() {
-            self.history.pending_generation_before = Some(self.visible_generation());
-        }
+    #[cfg(test)]
+    fn visible_generation(&self) -> u64 {
+        self.content.piece_tree.generation()
     }
 }
 

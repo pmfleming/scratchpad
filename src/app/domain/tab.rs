@@ -14,6 +14,7 @@ pub use layout_state::WorkspaceTabLayout;
 
 #[derive(Clone)]
 pub struct WorkspaceTab {
+    pub layout_id: u64,
     pub buffers: WorkspaceTabBuffers,
     pub layout: WorkspaceTabLayout,
 }
@@ -25,11 +26,17 @@ pub enum TabAttentionState {
     DiskProblem,
 }
 
+pub(crate) fn next_layout_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl WorkspaceTab {
     #[must_use]
     pub fn new(buffer: BufferState) -> Self {
         let layout = WorkspaceTabLayout::new(buffer.id);
         Self {
+            layout_id: next_layout_id(),
             buffers: WorkspaceTabBuffers::new(buffer),
             layout,
         }
@@ -54,6 +61,7 @@ impl WorkspaceTab {
         active_view_id: ViewId,
     ) -> Self {
         let mut tab = Self {
+            layout_id: next_layout_id(),
             buffers: WorkspaceTabBuffers::restored(buffer, extra_buffers),
             layout: WorkspaceTabLayout::restored(views, root_pane, active_view_id),
         };

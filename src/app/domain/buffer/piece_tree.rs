@@ -9,16 +9,15 @@ pub(super) mod preview;
 pub(crate) mod query;
 mod runtime;
 mod slice;
-pub use slice::PieceTreeSlice;
+pub use slice::{PieceTreeSlice, TryPieceTreeSlice};
+pub use storage::TextPin;
 mod storage;
 mod support;
 #[cfg(test)]
 mod tests;
 pub(crate) mod text_cache;
 
-#[cfg(test)]
-pub(crate) use super::history::PIECE_PROVENANCE_ENTRY_LIMIT;
-pub(crate) use super::history::{ByteSpan, PieceProvenance, PieceSource};
+pub(crate) use super::history::{ByteSpan, PieceSource};
 pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
 pub use cursor::PieceTreeCharCursor;
 
@@ -393,6 +392,10 @@ struct LeafAddress {
 }
 
 impl PieceTreeLite {
+    #[cfg(test)]
+    pub(crate) fn truncate_backing_for_test(&self) -> io::Result<()> {
+        self.storage.truncate_backing_for_test()
+    }
     #[must_use]
     pub fn from_string(text: String) -> Self {
         let pieces = build_chunked_pieces(PieceBuffer::Original, 0, &text);
@@ -425,9 +428,6 @@ impl PieceTreeLite {
         Ok((tree, sample, line_count))
     }
 
-    pub(crate) fn check_history_span(&self, span: ByteSpan) -> io::Result<()> {
-        self.storage.check_history_span(span)
-    }
     #[cfg(test)]
     pub(crate) fn add_storage_bytes(&self) -> usize {
         self.storage.add_bytes()
@@ -468,11 +468,6 @@ impl PieceTreeLite {
     #[must_use]
     pub fn metrics(&self) -> PieceTreeMetrics {
         self.root.metrics
-    }
-
-    #[must_use]
-    pub fn provenance_entry_count(&self) -> usize {
-        self.storage.provenance_entry_count()
     }
 
     #[must_use]
@@ -538,6 +533,9 @@ impl PieceTreeLite {
 
     #[must_use]
     pub fn char_at(&self, offset_chars: usize) -> Option<char> {
+        let _pin = self
+            .pin_range(offset_chars.min(self.len_chars())..offset_chars.min(self.len_chars()))
+            .ok()?;
         if offset_chars >= self.len_chars() || self.root.nodes.is_empty() {
             return None;
         }

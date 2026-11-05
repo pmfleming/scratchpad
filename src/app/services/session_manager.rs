@@ -3,7 +3,6 @@ use crate::app::app_state::{AppSurface, ScratchpadApp, StatusDomain};
 use crate::app::services::session_store::{
     RestoreStatusLevel, RestoredSession, SessionActiveSurface, SessionPersistRequest,
 };
-use crate::app::services::settings_store::AppSettings;
 use eframe::egui;
 use std::time::Instant;
 
@@ -82,10 +81,15 @@ pub(crate) fn persist_tab_close(app: &mut ScratchpadApp, index: usize) -> std::i
     let mut request = capture_session(app);
     request.close_tab(index, closed);
     let acknowledgement = request.acknowledgement();
-    app.state
-        .persistence
-        .session_store
-        .persist_request(request)?;
+    if let Err(error) = app.state.persistence.session_store.persist_request(request) {
+        // The first explicit persistence attempt may discover an unavailable
+        // lazy store. Reading health itself must never open or queue work.
+        if app.state.persistence.session_store.writes_blocked() {
+            app.state.status.report_session_save_failed(error);
+            return Ok(());
+        }
+        return Err(error);
+    }
     acknowledge_capture(app, &acknowledgement);
     Ok(())
 }
@@ -164,19 +168,27 @@ pub(crate) fn persist_view_close(
         return Err(std::io::Error::other("view is no longer open"));
     }
     let acknowledgement = request.acknowledgement();
-    app.state
-        .persistence
-        .session_store
-        .persist_request(request)?;
+    if let Err(error) = app.state.persistence.session_store.persist_request(request) {
+        // The first explicit persistence attempt may discover an unavailable
+        // lazy store. Reading health itself must never open or queue work.
+        if app.state.persistence.session_store.writes_blocked() {
+            app.state.status.report_session_save_failed(error);
+            return Ok(());
+        }
+        return Err(error);
+    }
     acknowledge_capture(app, &acknowledgement);
     Ok(())
 }
 
-pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettings> {
+pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<()> {
     let result = app.state.persistence.session_store.load();
     report_database_notices(app);
     match result {
-        Ok(Some(restored)) => Some(apply_restored_session(app, restored)),
+        Ok(Some(restored)) => {
+            apply_restored_session(app, restored);
+            Some(())
+        }
         Ok(None) => None,
         Err(error) => {
             app.state.persistence.session_restore_failed = true;
@@ -204,10 +216,7 @@ pub(crate) fn report_database_notices(app: &mut ScratchpadApp) {
     }
 }
 
-pub(crate) fn apply_restored_session(
-    app: &mut ScratchpadApp,
-    restored: RestoredSession,
-) -> AppSettings {
+pub(crate) fn apply_restored_session(app: &mut ScratchpadApp, restored: RestoredSession) {
     if let Some(status) = restored.restore_status.as_ref() {
         match status.level {
             RestoreStatusLevel::Info => app
@@ -225,7 +234,6 @@ pub(crate) fn apply_restored_session(
     app.tab_manager.evict_inactive_tab_state();
     apply_restored_active_surface(app, restored.active_surface);
     restore_conflict::refresh_startup_restore_conflicts(app);
-    restored.legacy_settings
 }
 
 pub(crate) fn session_active_surface(app: &ScratchpadApp) -> SessionActiveSurface {

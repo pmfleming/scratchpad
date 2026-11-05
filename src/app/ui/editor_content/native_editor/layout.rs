@@ -1,5 +1,5 @@
 use super::{TextEditOptions, highlighting};
-use crate::app::domain::buffer::PieceTreeText;
+use crate::app::domain::buffer::{PieceTreeText, TextPin};
 use crate::app::domain::{
     BufferState, EditorViewState, LayoutCacheKey, SearchHighlightState, SearchReplacementPreview,
     ViewId,
@@ -10,6 +10,7 @@ use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::io;
 use std::sync::Arc;
 
 mod display_text;
@@ -20,6 +21,7 @@ use display_text::{
 };
 
 pub(super) struct EditorGalleyContext {
+    _pin: TextPin,
     pub(super) galley: Arc<egui::Galley>,
     pub(super) char_offset_base: usize,
     pub(super) logical_line_base: usize,
@@ -31,6 +33,7 @@ pub(super) struct EditorGalleyContext {
 }
 
 struct ViewportTextSlice<'a> {
+    pin: TextPin,
     text: PieceTreeText<'a>,
     char_range: std::ops::Range<usize>,
     start_line: usize,
@@ -44,7 +47,7 @@ pub(super) fn build_editor_galley(
     view: &mut EditorViewState,
     options: TextEditOptions<'_>,
     viewport: Option<egui::Rect>,
-) -> EditorGalleyContext {
+) -> io::Result<EditorGalleyContext> {
     let effective_viewport = viewport.unwrap_or_else(|| bounded_editor_viewport(ui));
     let slice = viewport_text_slice(
         buffer,
@@ -53,7 +56,7 @@ pub(super) fn build_editor_galley(
         cursor_line_for_viewport_slice(buffer, view),
         cursor_offset_for_viewport_slice(view),
         options.word_wrap,
-    );
+    )?;
     let tab_offsets =
         if options.tab_display == TabDisplayMode::Character && !buffer.show_control_chars {
             slice
@@ -133,7 +136,8 @@ pub(super) fn build_editor_galley(
         galley
     };
     let slice_chars = slice.char_range.end.saturating_sub(slice.char_range.start);
-    EditorGalleyContext {
+    Ok(EditorGalleyContext {
+        _pin: slice.pin,
         galley,
         char_offset_base: slice.char_range.start,
         logical_line_base: slice.start_line,
@@ -142,7 +146,7 @@ pub(super) fn build_editor_galley(
         slice_chars,
         display_map,
         tab_offsets,
-    }
+    })
 }
 
 struct LayoutCacheKeyInput<'a> {
@@ -191,7 +195,7 @@ fn viewport_text_slice(
     cursor_line: Option<usize>,
     cursor_offset: Option<usize>,
     word_wrap: bool,
-) -> ViewportTextSlice<'_> {
+) -> io::Result<ViewportTextSlice<'_>> {
     let line_count = buffer.line_count.max(1);
     let top_line = if row_height > 0.0 {
         (viewport.min.y.max(0.0) / row_height).floor() as usize
@@ -215,6 +219,7 @@ fn viewport_text_slice(
         }
     }
     let tree = buffer.document().piece_tree();
+    let mut pin = tree.pin_lines(start_line..end_line)?;
     let start_char = tree.line_info(start_line).start_char;
     let end_info = tree.line_info(end_line);
     let end_char = (end_info.start_char + end_info.char_len).min(tree.len_chars());
@@ -235,16 +240,18 @@ fn viewport_text_slice(
         virtual_width = Some(window.virtual_width);
         char_range = window.char_range;
     }
+    pin.extend(tree.pin_range(char_range.clone())?);
     let text = tree
         .borrow_range(char_range.clone())
         .unwrap_or_else(|| PieceTreeText::owned(tree.extract_range(char_range.clone())));
-    ViewportTextSlice {
+    Ok(ViewportTextSlice {
+        pin,
         text,
         char_range,
         start_line,
         display_column_base,
         virtual_width,
-    }
+    })
 }
 
 struct LongLineWindow {
@@ -316,12 +323,15 @@ fn long_line_viewport_window(request: LongLineViewportRequest) -> Option<LongLin
 
 fn cursor_line_index(buffer: &BufferState, view: &EditorViewState) -> Option<usize> {
     let cursor = view.cursor_range?;
-    (cursor.primary.index <= buffer.current_file_length().chars).then(|| {
-        buffer
-            .document()
-            .piece_tree()
-            .line_index_at_offset(cursor.primary.index)
-    })
+    (cursor.primary.index <= buffer.current_file_length().chars)
+        .then(|| {
+            buffer
+                .document()
+                .piece_tree()
+                .try_line_index_at_offset(cursor.primary.index)
+                .ok()
+        })
+        .flatten()
 }
 
 fn cursor_line_for_viewport_slice(buffer: &BufferState, view: &EditorViewState) -> Option<usize> {
@@ -363,8 +373,11 @@ fn warm_nearby_layout_slices(
         {
             break;
         }
-        let slice =
-            viewport_text_slice(buffer, adjacent, row_height, None, None, options.word_wrap);
+        let Ok(slice) =
+            viewport_text_slice(buffer, adjacent, row_height, None, None, options.word_wrap)
+        else {
+            break;
+        };
         let search_highlights = local_search_highlights(
             &view.search_highlights,
             slice.char_range.start,

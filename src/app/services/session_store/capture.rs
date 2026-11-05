@@ -316,6 +316,7 @@ impl CapturedSessionTab {
         Self {
             loading_preview_only: tab.buffers().all(|buffer| buffer.is_loading_preview),
             session_tab: SessionTab {
+                layout_id: tab.layout_id,
                 buffers,
                 active_view_id,
                 views,

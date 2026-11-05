@@ -440,7 +440,6 @@ fn empty_replacement_does_not_enter_history_or_clear_redo() {
 fn no_op_edits_are_dropped_from_multi_edit_records() {
     let mut document = TextDocument::new("ab".to_owned());
     let before = document.visible_generation();
-    document.capture_pending_history_generation_before();
     document.delete_char_range_direct(1..2);
     document.push_operation_record(
         TextDocumentOperationRecord {
@@ -469,10 +468,7 @@ fn no_op_edits_are_dropped_from_multi_edit_records() {
     let record = entry_record(&document, 1);
     assert_eq!(record.edits.len(), 1);
     assert_eq!(record.edits[0].deleted_text, "b");
-    assert_eq!(
-        document.history_entries()[1].visible_generation_before,
-        before
-    );
+    assert!(document.visible_generation() > before);
 }
 
 #[test]

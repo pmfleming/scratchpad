@@ -61,9 +61,40 @@ pub fn render_editor_text_edit(
     options: TextEditOptions<'_>,
     viewport: Option<egui::Rect>,
 ) -> EditorWidgetOutcome {
+    if let Some(fault) = buffer.document().piece_tree().read_fault() {
+        return render_storage_fault(ui, &fault);
+    }
     view.resolve_anchored_ranges(buffer);
     let total_chars = buffer.current_file_length().chars;
-    let mut galley_context = build_editor_galley(ui, buffer, view, options, viewport);
+    let mut galley_context = match build_editor_galley(ui, buffer, view, options, viewport) {
+        Ok(galley) => galley,
+        Err(error) => return render_storage_fault(ui, &error.to_string()),
+    };
+    if let Some(fault) = buffer.document().piece_tree().read_fault() {
+        return render_storage_fault(ui, &fault);
+    }
+    let cursor = view.cursor_range.unwrap_or_default();
+    let selection = cursor.primary.index.min(cursor.secondary.index)
+        ..cursor.primary.index.max(cursor.secondary.index);
+    let _input_pin = if ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Text(_)
+                    | egui::Event::Paste(_)
+                    | egui::Event::Copy
+                    | egui::Event::Cut
+                    | egui::Event::Key { pressed: true, .. }
+            )
+        })
+    }) {
+        match buffer.document().piece_tree().pin_range(selection) {
+            Ok(pin) => Some(pin),
+            Err(error) => return render_storage_fault(ui, &error.to_string()),
+        }
+    } else {
+        None
+    };
 
     let row_height = editor_row_height(ui, options.editor_font_id);
     let viewport_height = editor_viewport_height(ui, viewport);
@@ -131,7 +162,10 @@ pub fn render_editor_text_edit(
         galley_context.char_offset_base,
         galley_context.slice_chars,
     ) {
-        galley_context = build_editor_galley(ui, buffer, view, options, viewport);
+        galley_context = match build_editor_galley(ui, buffer, view, options, viewport) {
+            Ok(galley) => galley,
+            Err(error) => return render_storage_fault(ui, &error.to_string()),
+        };
         galley_pos = galley_origin(
             rect,
             galley_context.logical_line_base,
@@ -512,4 +546,18 @@ fn cursor_primary_in_slice(
     };
     let slice_end = char_offset_base.saturating_add(slice_chars);
     (char_offset_base..=slice_end).contains(&cursor_range.primary.index)
+}
+
+// Fault presentation is editor chrome. It never becomes document text or an
+// editable placeholder, and a failed preflight never reaches input handling.
+fn render_storage_fault(ui: &mut egui::Ui, cause: &str) -> EditorWidgetOutcome {
+    let response = ui.colored_label(
+        ui.visuals().error_fg_color,
+        format!("Text unavailable. This document is read-only. {cause}"),
+    );
+    EditorWidgetOutcome {
+        changed: false,
+        focused: false,
+        response,
+    }
 }

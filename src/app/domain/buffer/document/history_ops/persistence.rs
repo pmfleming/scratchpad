@@ -7,18 +7,6 @@ use super::super::TextDocument;
 use std::sync::Arc;
 
 impl TextDocument {
-    pub(in crate::app::domain::buffer::document) fn export_history_entry(
-        &self,
-        entry: &PieceHistoryEntry,
-    ) -> PersistedHistoryEntry {
-        export_entry(
-            entry,
-            &self.content.piece_tree,
-            self.history_now(),
-            self.history_tip(),
-        )
-    }
-
     pub(in crate::app::domain::buffer::document) fn import_history_entry(
         &mut self,
         persisted: PersistedHistoryEntry,
@@ -39,8 +27,6 @@ impl TextDocument {
             edited_at: persisted.edited_at,
             global_seq: persisted.global_seq,
             source: persisted.source,
-            visible_generation_before: persisted.visible_generation_before,
-            visible_generation_after: persisted.visible_generation_after,
             fingerprint: persisted.fingerprint,
             summary: persisted.summary,
             edits,
@@ -74,8 +60,8 @@ fn export_entry(
         selected_tip: tip == entry.id,
         global_seq: entry.global_seq,
         source: entry.source,
-        visible_generation_before: entry.visible_generation_before,
-        visible_generation_after: entry.visible_generation_after,
+        visible_generation_before: 0,
+        visible_generation_after: 0,
         fingerprint: entry.fingerprint,
         summary: entry.summary.clone(),
         flags: entry.flags,
@@ -101,8 +87,19 @@ impl HistorySnapshot {
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
-    pub(crate) fn entry(&self, index: usize) -> PersistedHistoryEntry {
-        export_entry(&self.entries[index], &self.tree, self.now, self.tip)
+    pub(crate) fn entry(&self, index: usize) -> std::io::Result<PersistedHistoryEntry> {
+        let _pin = self.tree.pin_history_spans(
+            self.entries[index]
+                .edits
+                .iter()
+                .flat_map(PieceHistoryEdit::spans),
+        )?;
+        Ok(export_entry(
+            &self.entries[index],
+            &self.tree,
+            self.now,
+            self.tip,
+        ))
     }
     pub(crate) fn positions(&self) -> (u64, u64, u64, u64) {
         (self.now, self.tip, self.last_edit.0, self.last_edit.1)

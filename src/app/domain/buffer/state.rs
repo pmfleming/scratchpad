@@ -325,7 +325,7 @@ impl BufferState {
         self.is_loading_preview = true;
     }
 
-    pub fn replace_from_loaded_buffer(&mut self, loaded: BufferState) {
+    pub fn replace_from_loaded_buffer(&mut self, loaded: BufferState) -> bool {
         let source = if self
             .disk_content_digest
             .as_ref()
@@ -336,25 +336,39 @@ impl BufferState {
         } else {
             super::PieceSource::Load
         };
-        self.replace_from_loaded_buffer_source(loaded, source);
+        self.replace_from_loaded_buffer_source(loaded, source)
     }
 
     pub(crate) fn replace_from_loaded_buffer_source(
         &mut self,
         mut loaded: BufferState,
         source: super::PieceSource,
-    ) {
+    ) -> bool {
         let id = self.id;
         let temp_id = self.temp_id.clone();
         let history = if self.is_loading_preview {
             None
         } else {
-            let text = loaded
-                .loaded_replacement_text
-                .take()
-                .unwrap_or_else(|| std::sync::Arc::new(loaded.document.extract_text()));
-            self.document
-                .replace_exact_with_history_source(&text, source);
+            let text = if let Some(text) = loaded.loaded_replacement_text.take() {
+                text
+            } else {
+                let mut text = String::new();
+                for span in loaded
+                    .document
+                    .piece_tree()
+                    .try_spans_for_range(0..loaded.document.piece_tree().len_chars())
+                {
+                    let Ok(span) = span else { return false };
+                    text.push_str(&span.text);
+                }
+                std::sync::Arc::new(text)
+            };
+            if !self
+                .document
+                .replace_exact_with_history_source(&text, source)
+            {
+                return false;
+            }
             Some(self.document.clone())
         };
         *self = loaded;
@@ -365,6 +379,7 @@ impl BufferState {
         }
         self.active_selection = None;
         self.refresh.pending_text_history_event = None;
+        true
     }
 
     /// Preserve recovered text/undo without retaining an obsolete disk baseline.

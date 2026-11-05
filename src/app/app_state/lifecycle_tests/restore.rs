@@ -69,8 +69,6 @@ fn hold_restore(app: &mut ScratchpadApp) -> u64 {
         id,
         PendingBackgroundAction::StartupRestore(PendingStartupRestoreAction {
             startup_options: StartupOptions::default(),
-            loaded_from_settings: true,
-            restore_started: false,
             streamed_tab_count: 0,
             streamed_tab_indices: Vec::new(),
         }),

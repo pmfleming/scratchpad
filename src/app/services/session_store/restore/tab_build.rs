@@ -53,11 +53,13 @@ pub(super) fn workspace_tab_from_restored_buffers(
         .position(|buffer| buffer.id == active_buffer_id)
         .unwrap_or(0);
     let active_buffer = buffers.remove(active_buffer_index);
-    WorkspaceTab::restored_with_buffers(
+    let mut tab = WorkspaceTab::restored_with_buffers(
         active_buffer,
         std::mem::take(buffers),
         views,
         root_pane,
         active_view_id,
-    )
+    );
+    tab.layout_id = shell.layout_id;
+    tab
 }

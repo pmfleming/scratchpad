@@ -53,8 +53,6 @@ fn startup_modes_share_settings_precedence_restore_and_fallback_policy() {
                 assert_eq!(buffer.text(), if saved { "second" } else { "" });
                 let expected = if settings_file {
                     23.0
-                } else if saved {
-                    18.0
                 } else {
                     AppSettings::default().editor.font_size
                 };

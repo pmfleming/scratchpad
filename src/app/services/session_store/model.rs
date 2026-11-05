@@ -1,5 +1,5 @@
 use crate::app::domain::{PaneNode, PersistedHistoryEntry, SplitAxis, TextFormatMetadata};
-use crate::app::services::settings_store::{AppSettings, default_font_size, default_word_wrap};
+use crate::app::services::settings_store::{default_font_size, default_word_wrap};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -28,17 +28,10 @@ pub(crate) struct SessionManifest {
     pub tabs: Vec<SessionTab>,
 }
 
-impl SessionManifest {
-    pub fn legacy_settings(&self) -> AppSettings {
-        let mut settings = AppSettings::default();
-        settings.editor.font_size = self.font_size;
-        settings.editor.word_wrap = self.word_wrap;
-        settings
-    }
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct SessionTab {
+    #[serde(skip)]
+    pub layout_id: u64,
     #[serde(default)]
     pub buffers: Vec<SessionBuffer>,
     pub active_view_id: u64,
@@ -48,6 +41,7 @@ pub(crate) struct SessionTab {
 
 #[derive(Clone)]
 pub(crate) struct SessionTabShell {
+    pub layout_id: u64,
     pub active_view_id: u64,
     pub views: Vec<SessionView>,
     pub root_pane: SessionPaneNode,
@@ -67,6 +61,7 @@ impl SessionTab {
 
     pub(crate) fn into_parts(self) -> SessionTabParts {
         let SessionTab {
+            layout_id,
             buffers,
             active_view_id,
             views,
@@ -75,6 +70,11 @@ impl SessionTab {
         SessionTabParts {
             reopened: false,
             shell: SessionTabShell {
+                layout_id: if layout_id == 0 {
+                    crate::app::domain::tab::next_layout_id()
+                } else {
+                    layout_id
+                },
                 active_view_id,
                 views,
                 root_pane,
@@ -87,6 +87,7 @@ impl SessionTab {
 impl From<SessionTabParts> for SessionTab {
     fn from(parts: SessionTabParts) -> Self {
         Self {
+            layout_id: parts.shell.layout_id,
             buffers: parts.buffers,
             active_view_id: parts.shell.active_view_id,
             views: parts.shell.views,
@@ -100,6 +101,7 @@ impl SessionTabParts {
     pub(crate) fn retain_workspace_layout(&mut self, tab: &crate::app::domain::WorkspaceTab) {
         self.buffers
             .retain(|buffer| tab.buffer_by_id(buffer.id).is_some());
+        self.shell.layout_id = tab.layout_id;
         self.shell.active_view_id = tab.layout.active_view_id();
         self.shell.views = tab.layout.views().iter().map(SessionView::from).collect();
         self.shell.root_pane = SessionPaneNode::from(tab.layout.root_pane());
@@ -149,6 +151,7 @@ pub(crate) struct SessionBuffer {
     pub history_capture: Option<crate::app::domain::buffer::HistorySnapshot>,
 }
 
+#[cfg(test)]
 impl From<&crate::app::domain::BufferState> for SessionBuffer {
     fn from(buffer: &crate::app::domain::BufferState) -> Self {
         let mut metadata = Self::capture(buffer);

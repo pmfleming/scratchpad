@@ -205,7 +205,7 @@ impl FileService {
     ) -> BufferState {
         let digest = disk_state
             .as_ref()
-            .map(|_| file_content.document.content_digest());
+            .and_then(|_| file_content.document.try_content_digest().ok());
         Self::build_buffer_with_digest(path, file_content, disk_state, digest)
     }
 

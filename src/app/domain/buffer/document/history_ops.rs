@@ -56,28 +56,28 @@ impl TextDocument {
         mut record: TextDocumentOperationRecord,
         source: PieceSource,
     ) {
+        if self.piece_tree().read_fault().is_some() {
+            return;
+        }
         record
             .edits
             .retain(|edit| !edit.deleted_text.is_empty() || !edit.inserted_text.is_empty());
         if record.edits.is_empty() {
-            self.history.pending_generation_before = None;
+            return;
+        }
+
+        if self.try_coalesce_history(&record, source) {
+            self.advance_history_revision();
+
             return;
         }
 
         self.history.latest_operation_record = Some(record.clone());
-        if self.try_coalesce_history(&record, source) {
-            self.advance_history_revision();
-            self.history.pending_generation_before = None;
-            return;
-        }
-
         let entry = self.history_entry_from_operation(record, source);
         self.history.byte_usage += entry.byte_cost();
         assert!(self.history.tree.append(entry.id));
         self.history.entries.push(entry);
         self.advance_history_revision();
-
-        self.history.pending_generation_before = None;
     }
 
     pub(super) fn text_for_spans(&self, spans: &[ByteSpan]) -> String {
@@ -93,15 +93,6 @@ impl TextDocument {
         record: TextDocumentOperationRecord,
         source: PieceSource,
     ) -> PieceHistoryEntry {
-        let generation_after = self.visible_generation();
-        debug_assert!(
-            self.history.pending_generation_before.is_some(),
-            "history generation_before should be captured before pushing text history"
-        );
-        let generation_before = self
-            .history
-            .pending_generation_before
-            .unwrap_or(generation_after);
         let edits = record
             .edits
             .iter()
@@ -118,15 +109,13 @@ impl TextDocument {
                 .as_secs(),
             global_seq: next_text_history_global_seq(),
             source,
-            visible_generation_before: generation_before,
-            visible_generation_after: generation_after,
+
             fingerprint,
             summary: operation_summary(source, &record),
             edits,
             flags: PieceHistoryFlags {
                 undone: false,
                 replayable: true,
-                persisted: false,
             },
             previous_selection: record.previous_selection,
             next_selection: record.next_selection,
@@ -141,7 +130,7 @@ impl TextDocument {
         source: PieceSource,
     ) -> PieceHistoryEdit {
         let tree = Arc::make_mut(&mut self.content.piece_tree);
-        let start_char = edit.start_char.min(u32::MAX as usize) as u32;
+        let start_char = edit.start_char as u64;
         match (edit.deleted_text.is_empty(), edit.inserted_text.is_empty()) {
             (true, false) => PieceHistoryEdit::Inserted {
                 start_char,
@@ -197,7 +186,11 @@ impl TextDocument {
         {
             return false;
         }
-        let latest_record = self.operation_from_history_entry(latest);
+        // This record is retained while the group is open. Re-reading the old
+        // history spans here could fail after the incoming edit was applied.
+        let Some(latest_record) = self.history.latest_operation_record.clone() else {
+            return false;
+        };
         if entry_sealed_by_divider(&latest_record, elapsed) {
             return false;
         }
@@ -235,12 +228,12 @@ impl TextDocument {
             .map(|edit| self.history_edit_from_operation_edit(edit, source))
             .collect::<PieceHistoryEdits>();
         let fingerprint = self.fingerprint_for_history_edits(&edits);
-        let visible_generation_after = self.visible_generation();
+
         let old_cost = self.history.entries[latest_index].byte_cost();
         let latest = &mut self.history.entries[latest_index];
         latest.edits = edits;
         latest.next_selection = merged_record.next_selection;
-        latest.visible_generation_after = visible_generation_after;
+
         latest.global_seq = next_text_history_global_seq();
         latest.edited_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

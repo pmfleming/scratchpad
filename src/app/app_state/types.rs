@@ -45,8 +45,6 @@ pub(crate) struct PendingOpenHereAction {
 
 pub(crate) struct PendingStartupRestoreAction {
     pub(crate) startup_options: StartupOptions,
-    pub(crate) loaded_from_settings: bool,
-    pub(crate) restore_started: bool,
     pub(crate) streamed_tab_count: usize,
     pub(crate) streamed_tab_indices: Vec<usize>,
 }

@@ -251,18 +251,12 @@ impl ScratchpadApp {
         true
     }
 
-    pub(crate) fn queue_background_session_restore(
-        &mut self,
-        startup_options: StartupOptions,
-        loaded_from_settings: bool,
-    ) {
+    pub(crate) fn queue_background_session_restore(&mut self, startup_options: StartupOptions) {
         let request_id = self.state.background_io.allocate_background_request_id();
         self.state.background_io.insert_pending_background_action(
             request_id,
             PendingBackgroundAction::StartupRestore(PendingStartupRestoreAction {
                 startup_options,
-                loaded_from_settings,
-                restore_started: false,
                 streamed_tab_count: 0,
                 streamed_tab_indices: Vec::new(),
             }),

@@ -9,10 +9,7 @@ pub(crate) use coalescing::TEXT_HISTORY_SOFT_DIVIDER_PAUSE;
 pub(crate) use coalescing::{CoalescedEdit, coalesced_local_edit_record, entry_sealed_by_divider};
 pub use persistence::{PersistedCursorRange, PersistedHistoryEdit, PersistedHistoryEntry};
 pub(crate) use persistence::{persist_cursor_range, restore_cursor_range};
-#[cfg(test)]
-pub(crate) use provenance::PIECE_PROVENANCE_ENTRY_LIMIT;
-pub(crate) use provenance::PieceProvenanceStore;
-pub use provenance::{ByteSpan, PieceProvenance, PieceSource};
+pub use provenance::{ByteSpan, PieceSource};
 
 use super::piece_tree::PieceTreeLite;
 use crate::app::domain::CursorRange;
@@ -31,24 +28,50 @@ pub(crate) const TEXT_HISTORY_PREVIEW_MAX_CHARS: usize = 80;
 pub(crate) const TEXT_HISTORY_ROOT_CHECKPOINT_MIN_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(from = "PersistedHistoryFlags", into = "PersistedHistoryFlags")]
 pub struct PieceHistoryFlags {
     pub undone: bool,
     pub replayable: bool,
-    pub persisted: bool,
+}
+
+// Keep stage 1's existing JSON wire shape until the new schema lands. This is
+// serialization of the current format, not an old-schema reader or migration.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedHistoryFlags {
+    undone: bool,
+    replayable: bool,
+    persisted: bool,
+}
+impl From<PieceHistoryFlags> for PersistedHistoryFlags {
+    fn from(flags: PieceHistoryFlags) -> Self {
+        Self {
+            undone: flags.undone,
+            replayable: flags.replayable,
+            persisted: false,
+        }
+    }
+}
+impl From<PersistedHistoryFlags> for PieceHistoryFlags {
+    fn from(flags: PersistedHistoryFlags) -> Self {
+        Self {
+            undone: flags.undone,
+            replayable: flags.replayable,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PieceHistoryEdit {
     Inserted {
-        start_char: u32,
+        start_char: u64,
         span: ByteSpan,
     },
     Deleted {
-        start_char: u32,
+        start_char: u64,
         spans: Vec<ByteSpan>,
     },
     Replaced {
-        start_char: u32,
+        start_char: u64,
         deleted: Vec<ByteSpan>,
         inserted: ByteSpan,
     },
@@ -61,8 +84,6 @@ pub struct PieceHistoryEntry {
     pub edited_at: u64,
     pub global_seq: u64,
     pub source: PieceSource,
-    pub visible_generation_before: u32,
-    pub visible_generation_after: u32,
     pub fingerprint: u64,
     pub summary: String,
     pub edits: PieceHistoryEdits,
@@ -72,7 +93,7 @@ pub struct PieceHistoryEntry {
 }
 
 impl PieceHistoryEdit {
-    pub fn start_char(&self) -> u32 {
+    pub fn start_char(&self) -> u64 {
         match self {
             Self::Inserted { start_char, .. }
             | Self::Deleted { start_char, .. }

@@ -1,6 +1,37 @@
 use super::*;
 use crate::app::ui::editor_content::native_editor::EditorHighlightStyle;
 
+#[test]
+fn viewport_preflight_reports_unreadable_text_before_building_a_galley() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("source");
+    std::fs::write(&path, "viewport λ\r\n".repeat(128)).unwrap();
+    let (document, _, line_count) =
+        crate::app::domain::TextDocument::from_utf8_file(&path, 0, 0).unwrap();
+    let mut buffer = BufferState::new("source".into(), String::new(), Some(path));
+    *buffer.document_mut() = document;
+    buffer.line_count = line_count;
+    buffer
+        .document()
+        .piece_tree()
+        .truncate_backing_for_test()
+        .unwrap();
+    let result = viewport_text_slice(
+        &buffer,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 400.)),
+        20.,
+        None,
+        None,
+        false,
+    );
+    assert!(result.is_err());
+    assert!(buffer.document().piece_tree().read_fault().is_some());
+    assert_eq!(
+        buffer.document().piece_tree().len_bytes(),
+        "viewport λ\r\n".repeat(128).len()
+    );
+}
+
 fn editor_galley(
     ui: &mut egui::Ui,
     buffer: &BufferState,
@@ -23,6 +54,7 @@ fn editor_galley(
             egui::vec2(800.0, 400.0),
         )),
     )
+    .unwrap()
     .galley
 }
 

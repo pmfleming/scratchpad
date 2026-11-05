@@ -86,24 +86,24 @@ pub(crate) fn detected_text_format_and_metadata(
 pub(crate) fn buffer_text_metadata_from_piece_tree(
     tree: &PieceTreeLite,
     format: &mut TextFormatMetadata,
-) -> BufferTextMetadata {
-    analyze_piece_tree_text(tree, format).metadata
+) -> std::io::Result<BufferTextMetadata> {
+    Ok(try_analyze_piece_tree_text(tree, format)?.metadata)
 }
 
-pub(crate) fn analyze_piece_tree_text(
+pub(crate) fn try_analyze_piece_tree_text(
     tree: &PieceTreeLite,
     format: &mut TextFormatMetadata,
-) -> PieceTreeTextAnalysis {
+) -> std::io::Result<PieceTreeTextAnalysis> {
     let metrics = tree.metrics();
-    let spans = tree.spans_for_range(0..metrics.chars);
-    let inspection = TextInspection::inspect_span_refs(spans.map(|s| s.text));
+    let spans = tree.try_spans_for_range(0..metrics.chars);
+    let inspection = TextInspection::try_inspect_span_refs(spans.map(|s| s.map(|s| s.text)))?;
     let length = BufferLength::from_metrics(
         metrics,
         display_line_count_from_piece_tree_inspection(&inspection, metrics.newlines),
     );
     format.apply_inspection(&inspection);
     let metadata = build_buffer_text_metadata(inspection, format, false);
-    PieceTreeTextAnalysis { metadata, length }
+    Ok(PieceTreeTextAnalysis { metadata, length })
 }
 
 fn build_buffer_text_metadata(

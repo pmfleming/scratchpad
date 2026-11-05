@@ -54,5 +54,4 @@ fn acknowledged_commit_survives_abrupt_exit() {
     let store = SessionStore::new(directory.path().to_owned());
     let restored = store.load().unwrap().unwrap();
     assert_eq!(restored.tabs[0].active_buffer().text(), "committed\0λ\r\n");
-    assert_eq!(restored.legacy_settings.editor.font_size, 19.0);
 }

@@ -30,7 +30,9 @@ impl WorkspaceTab {
 
     #[must_use]
     pub fn into_tabs_per_file(self) -> Vec<WorkspaceTab> {
-        let WorkspaceTab { buffers, layout } = self;
+        let WorkspaceTab {
+            buffers, layout, ..
+        } = self;
         let (buffer, extra_buffers) = buffers.into_parts();
         let (views, root_pane, active_view_id) = layout.into_parts();
 

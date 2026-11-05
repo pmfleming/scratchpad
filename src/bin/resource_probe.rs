@@ -283,7 +283,7 @@ fn run_provenance_retained_memory_cycle(edit_count: usize) -> StepOutcome {
         );
     }
 
-    let provenance_entries = document.piece_tree().provenance_entry_count();
+    let provenance_entries = 0; // The unused provenance store has been removed.
     StepOutcome {
         result_value: black_box(provenance_entries),
         retained_live_bytes_before_teardown: Some(alloc_metrics::allocation_snapshot().live_bytes),

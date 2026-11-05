@@ -15,6 +15,32 @@ pub(in crate::app::domain::buffer::analysis) struct TextInspection {
 }
 
 impl TextInspection {
+    pub(in crate::app::domain::buffer::analysis) fn try_inspect_span_refs(
+        spans: impl Iterator<Item = std::io::Result<impl AsRef<str> + Sync>>,
+    ) -> std::io::Result<Self> {
+        let mut summary = TextScanSummary::scan_text_serial("");
+        let mut batch = Vec::new();
+        let mut bytes = 0;
+        for span in spans {
+            let span = span?;
+            bytes += span.as_ref().len();
+            batch.push(span);
+            if bytes >= 4 * 1024 * 1024 {
+                let next = TextScanSummary::scan_span_slice_parallel(&batch)
+                    .unwrap_or_else(|| TextScanSummary::scan_spans(batch.iter()));
+                summary = TextScanSummary::combine(vec![summary, next]);
+                batch.clear();
+                bytes = 0;
+            }
+        }
+        if !batch.is_empty() {
+            let next = TextScanSummary::scan_span_slice_parallel(&batch)
+                .unwrap_or_else(|| TextScanSummary::scan_spans(batch.iter()));
+            summary = TextScanSummary::combine(vec![summary, next]);
+        }
+        Ok(summary.into_inspection(None))
+    }
+
     pub(in crate::app::domain::buffer::analysis) fn inspect(text: &str) -> Self {
         Self::inspect_with_line_endings(text, None)
     }

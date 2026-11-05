@@ -32,15 +32,6 @@ impl PieceTreeRuntime {
         self.generation
     }
 
-    pub(super) fn clear_line_samples(&mut self) {
-        if let Some(cache) = self.line_samples.get() {
-            cache
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clear();
-        }
-    }
-
     pub(super) fn line_samples(
         &self,
         span: ByteSpan,

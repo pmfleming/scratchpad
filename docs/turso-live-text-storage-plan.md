@@ -841,6 +841,9 @@ writes starve saves, or standard WAL fails correctness/concurrency checks. Do no
 
 ### 1. Preparatory refactors, no format change
 
+Implemented on 2026-11-05; see [stage 1 evidence](../tools/turso-contract/STAGE-1.md).
+Database schema 11 and session version 9 are retained at this boundary.
+
 - Delete compaction and, if confirmed unused, `PieceProvenanceStore`, `flags.persisted`, and
   `visible_generation_before`/`after`.
 - Keep standard WAL on both platforms. Ensure every opener uses the same mode,

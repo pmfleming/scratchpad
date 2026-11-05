@@ -11,6 +11,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Text backing read failures now stop edits and show a read-only error in the editor. Storage-health checks no longer wait behind a session save. Startup appearance comes only from settings; deleting the settings file restores its defaults.
 - Closing dirty work now offers **Close without saving** and retains its text in history. Save As Copy creates a separate document; ordinary Save As preserves identity. Timeline preserves older pages during saves and close/reopen handover, searches Unicode names consistently, and exposes static activity dates, paths and times to assistive technology.
 
 - Read and hash external file changes in the background. Dirty files keep their text and record one conflict observation per disk version; metadata-only touches produce no activity. Missing files record once and returning files are reconciled. Save waits for pending disk checks before offering conflict choices.

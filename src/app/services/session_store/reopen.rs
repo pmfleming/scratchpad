@@ -46,7 +46,7 @@ pub(super) fn restore_reopened(
                     .as_ref()
                     .or(original.disk_content_digest.as_ref())
                     .cloned()
-                    .unwrap_or_else(|| buffer.document().content_digest());
+                    .map_or_else(|| buffer.document().try_content_digest(), Ok)?;
                 buffer.set_path(Some(path.clone()));
                 buffer
                     .disk_content_digest
@@ -57,10 +57,12 @@ pub(super) fn restore_reopened(
                     let original_document = Box::new(buffer.document().clone());
                     let previous = buffer.document().history_now();
                     let loaded = FileService::buffer_from_observed(&path, observed);
-                    buffer.replace_from_loaded_buffer_source(
+                    if !buffer.replace_from_loaded_buffer_source(
                         loaded,
                         crate::app::domain::buffer::PieceSource::External,
-                    );
+                    ) {
+                        return Err(io::Error::other("Reopened text is unreadable"));
+                    }
                     if buffer.document().history_now() != previous {
                         buffer.pending_reopen_external = Some(buffer.document().history_now());
                         buffer.pending_reopen_original = Some(original_document);

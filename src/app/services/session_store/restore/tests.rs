@@ -115,7 +115,7 @@ fn streaming_restores_active_first_preserves_cold_payloads_and_honors_cancellati
     let mut cold = HashMap::new();
     let metadata = store
         .load_streaming(
-            |active, _, _| {
+            |active, _| {
                 started = active == 1;
                 true
             },
@@ -162,7 +162,7 @@ fn streaming_restores_active_first_preserves_cold_payloads_and_honors_cancellati
         let mut callbacks = 0;
         let error = store
             .load_streaming(
-                |_, _, _| !cancel_at_start,
+                |_, _| !cancel_at_start,
                 |_, _, _| {
                     callbacks += 1;
                     false

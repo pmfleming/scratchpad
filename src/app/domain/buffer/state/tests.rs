@@ -2,6 +2,31 @@ use super::BufferState;
 use crate::app::domain::{CharCursor, CursorRange};
 
 #[test]
+fn unreadable_reload_preserves_dirty_metadata_and_history() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("source");
+    std::fs::write(&path, "aλ\r\n".repeat(128)).unwrap();
+    let (document, _, _) = super::TextDocument::from_utf8_file(&path, 0, 0).unwrap();
+    let mut buffer = BufferState::new("dirty".into(), String::new(), None);
+    buffer.document = document;
+    buffer.is_dirty = true;
+    let before = buffer.document.history_token();
+    let metrics = buffer.document.piece_tree().metrics();
+    buffer
+        .document
+        .piece_tree()
+        .truncate_backing_for_test()
+        .unwrap();
+    let loaded = BufferState::new("loaded".into(), "replacement".into(), Some(path));
+    assert!(!buffer.replace_from_loaded_buffer(loaded));
+    assert!(buffer.is_dirty);
+    assert_eq!(buffer.name, "dirty");
+    assert!(buffer.path.is_none());
+    assert_eq!(buffer.document.history_token(), before);
+    assert_eq!(buffer.document.piece_tree().metrics(), metrics);
+}
+
+#[test]
 fn visible_control_availability_includes_line_breaks_tabs_and_format_controls() {
     assert!(
         BufferState::new("sample.txt".to_owned(), "a\nb".to_owned(), None)

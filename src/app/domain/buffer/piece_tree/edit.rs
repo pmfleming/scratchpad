@@ -29,6 +29,12 @@ impl PieceTreeLite {
         source: PieceSource,
     ) -> usize {
         assert!(offset_chars <= self.len_chars());
+        if self.read_fault().is_some() {
+            return 0;
+        }
+        let Ok(_pin) = self.pin_range(offset_chars..offset_chars) else {
+            return 0;
+        };
         if text.is_empty() {
             return 0;
         }
@@ -93,6 +99,12 @@ impl PieceTreeLite {
     pub fn remove_char_range(&mut self, range_chars: Range<usize>) {
         assert!(range_chars.start <= range_chars.end);
         assert!(range_chars.end <= self.len_chars());
+        if self.read_fault().is_some() {
+            return;
+        }
+        let Ok(_pin) = self.pin_range(range_chars.clone()) else {
+            return;
+        };
         if range_chars.is_empty() {
             return;
         }

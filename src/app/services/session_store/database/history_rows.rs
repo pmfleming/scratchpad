@@ -13,10 +13,10 @@ impl HistoryRows {
             Self::Exported(rows) => rows.len(),
         }
     }
-    pub(super) fn entry(&self, index: usize) -> PersistedHistoryEntry {
+    pub(super) fn entry(&self, index: usize) -> io::Result<PersistedHistoryEntry> {
         match self {
             Self::Document(doc) => doc.entry(index),
-            Self::Exported(rows) => rows[index].clone(),
+            Self::Exported(rows) => Ok(rows[index].clone()),
         }
     }
     pub(super) fn positions(&self) -> (u64, u64, u64, u64) {

@@ -27,17 +27,31 @@ fn history_token_invalidates_replay_clear_restore_and_replacement() {
 }
 
 #[test]
-fn generation_before_is_captured_before_direct_edit_mutation() {
-    let mut document = TextDocument::new(String::new());
-    let before = document.visible_generation();
-
-    insert_edit(&mut document, 0, "a");
-
-    let entry = &document.history_entries()[0];
-    assert_eq!(entry.visible_generation_before, before);
-    assert_eq!(
-        entry.visible_generation_after,
-        document.visible_generation()
-    );
-    assert!(entry.visible_generation_after > entry.visible_generation_before);
+fn history_offsets_above_u32_round_trip_without_large_text_allocation() {
+    use crate::app::domain::buffer::piece_tree::PieceBuffer;
+    use crate::app::domain::buffer::{ByteSpan, PieceHistoryEdit};
+    let start = u64::from(u32::MAX) + 17;
+    let edit = PieceHistoryEdit::Inserted {
+        start_char: start,
+        span: ByteSpan {
+            buffer: PieceBuffer::Add,
+            start_byte: 0,
+            byte_len: 2,
+        },
+    };
+    let persisted = edit.to_persisted(|_| "λ".into());
+    let encoded = serde_json::to_vec(&persisted).unwrap();
+    let decoded: crate::app::domain::buffer::PersistedHistoryEdit =
+        serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded, persisted);
+    let restored = decoded.into_piece(|text| {
+        assert_eq!(text, "λ");
+        ByteSpan {
+            buffer: PieceBuffer::Add,
+            start_byte: 0,
+            byte_len: text.len() as u64,
+        }
+    });
+    assert_eq!(restored.start_char(), start);
+    assert_eq!(restored, edit);
 }

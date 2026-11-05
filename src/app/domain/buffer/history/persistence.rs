@@ -34,19 +34,19 @@ pub struct PersistedHistoryEntry {
 #[serde(rename_all = "snake_case")]
 pub enum PersistedHistoryEdit {
     Inserted {
-        start_char: u32,
-        inserted_len: u32,
+        start_char: u64,
+        inserted_len: u64,
         inserted_payload: Option<String>,
     },
     Deleted {
-        start_char: u32,
-        deleted_len: u32,
+        start_char: u64,
+        deleted_len: u64,
         deleted_payload: Option<String>,
     },
     Replaced {
-        start_char: u32,
-        deleted_len: u32,
-        inserted_len: u32,
+        start_char: u64,
+        deleted_len: u64,
+        inserted_len: u64,
         deleted_payload: Option<String>,
         inserted_payload: Option<String>,
     },
@@ -165,7 +165,7 @@ impl PersistedHistoryEntry {
                 let Some(text) = payload.as_deref() else {
                     return false;
                 };
-                if text.chars().count() != len as usize {
+                if text.chars().count() as u64 != len {
                     return false;
                 }
                 parts.push(text);
@@ -200,7 +200,7 @@ impl PieceHistoryEdit {
                 let text = text_for_span(*span);
                 PersistedHistoryEdit::Inserted {
                     start_char: *start_char,
-                    inserted_len: char_len_u32(&text),
+                    inserted_len: char_len_u64(&text),
                     inserted_payload: Some(text),
                 }
             }
@@ -212,7 +212,7 @@ impl PieceHistoryEdit {
                     .collect::<String>();
                 PersistedHistoryEdit::Deleted {
                     start_char: *start_char,
-                    deleted_len: char_len_u32(&text),
+                    deleted_len: char_len_u64(&text),
                     deleted_payload: Some(text),
                 }
             }
@@ -229,8 +229,8 @@ impl PieceHistoryEdit {
                 let inserted_text = text_for_span(*inserted);
                 PersistedHistoryEdit::Replaced {
                     start_char: *start_char,
-                    deleted_len: char_len_u32(&deleted_text),
-                    inserted_len: char_len_u32(&inserted_text),
+                    deleted_len: char_len_u64(&deleted_text),
+                    inserted_len: char_len_u64(&inserted_text),
                     deleted_payload: Some(deleted_text),
                     inserted_payload: Some(inserted_text),
                 }
@@ -261,6 +261,6 @@ pub(crate) fn restore_cursor_range(range: PersistedCursorRange) -> CursorRange {
     }
 }
 
-fn char_len_u32(text: &str) -> u32 {
-    text.chars().count().min(u32::MAX as usize) as u32
+fn char_len_u64(text: &str) -> u64 {
+    text.chars().count() as u64
 }

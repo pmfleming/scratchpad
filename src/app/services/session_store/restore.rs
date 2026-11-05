@@ -212,7 +212,7 @@ impl Restorer {
                     restored.text_metadata,
                 );
                 state.disk_content_digest = if !state.is_dirty && state.disk_state.is_some() {
-                    Some(state.document().content_digest())
+                    state.document().try_content_digest().ok()
                 } else {
                     buffer.disk_content_digest
                 };

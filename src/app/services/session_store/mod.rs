@@ -15,7 +15,6 @@ mod validation;
 
 use crate::app::diagnostics;
 use crate::app::domain::WorkspaceTab;
-use crate::app::services::settings_store::AppSettings;
 use database::{DatabaseWorker, ReadScope, StoredSession};
 use futures_lite::future::block_on;
 use model::{SessionBuffer, SessionManifest, SessionPaneNode, SessionTab, SessionView};
@@ -110,9 +109,10 @@ impl SessionStore {
     /// A protection latch or cached worker-open failure cannot be retried by this
     /// store. Ordinary transaction errors remain retryable and must not discard edits.
     pub(crate) fn writes_blocked(&self) -> bool {
-        match self.worker() {
-            Ok(worker) => worker.call(|db| Ok(db.blocked.is_some())).unwrap_or(true),
-            Err(_) => true,
+        match self.worker.get() {
+            Some(Ok(worker)) => worker.writes_blocked(),
+            Some(Err(_)) => true,
+            None => false,
         }
     }
     fn read_session(&self, scope: ReadScope) -> io::Result<Option<StoredSession>> {
@@ -177,18 +177,14 @@ impl SessionStore {
     }
     pub(crate) fn load_streaming(
         &self,
-        mut on_started: impl FnMut(usize, SessionActiveSurface, AppSettings) -> bool,
+        mut on_started: impl FnMut(usize, SessionActiveSurface) -> bool,
         mut on_tab: impl FnMut(usize, WorkspaceTab, Option<ColdSessionTab>) -> bool,
     ) -> io::Result<Option<RestoredSession>> {
         let Some(stored) = self.read_session(ReadScope::Shells)? else {
             return Ok(None);
         };
         let mut session = restored_metadata(&stored.manifest);
-        if !on_started(
-            session.active_tab_index,
-            session.active_surface,
-            session.legacy_settings.clone(),
-        ) {
+        if !on_started(session.active_tab_index, session.active_surface) {
             return Err(receiver_closed());
         }
         let mut restorer = Restorer::new(stored.contents);
@@ -313,7 +309,6 @@ fn restored_metadata(manifest: &SessionManifest) -> RestoredSession {
             .active_tab_index
             .min(manifest.tabs.len().saturating_sub(1)),
         active_surface: manifest.active_surface,
-        legacy_settings: manifest.legacy_settings(),
         restore_status: None,
     }
 }

@@ -5,7 +5,6 @@ use crate::app::domain::{
 use crate::app::services::session_store::{
     ColdSessionTab, RestoreStatus, RestoredSession, SessionActiveSurface,
 };
-use crate::app::services::settings_store::AppSettings;
 use std::path::PathBuf;
 
 pub(crate) enum BackgroundIoResult {
@@ -40,7 +39,6 @@ pub(crate) enum BackgroundIoResult {
         request_id: u64,
         active_tab_index: usize,
         active_surface: SessionActiveSurface,
-        legacy_settings: AppSettings,
     },
     SessionTabRestored {
         request_id: u64,

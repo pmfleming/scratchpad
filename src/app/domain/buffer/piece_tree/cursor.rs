@@ -101,7 +101,18 @@ impl<'a> PieceTreeCharCursor<'a> {
         let (piece, offset_in_piece) = self.tree.piece_at_char_offset(address, probe)?;
         let piece_start_char = probe.saturating_sub(offset_in_piece);
         let local_char = cursor_position.saturating_sub(piece_start_char);
-        let text = self.tree.piece_text(piece);
+        let text = self
+            .tree
+            .storage
+            .try_text_for_span(
+                super::ByteSpan {
+                    buffer: piece.buffer,
+                    start_byte: piece.start_byte as u64,
+                    byte_len: piece.byte_len as u64,
+                },
+                true,
+            )
+            .ok()?;
         let byte_offset = if piece.is_ascii {
             local_char
         } else {

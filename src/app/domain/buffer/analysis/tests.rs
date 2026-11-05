@@ -1,6 +1,6 @@
 use super::{
-    BufferLength, PieceTreeLite, TextFormatMetadata, analyze_piece_tree_text,
-    display_line_count_from_piece_tree,
+    BufferLength, PieceTreeLite, TextFormatMetadata, display_line_count_from_piece_tree,
+    try_analyze_piece_tree_text,
 };
 use crate::app::domain::PieceSource;
 
@@ -32,7 +32,7 @@ fn analyze_piece_tree_text_returns_metadata_and_cached_length() {
     let tree = PieceTreeLite::from_string("one\ntwo\n".to_owned());
     let mut format = TextFormatMetadata::utf8_for_new_file("");
 
-    let analysis = analyze_piece_tree_text(&tree, &mut format);
+    let analysis = try_analyze_piece_tree_text(&tree, &mut format).unwrap();
 
     assert_eq!(analysis.metadata.line_count, 3);
     assert_eq!(

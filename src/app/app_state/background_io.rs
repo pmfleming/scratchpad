@@ -196,13 +196,11 @@ impl ScratchpadApp {
                 request_id,
                 active_tab_index,
                 active_surface,
-                legacy_settings,
             } => {
                 self.apply_session_restore_started_result(
                     request_id,
                     active_tab_index,
                     active_surface,
-                    legacy_settings,
                 );
             }
             BackgroundIoResult::SessionTabRestored {
@@ -384,10 +382,9 @@ impl ScratchpadApp {
         request_id: u64,
         active_tab_index: usize,
         active_surface: crate::app::services::session_store::SessionActiveSurface,
-        legacy_settings: crate::app::services::settings_store::AppSettings,
     ) {
-        let loaded_from_settings = {
-            let Some(action) = self
+        {
+            let Some(_) = self
                 .state
                 .background_io
                 .pending_background_action_mut(request_id)
@@ -395,10 +392,7 @@ impl ScratchpadApp {
             else {
                 return;
             };
-            action.restore_started = true;
-            action.loaded_from_settings
         };
-        self.adopt_legacy_startup_settings(loaded_from_settings, Some(legacy_settings));
         if !self.tab_manager.tabs.as_slice().is_empty() {
             self.tab_manager
                 .set_active_tab_index_clamped(active_tab_index);
@@ -578,7 +572,7 @@ impl ScratchpadApp {
         result: Result<Option<crate::app::services::session_store::RestoredSession>, String>,
     ) {
         let mut restored_session = false;
-        let legacy_settings = match result {
+        match result {
             Ok(Some(restored)) if action.streamed_tab_count > 0 => {
                 restored_session = true;
                 self.tab_manager
@@ -592,14 +586,12 @@ impl ScratchpadApp {
                 if let Some(status) = restored.restore_status.as_ref() {
                     self.apply_session_restore_status(status.clone());
                 }
-                (!action.loaded_from_settings && !action.restore_started)
-                    .then_some(restored.legacy_settings)
             }
             Ok(Some(restored)) => {
                 restored_session = true;
-                Some(session_manager::apply_restored_session(self, restored))
+                session_manager::apply_restored_session(self, restored);
             }
-            Ok(None) => None,
+            Ok(None) => {}
             Err(error) => {
                 self.state.persistence.session_restore_failed = true;
                 diagnostics::record_background_failure(
@@ -610,11 +602,8 @@ impl ScratchpadApp {
                 );
                 self.state.status.report_startup_restore_failed(error);
                 self.state.dialogs.status_history.open();
-                None
             }
-        };
-
-        self.adopt_legacy_startup_settings(action.loaded_from_settings, legacy_settings);
+        }
         self.finish_startup(
             action.startup_options,
             restored_session,

@@ -41,7 +41,7 @@ impl SessionStore {
             .flat_map(|tab| &mut tab.buffers)
         {
             if let Some(document) = buffer.history_document.take() {
-                buffer.text_history = document.exported_history();
+                buffer.text_history = document.try_exported_history()?;
             }
         }
         write_new(&destination.join("session.json"), |file| {

@@ -20,9 +20,15 @@ impl BufferState {
     pub fn sync_to_disk_state(&mut self, disk_state: Option<DiskFileState>) {
         self.document.seal_history_group();
         if !self.is_dirty {
-            self.disk_content_digest = disk_state
-                .as_ref()
-                .map(|_| self.document().content_digest());
+            let digest = if disk_state.is_some() {
+                match self.document().try_content_digest() {
+                    Ok(digest) => Some(digest),
+                    Err(_) => return,
+                }
+            } else {
+                None
+            };
+            self.disk_content_digest = digest;
             self.observed_disk_digest
                 .clone_from(&self.disk_content_digest);
             self.observed_disk_missing = false;
@@ -57,7 +63,11 @@ impl BufferState {
         self.is_dirty = if navigating {
             self.disk_content_digest.as_ref().map_or(
                 self.path.is_some() || self.document.piece_tree().len_chars() != 0,
-                |saved| *saved != self.document.content_digest(),
+                |saved| {
+                    self.document
+                        .try_content_digest()
+                        .map_or(true, |current| *saved != current)
+                },
             )
         } else {
             true
