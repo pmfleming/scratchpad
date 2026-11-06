@@ -56,6 +56,16 @@ fn read_probe_file(
     let handle = store.chunk_store_handle()?;
     FileService::read_file_in_store(path, handle)
 }
+fn selected(id: &str) -> bool {
+    let args: Vec<_> = std::env::args().collect();
+    args.windows(2)
+        .find(|pair| pair[0] == "--scenario")
+        .is_none_or(|pair| pair[1] == id)
+}
+fn any_selected(ids: &[&str]) -> bool {
+    ids.iter().any(|id| selected(id))
+}
+
 fn main() {
     let file_probe_root = tempfile::tempdir().expect("file probe store root");
     FILE_PROBE_STORE.with(|slot| {

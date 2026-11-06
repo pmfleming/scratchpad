@@ -69,7 +69,7 @@ fn descriptor(scenario: &'static str, index: usize, bytes: usize) -> StepDescrip
     StepDescriptor {
         scenario,
         scenario_label: scenario,
-        workload_family: "live-text-stage-zero",
+        workload_family: "store-workflows",
         focus: "concurrency",
         step_index: index,
         workload_value: bytes,
@@ -124,6 +124,36 @@ pub(super) fn imports() {
         println!(
             "{}",
             serde_json::json!({"scenario":"store_import","bytes":size,"first_paint_ns":first_paint_ns,"first_paint_result":paint.result_value,"import_ns":import_ns,"read_p99_ns":reads[253],"read_max_ns":reads[255],"peak_pending_bytes":store.peak_pending_bytes(),"cached_bytes":store.cached_bytes(),"new_body_bytes_hashed_after_edit":hashed_new,"edit_save_ns":profile.total_ns})
+        );
+    }
+}
+
+/// Standard lens rows for import cost and responsiveness against real writes.
+pub(super) fn storage_workflows() {
+    if super::selected("store_import") {
+        for (index, bytes) in [64 * MB, GB].into_iter().enumerate() {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("import.txt");
+            write_utf8_text_file(&path, bytes).unwrap();
+            emit_prepared_operation(
+                descriptor("store_import", index, bytes),
+                serde_json::json!({"fresh_store":true}),
+                || run_large_utf8_load_cycle(&path),
+            );
+        }
+    }
+    if super::selected("ui_during_store_writes") {
+        emit_prepared_operation(
+            descriptor("ui_during_store_writes", 0, 64 * MB),
+            serde_json::json!({"writer_pause_ms":200,"seed_bytes":3_u64 * GB as u64}),
+            || {
+                let profile = scratchpad::profile::run_live_text_io_profile(64 * MB);
+                assert!(profile["queued_typing_preserved"] == true);
+                assert!(profile["concurrent_write_bytes"].as_u64().unwrap() >= 3_u64 * GB as u64);
+                let mut outcome = StepOutcome::items(profile["frames"].as_u64().unwrap() as usize);
+                outcome.phase_elapsed_ns = profile;
+                outcome
+            },
         );
     }
 }

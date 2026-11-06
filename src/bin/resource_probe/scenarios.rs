@@ -32,7 +32,17 @@ pub(super) fn run_all() {
     emit_tab_strip_frame_tracking();
     emit_view_count_resource_tracking();
     emit_session_persist_restore_costs();
-    super::session_save::run();
+    if super::selected("large_dirty_buffer_save") {
+        super::session_save::run();
+    }
+    if super::any_selected(&[
+        "file_backed_search",
+        "typing_without_save",
+        "typing_during_save",
+    ]) {
+        super::live_text::run();
+    }
+    super::live_text::storage_workflows();
 }
 
 /// Reuse the existing measured paths without the unrelated many-file/UI cases.
@@ -49,6 +59,13 @@ pub(super) fn run_live_text_baseline() {
 }
 
 fn emit_large_utf8_load_peak_memory() {
+    if !super::any_selected(&[
+        "large_utf8_load_peak_memory",
+        "file_backed_chunk_cache_tracking",
+        "file_backed_random_window",
+    ]) {
+        return;
+    }
     let root = unique_probe_root("large-utf8-load-memory");
     std::fs::create_dir_all(&root).expect("create large UTF-8 load root");
     let max_bytes = file_backed_open_max_bytes();
@@ -109,6 +126,9 @@ fn emit_large_utf8_load_peak_memory() {
 }
 
 fn emit_file_backed_open_allocations() {
+    if !super::any_selected(&["large_file_first_visible_paint"]) {
+        return;
+    }
     let root = unique_probe_root("file-backed-open");
     std::fs::create_dir_all(&root).expect("create file-backed open root");
     let max_bytes = file_backed_open_max_bytes();
@@ -139,6 +159,13 @@ fn emit_file_backed_open_allocations() {
 }
 
 fn emit_search_resource_tracking() {
+    if !super::any_selected(&[
+        "search_file_size_resource_tracking",
+        "search_target_resource_tracking",
+        "search_app_result_tracking",
+    ]) {
+        return;
+    }
     emit_search_file_size_tracking();
 
     emit_workload_steps(
@@ -167,6 +194,9 @@ fn emit_search_resource_tracking() {
 }
 
 fn emit_search_file_size_tracking() {
+    if !super::any_selected(&["search_file_size_resource_tracking"]) {
+        return;
+    }
     emit_workload_steps(
         [64 * MB, 256 * MB],
         WorkloadSpec {
@@ -181,6 +211,9 @@ fn emit_search_file_size_tracking() {
 }
 
 fn emit_edited_buffer_search_preview_rendering() {
+    if !super::any_selected(&["edited_buffer_search_preview_rendering"]) {
+        return;
+    }
     emit_workload_steps(
         [256usize, 2_048, 8_192],
         WorkloadSpec {
@@ -195,6 +228,9 @@ fn emit_edited_buffer_search_preview_rendering() {
 }
 
 fn emit_provenance_retained_memory() {
+    if !super::any_selected(&["provenance_retained_memory"]) {
+        return;
+    }
     emit_workload_steps(
         [10_000usize, 100_000],
         WorkloadSpec {
@@ -209,6 +245,9 @@ fn emit_provenance_retained_memory() {
 }
 
 fn emit_anchor_heavy_view_editing() {
+    if !super::any_selected(&["anchor_heavy_view_editing"]) {
+        return;
+    }
     emit_workload_steps(
         [1_000usize, 10_000, 40_000],
         WorkloadSpec {
@@ -223,6 +262,9 @@ fn emit_anchor_heavy_view_editing() {
 }
 
 fn emit_fragmented_long_session_mutations() {
+    if !super::any_selected(&["fragmented_long_session_mutation"]) {
+        return;
+    }
     emit_workload_steps(
         [1_000usize, 5_000, 20_000],
         WorkloadSpec {
@@ -237,6 +279,9 @@ fn emit_fragmented_long_session_mutations() {
 }
 
 fn emit_paste_allocations() {
+    if !super::any_selected(&["paste_allocation"]) {
+        return;
+    }
     emit_workload_steps(
         [8 * MB, 64 * MB, 128 * MB],
         WorkloadSpec {
@@ -251,6 +296,9 @@ fn emit_paste_allocations() {
 }
 
 fn emit_many_file_resource_tracking() {
+    if !super::any_selected(&["many_file_resource_tracking"]) {
+        return;
+    }
     emit_workload_steps(
         [1_000usize, 10_000, 50_000],
         WorkloadSpec {
@@ -265,6 +313,9 @@ fn emit_many_file_resource_tracking() {
 }
 
 fn emit_many_file_lazy_open_tracking() {
+    if !super::any_selected(&["many_file_lazy_open_tracking"]) {
+        return;
+    }
     let root = unique_probe_root("many-file-lazy-open");
     std::fs::create_dir_all(&root).expect("create many-file lazy-open root");
 
@@ -297,6 +348,9 @@ fn emit_many_file_lazy_open_tracking() {
 }
 
 fn emit_tab_count_resource_tracking() {
+    if !super::any_selected(&["tab_count_resource_tracking"]) {
+        return;
+    }
     emit_workload_steps(
         [128usize, 512, 4_096, 10_000],
         WorkloadSpec {
@@ -311,6 +365,13 @@ fn emit_tab_count_resource_tracking() {
 }
 
 fn emit_targeted_tab_phase_probes() {
+    if !super::any_selected(&[
+        "tab_build_targeted",
+        "tab_split_targeted",
+        "tab_combine_targeted",
+    ]) {
+        return;
+    }
     for (step_index, tab_count) in [128usize, 512, 4_096, 10_000].into_iter().enumerate() {
         emit_step(
             StepDescriptor {
@@ -360,6 +421,9 @@ fn emit_targeted_tab_phase_probes() {
 }
 
 fn emit_tab_strip_frame_tracking() {
+    if !super::any_selected(&["tab_strip_frame_rendering"]) {
+        return;
+    }
     emit_workload_steps(
         [128usize, 1_000, 10_000],
         WorkloadSpec {
@@ -374,6 +438,9 @@ fn emit_tab_strip_frame_tracking() {
 }
 
 fn emit_view_count_resource_tracking() {
+    if !super::any_selected(&["view_count_resource_tracking"]) {
+        return;
+    }
     emit_workload_steps(
         [128usize, 512, 1_000],
         WorkloadSpec {
@@ -388,6 +455,14 @@ fn emit_view_count_resource_tracking() {
 }
 
 fn emit_session_persist_restore_costs() {
+    if !super::any_selected(&[
+        "session_persist_cost",
+        "session_steady_persist_cost",
+        "session_restore_cost",
+        "startup_visible_restore_cost",
+    ]) {
+        return;
+    }
     let root = unique_probe_root("session-cost");
     std::fs::create_dir_all(&root).expect("create session cost root");
 
@@ -396,6 +471,9 @@ fn emit_session_persist_restore_costs() {
         let store_root = root.join(format!("tabs_{tab_count}"));
         let store = SessionStore::new(store_root.clone());
 
+        if !super::selected("session_persist_cost") {
+            store.persist(&tabs, 0, 14.0, true).unwrap();
+        }
         emit_step(
             StepDescriptor {
                 scenario: "session_persist_cost",

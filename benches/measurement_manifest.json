@@ -29,7 +29,9 @@
       "large_dirty_buffer_save",
       "session_restore_cost",
       "startup_visible_restore_cost",
-      "session_steady_persist_cost"
+      "session_steady_persist_cost",
+      "store_import",
+      "ui_during_store_writes"
     ]
   },
   "suites": {
@@ -284,6 +286,18 @@
       "max": 180000000,
       "unit": "ns",
       "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "store_import": {
+      "metric": "/elapsed_ns",
+      "max": 5000000000,
+      "unit": "ns",
+      "basis": "large-file background completion budget"
+    },
+    "ui_during_store_writes": {
+      "metric": "/phase_elapsed_ns/frame_p99_ns",
+      "max": 12000000,
+      "unit": "ns",
+      "basis": "existing frame p99 limit"
     }
   }
 }

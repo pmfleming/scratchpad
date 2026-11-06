@@ -57,6 +57,7 @@ pub(super) struct StepOutcome {
     pub(super) file_chunk_cache_limit: Option<usize>,
 }
 
+#[derive(Serialize)]
 pub(super) struct StepDescriptor {
     pub(super) scenario: &'static str,
     pub(super) scenario_label: &'static str,
@@ -75,6 +76,16 @@ pub(super) struct WorkloadSpec {
     pub(super) workload_family: &'static str,
     pub(super) focus: &'static str,
     pub(super) workload_unit: &'static str,
+}
+
+fn started(step: &StepDescriptor) {
+    if !std::env::args().any(|arg| arg == "--scenario") {
+        return;
+    }
+    let mut event = serde_json::to_value(step).unwrap();
+    event["event"] = serde_json::json!("step_started");
+    println!("{event}");
+    std::io::stdout().flush().unwrap();
 }
 
 pub(super) fn emit_workload_steps(
@@ -98,6 +109,10 @@ pub(super) fn emit_prepared_step<T>(
     setup: impl FnOnce() -> T,
     run: impl FnOnce(&T) -> StepOutcome,
 ) {
+    if !super::selected(step.scenario) {
+        return;
+    }
+    started(&step);
     let setup_start = Instant::now();
     let prepared = setup();
     let setup_elapsed_ns = setup_start.elapsed().as_nanos();
@@ -132,6 +147,10 @@ fn emit_measured_step(
     workload_details: serde_json::Value,
     run: impl FnOnce() -> StepOutcome,
 ) {
+    if !super::selected(step.scenario) {
+        return;
+    }
+    started(&step);
     let process_before = process_snapshot();
     reset_allocation_counters();
     let start = Instant::now();
