@@ -13,6 +13,7 @@ pub(super) const SCHEMA:&str="
 CREATE TABLE chunks(id INTEGER PRIMARY KEY,digest BLOB NOT NULL UNIQUE CHECK(length(digest)=32),byte_len INTEGER NOT NULL CHECK(byte_len>=0),char_len INTEGER NOT NULL CHECK(char_len>=0),newline_count INTEGER NOT NULL CHECK(newline_count>=0),is_ascii INTEGER NOT NULL CHECK(is_ascii IN (0,1)),ends_with_lf INTEGER NOT NULL CHECK(ends_with_lf IN (0,1))) STRICT;
 CREATE TABLE chunk_bodies(chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id),body BLOB NOT NULL) STRICT;
 CREATE INDEX chunk_sizes ON chunks(byte_len,id);";
+const MAX_CHUNK_BATCH_BYTES: usize = 1024 * 1024;
 impl Database {
     pub(super) async fn collect_chunk_batch(&mut self) -> io::Result<()> {
         self.ensure_healthy()?;
@@ -75,6 +76,7 @@ impl Database {
             return Ok(());
         };
         let start = Instant::now();
+        let mut batch_bytes = first.len();
         let mut batch = vec![first];
         let mut references = Vec::new();
         // NORMAL is confined to immutable body commits. Manifest commits remain FULL.
@@ -90,12 +92,19 @@ impl Database {
             loop {
                 let chunk = &batch[batch.len() - 1];
                 references.push(self.write_chunk(chunk, &store).await?);
-                if batch.len() >= 4 || start.elapsed() >= Duration::from_millis(4) {
+                if batch_bytes >= MAX_CHUNK_BATCH_BYTES
+                    || start.elapsed() >= Duration::from_millis(4)
+                {
                     break;
                 }
                 let Some(next) = store.pop_pending() else {
                     break;
                 };
+                if batch_bytes + next.len() > MAX_CHUNK_BATCH_BYTES {
+                    store.retry(vec![next]);
+                    break;
+                }
+                batch_bytes += next.len();
                 batch.push(next);
             }
             self.finish_transaction(Ok(())).await
@@ -230,6 +239,43 @@ mod tests {
     use super::super::{DatabaseWorker, ReadScope};
     use super::*;
     use futures_lite::future::block_on;
+
+    #[test]
+    fn mixed_chunk_batches_preserve_fifo_and_bound_committed_bytes() {
+        block_on(async {
+            let (_root, mut db) = super::super::tests::database().await;
+            let store = db.chunk_store().unwrap();
+            let chunks: Vec<_> = (0..20)
+                .map(|index| {
+                    let size = if index % 3 == 0 { 256 * 1024 } else { 3 * 1024 };
+                    store.seal(Arc::new(format!("{index:04}").repeat(size / 4)), index)
+                })
+                .collect();
+            while store.pending_bytes() > 0 {
+                let before = store.pending_bytes();
+                db.drain_chunk_batch().await.unwrap();
+                let committed = before - store.pending_bytes();
+                assert!(committed > 0 && committed <= MAX_CHUNK_BATCH_BYTES);
+                let first_pending = chunks
+                    .iter()
+                    .position(|chunk| chunk.reference().is_none())
+                    .unwrap_or(chunks.len());
+                assert!(
+                    chunks[first_pending..]
+                        .iter()
+                        .all(|chunk| chunk.reference().is_none())
+                );
+            }
+            for (index, chunk) in chunks.iter().enumerate() {
+                assert!(
+                    chunk
+                        .load(false, true)
+                        .unwrap()
+                        .starts_with(&format!("{index:04}"))
+                );
+            }
+        });
+    }
 
     #[test]
     fn deduplication_never_releases_accepted_ram_against_a_corrupt_body() {

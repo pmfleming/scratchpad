@@ -329,6 +329,7 @@ impl Database {
         // Queue a bounded group before draining so small documents share body
         // transactions. Large captures still drain before the next document.
         let store = self.chunk_store()?;
+        trees.sort_unstable_by(|a, b| a.0.cmp(b.0));
         let mut trees = trees.into_iter().peekable();
         while trees.peek().is_some() {
             let mut batch = Vec::new();
@@ -572,7 +573,9 @@ impl Database {
         prepared: &mut Prepared,
         inventory: &ContentInventory,
     ) -> io::Result<()> {
-        for (id, buffer) in &prepared.buffers {
+        let mut buffers: Vec<_> = prepared.buffers.iter().collect();
+        buffers.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        for (id, buffer) in buffers {
             if self.document_cache.get(id) != Some(&buffer.metadata) {
                 if let Some(key) = &buffer.metadata.path_key {
                     prepared
@@ -607,7 +610,9 @@ impl Database {
         profile: &mut SessionPersistProfile,
     ) -> io::Result<()> {
         let _ = removed_digests;
-        for (id, content) in &prepared.contents {
+        let mut contents: Vec<_> = prepared.contents.iter().collect();
+        contents.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        for (id, content) in contents {
             self.write_prepared_content(id, content).await?;
         }
         profile.snapshot_bytes_read = 0;

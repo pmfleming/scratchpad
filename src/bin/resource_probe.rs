@@ -534,6 +534,7 @@ fn run_session_persist_cycle(store: &SessionStore, tabs: &[WorkspaceTab]) -> Ste
         result_value: black_box(profile.tab_count),
         retained_live_bytes_before_teardown: None,
         phase_elapsed_ns: serde_json::json!({"snapshot_capture_ns":profile.snapshot_capture_ns,
+            "persist_logical_bytes":tabs.iter().flat_map(WorkspaceTab::buffers).map(|buffer| buffer.document().piece_tree().len_bytes()).sum::<usize>(),
             "file_write_ns":profile.snapshot_write_ns + profile.manifest_write_ns,
             "manifest_serialize_ns":profile.manifest_serialize_ns}),
         result_unit: "tabs",
