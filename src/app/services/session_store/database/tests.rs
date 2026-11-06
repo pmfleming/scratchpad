@@ -40,6 +40,42 @@ pub(super) async fn database() -> (tempfile::TempDir, Database) {
 }
 
 #[test]
+fn profiled_session_subdivisions_fit_their_parent_intervals() {
+    use crate::app::services::session_store::SessionStore;
+    let directory = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(directory.path().to_owned());
+    let mut tabs = vec![tab("Unicode λ\n"), tab("second")];
+    insert(&mut tabs[0], 0, "edited ");
+    let saved = store.persist_profiled(&tabs, 0, 16.0, false).unwrap();
+    assert!(saved.history_prepare_ns + saved.content_prepare_ns <= saved.manifest_serialize_ns);
+    assert!(saved.history_write_ns > 0 && saved.content_write_ns > 0);
+    assert!(saved.history_write_ns + saved.content_write_ns <= saved.snapshot_write_ns);
+    assert_eq!(
+        saved.layout_write_ns + saved.commit_ns,
+        saved.manifest_write_ns
+    );
+    let loaded = store.load_profiled().unwrap();
+    let profile = loaded.profile;
+    assert!(profile.orphan_validation_ns > 0 && profile.history_read_ns > 0);
+    assert!(
+        profile.orphan_validation_ns
+            + profile.layout_read_ns
+            + profile.content_validation_ns
+            + profile.history_read_ns
+            <= profile.manifest_read_parse_ns
+    );
+    assert_eq!(loaded.restored.unwrap().tabs.len(), 2);
+    let unchanged = store.persist_profiled(&tabs, 0, 16.0, false).unwrap();
+    assert_eq!(
+        unchanged.history_write_ns
+            + unchanged.content_write_ns
+            + unchanged.layout_write_ns
+            + unchanged.commit_ns,
+        0
+    );
+}
+
+#[test]
 fn worker_round_trip_and_stale_capture_barrier() {
     let directory = tempfile::tempdir().unwrap();
     let worker = DatabaseWorker::open(directory.path().to_owned()).unwrap();

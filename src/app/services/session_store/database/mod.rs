@@ -95,6 +95,7 @@ CREATE TABLE document_tail(temp_id TEXT NOT NULL REFERENCES documents(id) ON DEL
 pub(super) struct StoredSession {
     pub manifest: SessionManifest,
     pub quarantined: HashSet<String>,
+    pub profile: super::SessionRestoreProfile,
 }
 #[cfg(test)]
 impl StoredSession {

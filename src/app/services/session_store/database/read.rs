@@ -8,6 +8,7 @@ use crate::app::services::session_store::{
 };
 use std::collections::HashSet;
 use std::io;
+use std::time::Instant;
 
 fn validate_required(tabs: &[SessionTab], contains: impl Fn(&str) -> bool) -> io::Result<()> {
     if let Some(buffer) = tabs
@@ -50,16 +51,21 @@ impl Database {
         result
     }
     async fn read_session(&mut self, scope: ReadScope) -> io::Result<Option<StoredSession>> {
+        let mut profile = super::super::SessionRestoreProfile::default();
+        let phase = Instant::now();
         if matches!(scope, ReadScope::All)
             && let Some(id) = self.quarantined.keys().next()
         {
             return Err(damaged(id, "original recovery data is protected"));
         }
         if self.integer("SELECT (SELECT count(*) FROM document_text t LEFT JOIN documents d ON t.temp_id=d.id WHERE d.id IS NULL)+(SELECT count(*) FROM document_tail t LEFT JOIN documents d ON t.temp_id=d.id WHERE d.id IS NULL)+(SELECT count(*) FROM document_pieces t LEFT JOIN documents d ON t.id=d.id WHERE d.id IS NULL)").await?!=0 {return Err(invalid("orphan text manifest"));}
+        profile.orphan_validation_ns = phase.elapsed().as_nanos();
+        let phase = Instant::now();
         let Some(mut manifest) = self.read_manifest().await? else {
             return Ok(None);
         };
         self.read_tabs(&mut manifest, scope).await?;
+        profile.layout_read_ns = phase.elapsed().as_nanos();
         if !matches!(scope, ReadScope::Shells)
             && let Some(buffer) = manifest
                 .tabs
@@ -73,7 +79,10 @@ impl Database {
             ));
         }
         match async {
+            let phase = Instant::now();
             self.validate_contents(&manifest, scope).await?;
+            profile.content_validation_ns = phase.elapsed().as_nanos();
+            let phase = Instant::now();
             let tabs = if matches!(scope, ReadScope::Shells) {
                 let active = manifest.active_tab_index;
                 manifest
@@ -85,6 +94,7 @@ impl Database {
                 &mut manifest.tabs
             };
             self.read_histories(tabs).await?;
+            profile.history_read_ns = phase.elapsed().as_nanos();
             Ok(())
         }
         .await
@@ -104,6 +114,7 @@ impl Database {
         Ok(Some(StoredSession {
             manifest,
             quarantined: self.quarantined.keys().cloned().collect(),
+            profile,
         }))
     }
     async fn validate_contents(

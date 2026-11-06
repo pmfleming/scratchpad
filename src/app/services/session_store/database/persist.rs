@@ -236,8 +236,8 @@ impl Database {
             return Err(invalid("cannot remove a quarantined document"));
         }
         let mut prepared = Prepared::new(request, old_closed)?;
-        self.prepare_changes(&mut prepared).await?;
         let mut profile = prepared.profile();
+        self.prepare_changes(&mut prepared, &mut profile).await?;
         profile.manifest_serialize_ns = start.elapsed().as_nanos();
         if self.has_changes(&prepared) {
             // An attempt owns the inventory until COMMIT. Failure drops it, forcing
@@ -257,7 +257,8 @@ impl Database {
             if let Err(cause) = self.finish_transaction(result).await {
                 return Err(self.protect_failed_write(cause).await);
             }
-            profile.manifest_write_ns += commit_start.elapsed().as_nanos();
+            profile.commit_ns = commit_start.elapsed().as_nanos();
+            profile.manifest_write_ns += profile.commit_ns;
             let connection_changes = self.integer("SELECT total_changes()").await.ok();
             self.accept_prepared(prepared, inventory, connection_changes);
         }
@@ -270,13 +271,20 @@ impl Database {
         Ok(profile)
     }
 
-    async fn prepare_changes(&mut self, prepared: &mut Prepared) -> io::Result<()> {
+    async fn prepare_changes(
+        &mut self,
+        prepared: &mut Prepared,
+        profile: &mut SessionPersistProfile,
+    ) -> io::Result<()> {
         self.refresh_inventory().await?;
         prepared.full_cleanup = self
             .inventory
             .as_ref()
             .is_some_and(|inventory| inventory.full_cleanup_pending);
+        let phase = Instant::now();
         self.prepare_history_changes(prepared).await?;
+        profile.history_prepare_ns = phase.elapsed().as_nanos();
+        let phase = Instant::now();
         prepared.snapshots.retain(|buffer| {
             self.revisions.get(&buffer.temp_id) != Some(&buffer.snapshot.revision_key())
         });
@@ -344,6 +352,7 @@ impl Database {
                 prepared.contents.insert(id.clone(), content);
             }
         }
+        profile.content_prepare_ns = phase.elapsed().as_nanos();
         Ok(())
     }
 
@@ -553,12 +562,16 @@ impl Database {
         let mut removed_digests = HashSet::new();
         let start = Instant::now();
         self.write_buffer_history(prepared, inventory).await?;
+        profile.history_write_ns = start.elapsed().as_nanos();
+        let content_start = Instant::now();
         self.write_prepared_snapshots(prepared, &mut removed_digests, profile)
             .await?;
+        profile.content_write_ns = content_start.elapsed().as_nanos();
         profile.snapshot_write_ns = start.elapsed().as_nanos();
         let start = Instant::now();
         self.write_prepared_metadata(prepared).await?;
-        profile.manifest_write_ns = start.elapsed().as_nanos();
+        profile.layout_write_ns = start.elapsed().as_nanos();
+        profile.manifest_write_ns = profile.layout_write_ns;
         let start = Instant::now();
         self.delete_stale_content(prepared, inventory, removed_digests)
             .await?;

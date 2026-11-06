@@ -220,7 +220,7 @@ impl SessionStore {
         let stored = self.read_session(ReadScope::All)?;
         let mut profile = SessionRestoreProfile {
             manifest_read_parse_ns: start.elapsed().as_nanos(),
-            ..SessionRestoreProfile::default()
+            ..stored.as_ref().map(|s| s.profile).unwrap_or_default()
         };
         let restored = stored
             .map(|stored| {
