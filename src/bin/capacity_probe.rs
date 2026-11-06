@@ -24,7 +24,6 @@ const TAB_BYTES_PER_BUFFER: usize = 48 * KB;
 const MANY_FILE_BYTES_PER_BUFFER: usize = KB;
 const SPLIT_BYTES_PER_TILE: usize = 128 * KB;
 const VIEW_COUNT_BUFFER_BYTES: usize = MB;
-const BASE_PASTE_BUFFER_BYTES: usize = MB;
 const MEASUREMENT_REPETITIONS: usize = 3;
 const UTF8_SAMPLE_LINE: &str =
     "Scratchpad edits UTF-8: café résumé 東京 Привет مرحبا 0123456789.\n";
@@ -46,6 +45,7 @@ struct CapacityEvent {
     background_completion_ns: Option<u128>,
     completed_workload_value: Option<usize>,
     measurement_scope: &'static str,
+    measurement_contract: serde_json::Value,
     metrics: CapacityMetricsSnapshot,
     memory_budget: MemoryBudgetSnapshot,
     process_resources: ProcessMeasurement,
@@ -80,6 +80,31 @@ struct SweepDescriptor {
     workload_family: &'static str,
     workload_unit: &'static str,
     workload_label: fn(usize) -> String,
+}
+
+fn read_stored_file(path: &Path) -> scratchpad::app::services::file_service::FileContent {
+    use scratchpad::app::services::session_store::SessionStore;
+    static STORE: std::sync::OnceLock<SessionStore> = std::sync::OnceLock::new();
+    let store = STORE.get_or_init(|| SessionStore::new(unique_probe_root("store")));
+    FileService::read_file_in_store(path, store.chunk_store_handle().unwrap()).unwrap()
+}
+
+fn contract(scenario: &str) -> serde_json::Value {
+    let (backing, production, path) = match scenario {
+        "large_file_background_index_ceiling" => ("store", true, "FileService::read_file_in_store"),
+        "large_file_first_visible_ceiling" => {
+            ("bounded_window", true, "open_path_to_first_tessellation")
+        }
+        "many_file_first_visible_ceiling" => ("store", true, "open_paths_to_first_tessellation"),
+        "search_file_size_ceiling" => (
+            "store",
+            true,
+            "DocumentSnapshot::chunks_for_range/search_program",
+        ),
+        "paste_size_ceiling" => ("store", true, "ScratchpadApp::raw_input_hook/logic/ui"),
+        _ => ("owned", false, "prepared_component"),
+    };
+    serde_json::json!({"text_backing":backing,"production_path":production,"code_path":path})
 }
 
 fn main() {
@@ -219,8 +244,7 @@ fn emit_large_file_first_visible_sweep() {
                 repeat_index,
                 setup_elapsed_ns,
                 || {
-                    let content =
-                        FileService::read_file(&path).expect("index file-backed UTF-8 document");
+                    let content = read_stored_file(&path);
                     black_box(
                         content.document.piece_tree().len_bytes()
                             + content.document.piece_tree().metrics().newlines,
@@ -400,16 +424,43 @@ fn emit_many_file_count_sweep() {
 }
 
 fn emit_search_file_size_sweep() {
-    emit_prepared_sweep(
-        SweepDescriptor::bytes(
-            "search_file_size_ceiling",
-            "Search file-size ceiling sweep",
-            "capacity-stress",
-        ),
-        [MB, 64 * MB, 256 * MB, GB],
-        search_text_of_size,
-        |text| run_search_file_size_cycle(&text),
-    );
+    let root = tempfile::tempdir().unwrap();
+    for (step_index, bytes) in [MB, 64 * MB, 256 * MB, GB].into_iter().enumerate() {
+        let path = root.path().join(format!("search-{bytes}.txt"));
+        std::fs::write(&path, search_text_of_size(bytes)).unwrap();
+        let document = read_stored_file(&path).document;
+        let snapshot = document.snapshot();
+        let program = search_capacity_program();
+        for repeat_index in 0..MEASUREMENT_REPETITIONS {
+            emit_prepared_step(
+                StepDescriptor {
+                    scenario: "search_file_size_ceiling",
+                    scenario_label: "Store-backed search completion",
+                    workload_family: "search",
+                    step_index,
+                    workload_value: bytes,
+                    workload_unit: "bytes",
+                    workload_label: human_bytes(bytes),
+                },
+                repeat_index,
+                0,
+                || {
+                    let mut matches = 0;
+                    for chunk in snapshot.chunks_for_range(0..snapshot.len_chars(), 256 * KB, 5, 5)
+                    {
+                        let (text, offset) = snapshot.search_text_cow(Some(chunk.window_range));
+                        matches += search_program(&text, &program)
+                            .matches
+                            .into_iter()
+                            .filter(|range| chunk.core_range.contains(&(offset + range.start)))
+                            .count();
+                    }
+                    assert_eq!(matches, 1);
+                    matches
+                },
+            );
+        }
+    }
 }
 
 fn emit_search_target_count_sweep() {
@@ -455,25 +506,26 @@ fn emit_view_count_sweep() {
 }
 
 fn emit_paste_size_sweep() {
-    emit_prepared_sweep(
-        SweepDescriptor::bytes(
-            "paste_size_ceiling",
-            "Paste size ceiling sweep",
-            "capacity-stress",
-        ),
-        [64 * KB, MB, 8 * MB, 64 * MB, 128 * MB, 256 * MB, 512 * MB],
-        |insert_bytes| {
-            (
-                BufferState::new(
-                    "paste_capacity.txt".to_owned(),
-                    utf8_text_of_size(BASE_PASTE_BUFFER_BYTES),
-                    None,
-                ),
-                utf8_text_of_size(insert_bytes),
-            )
-        },
-        |(mut buffer, inserted)| run_paste_capacity_cycle(&mut buffer, &inserted),
-    );
+    for (step_index, bytes) in [8 * MB, 64 * MB, 128 * MB].into_iter().enumerate() {
+        for repeat_index in 0..MEASUREMENT_REPETITIONS {
+            let step = StepDescriptor {
+                scenario: "paste_size_ceiling",
+                scenario_label: "Production paste through publication",
+                workload_family: "edit-paste",
+                step_index,
+                workload_value: bytes,
+                workload_unit: "bytes",
+                workload_label: human_bytes(bytes),
+            };
+            started(&step, repeat_index);
+            let before = process_snapshot();
+            let profile = scratchpad::profile::run_live_text_paste_profile(bytes);
+            emit_recorded_step(step, repeat_index, 0, RecordedTiming {
+                elapsed_ns: profile["workflow_ns"].as_u64().unwrap() as u128,
+                background_completion_ns: None, completed_workload_value: None, process_before: before,
+            }, "production_paste_to_publication", Some("Raw input, background preparation, publication, layout and tessellation; no injected writer pause".into()));
+        }
+    }
 }
 
 impl SweepDescriptor {
@@ -582,6 +634,7 @@ fn emit_recorded_step(
         background_completion_ns,
         completed_workload_value,
         measurement_scope,
+        measurement_contract: contract(step.scenario),
         metrics: capacity_metrics_snapshot(),
         memory_budget: memory_budget::snapshot(),
         working_set_bytes: process_after.working_set_bytes,
@@ -635,6 +688,7 @@ fn emit_measured_step(
         background_completion_ns: None,
         completed_workload_value: None,
         measurement_scope,
+        measurement_contract: contract(step.scenario),
         metrics,
         memory_budget: memory_budget_snapshot,
         working_set_bytes: process_after.working_set_bytes,
@@ -703,11 +757,6 @@ fn run_many_file_background_hydration_cycle(files: Vec<(String, String, PathBuf)
         .sum()
 }
 
-fn run_search_file_size_cycle(text: &str) -> usize {
-    let program = search_capacity_program();
-    search_program(black_box(text), &program).matches.len()
-}
-
 fn run_search_target_count_cycle(file_count: usize, target: &str) -> usize {
     let program = search_capacity_program();
     (0..file_count)
@@ -746,13 +795,6 @@ fn build_view_heavy_tab(view_count: usize) -> WorkspaceTab {
 fn run_view_capacity_cycle(mut tab: WorkspaceTab) -> usize {
     let _ = tab.rebalance_views_equally();
     tab.layout.views.len()
-}
-
-fn run_paste_capacity_cycle(buffer: &mut BufferState, inserted: &str) -> usize {
-    let midpoint = buffer.document().piece_tree().len_chars() / 2;
-    buffer.document_mut().insert_direct(midpoint, inserted);
-    buffer.refresh_text_metadata();
-    buffer.line_count + buffer.document().piece_tree().len_bytes()
 }
 
 fn build_tabs(tab_count: usize, bytes_per_buffer: usize) -> Vec<WorkspaceTab> {

@@ -159,13 +159,16 @@ pub fn search_workflow_sample(mode: &str, targets: usize, bytes_per_target: usiz
 /// Headless production paint/input during an injected writer pause. Ends at
 /// tessellation; it does not measure GPU present or physical-device I/O latency.
 pub fn run_live_text_bulk_profile(bytes: usize) -> Value {
-    run_bulk_profile(bytes, false)
+    run_bulk_profile(bytes, false, 200)
 }
 /// UI responsiveness while real batches write against a populated 3 GiB store.
 pub fn run_live_text_io_profile(bytes: usize) -> Value {
-    run_bulk_profile(bytes, true)
+    run_bulk_profile(bytes, true, 200)
 }
-fn run_bulk_profile(bytes: usize, io_stress: bool) -> Value {
+pub fn run_live_text_paste_profile(bytes: usize) -> Value {
+    run_bulk_profile(bytes, false, 0)
+}
+fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
     super::support::with_isolated_app("live-text-bulk", |app| {
         let tab = WorkspaceTab::new(BufferState::new("bulk paste".into(), "base".into(), None));
         app.tab_manager.set_tabs(vec![tab], 0);
@@ -241,7 +244,7 @@ fn run_bulk_profile(bytes: usize, io_stress: bool) -> Value {
             None
         };
         let pause = store
-            .profile_pause_writer(Duration::from_millis(200))
+            .profile_pause_writer(Duration::from_millis(pause_ms))
             .expect("writer pause");
         let mut frame = eframe::Frame::_new_kittest();
         let started = Instant::now();
@@ -347,7 +350,7 @@ fn run_bulk_profile(bytes: usize, io_stress: bool) -> Value {
         let tail_bytes = buffer.document().piece_tree().ram_tail_bytes();
         durations.sort_unstable();
         paused.sort_unstable();
-        json!({"scope":"production logic/input/layout/tessellation; 200 ms injected pause; real writes when io_stress=true", "bytes":expected_bytes,"frames":durations.len(),"frame_p50_ns":durations[durations.len()/2],"frame_p99_ns":durations[(durations.len()*99).div_ceil(100)-1],"frame_max_ns":durations.last(),"writer_paused_frames":paused.len(),"writer_paused_frame_max_ns":paused.last(),"workflow_ns":started.elapsed().as_nanos(),"peak_pending_bytes":handle.peak_pending_bytes(),"pending_flow_threshold_bytes":crate::app::services::chunk_store::BULK_PENDING_BYTES,"queued_typing_preserved":true,"io_stress":io_stress,"concurrent_write_bytes":if io_stress {3_u64*1024*1024*1024} else {0},"process_resources":resources,"database_bytes":file_bytes("session.db"),"wal_bytes_after_flush":file_bytes("session.db-wal"),"wal_peak_sampled_bytes":wal_peak.load(std::sync::atomic::Ordering::Relaxed),"wal_peak_sample_interval_ms":5,"cache_bytes":cache_bytes,"tail_bytes":tail_bytes,"seed_bytes":if io_stress {3_u64*1024*1024*1024} else {0},"batch_timing":handle.write_timing(),"seed_batch_timing":seed_batch_timing,"measured_batch_overruns":handle.write_timing().2})
+        json!({"scope":"production logic/input/layout/tessellation", "writer_pause_ms":pause_ms, "bytes":expected_bytes,"frames":durations.len(),"frame_p50_ns":durations[durations.len()/2],"frame_p99_ns":durations[(durations.len()*99).div_ceil(100)-1],"frame_max_ns":durations.last(),"writer_paused_frames":paused.len(),"writer_paused_frame_max_ns":paused.last(),"workflow_ns":started.elapsed().as_nanos(),"peak_pending_bytes":handle.peak_pending_bytes(),"pending_flow_threshold_bytes":crate::app::services::chunk_store::BULK_PENDING_BYTES,"queued_typing_preserved":true,"io_stress":io_stress,"concurrent_write_bytes":if io_stress {3_u64*1024*1024*1024} else {0},"process_resources":resources,"database_bytes":file_bytes("session.db"),"wal_bytes_after_flush":file_bytes("session.db-wal"),"wal_peak_sampled_bytes":wal_peak.load(std::sync::atomic::Ordering::Relaxed),"wal_peak_sample_interval_ms":5,"cache_bytes":cache_bytes,"tail_bytes":tail_bytes,"seed_bytes":if io_stress {3_u64*1024*1024*1024} else {0},"batch_timing":handle.write_timing(),"seed_batch_timing":seed_batch_timing,"measured_batch_overruns":handle.write_timing().2})
     })
 }
 

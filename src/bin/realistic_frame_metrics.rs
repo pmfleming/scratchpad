@@ -25,6 +25,7 @@ struct Meta {
 
 #[derive(Serialize)]
 struct Scenario {
+    measurement_contract: serde_json::Value,
     scenario_id: &'static str,
     scenario_label: &'static str,
     workload_family: &'static str,
@@ -54,7 +55,7 @@ struct Scenario {
 }
 
 fn main() {
-    let mut harness = UiRenderFrameHarness::new(4 * MB);
+    let mut harness = UiRenderFrameHarness::new(64 * MB);
     for _ in 0..WARMUP_FRAMES {
         black_box(harness.run_event_to_tessellation_scroll_frame());
     }
@@ -85,8 +86,9 @@ fn main() {
             warmup_frames: WARMUP_FRAMES,
         },
         scenarios: vec![Scenario {
-            scenario_id: "editor_scroll_event_to_tessellation/4194304",
-            scenario_label: "Editor scroll event to tessellated render data (4 MiB)",
+            measurement_contract: serde_json::json!({"text_backing":"store","production_path":true,"code_path":"ScratchpadApp::logic/ui/tessellation","document_bytes":64 * MB}),
+            scenario_id: "editor_scroll_event_to_tessellation/67108864",
+            scenario_label: "Editor scroll event to tessellated render data (64 MiB)",
             workload_family: "wheel-scroll",
             measurement_scope: "end_to_end_event_to_tessellation",
             metric_role: "render_preparation_latency",

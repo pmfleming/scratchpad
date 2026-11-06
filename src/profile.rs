@@ -3,7 +3,9 @@ mod render;
 mod support;
 mod workflows;
 pub use workflows::{run_file_first_render_preparation, search_workflow_sample};
-pub use workflows::{run_live_text_bulk_profile, run_live_text_io_profile};
+pub use workflows::{
+    run_live_text_bulk_profile, run_live_text_io_profile, run_live_text_paste_profile,
+};
 
 use crate::ScratchpadApp;
 use crate::app::app_state::{SearchScope, prepare_context_before_first_frame, search_runtime};

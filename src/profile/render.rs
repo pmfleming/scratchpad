@@ -35,7 +35,29 @@ impl UiRenderFrameHarness {
             crate::app::services::session_store::SessionStore::new(session_root.clone());
         let mut app = ScratchpadApp::with_session_store(session_store);
         app.set_session_persist_on_drop(false);
-        install_profile_tab(&mut app, build_balanced_tile_tab(0, 1, bytes), |_| ());
+        if bytes > 16 * super::MB {
+            use crate::app::services::file_service::FileService;
+            let path = session_root.join("frame-fixture.txt");
+            std::fs::create_dir_all(&session_root).unwrap();
+            std::fs::write(&path, plain_text_of_size(bytes)).unwrap();
+            let content = FileService::read_file_in_store(
+                &path,
+                app.state
+                    .persistence
+                    .session_store
+                    .chunk_store_handle()
+                    .unwrap(),
+            )
+            .unwrap();
+            let buffer = FileService::build_buffer_from_file_content(&path, content, None);
+            install_profile_tab(
+                &mut app,
+                crate::app::domain::WorkspaceTab::new(buffer),
+                |_| (),
+            );
+        } else {
+            install_profile_tab(&mut app, build_balanced_tile_tab(0, 1, bytes), |_| ());
+        }
         if let Some(tab) = app.tab_manager.active_tab_mut() {
             tab.layout.set_line_numbers_visible(true);
         }

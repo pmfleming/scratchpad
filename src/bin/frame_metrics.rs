@@ -37,6 +37,7 @@ struct FrameMetricsMeta {
 
 #[derive(Serialize)]
 struct FrameScenario {
+    measurement_contract: serde_json::Value,
     scenario_id: String,
     scenario_label: String,
     workload_family: &'static str,
@@ -81,9 +82,9 @@ fn main() {
             "wheel-scroll",
         ),
         frame_scenario(
-            &ui_scroll_frame_metrics(4 * MB, iterations),
-            "editor_scroll_frame_120hz/4194304",
-            4 * MB,
+            &ui_scroll_frame_metrics(64 * MB, iterations),
+            "editor_scroll_frame_120hz/67108864",
+            64 * MB,
             "wheel-scroll",
         ),
     ];
@@ -112,6 +113,7 @@ fn frame_scenario(
     let p95_ms = ns_to_ms(metrics.frame_time_percentile_ns(0.95));
     let p99_ms = ns_to_ms(metrics.frame_time_percentile_ns(0.99));
     FrameScenario {
+        measurement_contract: serde_json::json!({"text_backing":if bytes > 16 * MB {"store"} else {"owned"},"production_path":true,"code_path":"ScratchpadApp::logic/ui","document_bytes":bytes}),
         scenario_id: scenario_id.to_owned(),
         scenario_label: format!("Editor frame 120 Hz ({})", human_bytes(bytes)),
         workload_family,
