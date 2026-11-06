@@ -11,6 +11,8 @@ use std::collections::HashMap;
 use std::{collections::HashSet, io};
 use turso::params;
 
+pub(super) type StoredPieceParts = (i64, Vec<u8>, Vec<blake3::Hash>);
+
 #[derive(Clone)]
 pub(super) struct TailCheckpoint {
     start: usize,
@@ -178,24 +180,9 @@ impl Database {
     }
     pub(super) async fn read_tail(&self, id: &str) -> io::Result<Option<(usize, String)>> {
         let rows = self.query_collect("SELECT start_byte,offset,body,digest FROM document_tail WHERE temp_id=? ORDER BY offset",[id],|r|Ok((usize::try_from(r.get::<i64>(0).map_err(error)?).map_err(invalid)?,usize::try_from(r.get::<i64>(1).map_err(error)?).map_err(invalid)?,r.get::<Vec<u8>>(2).map_err(error)?,r.get::<Vec<u8>>(3).map_err(error)?))).await?;
-        let mut result = None;
-        for (start, offset, body, digest) in rows {
-            let (base, text) = result.get_or_insert_with(|| (start, String::new()));
-            if start != *base
-                || offset != text.len()
-                || blake3::hash(&body).as_bytes().as_slice() != digest
-                || text.len() + body.len() > 256 * 1024
-            {
-                return Err(damaged(id, "invalid tail segments"));
-            }
-            text.push_str(std::str::from_utf8(&body).map_err(|e| damaged(id, e))?);
-        }
-        Ok(result)
+        decode_tail(id, rows)
     }
-    async fn read_piece_parts(
-        &self,
-        id: &str,
-    ) -> io::Result<Option<(i64, Vec<u8>, Vec<blake3::Hash>)>> {
+    async fn read_piece_parts(&self, id: &str) -> io::Result<Option<StoredPieceParts>> {
         let rows = self
             .query_collect(
                 "SELECT part,bytes,digest,body FROM document_pieces WHERE id=? ORDER BY part",
@@ -210,34 +197,9 @@ impl Database {
                 },
             )
             .await?;
-        if rows.is_empty() {
-            return Ok(None);
-        }
-        let mut pieces = Vec::new();
-        let mut hashes = Vec::new();
-        let mut length = 0;
-        for (index, (part, bytes, digest, body)) in rows.into_iter().enumerate() {
-            let hash = blake3::hash(&body);
-            if part != number(index)?
-                || body.len() > 65536
-                || body.is_empty()
-                || (part > 0 && bytes != 0)
-                || bytes < 0
-                || hash.as_bytes().as_slice() != digest
-            {
-                return Err(damaged(
-                    id,
-                    "invalid piece metadata part, length or checksum",
-                ));
-            }
-            if part == 0 {
-                length = bytes;
-            }
-            pieces.extend(body);
-            hashes.push(hash);
-        }
-        Ok(Some((length, pieces, hashes)))
+        decode_piece_parts(id, rows)
     }
+    #[cfg(test)]
     pub(super) async fn read_reference_tree(&self, id: &str) -> io::Result<Option<PieceTreeLite>> {
         let Some((bytes, pieces, _)) = self.read_piece_parts(id).await? else {
             return Ok(None);
@@ -245,31 +207,9 @@ impl Database {
         let store = self.chunk_store()?;
         let owner = crate::app::domain::buffer::text_cache::new_owner();
         let blocks = self.query_collect("SELECT t.buffer,t.position,t.start_byte,c.id,c.digest,c.byte_len,c.char_len,c.newline_count,c.is_ascii,c.ends_with_lf FROM document_text t LEFT JOIN chunks c ON c.id=t.chunk_id WHERE t.temp_id=? ORDER BY t.buffer,t.position",[id],|r| {
-            let buffer = match r.get::<i64>(0).map_err(error)? {0=>PieceBuffer::Original,1=>PieceBuffer::Add,_=>return Err(invalid("invalid storage buffer"))};
-            let position = r.get::<i64>(1).map_err(error)?;
-            let start = usize::try_from(r.get::<i64>(2).map_err(error)?).map_err(invalid)?;
-            let metadata=Metadata {digest:r.get::<Vec<u8>>(4).map_err(error)?.try_into().map_err(|_|invalid("invalid chunk digest"))?,byte_len:usize::try_from(r.get::<i64>(5).map_err(error)?).map_err(invalid)?,char_len:super::document_rows::unsigned(r.get(6).map_err(error)?)?,newline_count:super::document_rows::unsigned(r.get(7).map_err(error)?)?,is_ascii:super::document_rows::boolean(r.get::<i64>(8).map_err(error)?)?,ends_with_lf:super::document_rows::boolean(r.get::<i64>(9).map_err(error)?)?};
-            Ok((position,StorageBlock {buffer,start,chunk:store.restored(ChunkReference {id:r.get(3).map_err(error)?,metadata,epoch:store.epoch()},owner)}))
+            decode_storage_block(r, 0, &store, owner)
         }).await.map_err(|e|damaged(id,e))?;
-        let mut positions = [0; 2];
-        let blocks = blocks
-            .into_iter()
-            .map(|(position, block)| {
-                let side = usize::from(block.buffer == PieceBuffer::Add);
-                if positions[side] != position {
-                    return Err(damaged(id, "noncontiguous storage positions"));
-                }
-                positions[side] += 1;
-                Ok(block)
-            })
-            .collect::<io::Result<Vec<_>>>()?;
-        let tree =
-            PieceTreeLite::restore_references(store, blocks, self.read_tail(id).await?, &pieces)
-                .map_err(|e| damaged(id, e))?;
-        if number(tree.len_bytes())? != bytes {
-            return Err(damaged(id, "piece text length mismatch"));
-        }
-        Ok(Some(tree))
+        restore_tree(id, store, bytes, &pieces, blocks, self.read_tail(id).await?).map(Some)
     }
     /// Materialization is reserved for explicit recovery export and test probes.
     #[cfg(test)]
@@ -337,4 +277,127 @@ impl Database {
         )
         .await
     }
+}
+
+// Keep batch and single-document recovery validation identical.
+pub(super) fn decode_tail(
+    id: &str,
+    rows: Vec<(usize, usize, Vec<u8>, Vec<u8>)>,
+) -> io::Result<Option<(usize, String)>> {
+    let mut result = None;
+    for (start, offset, body, digest) in rows {
+        let (base, text) = result.get_or_insert_with(|| (start, String::new()));
+        if start != *base
+            || offset != text.len()
+            || blake3::hash(&body).as_bytes().as_slice() != digest
+            || text.len() + body.len() > 256 * 1024
+        {
+            return Err(damaged(id, "invalid tail segments"));
+        }
+        text.push_str(std::str::from_utf8(&body).map_err(|e| damaged(id, e))?);
+    }
+    Ok(result)
+}
+
+pub(super) fn decode_piece_parts(
+    id: &str,
+    rows: Vec<(i64, i64, Vec<u8>, Vec<u8>)>,
+) -> io::Result<Option<StoredPieceParts>> {
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    let mut pieces = Vec::new();
+    let mut hashes = Vec::new();
+    let mut length = 0;
+    for (index, (part, bytes, digest, body)) in rows.into_iter().enumerate() {
+        let hash = blake3::hash(&body);
+        if part != number(index)?
+            || body.len() > 65536
+            || body.is_empty()
+            || (part > 0 && bytes != 0)
+            || bytes < 0
+            || hash.as_bytes().as_slice() != digest
+        {
+            return Err(damaged(
+                id,
+                "invalid piece metadata part, length or checksum",
+            ));
+        }
+        if part == 0 {
+            length = bytes;
+        }
+        pieces.extend(body);
+        hashes.push(hash);
+    }
+    Ok(Some((length, pieces, hashes)))
+}
+
+pub(super) fn decode_storage_block(
+    r: &turso::Row,
+    offset: usize,
+    store: &crate::app::services::chunk_store::ChunkStoreHandle,
+    owner: u64,
+) -> io::Result<(i64, StorageBlock)> {
+    let buffer = match r.get::<i64>(offset).map_err(error)? {
+        0 => PieceBuffer::Original,
+        1 => PieceBuffer::Add,
+        _ => return Err(invalid("invalid storage buffer")),
+    };
+    let position = r.get::<i64>(offset + 1).map_err(error)?;
+    let start = usize::try_from(r.get::<i64>(offset + 2).map_err(error)?).map_err(invalid)?;
+    let metadata = Metadata {
+        digest: r
+            .get::<Vec<u8>>(offset + 4)
+            .map_err(error)?
+            .try_into()
+            .map_err(|_| invalid("invalid chunk digest"))?,
+        byte_len: usize::try_from(r.get::<i64>(offset + 5).map_err(error)?).map_err(invalid)?,
+        char_len: super::document_rows::unsigned(r.get(offset + 6).map_err(error)?)?,
+        newline_count: super::document_rows::unsigned(r.get(offset + 7).map_err(error)?)?,
+        is_ascii: super::document_rows::boolean(r.get::<i64>(offset + 8).map_err(error)?)?,
+        ends_with_lf: super::document_rows::boolean(r.get::<i64>(offset + 9).map_err(error)?)?,
+    };
+    Ok((
+        position,
+        StorageBlock {
+            buffer,
+            start,
+            chunk: store.restored(
+                ChunkReference {
+                    id: r.get(offset + 3).map_err(error)?,
+                    metadata,
+                    epoch: store.epoch(),
+                },
+                owner,
+            ),
+        },
+    ))
+}
+
+pub(super) fn restore_tree(
+    id: &str,
+    store: crate::app::services::chunk_store::ChunkStoreHandle,
+    bytes: i64,
+    pieces: &[u8],
+    blocks: Vec<(i64, StorageBlock)>,
+    tail: Option<(usize, String)>,
+) -> io::Result<PieceTreeLite> {
+    let mut positions = [0; 2];
+    let blocks = blocks
+        .into_iter()
+        .map(|(position, block)| {
+            let side = usize::from(block.buffer == PieceBuffer::Add);
+            if positions[side] != position {
+                return Err(damaged(id, "noncontiguous storage positions"));
+            }
+            positions[side] += 1;
+            Ok(block)
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let tree = PieceTreeLite::restore_references(store, blocks, tail, pieces)
+        .map_err(|e| damaged(id, e))?;
+    if number(tree.len_bytes())? != bytes {
+        return Err(damaged(id, "piece text length mismatch"));
+    }
+    Ok(tree)
 }

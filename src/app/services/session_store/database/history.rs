@@ -419,12 +419,12 @@ impl Database {
                 .await?
                 .into_iter()
                 .collect();
-            let entries = self.read_reference_entries_batch(&ids).await?;
+            let mut entries = self.read_reference_entries_batch(&ids).await?;
+            let mut trees = self.read_reference_trees(&ids).await?;
             for buffer in batch {
                 let id = &buffer.temp_id;
-                let tree = self
-                    .read_reference_tree(id)
-                    .await?
+                let tree = trees
+                    .remove(id)
                     .ok_or_else(|| damaged(id, "required text manifest is missing"))?;
                 let &(now, tip) = positions
                     .get(id)
@@ -432,7 +432,7 @@ impl Database {
                 buffer.history_document = Some(
                     TextDocument::from_references(
                         tree,
-                        entries.get(id).cloned().unwrap_or_default(),
+                        entries.remove(id).unwrap_or_default(),
                         now,
                         tip,
                     )
