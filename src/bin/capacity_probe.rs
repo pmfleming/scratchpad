@@ -56,7 +56,7 @@ struct CapacityEvent {
     note: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 struct StepDescriptor {
     scenario: &'static str,
     scenario_label: &'static str,
@@ -83,17 +83,67 @@ struct SweepDescriptor {
 }
 
 fn main() {
-    emit_large_file_first_visible_sweep();
-    emit_file_size_sweep();
-    emit_text_layout_sweep();
-    emit_many_file_first_visible_sweep();
-    emit_many_file_count_sweep();
-    emit_search_file_size_sweep();
-    emit_search_target_count_sweep();
-    emit_tab_count_sweep();
-    emit_split_count_sweep();
-    emit_view_count_sweep();
-    emit_paste_size_sweep();
+    let args: Vec<_> = std::env::args().collect();
+    let selection = args
+        .windows(2)
+        .find(|p| p[0] == "--scenario")
+        .map(|p| p[1].as_str());
+    let sweeps: &[(&[&str], fn())] = &[
+        (
+            &[
+                "large_file_first_visible_ceiling",
+                "large_file_background_index_ceiling",
+            ],
+            emit_large_file_first_visible_sweep,
+        ),
+        (&["in_memory_text_ingest_ceiling"], emit_file_size_sweep),
+        (&["text_layout_ceiling"], emit_text_layout_sweep),
+        (
+            &["many_file_first_visible_ceiling"],
+            emit_many_file_first_visible_sweep,
+        ),
+        (
+            &["many_file_background_hydration_ceiling"],
+            emit_many_file_count_sweep,
+        ),
+        (&["search_file_size_ceiling"], emit_search_file_size_sweep),
+        (
+            &["search_target_count_ceiling"],
+            emit_search_target_count_sweep,
+        ),
+        (&["tab_count_ceiling"], emit_tab_count_sweep),
+        (&["split_count_ceiling"], emit_split_count_sweep),
+        (&["view_count_ceiling"], emit_view_count_sweep),
+        (&["paste_size_ceiling"], emit_paste_size_sweep),
+    ];
+    assert!(
+        selection.is_none_or(|id| sweeps.iter().any(|(ids, _)| ids.contains(&id))),
+        "unknown capacity scenario"
+    );
+    for (ids, run) in sweeps {
+        if selection.is_none_or(|id| ids.contains(&id)) {
+            run();
+        }
+    }
+}
+
+fn selected(scenario: &str) -> bool {
+    let args: Vec<_> = std::env::args().collect();
+    args.windows(2)
+        .find(|p| p[0] == "--scenario")
+        .is_none_or(|p| p[1] == scenario)
+}
+
+fn started(step: &StepDescriptor, repeat_index: usize) {
+    if !selected(step.scenario) {
+        return;
+    }
+    let mut event = serde_json::to_value(step).unwrap();
+    event["event"] = serde_json::json!("step_started");
+    event["repeat_index"] = serde_json::json!(repeat_index);
+    event["expected_repetition_count"] = serde_json::json!(MEASUREMENT_REPETITIONS);
+    println!("{event}");
+    std::io::stdout().flush().unwrap();
 }
 
 fn emit_large_file_first_visible_sweep() {
@@ -112,13 +162,26 @@ fn emit_large_file_first_visible_sweep() {
         write_large_text_fixture(&path, file_bytes, &fixture_chunk);
         let setup_elapsed_ns = setup_start.elapsed().as_nanos();
         for repeat_index in 0..MEASUREMENT_REPETITIONS {
-            reset_capacity_metrics();
-            memory_budget::reset();
-            let process_before = process_snapshot();
-            let (elapsed_ns, primitives) =
-                scratchpad::profile::run_file_first_render_preparation(&path);
-            black_box(primitives);
-            emit_recorded_step(
+            if selected(descriptor.scenario) {
+                started(
+                    &StepDescriptor {
+                        scenario: descriptor.scenario,
+                        scenario_label: descriptor.scenario_label,
+                        workload_family: descriptor.workload_family,
+                        step_index,
+                        workload_value: file_bytes,
+                        workload_unit: descriptor.workload_unit,
+                        workload_label: (descriptor.workload_label)(file_bytes),
+                    },
+                    repeat_index,
+                );
+                reset_capacity_metrics();
+                memory_budget::reset();
+                let process_before = process_snapshot();
+                let (elapsed_ns, primitives) =
+                    scratchpad::profile::run_file_first_render_preparation(&path);
+                black_box(primitives);
+                emit_recorded_step(
                 StepDescriptor {
                     scenario: descriptor.scenario,
                     scenario_label: descriptor.scenario_label,
@@ -142,6 +205,7 @@ fn emit_large_file_first_visible_sweep() {
                         .into(),
                 ),
             );
+            }
             emit_prepared_step(
                 StepDescriptor {
                     scenario: "large_file_background_index_ceiling",
@@ -266,6 +330,18 @@ fn emit_many_file_first_visible_sweep() {
             reset_capacity_metrics();
             memory_budget::reset();
             let process_before = process_snapshot();
+            started(
+                &StepDescriptor {
+                    scenario: descriptor.scenario,
+                    scenario_label: descriptor.scenario_label,
+                    workload_family: descriptor.workload_family,
+                    step_index,
+                    workload_value: file_count,
+                    workload_unit: descriptor.workload_unit,
+                    workload_label: (descriptor.workload_label)(file_count),
+                },
+                repeat_index,
+            );
             let profile = run_many_file_first_visible_profile(paths.clone());
             black_box(profile.active_buffer_bytes + profile.tab_count_after_completion);
             emit_recorded_step(
@@ -464,6 +540,9 @@ fn emit_prepared_step(
     setup_elapsed_ns: u128,
     run: impl FnOnce() -> usize,
 ) {
+    if !selected(step.scenario) {
+        return;
+    }
     let scope = match step.scenario {
         "large_file_background_index_ceiling" => "warm_cache_file_index_completion",
         "search_file_size_ceiling" | "search_target_count_ceiling" => {
@@ -527,6 +606,7 @@ fn emit_measured_step(
     measurement_scope: &'static str,
     run: impl FnOnce() -> usize,
 ) {
+    started(&step, repeat_index);
     reset_capacity_metrics();
     memory_budget::reset();
     let process_before = process_snapshot();
