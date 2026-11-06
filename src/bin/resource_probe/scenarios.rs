@@ -216,7 +216,7 @@ fn emit_edited_buffer_search_preview_rendering() {
         return;
     }
     emit_prepared_workload_steps(
-        [256usize, 2_048, 8_192],
+        [256usize, 2_048, 8_192, 10_000],
         WorkloadSpec {
             scenario: "edited_buffer_search_preview_rendering",
             scenario_label: "Edited-buffer search preview rendering",

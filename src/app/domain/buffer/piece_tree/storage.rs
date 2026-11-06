@@ -37,7 +37,7 @@ impl TextPin {
 
 #[derive(Clone, Debug)]
 enum OriginalTextStorage {
-    Owned(Arc<str>),
+    Owned(Arc<String>),
     Chunked(Arc<ChunkedOriginal>),
 }
 
@@ -245,7 +245,8 @@ impl PieceTreeStorage {
     }
     pub(super) fn from_original(text: String) -> Self {
         Self {
-            original: OriginalTextStorage::Owned(Arc::from(text.into_boxed_str())),
+            // Share the existing allocation; Arc<str> would copy the entire body.
+            original: OriginalTextStorage::Owned(Arc::new(text)),
             add: AddTextStorage::default(),
             fault: Arc::default(),
             original_reachable: None,

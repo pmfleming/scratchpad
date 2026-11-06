@@ -115,6 +115,22 @@ fn anchors_track_bias_deletion_ownership_and_release() {
 }
 
 #[test]
+fn original_text_keeps_its_allocation_and_snapshots_remain_immutable() {
+    let text = "shared original α\n".repeat(4096);
+    let original_ptr = text.as_ptr();
+    let mut tree = PieceTreeLite::from_string(text);
+    assert_eq!(
+        tree.storage.owned_original_text().unwrap().as_ptr(),
+        original_ptr
+    );
+    let snapshot = tree.clone_without_anchors();
+    tree.insert_with_source(0, "edited ", PieceSource::Edit);
+    assert!(tree.extract_text().starts_with("edited shared original"));
+    assert!(snapshot.extract_text().starts_with("shared original"));
+    assert!(tree.storage.shares_original_storage_with(&snapshot.storage));
+}
+
+#[test]
 fn anchor_stripped_clone_shares_original_text_storage() {
     let mut tree = PieceTreeLite::from_string("needle\n".repeat(1024));
     let anchor = tree.create_anchor(3, AnchorBias::Right);

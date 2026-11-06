@@ -128,13 +128,21 @@ impl InspectionState {
                 self.record_cr();
             }
 
-            // Ordinary printable ASCII carries no metadata. Skip it a word at
-            // a time; controls and UTF-8 still use the exact scalar decoder.
-            if let Some(word) = bytes.get(index..index + 8)
-                && printable_ascii_word(word.try_into().unwrap())
-            {
-                index += 8;
-                continue;
+            // The reduction over 32 bytes can vectorize without platform-specific
+            // intrinsics. Controls and UTF-8 retain the scalar decoder below.
+            if (b' '..=b'~').contains(&byte) {
+                if let Some(block) = bytes.get(index..index + 32)
+                    && printable_ascii_block(block.try_into().unwrap())
+                {
+                    index += 32;
+                    continue;
+                }
+                if let Some(word) = bytes.get(index..index + 8)
+                    && printable_ascii_word(word.try_into().unwrap())
+                {
+                    index += 8;
+                    continue;
+                }
             }
 
             match byte {
@@ -200,13 +208,26 @@ fn printable_ascii_word(bytes: [u8; 8]) -> bool {
         && word.wrapping_add(0x0101_0101_0101_0101) & HIGH == 0
 }
 
+fn printable_ascii_block(bytes: &[u8; 32]) -> bool {
+    bytes.iter().fold(0u8, |mask, &byte| {
+        mask | u8::from(!(b' '..=b'~').contains(&byte))
+    }) == 0
+}
+
 #[cfg(test)]
 mod fast_scan_tests {
-    use super::printable_ascii_word;
+    use super::{printable_ascii_block, printable_ascii_word};
 
     #[test]
     fn every_byte_and_position_preserves_control_and_utf8_detection() {
         for padding in [b' ', b'~', b'a'] {
+            for index in 0..32 {
+                for byte in 0..=255 {
+                    let mut block = [padding; 32];
+                    block[index] = byte;
+                    assert_eq!(printable_ascii_block(&block), (b' '..=b'~').contains(&byte));
+                }
+            }
             for index in 0..8 {
                 for byte in 0..=255 {
                     let mut word = [padding; 8];

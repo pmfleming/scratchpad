@@ -4,6 +4,23 @@ use super::{
 use std::borrow::Cow;
 
 #[test]
+fn wide_ascii_runs_match_scalar_character_spans_around_controls_and_unicode() {
+    for width in 0..100 {
+        let text = format!(
+            "{}\r\n café 東京\u{0085}\u{200b}\x1b\x08\x00\x7f{}\r",
+            "a~ ".repeat(width),
+            "z".repeat(width)
+        );
+        let wide = TextInspection::inspect(&text);
+        let scalar = TextInspection::inspect_span_refs(text.chars().map(|ch| ch.to_string()));
+        assert_eq!(wide.line_count, scalar.line_count);
+        assert_eq!(wide.line_ending_counts, scalar.line_ending_counts);
+        assert_eq!(wide.artifact_summary, scalar.artifact_summary);
+        assert_eq!(wide.is_ascii_subset, scalar.is_ascii_subset);
+    }
+}
+
+#[test]
 fn inserted_line_endings_preserve_unicode_lone_cr_and_borrowed_fast_paths() {
     for (style, ending) in [
         (LineEndingStyle::Lf, "\n"),
