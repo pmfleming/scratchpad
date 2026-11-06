@@ -47,6 +47,7 @@ fn profiled_session_subdivisions_fit_their_parent_intervals() {
     let mut tabs = vec![tab("Unicode λ\n"), tab("second")];
     insert(&mut tabs[0], 0, "edited ");
     let saved = store.persist_profiled(&tabs, 0, 16.0, false).unwrap();
+    assert!(saved.transaction_committed);
     assert!(saved.history_prepare_ns + saved.content_prepare_ns <= saved.manifest_serialize_ns);
     assert!(saved.history_write_ns > 0 && saved.content_write_ns > 0);
     assert!(saved.history_write_ns + saved.content_write_ns <= saved.snapshot_write_ns);
@@ -66,6 +67,7 @@ fn profiled_session_subdivisions_fit_their_parent_intervals() {
     );
     assert_eq!(loaded.restored.unwrap().tabs.len(), 2);
     let unchanged = store.persist_profiled(&tabs, 0, 16.0, false).unwrap();
+    assert!(!unchanged.transaction_committed);
     assert_eq!(
         unchanged.history_write_ns
             + unchanged.content_write_ns

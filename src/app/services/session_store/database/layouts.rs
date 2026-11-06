@@ -118,6 +118,47 @@ impl Database {
         Ok(tabs)
     }
 
+    pub(super) async fn insert_layouts(&self, rows: &[&LayoutRow]) -> io::Result<()> {
+        self.insert_rows(
+            "INSERT INTO layouts",
+            rows.iter().map(|row| {
+                Ok(params![
+                    signed(row.id)?,
+                    signed(row.active_view_id)?,
+                    row.root_pane.as_str()
+                ])
+            }),
+        )
+        .await?;
+        self.insert_rows(
+            "INSERT INTO layout_documents",
+            rows.iter().flat_map(|row| {
+                row.documents
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (buffer, id))| {
+                        Ok(params![
+                            signed(row.id)?,
+                            i64::try_from(index).map_err(invalid)?,
+                            signed(*buffer)?,
+                            id.as_str()
+                        ])
+                    })
+            }),
+        )
+        .await?;
+        self.insert_rows(
+            "INSERT INTO layout_views",
+            rows.iter().flat_map(|row| {
+                row.views
+                    .iter()
+                    .enumerate()
+                    .map(|(index, view)| view_values(row.id, index, view))
+            }),
+        )
+        .await
+    }
+
     pub(super) async fn read_stored_tab(&self, id: u64) -> io::Result<SessionTab> {
         self.read_layouts(&[id])
             .await?
@@ -171,29 +212,7 @@ impl Database {
             if old.and_then(|old| old.views.get(index)) == Some(view) {
                 continue;
             }
-            let selection = view.selection;
-            let primary = selection
-                .map(|s| i64::try_from(s.primary.index).map_err(invalid))
-                .transpose()?;
-            let secondary = selection
-                .map(|s| i64::try_from(s.secondary.index).map_err(invalid))
-                .transpose()?;
-            self.execute_cached(
-                "INSERT INTO layout_views VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(layout_id,ordinal) DO UPDATE SET id=excluded.id,buffer_id=excluded.buffer_id,show_line_numbers=excluded.show_line_numbers,zoom_factor=excluded.zoom_factor,primary_index=excluded.primary_index,primary_next=excluded.primary_next,secondary_index=excluded.secondary_index,secondary_next=excluded.secondary_next",
-                params![
-                    signed(row.id)?,
-                    i64::try_from(index).map_err(invalid)?,
-                    signed(view.id)?,
-                    signed(view.buffer_id)?,
-                    i64::from(view.show_line_numbers),
-                    f64::from(view.zoom_factor),
-                    primary,
-                    selection.map(|s| i64::from(s.primary.prefer_next_row)),
-                    secondary,
-                    selection.map(|s| i64::from(s.secondary.prefer_next_row))
-                ],
-            )
-            .await?;
+            self.execute_cached("INSERT INTO layout_views VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(layout_id,ordinal) DO UPDATE SET id=excluded.id,buffer_id=excluded.buffer_id,show_line_numbers=excluded.show_line_numbers,zoom_factor=excluded.zoom_factor,primary_index=excluded.primary_index,primary_next=excluded.primary_next,secondary_index=excluded.secondary_index,secondary_next=excluded.secondary_next", view_values(row.id, index, view)?).await?;
         }
         Ok(())
     }
@@ -253,4 +272,31 @@ pub(super) fn read_view(row: &turso::Row) -> io::Result<(u64, usize, SessionView
             selection,
         },
     ))
+}
+
+fn view_values(
+    layout: u64,
+    index: usize,
+    view: &SessionView,
+) -> io::Result<[Result<turso::Value, turso::Error>; 10]> {
+    let selection = view.selection;
+    let primary = selection
+        .map(|s| i64::try_from(s.primary.index).map_err(invalid))
+        .transpose()?;
+    let secondary = selection
+        .map(|s| i64::try_from(s.secondary.index).map_err(invalid))
+        .transpose()?;
+
+    Ok(params![
+        signed(layout)?,
+        i64::try_from(index).map_err(invalid)?,
+        signed(view.id)?,
+        signed(view.buffer_id)?,
+        i64::from(view.show_line_numbers),
+        f64::from(view.zoom_factor),
+        primary,
+        selection.map(|s| i64::from(s.primary.prefer_next_row)),
+        secondary,
+        selection.map(|s| i64::from(s.secondary.prefer_next_row))
+    ])
 }

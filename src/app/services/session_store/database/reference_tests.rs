@@ -13,6 +13,48 @@ fn capture(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
 }
 
 #[test]
+fn batched_layouts_rollback_then_preserve_splits_and_reopened_reordering() {
+    block_on(async {
+        let (root, mut db) = database().await;
+        let mut tabs = vec![tab("committed")];
+        db.persist(capture(&tabs), 1).await.unwrap();
+        for index in 0..65 {
+            let mut next = tab(&format!("{index}: λ🦀\n"));
+            if index % 3 == 0 {
+                next.split_active_view(crate::app::domain::SplitAxis::Horizontal);
+            }
+            tabs.push(next);
+        }
+        db.conn.execute_batch("CREATE TRIGGER fail_split BEFORE INSERT ON layout_views WHEN new.ordinal=1 BEGIN SELECT RAISE(ABORT,'injected split failure'); END;").await.unwrap();
+        assert!(db.persist(capture(&tabs), 2).await.is_err());
+        let committed = db.load(ReadScope::All).await.unwrap().unwrap();
+        assert_eq!(committed.manifest.tabs.len(), 1);
+        assert_eq!(
+            committed.text_contents().into_values().next().unwrap(),
+            "committed"
+        );
+        db.conn
+            .execute("DROP TRIGGER fail_split", ())
+            .await
+            .unwrap();
+        db.persist(capture(&tabs), 3).await.unwrap();
+        drop(db);
+        let mut db = Database::open(root.path()).await.unwrap();
+        tabs.rotate_left(17);
+        tabs.push(tab("new after reopen"));
+        db.persist(capture(&tabs), 1).await.unwrap();
+        let restored = db.load(ReadScope::All).await.unwrap().unwrap();
+        assert_eq!(restored.manifest.tabs.len(), tabs.len());
+        for (actual, expected) in restored.manifest.tabs.iter().zip(capture(&tabs).tabs) {
+            assert!(
+                super::layouts::LayoutRow::capture(actual).unwrap()
+                    == super::layouts::LayoutRow::capture(&expected.session_tab).unwrap()
+            );
+        }
+    });
+}
+
+#[test]
 fn batched_small_documents_survive_failed_manifest_retry_with_exact_history() {
     block_on(async {
         let (_root, mut db) = database().await;

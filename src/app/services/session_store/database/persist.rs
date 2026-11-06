@@ -24,6 +24,7 @@ struct RecoveryBuffer {
 struct Prepared {
     state: super::layouts::StateRow,
     tabs: Vec<super::layouts::LayoutRow>,
+    new_layouts: HashSet<u64>,
     snapshots: Vec<CapturedSessionBuffer>,
     buffers: HashMap<String, RecoveryBuffer>,
     removed_documents: Vec<String>,
@@ -258,6 +259,7 @@ impl Database {
                 return Err(self.protect_failed_write(cause).await);
             }
             profile.commit_ns = commit_start.elapsed().as_nanos();
+            profile.transaction_committed = true;
             profile.manifest_write_ns += profile.commit_ns;
             let connection_changes = self.integer("SELECT total_changes()").await.ok();
             self.accept_prepared(prepared, inventory, connection_changes);
@@ -411,7 +413,9 @@ impl Database {
             .map(|l| l.id)
             .filter(|id| !self.layout_cache.contains_key(id))
             .collect();
+        prepared.new_layouts = layout_ids.iter().copied().collect();
         for (id, tab) in self.read_layouts(&layout_ids).await? {
+            prepared.new_layouts.remove(&id);
             self.layout_cache
                 .insert(id, super::layouts::LayoutRow::capture(&tab)?);
         }
@@ -658,23 +662,35 @@ impl Database {
     }
 
     async fn write_prepared_metadata(&self, prepared: &Prepared) -> io::Result<()> {
-        for layout in &prepared.tabs {
+        self.insert_layouts(
+            &prepared
+                .tabs
+                .iter()
+                .filter(|row| prepared.new_layouts.contains(&row.id))
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+        for layout in prepared
+            .tabs
+            .iter()
+            .filter(|row| !prepared.new_layouts.contains(&row.id))
+        {
             self.write_layout(layout).await?;
         }
         let ids: Vec<_> = prepared.tabs.iter().map(|l| l.id).collect();
         if self.tab_cache != ids {
             // Delete positions before inserting: layout_id has a UNIQUE constraint.
             self.execute_cached("DELETE FROM tabs", ()).await?;
-            for (position, id) in ids.iter().enumerate() {
-                self.execute_cached(
-                    "INSERT INTO tabs VALUES(?,?)",
-                    params![
+            self.insert_rows(
+                "INSERT INTO tabs",
+                ids.iter().enumerate().map(|(position, id)| {
+                    Ok(params![
                         i64::try_from(position).map_err(invalid)?,
                         super::document_rows::signed(*id)?
-                    ],
-                )
-                .await?;
-            }
+                    ])
+                }),
+            )
+            .await?;
         }
         if self.state_cache.as_ref() != Some(&prepared.state) {
             self.execute_cached("INSERT INTO session_state VALUES(1,?,?,?) ON CONFLICT(id) DO UPDATE SET tab_count=excluded.tab_count,active_tab_index=excluded.active_tab_index,active_surface=excluded.active_surface", params![i64::try_from(prepared.state.tab_count).map_err(invalid)?,i64::try_from(prepared.state.active_tab_index).map_err(invalid)?,prepared.state.active_surface.as_str()]).await?;

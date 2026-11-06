@@ -558,7 +558,9 @@ fn run_session_persist_cycle(store: &SessionStore, tabs: &[WorkspaceTab]) -> Ste
             "history_write_ns":profile.history_write_ns,
             "content_write_ns":profile.content_write_ns,
             "layout_write_ns":profile.layout_write_ns,
-            "commit_ns":profile.commit_ns}),
+            "commit_ns":profile.commit_ns,
+            "transaction_committed":profile.transaction_committed}),
+        // The transaction flag distinguishes a measured no-op from missing timing.
         result_unit: "tabs",
         result_label: format!(
             "{} tabs; snapshot {} ms, file I/O {} ms, serialize {} ms",
@@ -573,19 +575,37 @@ fn run_session_persist_cycle(store: &SessionStore, tabs: &[WorkspaceTab]) -> Ste
     }
 }
 
-fn run_session_restore_cycle(store: &SessionStore) -> StepOutcome {
+fn run_session_restore_cycle(
+    store: &SessionStore,
+    expected_tabs: usize,
+    retained: &mut Option<scratchpad::app::services::session_store::RestoredSession>,
+) -> StepOutcome {
     let profiled = store.load_profiled().expect("load persisted session");
     let restore_profile = profiled.profile;
-    let restored = profiled.restored.expect("restored session present");
+    *retained = Some(profiled.restored.expect("restored session present"));
+    let restored = retained.as_ref().unwrap();
+    let buffer_count: usize = restored.tabs.iter().map(|tab| tab.buffers().count()).sum();
+    let text_bytes: usize = restored
+        .tabs
+        .iter()
+        .flat_map(WorkspaceTab::buffers)
+        .map(|buffer| buffer.document().piece_tree().len_bytes())
+        .sum();
+    assert_eq!(restored.tabs.len(), expected_tabs);
+    assert_eq!(buffer_count, expected_tabs);
+    assert_eq!(text_bytes, expected_tabs * SESSION_BYTES_PER_BUFFER);
     StepOutcome {
         result_value: black_box(restored.tabs.len()),
-        retained_live_bytes_before_teardown: None,
+        retained_live_bytes_before_teardown: Some(alloc_metrics::allocation_snapshot().live_bytes),
         phase_elapsed_ns: serde_json::json!({"manifest_read_parse_ns":restore_profile.manifest_read_parse_ns,
             "restore_reconstruction_ns":restore_profile.restore_reconstruction_ns,
             "orphan_validation_ns":restore_profile.orphan_validation_ns,
             "layout_read_ns":restore_profile.layout_read_ns,
             "content_validation_ns":restore_profile.content_validation_ns,
-            "history_read_ns":restore_profile.history_read_ns}),
+            "history_read_ns":restore_profile.history_read_ns,
+            "restore_fixture_revision":2,"restored_tab_count":restored.tabs.len(),
+            "restored_buffer_count":buffer_count,"restored_text_bytes":text_bytes,
+            "publication_endpoint":"fully_reconstructed_session_retained"}),
         result_unit: "tabs",
         result_label: format!(
             "{} tabs; manifest read/parse {} ms, reconstruction {} ms",
@@ -738,6 +758,29 @@ fn unique_probe_root(label: &str) -> PathBuf {
 
 #[cfg(test)]
 mod selection_tests {
+    #[test]
+    fn restored_session_survives_the_measured_operation() {
+        let root = tempfile::tempdir().unwrap();
+        let store = super::SessionStore::new(root.path().to_owned());
+        let tabs = super::build_tabs(3, super::SESSION_BYTES_PER_BUFFER);
+        store.persist(&tabs, 0, 14.0, true).unwrap();
+        let mut retained = None;
+        let outcome = super::run_session_restore_cycle(&store, 3, &mut retained);
+        assert_eq!(outcome.result_value, 3);
+        assert!(outcome.retained_live_bytes_before_teardown.is_some());
+        let restored = retained.unwrap();
+        for (actual, expected) in restored.tabs.iter().zip(&tabs) {
+            assert_eq!(
+                actual.active_buffer().text(),
+                expected.active_buffer().text()
+            );
+        }
+        assert_eq!(
+            outcome.phase_elapsed_ns["restored_text_bytes"],
+            3 * super::SESSION_BYTES_PER_BUFFER
+        );
+    }
+
     #[test]
     fn repeated_scenario_flags_select_the_union_without_enabling_other_work() {
         let args: Vec<_> = ["probe", "--scenario", "save", "--scenario", "restore"]

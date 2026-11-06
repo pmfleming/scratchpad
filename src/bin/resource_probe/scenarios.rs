@@ -516,7 +516,8 @@ fn emit_session_persist_restore_costs() {
             || run_session_persist_cycle(&store, &tabs),
         );
 
-        emit_step(
+        let mut restored = None;
+        super::events::emit_prepared_operation(
             StepDescriptor {
                 scenario: "session_restore_cost",
                 scenario_label: "Session restore cost",
@@ -527,8 +528,10 @@ fn emit_session_persist_restore_costs() {
                 workload_unit: "tabs",
                 workload_label: format!("{tab_count} tabs"),
             },
-            || run_session_restore_cycle(&store),
+            serde_json::json!({"store_prepared":true,"tab_count":tab_count,"bytes_per_buffer":SESSION_BYTES_PER_BUFFER}),
+            || run_session_restore_cycle(&store, tab_count, &mut restored),
         );
+        drop(restored); // Teardown follows the elapsed-time and retained-heap snapshots.
 
         emit_step(
             StepDescriptor {

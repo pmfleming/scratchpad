@@ -23,6 +23,7 @@ pub struct SessionPersistProfile {
     pub content_write_ns: u128,
     pub layout_write_ns: u128,
     pub commit_ns: u128,
+    pub transaction_committed: bool,
     pub tab_count: usize,
     pub buffer_count: usize,
     pub manifest_size_bytes: u64,

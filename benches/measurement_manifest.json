@@ -299,6 +299,7 @@
       "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
     },
     "session_persist_cost": {
+      "min_independent_launches": 3,
       "metric": "/elapsed_ns",
       "max": 180000000,
       "unit": "ns",
@@ -311,18 +312,22 @@
       "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
     },
     "session_restore_cost": {
+      "min_independent_launches": 3,
+      "measurement_scope": "prepared_operation",
       "metric": "/elapsed_ns",
       "max": 180000000,
       "unit": "ns",
       "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
     },
     "startup_visible_restore_cost": {
+      "min_independent_launches": 3,
       "metric": "/elapsed_ns",
       "max": 180000000,
       "unit": "ns",
       "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
     },
     "session_steady_persist_cost": {
+      "min_independent_launches": 3,
       "metric": "/elapsed_ns",
       "max": 180000000,
       "unit": "ns",

@@ -120,17 +120,18 @@ pub(super) fn run() {
                 outcome.result_label =
                     format!("one-character save at {at}; {history_entries} history entries");
                 outcome.phase_elapsed_ns = serde_json::json!({
-                        "save_ns": start.elapsed().as_nanos(),
-                        "snapshot_capture_ns": profile.snapshot_capture_ns,
-                        "manifest_serialize_ns": profile.manifest_serialize_ns,
-                "history_prepare_ns":profile.history_prepare_ns,
-                "content_prepare_ns":profile.content_prepare_ns,
-                "history_write_ns":profile.history_write_ns,
-                "content_write_ns":profile.content_write_ns,
-                "layout_write_ns":profile.layout_write_ns,
-                "commit_ns":profile.commit_ns,
-                        "file_write_ns": profile.snapshot_write_ns + profile.manifest_write_ns,
-                    });
+                            "save_ns": start.elapsed().as_nanos(),
+                            "snapshot_capture_ns": profile.snapshot_capture_ns,
+                            "manifest_serialize_ns": profile.manifest_serialize_ns,
+                    "history_prepare_ns":profile.history_prepare_ns,
+                    "content_prepare_ns":profile.content_prepare_ns,
+                    "history_write_ns":profile.history_write_ns,
+                    "content_write_ns":profile.content_write_ns,
+                    "layout_write_ns":profile.layout_write_ns,
+                    "commit_ns":profile.commit_ns,
+                "transaction_committed":profile.transaction_committed,
+                            "file_write_ns": profile.snapshot_write_ns + profile.manifest_write_ns,
+                        });
                 outcome
             },
         );
