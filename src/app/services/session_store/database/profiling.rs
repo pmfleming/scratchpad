@@ -86,7 +86,6 @@ impl SessionMaintenanceFixture {
     /// Repeated, independently evicted reads while production saves run.
     /// A read without observed physical I/O is reported as unverified, never cold.
     pub fn cold_reads_during_saves(&mut self) -> io::Result<serde_json::Value> {
-        use crate::profile::process_metrics::{ProcessMeasurement, process_snapshot};
         use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
         let done = AtomicBool::new(false);
         let saves = AtomicU64::new(0);
@@ -123,21 +122,22 @@ impl SessionMaintenanceFixture {
                         }
                     }
                     let chunk = &self.aged_chunks[(index * 97) % self.aged_chunks.len()];
-                    let before = process_snapshot();
+                    let epoch = self.store.chunk_store_handle()?.epoch();
+                    let before = epoch.foreground_physical_read_bytes();
                     let started = Instant::now();
                     let text = chunk.load(false, false)?;
                     std::hint::black_box(text.len());
                     let elapsed = started.elapsed().as_nanos();
-                    let io = ProcessMeasurement::between(before, process_snapshot());
-                    let counters = serde_json::to_value(io).map_err(io::Error::other)?;
-                    let verified =
-                        evicted && counters["read_bytes"].as_u64().is_some_and(|b| b > 0);
+                    let read_bytes = before
+                        .zip(epoch.foreground_physical_read_bytes())
+                        .and_then(|(before, after)| after.checked_sub(before));
+                    let verified = evicted && read_bytes.is_some_and(|bytes| bytes > 0);
                     if verified {
                         timings.push(elapsed);
                     }
                     raw.push(
                         serde_json::json!({"elapsed_ns":elapsed,"eviction_succeeded":evicted,
-                        "physical_read_verified":verified,"read_bytes":counters["read_bytes"]}),
+                        "physical_read_verified":verified,"read_bytes":read_bytes}),
                     );
                 }
                 Ok(())
@@ -155,7 +155,7 @@ impl SessionMaintenanceFixture {
         Ok(
             serde_json::json!({"cold_read_p99_ns":p99,"physical_read_verified_count":timings.len(),
             "read_sample_count":raw.len(),"concurrent_saves":saves.load(Ordering::Acquire),
-            "physical_io_scope":"process read_bytes during each read; includes concurrent saves",
+            "physical_io_scope":"foreground_reader_thread_read_bytes",
             "cold_read_samples":raw}),
         )
     }

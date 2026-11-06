@@ -406,6 +406,46 @@ mod tests {
         store.wait_for_capacity().unwrap();
     }
     #[test]
+    fn reused_reader_statement_recovers_from_missing_rows_and_rebinds() {
+        let root = tempfile::tempdir().unwrap();
+        let worker = DatabaseWorker::open(root.path().into()).unwrap();
+        let store = worker.chunk_store();
+        store.set_limits(0, 0);
+        let first = store.seal(Arc::new("first λ".into()), 1);
+        let second = store.seal(Arc::new("second 東京".into()), 2);
+        worker.call(|db| block_on(db.drain_chunk_batch())).unwrap();
+        let mut missing = first.reference().unwrap();
+        missing.id = i64::MAX;
+        assert!(store.restored(missing, 3).load(false, false).is_err());
+        for (chunk, expected) in [
+            (&first, "first λ"),
+            (&second, "second 東京"),
+            (&first, "first λ"),
+        ] {
+            assert_eq!(
+                *store
+                    .restored(chunk.reference().unwrap(), 4)
+                    .load(false, false)
+                    .unwrap(),
+                expected
+            );
+        }
+        let before = store.epoch().foreground_physical_read_bytes();
+        assert_eq!(
+            *store
+                .restored(second.reference().unwrap(), 5)
+                .load(true, false)
+                .unwrap(),
+            "second 東京"
+        );
+        assert_eq!(
+            store.epoch().foreground_physical_read_bytes(),
+            before,
+            "background I/O must not alter the foreground reader's counters"
+        );
+    }
+
+    #[test]
     fn a_reader_panic_is_an_error_and_background_reads_still_work() {
         let root = tempfile::tempdir().unwrap();
         let worker = DatabaseWorker::open(root.path().into()).unwrap();

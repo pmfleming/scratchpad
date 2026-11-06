@@ -20,6 +20,7 @@ struct Request {
 struct Reader {
     sender: Mutex<Option<mpsc::SyncSender<Request>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    io_path: Mutex<Option<std::path::PathBuf>>,
 }
 impl Reader {
     fn open(path: &Path, name: &str) -> io::Result<Arc<Self>> {
@@ -36,11 +37,19 @@ impl Reader {
         let reader = Arc::new(Self {
             sender: Mutex::new(Some(sender)),
             thread: Mutex::new(Some(thread)),
+            io_path: Mutex::new(None),
         });
-        opened
+        *reader.io_path.lock().unwrap() = opened
             .recv_timeout(Duration::from_secs(10))
             .map_err(failed)??;
         Ok(reader)
+    }
+    fn physical_read_bytes(&self) -> Option<u64> {
+        let path = self.io_path.lock().ok()?.clone()?;
+        let counters = std::fs::read_to_string(path).ok()?;
+        counters
+            .lines()
+            .find_map(|line| line.strip_prefix("read_bytes: ")?.trim().parse().ok())
     }
     fn load(&self, reference: &ChunkReference, background: bool) -> io::Result<Arc<String>> {
         let deadline = Instant::now()
@@ -137,6 +146,12 @@ impl ReadEpoch {
     /// Number of body-read requests; metadata reconstruction does not increment it.
     pub fn read_count(&self) -> u64 {
         self.reads.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    /// Linux foreground reader I/O only. Profiling calls this outside the timed read;
+    /// ordinary requests perform no counter sampling. Unsupported hosts return None.
+    pub(crate) fn foreground_physical_read_bytes(&self) -> Option<u64> {
+        let readers = self.readers.lock().ok()?;
+        readers.as_ref()?.foreground.physical_read_bytes()
     }
     #[cfg(test)]
     pub(crate) fn panic_foreground_for_test(&self) {
@@ -255,7 +270,7 @@ impl ReadEpoch {
 async fn run(
     path: std::path::PathBuf,
     incoming: mpsc::Receiver<Request>,
-    ready: mpsc::SyncSender<io::Result<()>>,
+    ready: mpsc::SyncSender<io::Result<Option<std::path::PathBuf>>>,
 ) {
     let result = async {
         let database = turso::Builder::new_local(
@@ -278,7 +293,14 @@ async fn run(
     .await;
     let (_database, connection) = match result {
         Ok(pair) => {
-            let _ = ready.send(Ok(()));
+            let io_path = if cfg!(target_os = "linux") {
+                std::fs::read_link("/proc/thread-self")
+                    .ok()
+                    .map(|path| std::path::PathBuf::from("/proc").join(path).join("io"))
+            } else {
+                None
+            };
+            let _ = ready.send(Ok(io_path));
             pair
         }
         Err(cause) => {
@@ -286,6 +308,7 @@ async fn run(
             return;
         }
     };
+    let mut statement = None;
     while let Ok(request) = incoming.recv() {
         #[cfg(test)]
         assert!(!request.panic, "injected chunk reader engine panic");
@@ -296,7 +319,7 @@ async fn run(
                     "chunk read deadline exceeded",
                 ));
             }
-            match read(&connection, request.id, &request.metadata).await {
+            match read(&connection, &mut statement, request.id, &request.metadata).await {
                 Err(turso::Error::Busy(_)) => thread::sleep(Duration::from_millis(1)),
                 result => break result.map_err(failed),
             }
@@ -306,18 +329,36 @@ async fn run(
 }
 async fn read(
     connection: &turso::Connection,
+    cached: &mut Option<turso::Statement>,
     id: i64,
     metadata: &Metadata,
 ) -> Result<Arc<String>, turso::Error> {
-    let body = {
-        let mut rows = connection
-            .query("SELECT body FROM chunk_bodies WHERE chunk_id=?", [id])
-            .await?;
+    if cached.is_none() {
+        *cached = Some(
+            connection
+                .prepare("SELECT body FROM chunk_bodies WHERE chunk_id=?")
+                .await?,
+        );
+    }
+    let result = async {
+        let mut rows = cached.as_mut().unwrap().query([id]).await?;
         let row = rows.next().await?.ok_or_else(|| {
             turso::Error::ConversionFailure("missing immutable text chunk".into())
         })?;
-        row.get::<Vec<u8>>(0)?
-    };
+        let body = row.get::<Vec<u8>>(0)?;
+        if rows.next().await?.is_some() {
+            return Err(turso::Error::ConversionFailure(
+                "duplicate immutable text chunk".into(),
+            ));
+        }
+        Ok(body)
+    }
+    .await;
+    // Failed queries can retain a cursor or Busy state. Recreate the VM on retry.
+    if result.is_err() {
+        *cached = None;
+    }
+    let body = result?;
     if body.len() != metadata.byte_len || blake3::hash(&body).as_bytes() != &metadata.digest {
         return Err(turso::Error::ConversionFailure(
             "immutable text chunk length/digest mismatch".into(),
