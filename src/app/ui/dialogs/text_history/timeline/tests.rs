@@ -60,6 +60,50 @@ fn live_index_moves_coalesced_edits_without_changing_row_identity_or_tracking_na
         .unwrap();
     assert!(!index.update(&app, "").1);
     assert_eq!(index.rows.len(), 1);
+
+    let path = root.path().join("renamed.txt");
+    let buffer = app
+        .tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut();
+    buffer.name = "renamed.txt".into();
+    buffer.set_path(Some(path.clone()));
+    assert!(index.update(&app, "").1);
+    let row = index.rows.values().next().unwrap();
+    assert_eq!(row.name, "renamed.txt");
+    assert_eq!(row.path.as_deref(), path.to_str());
+    assert!(!index.update(&app, "").1);
+    assert!(index.update(&app, "typing").1);
+    assert!(index.rows.is_empty());
+    assert!(index.update(&app, "renamed").1);
+    assert_eq!(index.rows.len(), 1);
+
+    app.tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut()
+        .is_loading_preview = true;
+    let (loaded, changed) = index.update(&app, "renamed");
+    assert!(changed && loaded.is_empty() && index.rows.is_empty());
+    assert_eq!(index.retired.len(), 1);
+    app.tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut()
+        .is_loading_preview = false;
+    assert!(index.update(&app, "renamed").1);
+    assert_eq!(index.rows.len(), 1);
+    assert!(!index.update(&app, "renamed").1);
+
+    app.tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut()
+        .document_mut()
+        .clear_operation_history();
+    assert!(index.update(&app, "renamed").1);
+    assert!(index.rows.is_empty());
 }
 
 #[test]
