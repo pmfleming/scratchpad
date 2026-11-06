@@ -21,6 +21,36 @@ fn wide_ascii_runs_match_scalar_character_spans_around_controls_and_unicode() {
 }
 
 #[test]
+fn block_inspection_matches_scalar_for_all_artifact_leads_and_boundaries() {
+    let characters: Vec<char> = (0..=0x9f)
+        .chain(0x2000..=0x206f)
+        .chain([0x061c, 0xfeff, 0x00e9, 0x6771, 0x4eac, 0x1f980])
+        .filter_map(char::from_u32)
+        .collect();
+    for character in characters {
+        for width in 0..64 {
+            let text = format!(
+                "{}{}{}",
+                "a".repeat(width),
+                character,
+                "café 東京\n\t".repeat(8)
+            );
+            let block = TextInspection::inspect(&text);
+            let scalar = TextInspection::inspect_span_refs(text.chars().map(|ch| ch.to_string()));
+            assert_eq!(
+                block.line_ending_counts, scalar.line_ending_counts,
+                "{character:?} at {width}"
+            );
+            assert_eq!(
+                block.artifact_summary, scalar.artifact_summary,
+                "{character:?} at {width}"
+            );
+            assert_eq!(block.is_ascii_subset, scalar.is_ascii_subset);
+        }
+    }
+}
+
+#[test]
 fn inserted_line_endings_preserve_unicode_lone_cr_and_borrowed_fast_paths() {
     for (style, ending) in [
         (LineEndingStyle::Lf, "\n"),
@@ -64,6 +94,15 @@ fn byte_inspection_preserves_crlf_across_spans() {
     assert_eq!(inspection.line_ending_counts.cr, 1);
     assert_eq!(inspection.line_ending_counts.lf, 1);
     assert_eq!(inspection.line_endings, LineEndingStyle::Mixed);
+
+    for prefix in ["\n", "z"] {
+        let suffix = format!("{prefix}{}", "café 東京\n\t".repeat(64));
+        let split = TextInspection::inspect_span_refs(["a\r", suffix.as_str()].into_iter());
+        let whole = TextInspection::inspect(&format!("a\r{suffix}"));
+        assert_eq!(split.line_ending_counts, whole.line_ending_counts);
+        assert_eq!(split.line_count, whole.line_count);
+        assert_eq!(split.artifact_summary, whole.artifact_summary);
+    }
 }
 
 #[test]

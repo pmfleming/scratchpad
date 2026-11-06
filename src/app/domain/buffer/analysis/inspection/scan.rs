@@ -115,6 +115,23 @@ impl InspectionState {
             self.ends_with_lf = bytes.last() == Some(&b'\n');
         }
 
+        if bytes.len() >= 64 && ordinary_utf8(bytes) {
+            let mut lines = memchr::memchr_iter(b'\n', bytes).count();
+            if self.pending_cr {
+                self.pending_cr = false;
+                if bytes[0] == b'\n' {
+                    self.record_crlf();
+                    lines -= 1;
+                } else {
+                    self.record_cr();
+                }
+            }
+            self.line_count += lines;
+            self.line_ending_counts.lf += lines;
+            self.is_ascii_subset &= bytes.is_ascii();
+            return;
+        }
+
         let mut index = 0usize;
         while index < bytes.len() {
             let byte = bytes[index];
@@ -198,6 +215,18 @@ impl InspectionState {
             has_bytes: self.seen_any,
         }
     }
+}
+
+// Scan the common UTF-8 case with independent vectorizable passes. CR and
+// artifact lead bytes retain the existing decoder, including cross-span CRLF.
+#[allow(clippy::needless_bitwise_bool)] // Keep the range mask vectorizable.
+fn ordinary_utf8(bytes: &[u8]) -> bool {
+    let controls = bytes.iter().fold(0u8, |mask, &byte| {
+        mask | u8::from(((byte < b' ') & (byte.wrapping_sub(b'\t') > 1)) | (byte == 0x7f))
+    });
+    controls == 0
+        && memchr::memchr3(0xc2, 0xd8, 0xe2, bytes).is_none()
+        && memchr::memchr(0xef, bytes).is_none()
 }
 
 fn printable_ascii_word(bytes: [u8; 8]) -> bool {
