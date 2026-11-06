@@ -490,7 +490,8 @@ fn emit_search_file_size_sweep() {
                 0,
                 || {
                     let mut matches = 0;
-                    for chunk in snapshot.chunks_for_range(0..snapshot.len_chars(), 256 * KB, 5, 5)
+                    for chunk in
+                        snapshot.chunk_iter_for_range(0..snapshot.len_chars(), 256 * KB, 5, 5)
                     {
                         let (text, offset) = snapshot.search_text_cow(Some(chunk.window_range));
                         matches += search_program(&text, &program)

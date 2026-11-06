@@ -41,7 +41,7 @@ pub use piece_tree::{
 };
 pub(crate) use piece_tree::{PieceBuffer, StorageBlock, StorageCapture};
 pub(crate) use snapshot::SnapshotRevision;
-pub use snapshot::{DocumentChunk, DocumentSnapshot};
+pub use snapshot::{DocumentChunk, DocumentChunks, DocumentSnapshot};
 pub use state::{
     BufferFreshness, BufferId, BufferState, BufferViewStatus, DiskFileState, RestoredBufferState,
 };

@@ -179,38 +179,34 @@ impl DocumentSnapshot {
         leading_context_chars: usize,
         trailing_context_chars: usize,
     ) -> Vec<DocumentChunk> {
-        let normalized = self.normalize_char_range(range_chars);
-        if normalized.is_empty() {
-            return Vec::new();
+        self.chunk_iter_for_range(
+            range_chars,
+            target_chunk_chars,
+            leading_context_chars,
+            trailing_context_chars,
+        )
+        .collect()
+    }
+
+    /// Plan line-aligned windows on demand so a bounded scan can reuse the
+    /// bodies read while locating each boundary, instead of pre-reading a file.
+    #[must_use]
+    pub fn chunk_iter_for_range(
+        &self,
+        range_chars: Range<usize>,
+        target_chunk_chars: usize,
+        leading_context_chars: usize,
+        trailing_context_chars: usize,
+    ) -> DocumentChunks<'_> {
+        let range = self.normalize_char_range(range_chars);
+        DocumentChunks {
+            snapshot: self,
+            next: range.start,
+            range,
+            chunk_chars: target_chunk_chars.max(1),
+            leading: leading_context_chars,
+            trailing: trailing_context_chars,
         }
-
-        let chunk_chars = target_chunk_chars.max(1);
-        let mut chunks = Vec::new();
-        let mut chunk_start = normalized.start;
-
-        while chunk_start < normalized.end {
-            let rough_end = chunk_start.saturating_add(chunk_chars).min(normalized.end);
-            let next_line_boundary = self.next_line_boundary_after(rough_end, normalized.end);
-            let core_end = if next_line_boundary > chunk_start {
-                next_line_boundary
-            } else {
-                rough_end
-            }
-            .min(normalized.end);
-            let window_start = normalized
-                .start
-                .max(chunk_start.saturating_sub(leading_context_chars));
-            let window_end = normalized
-                .end
-                .min(core_end.saturating_add(trailing_context_chars));
-            chunks.push(DocumentChunk {
-                core_range: chunk_start..core_end,
-                window_range: window_start..window_end,
-            });
-            chunk_start = core_end;
-        }
-
-        chunks
     }
 
     #[must_use]
@@ -295,5 +291,82 @@ impl DocumentSnapshot {
                 || Cow::Owned(self.flatten_range(range_chars)),
                 |text| text.into_cow(),
             )
+    }
+}
+
+/// Lazy, line-aligned search windows. Constructing an iterator performs no body I/O.
+pub struct DocumentChunks<'a> {
+    snapshot: &'a DocumentSnapshot,
+    range: Range<usize>,
+    next: usize,
+    chunk_chars: usize,
+    leading: usize,
+    trailing: usize,
+}
+impl Iterator for DocumentChunks<'_> {
+    type Item = DocumentChunk;
+    fn next(&mut self) -> Option<Self::Item> {
+        let start = self.next;
+        if start >= self.range.end {
+            return None;
+        }
+        let rough_end = start.saturating_add(self.chunk_chars).min(self.range.end);
+        let line_end = self
+            .snapshot
+            .next_line_boundary_after(rough_end, self.range.end);
+        let end = if line_end > start {
+            line_end
+        } else {
+            rough_end
+        }
+        .min(self.range.end);
+        self.next = end;
+        Some(DocumentChunk {
+            core_range: start..end,
+            window_range: self.range.start.max(start.saturating_sub(self.leading))
+                ..self.range.end.min(end.saturating_add(self.trailing)),
+        })
+    }
+}
+
+#[cfg(test)]
+mod chunk_iterator_tests {
+    #[test]
+    fn store_backed_window_planning_is_lazy_and_preserves_line_boundaries() {
+        use crate::app::services::{file_service::FileService, session_store::SessionStore};
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("source");
+        let text = "alpha café 東京\n".repeat(400_000);
+        std::fs::write(&path, &text).unwrap();
+        let session = SessionStore::new(root.path().join("session"));
+        let store = session.chunk_store_handle().unwrap();
+        let document = FileService::read_file_in_store(&path, store.clone())
+            .unwrap()
+            .document;
+        session.flush_text_chunks().unwrap();
+        store.set_limits(0, 0);
+        store.set_limits(16 * 1024 * 1024, 4 * 1024 * 1024);
+        let snapshot = document.snapshot();
+        let before = store.epoch().read_count();
+        let mut windows = snapshot.chunk_iter_for_range(0..snapshot.len_chars(), 256 * 1024, 5, 5);
+        assert_eq!(store.epoch().read_count(), before);
+        let first = windows.next().unwrap();
+        assert_eq!(first.core_range.start, 0);
+        assert!(
+            store.epoch().read_count() - before < 8,
+            "planning one window must not walk the full file"
+        );
+        let mut previous = first.core_range.end;
+        for window in windows {
+            assert_eq!(window.core_range.start, previous);
+            assert!(window.window_range.start <= window.core_range.start);
+            assert!(window.window_range.end >= window.core_range.end);
+            previous = window.core_range.end;
+            assert_eq!(
+                snapshot.piece_tree().extract_range(previous - 1..previous),
+                "\n"
+            );
+        }
+        assert_eq!(previous, snapshot.len_chars());
     }
 }

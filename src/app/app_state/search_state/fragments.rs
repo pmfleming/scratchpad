@@ -1,6 +1,6 @@
 use crate::app::capacity_metrics;
 use crate::app::domain::DocumentSnapshot;
-use crate::app::domain::buffer::DocumentChunk;
+use crate::app::domain::buffer::{DocumentChunk, DocumentChunks};
 use crate::app::services::search::{self, SearchMode, SearchProgram};
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -57,18 +57,18 @@ pub(super) fn search_target_ranges(
     search_fragmented(context, normalized)
 }
 
-struct FragmentSearchPlan {
-    chunks: Vec<DocumentChunk>,
+struct FragmentSearchPlan<'a> {
+    chunks: DocumentChunks<'a>,
     final_boundary: Option<usize>,
 }
 
-fn fragment_search_plan(
-    context: &FragmentSearchContext<'_>,
+fn fragment_search_plan<'a>(
+    context: &FragmentSearchContext<'a>,
     range: Range<usize>,
-) -> FragmentSearchPlan {
+) -> FragmentSearchPlan<'a> {
     if range.is_empty() || context.program.query().is_empty() {
         return FragmentSearchPlan {
-            chunks: Vec::new(),
+            chunks: context.snapshot.chunk_iter_for_range(0..0, 1, 0, 0),
             final_boundary: None,
         };
     }
@@ -101,7 +101,7 @@ fn fragment_search_plan(
             }
         };
     FragmentSearchPlan {
-        chunks: context.snapshot.chunks_for_range(
+        chunks: context.snapshot.chunk_iter_for_range(
             range,
             chunk_chars,
             leading_overlap,
@@ -115,43 +115,55 @@ fn search_fragmented(
     context: FragmentSearchContext<'_>,
     range: Range<usize>,
 ) -> Option<Vec<Range<usize>>> {
-    let plan = fragment_search_plan(&context, range);
-    capacity_metrics::record_search_chunks(plan.chunks.len());
+    let mut plan = fragment_search_plan(&context, range);
     let final_boundary = plan.final_boundary;
-
-    process_chunks_concurrent(
-        plan.chunks,
-        context.intra_parallelism,
-        context.generation,
-        context.latest_generation,
-        |chunk| {
-            let (window_text, window_offset) = context
-                .snapshot
-                .try_search_text(Some(chunk.window_range.clone()))
-                .ok()?;
-            let outcome = search::search_program_interruptible(
-                window_text.as_ref(),
-                context.program,
-                || context.latest_generation.load(Ordering::Relaxed) == context.generation,
-            )?;
-            debug_assert!(outcome.error.is_none());
-            Some(
-                outcome
-                    .matches
-                    .into_iter()
-                    .filter_map(|matched| {
-                        let global_start = window_offset + matched.start;
-                        let global_end = window_offset + matched.end;
-                        let in_core = global_start >= chunk.core_range.start
-                            && global_start < chunk.core_range.end;
-                        let at_final_boundary = final_boundary
-                            .is_some_and(|end| chunk.core_range.end == end && global_start == end);
-                        (in_core || at_final_boundary).then_some(global_start..global_end)
-                    })
-                    .collect(),
-            )
-        },
-    )
+    let mut matches = Vec::new();
+    loop {
+        if context.latest_generation.load(Ordering::Relaxed) != context.generation {
+            return None;
+        }
+        // Bound lookahead so planning does not evict the entire file before matching.
+        let chunks: Vec<_> = plan.chunks.by_ref().take(8).collect();
+        if chunks.is_empty() {
+            break;
+        }
+        capacity_metrics::record_search_chunks(chunks.len());
+        matches.extend(process_chunks_concurrent(
+            chunks,
+            context.intra_parallelism,
+            context.generation,
+            context.latest_generation,
+            |chunk| {
+                let (window_text, window_offset) = context
+                    .snapshot
+                    .try_search_text(Some(chunk.window_range.clone()))
+                    .ok()?;
+                let outcome = search::search_program_interruptible(
+                    window_text.as_ref(),
+                    context.program,
+                    || context.latest_generation.load(Ordering::Relaxed) == context.generation,
+                )?;
+                debug_assert!(outcome.error.is_none());
+                Some(
+                    outcome
+                        .matches
+                        .into_iter()
+                        .filter_map(|matched| {
+                            let global_start = window_offset + matched.start;
+                            let global_end = window_offset + matched.end;
+                            let in_core = global_start >= chunk.core_range.start
+                                && global_start < chunk.core_range.end;
+                            let at_final_boundary = final_boundary.is_some_and(|end| {
+                                chunk.core_range.end == end && global_start == end
+                            });
+                            (in_core || at_final_boundary).then_some(global_start..global_end)
+                        })
+                        .collect(),
+                )
+            },
+        )?);
+    }
+    Some(matches)
 }
 
 fn process_chunks_concurrent(
@@ -242,4 +254,43 @@ fn flatten_worker_matches(per_worker: Vec<Vec<Vec<Range<usize>>>>) -> Vec<Range<
         matches.append(&mut chunk_matches);
     }
     matches
+}
+
+#[cfg(test)]
+mod batching_tests {
+    #[test]
+    fn bounded_planning_preserves_unicode_regex_and_nonoverlapping_plain_matches() {
+        use super::*;
+        use crate::app::domain::TextDocument;
+        use crate::app::services::search::SearchOptions;
+        let text = format!("{}\n{}", "aaéaaa 東京\n".repeat(200_000), "aaaaa");
+        let snapshot = TextDocument::new(text.clone()).snapshot();
+        assert!(snapshot.piece_tree().metrics().pieces > 8);
+        for (query, mode) in [
+            ("aaa", SearchMode::PlainText),
+            ("東京", SearchMode::PlainText),
+            (r"a{2,3}", SearchMode::Regex),
+        ] {
+            let program = SearchProgram::compile(
+                query,
+                SearchOptions {
+                    mode,
+                    match_case: true,
+                    ..SearchOptions::default()
+                },
+            )
+            .unwrap();
+            let expected = search::search_program(&text, &program).matches;
+            let generation = AtomicU64::new(1);
+            for workers in [1, 4] {
+                assert_eq!(
+                    search_target_ranges(&snapshot, None, &program, 1, &generation, workers)
+                        .unwrap(),
+                    expected
+                );
+            }
+            generation.store(2, Ordering::Relaxed);
+            assert!(search_target_ranges(&snapshot, None, &program, 1, &generation, 4).is_none());
+        }
+    }
 }

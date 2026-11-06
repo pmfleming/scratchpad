@@ -21,7 +21,8 @@ pub(super) fn run() {
             serde_json::json!({"scope":"production snapshot chunk windows and search matcher; single-thread scan", "query":"needle"}),
             || {
                 let mut matches = 0;
-                for chunk in snapshot.chunks_for_range(0..snapshot.len_chars(), 256 * KB, 5, 5) {
+                for chunk in snapshot.chunk_iter_for_range(0..snapshot.len_chars(), 256 * KB, 5, 5)
+                {
                     let (text, offset) = snapshot.search_text_cow(Some(chunk.window_range));
                     matches += search_program(&text, &program)
                         .matches
