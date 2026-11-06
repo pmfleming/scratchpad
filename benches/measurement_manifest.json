@@ -28,36 +28,262 @@
       "session_persist_cost",
       "large_dirty_buffer_save",
       "session_restore_cost",
-      "startup_visible_restore_cost"
+      "startup_visible_restore_cost",
+      "session_steady_persist_cost"
     ]
   },
   "suites": {
     "search_speed": {
-      "search_active_file_size": [16384, 131072, 1048576],
-      "search_current_files_completion": [1, 8, 32],
-      "search_current_files_first_response": [1, 8, 32],
-      "search_all_tabs_completion": [1, 8, 32],
-      "search_all_tabs_first_response": [1, 8, 32]
+      "search_active_file_size": [
+        16384,
+        131072,
+        1048576
+      ],
+      "search_current_files_completion": [
+        1,
+        8,
+        32
+      ],
+      "search_current_files_first_response": [
+        1,
+        8,
+        32
+      ],
+      "search_all_tabs_completion": [
+        1,
+        8,
+        32
+      ],
+      "search_all_tabs_first_response": [
+        1,
+        8,
+        32
+      ]
     },
     "frame_budget": {
-      "ui_render_frame_120hz": ["steady_workspace"],
-      "viewport_extraction_latency": [1048576, 4194304],
-      "scroll_stress_latency": [1048576, 4194304]
+      "ui_render_frame_120hz": [
+        "steady_workspace"
+      ],
+      "viewport_extraction_latency": [
+        1048576,
+        4194304
+      ],
+      "scroll_stress_latency": [
+        1048576,
+        4194304
+      ]
     },
     "promise_latency": {
-      "tab_reorder_latency": [1000, 10000],
-      "paste_stress_latency": [134217728],
-      "paste_insert_phase": [134217728],
-      "paste_metadata_phase": [134217728],
-      "snapshot_shared_edit_latency": [16777216],
-      "snapshot_shared_fragmented_edit_latency": [20000],
-      "dense_line_lookup_latency": [4194304],
-      "reverse_character_walk_latency": [8192],
-      "fragmented_tree_edit_latency": [20000],
-      "large_paste_undo_latency": [16777216],
-      "session_restore_latency": [10000],
-      "session_restore_background_completion": [10000],
-      "session_persist_latency": [10000]
+      "tab_reorder_latency": [
+        1000,
+        10000
+      ],
+      "paste_stress_latency": [
+        134217728
+      ],
+      "paste_insert_phase": [
+        134217728
+      ],
+      "paste_metadata_phase": [
+        134217728
+      ],
+      "snapshot_shared_edit_latency": [
+        16777216
+      ],
+      "snapshot_shared_fragmented_edit_latency": [
+        20000
+      ],
+      "dense_line_lookup_latency": [
+        4194304
+      ],
+      "reverse_character_walk_latency": [
+        8192
+      ],
+      "fragmented_tree_edit_latency": [
+        20000
+      ],
+      "large_paste_undo_latency": [
+        16777216
+      ],
+      "session_restore_latency": [
+        10000
+      ],
+      "session_restore_background_completion": [
+        10000
+      ],
+      "session_persist_latency": [
+        10000
+      ]
+    }
+  },
+  "resource_budgets": {
+    "large_utf8_load_peak_memory": {
+      "metric": "/elapsed_ns",
+      "max": 5000000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "large_file_first_visible_paint": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "file_backed_chunk_cache_tracking": {
+      "metric": "/elapsed_ns",
+      "max": 5000000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "file_backed_random_window": {
+      "metric": "/phase_elapsed_ns/window_p99_ns",
+      "max": 4000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "file_backed_search": {
+      "metric": "/elapsed_ns",
+      "max": 5000000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "typing_without_save": {
+      "metric": "/phase_elapsed_ns/typing_p99_ns",
+      "max": 8330000.0,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "typing_during_save": {
+      "metric": "/phase_elapsed_ns/typing_p99_ns",
+      "max": 8330000.0,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "many_file_resource_tracking": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "many_file_lazy_open_tracking": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "search_file_size_resource_tracking": {
+      "metric": "/elapsed_ns",
+      "max": 5000000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "search_target_resource_tracking": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "search_app_result_tracking": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "edited_buffer_search_preview_rendering": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "paste_allocation": {
+      "metric": "/elapsed_ns",
+      "max": 150000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "provenance_retained_memory": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "fragmented_long_session_mutation": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "tab_count_resource_tracking": {
+      "metric": "/elapsed_ns",
+      "max": 140000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "tab_build_targeted": {
+      "metric": "/elapsed_ns",
+      "max": 140000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "tab_split_targeted": {
+      "metric": "/elapsed_ns",
+      "max": 140000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "tab_combine_targeted": {
+      "metric": "/elapsed_ns",
+      "max": 140000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "tab_strip_frame_rendering": {
+      "metric": "/result_value",
+      "max": 8330000.0,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "view_count_resource_tracking": {
+      "metric": "/elapsed_ns",
+      "max": 120000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "anchor_heavy_view_editing": {
+      "metric": "/elapsed_ns",
+      "max": 120000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "session_persist_cost": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "large_dirty_buffer_save": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "session_restore_cost": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "startup_visible_restore_cost": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+    },
+    "session_steady_persist_cost": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
     }
   }
 }

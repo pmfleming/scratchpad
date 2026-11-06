@@ -399,7 +399,21 @@ fn emit_session_persist_restore_costs() {
         emit_step(
             StepDescriptor {
                 scenario: "session_persist_cost",
-                scenario_label: "Session persist cost",
+                scenario_label: "Session first save cost",
+                workload_family: "session-persistence",
+                focus: "session",
+                step_index,
+                workload_value: tab_count,
+                workload_unit: "tabs",
+                workload_label: format!("{tab_count} tabs"),
+            },
+            || run_session_persist_cycle(&store, &tabs),
+        );
+
+        emit_step(
+            StepDescriptor {
+                scenario: "session_steady_persist_cost",
+                scenario_label: "Session unchanged steady save",
                 workload_family: "session-persistence",
                 focus: "session",
                 step_index,
