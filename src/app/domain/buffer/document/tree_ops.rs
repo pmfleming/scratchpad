@@ -1,7 +1,9 @@
 use super::super::{PieceHistoryEdits, PieceHistoryFlags, next_text_history_global_seq};
+#[cfg(test)]
+use super::TextDocumentEditOperation;
 use super::{
     CursorRange, OperationDirection, PieceHistoryEdit, PieceHistoryEntry, PieceSource,
-    TextDocument, TextDocumentEditOperation, TextDocumentOperationRecord, TextHistoryApplyError,
+    TextDocument, TextDocumentOperationRecord, TextHistoryApplyError,
 };
 
 impl TextDocument {
@@ -272,6 +274,7 @@ impl TextDocument {
         Ok((selection, record))
     }
 
+    #[cfg(test)]
     pub(crate) fn replace_exact_with_history(&mut self, text: &str) {
         self.replace_exact_with_history_source(text, PieceSource::Load);
     }
@@ -289,6 +292,7 @@ impl TextDocument {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn replace_exact_with_history_source(
         &mut self,
         text: &str,

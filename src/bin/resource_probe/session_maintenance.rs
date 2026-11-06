@@ -33,7 +33,7 @@ pub(super) fn run() {
                     workload_unit: "bytes",
                     workload_label: format!("{scenario}; warm database; FULL synchronous"),
                 },
-                serde_json::json!({"fixture_revision": 1, "buffer_bytes": 50 * super::MB, "initial_archives": 128, "synchronous": "FULL", "setup_excluded": true}),
+                serde_json::json!({"fixture_revision": 2, "edit_preparation":"recorded_single_character_insert", "buffer_bytes": 50 * super::MB, "initial_archives": 128, "synchronous": "FULL", "setup_excluded": true}),
                 || {
                     let (action, save, hashed) =
                         fixture.sample(scenario).expect("maintenance operation");

@@ -15,6 +15,12 @@ use std::{
 };
 use turso::params;
 
+// Casting json_each's untyped value lets Turso seek the TEXT primary-key index.
+// Without the cast, each requested document scans the whole history table.
+const HISTORY_ENTRY_QUERY: &str = "SELECT seq,parent_id,edited_at,global_seq,source,summary,replayable,previous_primary,previous_primary_next,previous_secondary,previous_secondary_next,next_primary,next_primary_next,next_secondary,next_secondary_next,packed_spans,temp_id FROM json_each(?) AS requested CROSS JOIN history ON history.temp_id=CAST(requested.value AS TEXT) ORDER BY temp_id,seq";
+const HISTORY_SPAN_QUERY: &str = "SELECT seq,edit,role,part,start_char,buffer,start_byte,byte_len,char_len,temp_id FROM json_each(?) AS requested CROSS JOIN history_spans ON history_spans.temp_id=CAST(requested.value AS TEXT) ORDER BY temp_id,seq,edit,role,part";
+const HISTORY_POSITION_QUERY: &str = "SELECT temp_id,now_id,tip_id,edited_at,edit_seq FROM json_each(?) AS requested CROSS JOIN document_history ON document_history.temp_id=CAST(requested.value AS TEXT)";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct HistoryFingerprint {
     pub id: u64,
@@ -112,6 +118,38 @@ pub(super) struct PreparedHistoryEntry {
     entry: PieceHistoryEntry,
     spans: Vec<Span>,
     packed: Option<Vec<u8>>,
+}
+
+fn decode_history_row(r: &turso::Row) -> io::Result<(PieceHistoryEntry, Option<Vec<u8>>)> {
+    let num = |i| super::document_rows::unsigned(r.get::<i64>(i).map_err(error)?);
+    let selection = |base| -> io::Result<CursorRange> {
+        Ok(CursorRange {
+            primary: CharCursor {
+                index: usize::try_from(num(base)?).map_err(invalid)?,
+                prefer_next_row: bool_field(num(base + 1)?)?,
+            },
+            secondary: CharCursor {
+                index: usize::try_from(num(base + 2)?).map_err(invalid)?,
+                prefer_next_row: bool_field(num(base + 3)?)?,
+            },
+        })
+    };
+    let entry = PieceHistoryEntry {
+        id: num(0)?,
+        parent_id: num(1)?,
+        edited_at: num(2)?,
+        global_seq: num(3)?,
+        source: super::document_rows::parse_enum(r.get::<String>(4).map_err(error)?)?,
+        summary: r.get(5).map_err(error)?,
+        flags: PieceHistoryFlags {
+            replayable: bool_field(num(6)?)?,
+            undone: false,
+        },
+        previous_selection: selection(7)?,
+        next_selection: selection(11)?,
+        edits: crate::app::domain::buffer::PieceHistoryEdits::new(),
+    };
+    Ok((entry, r.get::<Option<Vec<u8>>>(15).map_err(error)?))
 }
 impl Database {
     pub(super) async fn prime_history_caches(&mut self, ids: &[String]) -> io::Result<()> {
@@ -237,46 +275,94 @@ impl Database {
             .collect())
     }
     async fn read_reference_entries(&self, id: &str) -> io::Result<Vec<PieceHistoryEntry>> {
-        let mut rows=self.query_collect("SELECT seq,parent_id,edited_at,global_seq,source,summary,replayable,previous_primary,previous_primary_next,previous_secondary,previous_secondary_next,next_primary,next_primary_next,next_secondary,next_secondary_next,packed_spans FROM history WHERE temp_id=? ORDER BY seq",[id],|r| {
-            let num=|i|super::document_rows::unsigned(r.get::<i64>(i).map_err(error)?);
-            let selection=|base|->io::Result<CursorRange>{Ok(CursorRange {primary:CharCursor {index:usize::try_from(num(base)?).map_err(invalid)?,prefer_next_row:bool_field(num(base+1)?)?},secondary:CharCursor {index:usize::try_from(num(base+2)?).map_err(invalid)?,prefer_next_row:bool_field(num(base+3)?)?}})};
-            let entry=PieceHistoryEntry {id:num(0)?,parent_id:num(1)?,edited_at:num(2)?,global_seq:num(3)?,source:super::document_rows::parse_enum(r.get::<String>(4).map_err(error)?)?,summary:r.get(5).map_err(error)?,flags:PieceHistoryFlags {replayable:bool_field(num(6)?)?,undone:false},previous_selection:selection(7)?,next_selection:selection(11)?,edits:crate::app::domain::buffer::PieceHistoryEdits::new()};
-            Ok((entry,r.get::<Option<Vec<u8>>>(15).map_err(error)?))
-        }).await.map_err(|e|damaged(id,e))?;
-        let mut spans: HashMap<u64, Vec<Span>> = HashMap::new();
-        for (entry, packed) in &rows {
-            if let Some(packed) = packed {
-                if !packed.len().is_multiple_of(64) {
-                    return Err(damaged(id, "invalid packed span length"));
-                }
-                let mut decoded = Vec::with_capacity(packed.len() / 64);
-                for record in packed.chunks_exact(64) {
-                    let mut fields = [0; 8];
-                    for (field, bytes) in fields.iter_mut().zip(record.chunks_exact(8)) {
-                        *field = u64::from_le_bytes(bytes.try_into().expect("eight byte field"));
-                    }
-                    decoded.push(Span(fields));
-                }
-                spans.insert(entry.id, decoded);
-            }
-        }
-        let unpacked=self.query_collect("SELECT seq,edit,role,part,start_char,buffer,start_byte,byte_len,char_len FROM history_spans WHERE temp_id=? ORDER BY seq,edit,role,part",[id],|r| {let mut fields=[0;8];for (i,field) in fields.iter_mut().enumerate() {*field=super::document_rows::unsigned(r.get(i+1).map_err(error)?)?;} Ok((super::document_rows::unsigned(r.get(0).map_err(error)?)?,Span(fields)))}).await?;
-        let packed_ids: std::collections::HashSet<_> = spans.keys().copied().collect();
-        for (seq, span) in unpacked {
-            if packed_ids.contains(&seq) {
-                return Err(damaged(id, "history has packed and row spans"));
-            }
-            spans.entry(seq).or_default().push(span);
-        }
-        for (entry, _) in &mut rows {
-            entry.edits = decode_spans(spans.remove(&entry.id).unwrap_or_default())
-                .map_err(|e| damaged(id, e))?;
-        }
-        if !spans.is_empty() {
-            return Err(damaged(id, "orphan history spans"));
-        }
-        Ok(rows.into_iter().map(|(entry, _)| entry).collect())
+        Ok(self
+            .read_reference_entries_batch(&[id.to_owned()])
+            .await?
+            .remove(id)
+            .unwrap_or_default())
     }
+    async fn read_reference_entries_batch(
+        &self,
+        ids: &[String],
+    ) -> io::Result<HashMap<String, Vec<PieceHistoryEntry>>> {
+        let encoded = serde_json::to_string(ids).map_err(invalid)?;
+        let rows = self
+            .query_collect(HISTORY_ENTRY_QUERY, [encoded.as_str()], |r| {
+                let id = r.get::<String>(16).map_err(error)?;
+                let decoded = decode_history_row(r).map_err(|e| damaged(&id, e))?;
+                Ok((id, decoded))
+            })
+            .await?;
+        let mut grouped: HashMap<String, Vec<_>> = HashMap::new();
+        for (id, row) in rows {
+            grouped.entry(id).or_default().push(row);
+        }
+        let unpacked = self
+            .query_collect(HISTORY_SPAN_QUERY, [encoded.as_str()], |r| {
+                let id = r.get::<String>(9).map_err(error)?;
+                let decoded = (|| -> io::Result<_> {
+                    let mut fields = [0; 8];
+                    for (i, field) in fields.iter_mut().enumerate() {
+                        *field = super::document_rows::unsigned(r.get(i + 1).map_err(error)?)?;
+                    }
+                    Ok((
+                        super::document_rows::unsigned(r.get(0).map_err(error)?)?,
+                        Span(fields),
+                    ))
+                })()
+                .map_err(|e| damaged(&id, e))?;
+                Ok((id, decoded))
+            })
+            .await?;
+        let mut unpacked_by_id: HashMap<String, Vec<_>> = HashMap::new();
+        for (id, row) in unpacked {
+            grouped.entry(id.clone()).or_default();
+            unpacked_by_id.entry(id).or_default().push(row);
+        }
+        let mut result = HashMap::new();
+        for (id, mut rows) in grouped {
+            let id = id.as_str();
+            let mut spans: HashMap<u64, Vec<Span>> = HashMap::new();
+            for (entry, packed) in &rows {
+                if let Some(packed) = packed {
+                    if !packed.len().is_multiple_of(64) {
+                        return Err(damaged(id, "invalid packed span length"));
+                    }
+                    let mut decoded = Vec::with_capacity(packed.len() / 64);
+                    for record in packed.chunks_exact(64) {
+                        let mut fields = [0; 8];
+                        for (field, bytes) in fields.iter_mut().zip(record.chunks_exact(8)) {
+                            *field =
+                                u64::from_le_bytes(bytes.try_into().expect("eight byte field"));
+                        }
+                        decoded.push(Span(fields));
+                    }
+                    spans.insert(entry.id, decoded);
+                }
+            }
+            let unpacked = unpacked_by_id.remove(id).unwrap_or_default();
+            let packed_ids: std::collections::HashSet<_> = spans.keys().copied().collect();
+            for (seq, span) in unpacked {
+                if packed_ids.contains(&seq) {
+                    return Err(damaged(id, "history has packed and row spans"));
+                }
+                spans.entry(seq).or_default().push(span);
+            }
+            for (entry, _) in &mut rows {
+                entry.edits = decode_spans(spans.remove(&entry.id).unwrap_or_default())
+                    .map_err(|e| damaged(id, e))?;
+            }
+            if !spans.is_empty() {
+                return Err(damaged(id, "orphan history spans"));
+            }
+            result.insert(
+                id.to_owned(),
+                rows.into_iter().map(|(entry, _)| entry).collect(),
+            );
+        }
+        Ok(result)
+    }
+    #[cfg(test)]
     pub(super) async fn read_history_document(&self, id: &str) -> io::Result<Option<TextDocument>> {
         let Some(tree) = self.read_reference_tree(id).await? else {
             return Ok(None);
@@ -306,15 +392,52 @@ impl Database {
             .map_or(Ok(Vec::new()), |d| d.try_exported_history())
     }
     pub(super) async fn read_histories(&self, tabs: &mut [SessionTab]) -> io::Result<()> {
-        for buffer in tabs.iter_mut().flat_map(|t| &mut t.buffers) {
-            if !self.quarantined.contains_key(&buffer.temp_id) {
-                buffer.history_document = self.read_history_document(&buffer.temp_id).await?;
-                if buffer.history_document.is_none() {
-                    return Err(damaged(
-                        &buffer.temp_id,
-                        "required text manifest is missing",
-                    ));
-                }
+        let mut buffers: Vec<_> = tabs
+            .iter_mut()
+            .flat_map(|t| &mut t.buffers)
+            .filter(|buffer| !self.quarantined.contains_key(&buffer.temp_id))
+            .collect();
+        // Bound decoded history lookahead while amortizing SQL work across documents.
+        for batch in buffers.chunks_mut(64) {
+            let ids: Vec<_> = batch.iter().map(|buffer| buffer.temp_id.clone()).collect();
+            let encoded = serde_json::to_string(&ids).map_err(invalid)?;
+            let positions: HashMap<_, _> = self
+                .query_collect(HISTORY_POSITION_QUERY, [encoded.as_str()], |r| {
+                    let id = r.get::<String>(0).map_err(error)?;
+                    let numbers = (|| -> io::Result<_> {
+                        for i in [3, 4] {
+                            super::document_rows::unsigned(r.get(i).map_err(error)?)?;
+                        }
+                        Ok((
+                            super::document_rows::unsigned(r.get(1).map_err(error)?)?,
+                            super::document_rows::unsigned(r.get(2).map_err(error)?)?,
+                        ))
+                    })()
+                    .map_err(|e| damaged(&id, e))?;
+                    Ok((id, numbers))
+                })
+                .await?
+                .into_iter()
+                .collect();
+            let entries = self.read_reference_entries_batch(&ids).await?;
+            for buffer in batch {
+                let id = &buffer.temp_id;
+                let tree = self
+                    .read_reference_tree(id)
+                    .await?
+                    .ok_or_else(|| damaged(id, "required text manifest is missing"))?;
+                let &(now, tip) = positions
+                    .get(id)
+                    .ok_or_else(|| damaged(id, "missing history position"))?;
+                buffer.history_document = Some(
+                    TextDocument::from_references(
+                        tree,
+                        entries.get(id).cloned().unwrap_or_default(),
+                        now,
+                        tip,
+                    )
+                    .map_err(|e| damaged(id, e))?,
+                );
             }
         }
         Ok(())
@@ -492,4 +615,41 @@ fn decode_spans(spans: Vec<Span>) -> io::Result<crate::app::domain::buffer::Piec
         });
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod batch_plan_tests {
+    #[test]
+    fn batch_history_queries_seek_document_indexes() {
+        futures_lite::future::block_on(async {
+            let (_root, db) = super::super::tests::database().await;
+            for (table, query) in [
+                ("history", super::HISTORY_ENTRY_QUERY),
+                ("history_spans", super::HISTORY_SPAN_QUERY),
+                ("document_history", super::HISTORY_POSITION_QUERY),
+            ] {
+                let mut rows = db
+                    .conn
+                    .query(&format!("EXPLAIN QUERY PLAN {query}"), ())
+                    .await
+                    .unwrap();
+                let mut details = Vec::new();
+                while let Some(row) = rows.next().await.unwrap() {
+                    details.push(row.get::<String>(3).unwrap());
+                }
+                assert!(
+                    details
+                        .iter()
+                        .any(|line| line.starts_with(&format!("SEARCH {table} USING INDEX"))),
+                    "{details:?}"
+                );
+                assert!(
+                    !details
+                        .iter()
+                        .any(|line| line.starts_with(&format!("SCAN {table}"))),
+                    "{details:?}"
+                );
+            }
+        });
+    }
 }

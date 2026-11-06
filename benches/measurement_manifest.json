@@ -507,7 +507,8 @@
       "samples_per_scenario": 9,
       "fixture": {
         "equals": {
-          "fixture_revision": 1,
+          "fixture_revision": 2,
+          "edit_preparation": "recorded_single_character_insert",
           "buffer_bytes": 52428800,
           "initial_archives": 128,
           "synchronous": "FULL"

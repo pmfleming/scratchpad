@@ -330,3 +330,26 @@ fn collection_keeps_live_only_handles_and_durable_history_roots() {
         );
     });
 }
+
+#[test]
+fn batched_history_restore_attributes_missing_positions_and_bad_spans() {
+    block_on(async {
+        for corruption in [
+            "DELETE FROM document_history WHERE temp_id=?",
+            "UPDATE history SET packed_spans=x'00' WHERE temp_id=?",
+        ] {
+            let (_root, mut db) = database().await;
+            let tabs: Vec<_> = (0..66)
+                .map(|index| tab(&format!("{index}: café 東京")))
+                .collect();
+            db.persist(capture(&tabs), 1).await.unwrap();
+            let bad = tabs[65].active_buffer().temp_id.clone();
+            db.conn.execute(corruption, [bad.as_str()]).await.unwrap();
+            let error = db.load(ReadScope::All).await.err().unwrap();
+            assert!(error.to_string().contains("quarantined"));
+            assert!(db.quarantined.contains_key(&bad));
+            assert_eq!(db.quarantined.len(), 1);
+            assert!(db.blocked.is_none());
+        }
+    });
+}

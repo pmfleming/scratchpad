@@ -211,7 +211,8 @@ pub(super) fn aged_storage() {
             emit_prepared_operation(
                 descriptor(id, index, 3 * GB),
                 serde_json::json!({"database_bytes":database_bytes,"seed_bytes":3 * GB,
-                    "history_revisions":128,"initial_archives":128,"fixture_revision":1}),
+                    "history_revisions":128,"initial_archives":128,"fixture_revision":2,
+                    "edit_preparation":"recorded_single_character_insert"}),
                 || {
                     let mut outcome = StepOutcome::items(1);
                     outcome.phase_elapsed_ns = if id == "cold_reads_during_save" {

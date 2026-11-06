@@ -204,8 +204,14 @@ impl SessionMaintenanceFixture {
                     .navigate_history(1)
                     .map_err(|error| io::Error::other(format!("{error:?}")))?;
             }
-            let text = format!("x{}", buffer.text());
-            buffer.document_mut().replace_exact_with_history(&text);
+            buffer
+                .document_mut()
+                .replace_char_ranges_with_undo(
+                    &[(0..0, "x".into())],
+                    CursorRange::one(CharCursor::new(0)),
+                    CursorRange::one(CharCursor::new(1)),
+                )
+                .map_err(|error| io::Error::other(format!("{error:?}")))?;
             buffer.is_dirty = true;
         }
         Ok(())
@@ -404,5 +410,33 @@ mod aged_profile_tests {
             fixture.aged_operation(operation).unwrap();
             fixture.verify().unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod incremental_fixture_tests {
+    #[test]
+    fn recorded_insert_preserves_original_storage_and_exact_undo_after_save() {
+        let root = tempfile::tempdir().unwrap();
+        let text = "café 東京\n".repeat(200_000);
+        let mut fixture =
+            super::SessionMaintenanceFixture::new(root.path().join("session"), text.clone(), 0)
+                .unwrap();
+        let original = fixture.tabs[0].active_buffer().document().snapshot();
+        fixture.prepare("incremental_save").unwrap();
+        let changed = fixture.tabs[0].active_buffer().document().snapshot();
+        assert_eq!(
+            changed.piece_tree().add_storage_bytes(),
+            original.piece_tree().add_storage_bytes() + 1
+        );
+        fixture.sample("incremental_save").unwrap();
+        fixture.verify().unwrap();
+        let mut restored = fixture.store.load().unwrap().unwrap();
+        let document = restored.tabs[0].active_buffer_mut().document_mut();
+        assert_eq!(document.try_extract_text().unwrap(), format!("x{text}"));
+        document.undo_last_operation().unwrap();
+        assert_eq!(document.try_extract_text().unwrap(), text);
+        document.redo_last_operation().unwrap();
+        assert_eq!(document.try_extract_text().unwrap(), format!("x{text}"));
     }
 }
