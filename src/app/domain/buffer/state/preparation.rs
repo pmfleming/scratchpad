@@ -1,5 +1,6 @@
 //! Bulk text is normalized, edited, measured, and sealed on the path lane.
 use super::{BufferState, TextDocument, TextFormatMetadata};
+use crate::app::capacity_metrics::{PreparationPhase, record_preparation};
 use crate::app::domain::buffer::{
     BufferTextMetadata, HistoryToken, PieceSource, normalize_inserted_text_line_endings,
     try_analyze_piece_tree_text,
@@ -9,6 +10,7 @@ use std::{
     io,
     ops::Range,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 pub(crate) const BULK_TEXT_BYTES: usize = 256 * 1024;
 #[derive(Clone)]
@@ -52,6 +54,7 @@ impl PrepareTextRequest {
         mut self,
         store: Option<crate::app::services::chunk_store::ChunkStoreHandle>,
     ) -> io::Result<PreparedText> {
+        let binding = Instant::now();
         if let Some(store) = store {
             if self.adds_text() {
                 store.check_bulk_capacity(
@@ -61,6 +64,7 @@ impl PrepareTextRequest {
             self.document.set_bulk_intake(true);
             self.document.bind_store(store)?;
         }
+        record_preparation(PreparationPhase::Bind, binding.elapsed());
         self.prepare()
     }
     fn adds_text(&self) -> bool {
@@ -68,9 +72,11 @@ impl PrepareTextRequest {
             || self.transform.as_ref().is_some_and(|(_, adds, _)| *adds)
     }
     pub(crate) fn prepare(mut self) -> io::Result<PreparedText> {
+        let total = Instant::now();
         let adds_text = self.adds_text();
         let mut changes_document = true;
         let mut transform_changes = None;
+        let normalization = Instant::now();
         for (_, text) in &mut self.replacements {
             let normalized = normalize_inserted_text_line_endings(
                 text,
@@ -80,6 +86,8 @@ impl PrepareTextRequest {
                 *text = normalized.into_owned();
             }
         }
+        record_preparation(PreparationPhase::Normalize, normalization.elapsed());
+        let mutation = Instant::now();
         let next = if let Some((changes, _, transform)) = self.transform.take() {
             changes_document = changes;
             let (document, format, selection, updates) = std::panic::catch_unwind(
@@ -133,12 +141,15 @@ impl PrepareTextRequest {
             ));
         }
         self.document.piece_tree_mut().clear_anchors();
+        record_preparation(PreparationPhase::Mutate, mutation.elapsed());
+        let inspection = Instant::now();
         let metadata = if changes_document {
             try_analyze_piece_tree_text(self.document.piece_tree(), &mut self.format)?.metadata
         } else {
             self.copy_metadata.take().expect("copy metadata captured")
         };
-        Ok(PreparedText {
+        record_preparation(PreparationPhase::Inspect, inspection.elapsed());
+        let prepared = PreparedText {
             base: self.base,
             changes_document,
             event: self.event,
@@ -154,7 +165,9 @@ impl PrepareTextRequest {
                     .map(|(range, text)| (range.clone(), text.chars().count()))
                     .collect()
             }),
-        })
+        };
+        record_preparation(PreparationPhase::Total, total.elapsed());
+        Ok(prepared)
     }
 }
 impl BufferState {

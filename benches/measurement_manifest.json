@@ -370,7 +370,7 @@
       "basis": "storage-plan cold-read gate or existing session interaction limit"
     },
     "production_paste": {
-      "metric": "/phase_elapsed_ns/workflow_ns",
+      "metric": "/phase_elapsed_ns/publication_ns",
       "max": 150000000,
       "unit": "ns",
       "basis": "existing paste latency budget applied to production input through publication"

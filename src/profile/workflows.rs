@@ -246,12 +246,14 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
             .profile_pause_writer(Duration::from_millis(pause_ms))
             .expect("writer pause");
         let mut frame = eframe::Frame::_new_kittest();
+        let preparation_before = crate::app::capacity_metrics::preparation_metrics();
         let started = Instant::now();
         let mut durations = Vec::new();
         let mut paused = Vec::new();
         let mut events = vec![egui::Event::Text("prefix".into()), egui::Event::Paste(text)];
         let mut queued_typing = false;
         let mut saw_preparing = false;
+        let mut publication_ns = None;
         loop {
             let was_paused = !pause.is_finished();
             let mut input = egui::RawInput {
@@ -293,6 +295,9 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
             if saw_preparing && !queued_typing {
                 events.push(egui::Event::Text("t".into()));
                 queued_typing = true;
+            }
+            if saw_preparing && !preparing && queued_typing && events.is_empty() {
+                publication_ns.get_or_insert_with(|| started.elapsed().as_nanos());
             }
             if io_stress && saw_preparing && !preparing && durations.len() % 8 == 0 {
                 events.push(egui::Event::MouseWheel {
@@ -340,7 +345,9 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
             .extract_range(expected_chars + 6..expected_chars + 11);
         assert_eq!(tail, "tbase");
         assert_eq!(buffer.document().piece_tree().extract_range(0..6), "prefix");
+        let flush_started = Instant::now();
         store.flush_text_chunks().expect("chunk flush");
+        let flush_ns = flush_started.elapsed().as_nanos();
         sample_done.store(true, std::sync::atomic::Ordering::Release);
         sampler.join().expect("WAL sampler");
         let resources = crate::profile::process_metrics::ProcessMeasurement::between(
@@ -356,7 +363,14 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
         let tail_bytes = buffer.document().piece_tree().ram_tail_bytes();
         durations.sort_unstable();
         paused.sort_unstable();
-        json!({"scope":"production logic/input/layout/tessellation", "writer_pause_ms":pause_ms, "bytes":expected_bytes,"frames":durations.len(),"frame_p50_ns":durations[durations.len()/2],"frame_p99_ns":durations[(durations.len()*99).div_ceil(100)-1],"frame_max_ns":durations.last(),"writer_paused_frames":paused.len(),"writer_paused_frame_max_ns":paused.last(),"workflow_ns":started.elapsed().as_nanos(),"peak_pending_bytes":handle.peak_pending_bytes(),"pending_flow_threshold_bytes":crate::app::services::chunk_store::BULK_PENDING_BYTES,"queued_typing_preserved":true,"io_stress":io_stress,"concurrent_write_bytes":if io_stress {3_u64*1024*1024*1024} else {0},"process_resources":resources,"database_bytes":file_bytes("session.db"),"wal_bytes_after_flush":file_bytes("session.db-wal"),"wal_peak_sampled_bytes":wal_peak.load(std::sync::atomic::Ordering::Relaxed),"wal_peak_sample_interval_ms":5,"cache_bytes":cache_bytes,"tail_bytes":tail_bytes,"seed_bytes":if io_stress {3_u64*1024*1024*1024} else {0},"batch_timing":handle.write_timing(),"seed_batch_timing":seed_batch_timing,"measured_batch_overruns":handle.write_timing().2})
+        let mut profile = json!({"scope":"production logic/input/layout/tessellation", "writer_pause_ms":pause_ms, "bytes":expected_bytes,"frames":durations.len(),"frame_p50_ns":durations[durations.len()/2],"frame_p99_ns":durations[(durations.len()*99).div_ceil(100)-1],"frame_max_ns":durations.last(),"writer_paused_frames":paused.len(),"writer_paused_frame_max_ns":paused.last(),"workflow_ns":started.elapsed().as_nanos(),"publication_ns":publication_ns.expect("published text and queued input"),"post_publication_flush_ns":flush_ns,"publication_endpoint":"published_text_and_queued_input_tessellated","peak_pending_bytes":handle.peak_pending_bytes(),"pending_flow_threshold_bytes":crate::app::services::chunk_store::BULK_PENDING_BYTES,"queued_typing_preserved":true,"io_stress":io_stress,"concurrent_write_bytes":if io_stress {3_u64*1024*1024*1024} else {0},"process_resources":resources,"database_bytes":file_bytes("session.db"),"wal_bytes_after_flush":file_bytes("session.db-wal"),"wal_peak_sampled_bytes":wal_peak.load(std::sync::atomic::Ordering::Relaxed),"wal_peak_sample_interval_ms":5,"cache_bytes":cache_bytes,"tail_bytes":tail_bytes,"seed_bytes":if io_stress {3_u64*1024*1024*1024} else {0},"batch_timing":handle.write_timing(),"seed_batch_timing":seed_batch_timing,"measured_batch_overruns":handle.write_timing().2});
+        let preparation =
+            crate::app::capacity_metrics::preparation_metrics().since(preparation_before);
+        profile
+            .as_object_mut()
+            .unwrap()
+            .extend(preparation.as_object().unwrap().clone());
+        profile
     })
 }
 
@@ -367,7 +381,14 @@ mod tests {
         let profile = super::run_live_text_paste_profile(8 * super::super::MB);
         assert_eq!(profile["writer_pause_ms"], 0);
         assert_eq!(profile["queued_typing_preserved"], true);
-        assert!(profile["workflow_ns"].as_u64().unwrap() > 0);
+        let publication = profile["publication_ns"].as_u64().unwrap();
+        let workflow = profile["workflow_ns"].as_u64().unwrap();
+        assert!(publication > 0 && publication <= workflow);
+        assert!(profile["post_publication_flush_ns"].as_u64().unwrap() <= workflow - publication);
+        assert_eq!(
+            profile["publication_endpoint"],
+            "published_text_and_queued_input_tessellated"
+        );
     }
     #[test]
     fn production_search_measures_delivery_and_tessellation_with_correct_results() {

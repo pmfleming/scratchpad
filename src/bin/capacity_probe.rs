@@ -583,7 +583,7 @@ fn emit_paste_size_sweep() {
             let before = process_snapshot();
             let profile = scratchpad::profile::run_live_text_paste_profile(bytes);
             emit_recorded_step(step, repeat_index, 0, RecordedTiming {
-                elapsed_ns: profile["workflow_ns"].as_u64().unwrap() as u128,
+                elapsed_ns: profile["publication_ns"].as_u64().unwrap() as u128,
                 background_completion_ns: None, completed_workload_value: None, process_before: before,
             }, "production_paste_to_publication", Some("Raw input, background preparation, publication, layout and tessellation; no injected writer pause".into()));
         }

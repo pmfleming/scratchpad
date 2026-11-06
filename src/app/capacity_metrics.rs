@@ -5,6 +5,8 @@ use serde::Serialize;
 
 mod background_io;
 mod frame;
+mod preparation;
+pub(crate) use preparation::{PreparationPhase, preparation_metrics, record_preparation};
 
 #[cfg(test)]
 mod tests;
