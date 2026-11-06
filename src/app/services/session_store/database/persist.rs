@@ -588,7 +588,32 @@ impl Database {
     ) -> io::Result<()> {
         let mut buffers: Vec<_> = prepared.buffers.iter().collect();
         buffers.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        // Inventory is refreshed before preparation and consumed only by a
+        // successful commit. Only proven-new, pathless documents can bypass
+        // retained-path release and incremental history replacement.
+        let new: Vec<_> = buffers
+            .iter()
+            .filter(|(id, buffer)| {
+                !inventory.buffers.contains(*id) && buffer.metadata.path_key.is_none()
+            })
+            .map(|(id, buffer)| (*id, *buffer))
+            .collect();
+        self.insert_document_rows(&new.iter().map(|(_, b)| &b.metadata).collect::<Vec<_>>())
+            .await?;
+        self.insert_histories(
+            &new.iter()
+                .map(|(id, buffer)| super::history::NewHistory {
+                    id,
+                    rows: buffer.history.as_ref(),
+                    entries: &buffer.changed_history,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await?;
         for (id, buffer) in buffers {
+            if !inventory.buffers.contains(id) && buffer.metadata.path_key.is_none() {
+                continue;
+            }
             if self.document_cache.get(id) != Some(&buffer.metadata) {
                 if let Some(key) = &buffer.metadata.path_key {
                     prepared

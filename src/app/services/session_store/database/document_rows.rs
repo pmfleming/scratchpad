@@ -221,63 +221,16 @@ impl Database {
         } else {
             "INSERT INTO documents(id,buffer_id,name,path,path_key,search_text,is_dirty,text_is_empty,has_recorded_edits,is_settings_file,show_control_chars,right_to_left,encoding_name,has_bom,encoding_source,line_endings,preferred_line_ending,lf_count,crlf_count,cr_count,is_ascii_subset,has_decoding_warnings,line_count,disk_modified_millis,disk_len,disk_content_digest,observed_digest,observed_missing,artifact_flags,other_control_count,ansi_count,backspace_count,unicode_format_count,other_control_exact) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         };
-        self.execute_cached(
-            sql,
-            turso::params![
-                row.id.as_str(),
-                signed(row.buffer_id)?,
-                row.name.as_str(),
-                row.path.clone(),
-                row.path_key.clone(),
-                row.search_text.as_str(),
-                i64::from(row.is_dirty),
-                i64::from(row.text_is_empty),
-                i64::from(row.has_recorded_edits),
-                i64::from(row.is_settings_file),
-                i64::from(row.show_control_chars),
-                i64::from(row.right_to_left),
-                row.encoding_name.as_str(),
-                i64::from(row.has_bom),
-                row.encoding_source.as_str(),
-                row.line_endings.as_str(),
-                row.preferred_line_ending.as_str(),
-                signed(row.lf_count)?,
-                signed(row.crlf_count)?,
-                signed(row.cr_count)?,
-                i64::from(row.is_ascii_subset),
-                i64::from(row.has_decoding_warnings),
-                signed(row.line_count)?,
-                row.disk_modified_millis.map(signed).transpose()?,
-                row.disk_len.map(signed).transpose()?,
-                row.disk_content_digest.clone(),
-                row.observed_digest.clone(),
-                i64::from(row.observed_missing),
-                artifact_flags(&row.analysis),
-                signed(row.analysis.artifact_summary.other_control_count as u64)?,
-                row.analysis
-                    .artifact_summary
-                    .ansi_sequence_count
-                    .map(|n| signed(n as u64))
-                    .transpose()?,
-                row.analysis
-                    .artifact_summary
-                    .backspace_count
-                    .map(|n| signed(n as u64))
-                    .transpose()?,
-                row.analysis
-                    .artifact_summary
-                    .unicode_format_control_count
-                    .map(|n| signed(n as u64))
-                    .transpose()?,
-                row.analysis
-                    .artifact_summary
-                    .other_control_count_exact
-                    .map(|n| signed(n as u64))
-                    .transpose()?,
-            ],
+        self.execute_cached(sql, row.values()?).await
+    }
+    pub(super) async fn insert_document_rows(&self, rows: &[&DocumentRow]) -> io::Result<()> {
+        self.insert_rows(
+            &format!("INSERT INTO documents({COLUMNS})"),
+            rows.iter().map(|row| row.values()),
         )
         .await
     }
+
     pub(super) async fn read_document_row(&self, id: &str) -> io::Result<DocumentRow> {
         self.query_collect(
             &format!("SELECT {COLUMNS} FROM documents WHERE id=?"),
@@ -330,4 +283,62 @@ fn read_analysis(row: &turso::Row) -> io::Result<BufferTextMetadata> {
             other_control_count_exact: checked.optional_index(33)?,
         },
     })
+}
+
+impl DocumentRow {
+    fn values(&self) -> io::Result<[Result<turso::Value, turso::Error>; 34]> {
+        let row = self;
+        Ok(turso::params![
+            row.id.as_str(),
+            signed(row.buffer_id)?,
+            row.name.as_str(),
+            row.path.clone(),
+            row.path_key.clone(),
+            row.search_text.as_str(),
+            i64::from(row.is_dirty),
+            i64::from(row.text_is_empty),
+            i64::from(row.has_recorded_edits),
+            i64::from(row.is_settings_file),
+            i64::from(row.show_control_chars),
+            i64::from(row.right_to_left),
+            row.encoding_name.as_str(),
+            i64::from(row.has_bom),
+            row.encoding_source.as_str(),
+            row.line_endings.as_str(),
+            row.preferred_line_ending.as_str(),
+            signed(row.lf_count)?,
+            signed(row.crlf_count)?,
+            signed(row.cr_count)?,
+            i64::from(row.is_ascii_subset),
+            i64::from(row.has_decoding_warnings),
+            signed(row.line_count)?,
+            row.disk_modified_millis.map(signed).transpose()?,
+            row.disk_len.map(signed).transpose()?,
+            row.disk_content_digest.clone(),
+            row.observed_digest.clone(),
+            i64::from(row.observed_missing),
+            artifact_flags(&row.analysis),
+            signed(row.analysis.artifact_summary.other_control_count as u64)?,
+            row.analysis
+                .artifact_summary
+                .ansi_sequence_count
+                .map(|n| signed(n as u64))
+                .transpose()?,
+            row.analysis
+                .artifact_summary
+                .backspace_count
+                .map(|n| signed(n as u64))
+                .transpose()?,
+            row.analysis
+                .artifact_summary
+                .unicode_format_control_count
+                .map(|n| signed(n as u64))
+                .transpose()?,
+            row.analysis
+                .artifact_summary
+                .other_control_count_exact
+                .map(|n| signed(n as u64))
+                .transpose()?,
+        ])
+    }
 }

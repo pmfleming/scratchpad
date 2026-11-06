@@ -498,17 +498,7 @@ impl Database {
         }
         for prepared in changed {
             let e = &prepared.entry;
-            let p = e.previous_selection;
-            let n = e.next_selection;
-            let bytes =
-                e.edits
-                    .iter()
-                    .flat_map(PieceHistoryEdit::spans)
-                    .try_fold(0u64, |sum, s| {
-                        sum.checked_add(s.byte_len)
-                            .ok_or_else(|| invalid("history byte count overflow"))
-                    })?;
-            self.execute_cached("INSERT INTO history(temp_id,seq,parent_id,edited_at,global_seq,source,summary,replayable,bytes,previous_primary,previous_primary_next,previous_secondary,previous_secondary_next,next_primary,next_primary_next,next_secondary,next_secondary_next,packed_spans) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(temp_id,seq) DO UPDATE SET parent_id=excluded.parent_id,edited_at=excluded.edited_at,global_seq=excluded.global_seq,source=excluded.source,summary=excluded.summary,replayable=excluded.replayable,bytes=excluded.bytes,previous_primary=excluded.previous_primary,previous_primary_next=excluded.previous_primary_next,previous_secondary=excluded.previous_secondary,previous_secondary_next=excluded.previous_secondary_next,next_primary=excluded.next_primary,next_primary_next=excluded.next_primary_next,next_secondary=excluded.next_secondary,next_secondary_next=excluded.next_secondary_next,packed_spans=excluded.packed_spans",params![id,signed(e.id)?,signed(e.parent_id)?,signed(e.edited_at)?,signed(e.global_seq)?,super::document_rows::enum_name(e.source)?,e.summary.as_str(),i64::from(e.flags.replayable),signed(bytes)?,i64::try_from(p.primary.index).map_err(invalid)?,i64::from(p.primary.prefer_next_row),i64::try_from(p.secondary.index).map_err(invalid)?,i64::from(p.secondary.prefer_next_row),i64::try_from(n.primary.index).map_err(invalid)?,i64::from(n.primary.prefer_next_row),i64::try_from(n.secondary.index).map_err(invalid)?,i64::from(n.secondary.prefer_next_row),prepared.packed.as_deref()]).await?;
+            self.execute_cached("INSERT INTO history(temp_id,seq,parent_id,edited_at,global_seq,source,summary,replayable,bytes,previous_primary,previous_primary_next,previous_secondary,previous_secondary_next,next_primary,next_primary_next,next_secondary,next_secondary_next,packed_spans) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(temp_id,seq) DO UPDATE SET parent_id=excluded.parent_id,edited_at=excluded.edited_at,global_seq=excluded.global_seq,source=excluded.source,summary=excluded.summary,replayable=excluded.replayable,bytes=excluded.bytes,previous_primary=excluded.previous_primary,previous_primary_next=excluded.previous_primary_next,previous_secondary=excluded.previous_secondary,previous_secondary_next=excluded.previous_secondary_next,next_primary=excluded.next_primary,next_primary_next=excluded.next_primary_next,next_secondary=excluded.next_secondary,next_secondary_next=excluded.next_secondary_next,packed_spans=excluded.packed_spans", prepared.values(id)?).await?;
             self.execute_cached(
                 "DELETE FROM history_spans WHERE temp_id=? AND seq=?",
                 params![id, signed(e.id)?],
@@ -615,6 +605,118 @@ fn decode_spans(spans: Vec<Span>) -> io::Result<crate::app::domain::buffer::Piec
         });
     }
     Ok(result)
+}
+
+impl PreparedHistoryEntry {
+    fn values(&self, id: &str) -> io::Result<[Result<turso::Value, turso::Error>; 18]> {
+        let prepared = self;
+        let e = &prepared.entry;
+        let p = e.previous_selection;
+        let n = e.next_selection;
+        let bytes = e
+            .edits
+            .iter()
+            .flat_map(PieceHistoryEdit::spans)
+            .try_fold(0u64, |sum, s| {
+                sum.checked_add(s.byte_len)
+                    .ok_or_else(|| invalid("history byte count overflow"))
+            })?;
+
+        Ok(params![
+            id,
+            signed(e.id)?,
+            signed(e.parent_id)?,
+            signed(e.edited_at)?,
+            signed(e.global_seq)?,
+            super::document_rows::enum_name(e.source)?,
+            e.summary.as_str(),
+            i64::from(e.flags.replayable),
+            signed(bytes)?,
+            i64::try_from(p.primary.index).map_err(invalid)?,
+            i64::from(p.primary.prefer_next_row),
+            i64::try_from(p.secondary.index).map_err(invalid)?,
+            i64::from(p.secondary.prefer_next_row),
+            i64::try_from(n.primary.index).map_err(invalid)?,
+            i64::from(n.primary.prefer_next_row),
+            i64::try_from(n.secondary.index).map_err(invalid)?,
+            i64::from(n.secondary.prefer_next_row),
+            prepared.packed.as_deref()
+        ])
+    }
+}
+
+pub(super) struct NewHistory<'a> {
+    pub id: &'a str,
+    pub rows: Option<&'a HistoryRows>,
+    pub entries: &'a [PreparedHistoryEntry],
+}
+
+impl Database {
+    pub(super) async fn insert_histories(&self, histories: &[NewHistory<'_>]) -> io::Result<()> {
+        if histories
+            .iter()
+            .any(|h| h.rows.map_or(0, HistoryRows::len) != h.entries.len())
+        {
+            return Err(invalid("new document history is incomplete"));
+        }
+        self.insert_rows(
+            "INSERT INTO history_nodes",
+            histories.iter().flat_map(|h| {
+                std::iter::once(Ok(params![h.id, 0i64])).chain(
+                    h.entries
+                        .iter()
+                        .map(|e| Ok(params![h.id, signed(e.entry.id)?])),
+                )
+            }),
+        )
+        .await?;
+        self.insert_rows(
+            "INSERT INTO document_history",
+            histories.iter().map(|h| {
+                let p = h.rows.map_or((0, 0, 0, 0), HistoryRows::positions);
+                Ok(params![
+                    h.id,
+                    signed(p.0)?,
+                    signed(p.1)?,
+                    signed(p.2)?,
+                    signed(p.3)?
+                ])
+            }),
+        )
+        .await?;
+        self.insert_rows("INSERT INTO history(temp_id,seq,parent_id,edited_at,global_seq,source,summary,replayable,bytes,previous_primary,previous_primary_next,previous_secondary,previous_secondary_next,next_primary,next_primary_next,next_secondary,next_secondary_next,packed_spans)", histories.iter().flat_map(|h| h.entries.iter().map(|entry| entry.values(h.id)))).await?;
+        self.insert_rows(
+            "INSERT INTO history_spans",
+            histories.iter().flat_map(|h| {
+                h.entries
+                    .iter()
+                    .filter(|e| e.packed.is_none())
+                    .flat_map(|e| {
+                        e.spans.iter().map(|span| {
+                            let f = span
+                                .0
+                                .map(signed)
+                                .into_iter()
+                                .collect::<io::Result<Vec<_>>>()?;
+                            Ok(params![
+                                h.id,
+                                signed(e.entry.id)?,
+                                f[0],
+                                f[1],
+                                f[2],
+                                f[3],
+                                f[4],
+                                f[5],
+                                f[6],
+                                f[7]
+                            ])
+                        })
+                    })
+            }),
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
