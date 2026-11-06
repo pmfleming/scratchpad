@@ -83,6 +83,10 @@ impl SessionMaintenanceFixture {
             .sum()
     }
 
+    pub fn storage_configuration(&self) -> io::Result<serde_json::Value> {
+        self.store.profile_storage_configuration()
+    }
+
     /// Repeated, independently evicted reads while production saves run.
     /// A read without observed physical I/O is reported as unverified, never cold.
     pub fn cold_reads_during_saves(&mut self) -> io::Result<serde_json::Value> {
@@ -331,6 +335,19 @@ impl SessionMaintenanceFixture {
 }
 
 impl SessionStore {
+    /// Read actual engine settings outside a profiling operation's timer.
+    pub fn profile_storage_configuration(&self) -> io::Result<serde_json::Value> {
+        self.worker()?.call(|db| {
+            futures_lite::future::block_on(async {
+                Ok(
+                    serde_json::json!({"page_size_bytes":db.integer("PRAGMA page_size").await?,
+                "writer_cache_size_pragma":db.integer("PRAGMA cache_size").await?,
+                "engine":"turso-0.8.3", "scope":"measured_store_connection"}),
+                )
+            })
+        })
+    }
+
     /// Production probe boundary: hold one writer job while measuring UI frames.
     /// This injects a scheduling stall, not a claim about physical device latency.
     pub fn profile_pause_writer(

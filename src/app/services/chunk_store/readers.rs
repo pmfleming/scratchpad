@@ -367,7 +367,7 @@ async fn read(
     let text = String::from_utf8(body)
         .map_err(|cause| turso::Error::ConversionFailure(cause.to_string()))?;
     if text.chars().count() as u64 != metadata.char_len
-        || text.bytes().filter(|&b| b == b'\n').count() as u64 != metadata.newline_count
+        || memchr::memchr_iter(b'\n', text.as_bytes()).count() as u64 != metadata.newline_count
         || text.is_ascii() != metadata.is_ascii
         || text.ends_with('\n') != metadata.ends_with_lf
     {

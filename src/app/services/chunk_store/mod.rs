@@ -44,7 +44,7 @@ impl Metadata {
             digest: *blake3::hash(text.as_bytes()).as_bytes(),
             byte_len: text.len(),
             char_len: text.chars().count() as u64,
-            newline_count: text.bytes().filter(|&b| b == b'\n').count() as u64,
+            newline_count: memchr::memchr_iter(b'\n', text.as_bytes()).count() as u64,
             is_ascii: text.is_ascii(),
             ends_with_lf: text.ends_with('\n'),
         }

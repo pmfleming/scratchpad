@@ -221,3 +221,75 @@ fn second_owner_and_unsupported_schemas_are_rejected_without_discarding_data() {
         }
     });
 }
+
+#[test]
+fn existing_page_formats_preserve_exact_reopen() {
+    block_on(async {
+        for seeded_page_size in [None, Some(4096), Some(16384)] {
+            let root = tempfile::tempdir().unwrap();
+            if let Some(page_size) = seeded_page_size {
+                let engine =
+                    turso::Builder::new_local(root.path().join("session.db").to_str().unwrap())
+                        .with_io(turso::IoBackend::Syscall)
+                        .build()
+                        .await
+                        .unwrap();
+                let conn = engine.connect().unwrap();
+                conn.execute_batch(&format!(
+                    "PRAGMA page_size={page_size}; CREATE TABLE seed(x); DROP TABLE seed;"
+                ))
+                .await
+                .unwrap();
+                let mut checkpoint = conn
+                    .query("PRAGMA wal_checkpoint(TRUNCATE)", ())
+                    .await
+                    .unwrap();
+                while checkpoint.next().await.unwrap().is_some() {}
+            }
+            let mut db = Database::open(root.path()).await.unwrap();
+            let expected = seeded_page_size.unwrap_or(4096);
+            assert_eq!(db.integer("PRAGMA page_size").await.unwrap(), expected);
+            let text = "café 東京\n".repeat(50_000);
+            let mut tabs = vec![tab(&text)];
+            insert(&mut tabs[0], 0, "recorded edit\n");
+            db.persist(request(&tabs), 1).await.unwrap();
+            let history = db
+                .read_history(&tabs[0].buffers.buffer.temp_id)
+                .await
+                .unwrap();
+            let contents = db
+                .load(ReadScope::All)
+                .await
+                .unwrap()
+                .unwrap()
+                .text_contents();
+            assert_eq!(
+                contents.values().next().unwrap(),
+                &format!("recorded edit\n{text}")
+            );
+            db.checkpoint().await.unwrap();
+            drop(db);
+            let mut reopened = Database::open(root.path()).await.unwrap();
+            assert_eq!(
+                reopened.integer("PRAGMA page_size").await.unwrap(),
+                expected
+            );
+            assert_eq!(
+                reopened
+                    .load(ReadScope::All)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .text_contents(),
+                contents
+            );
+            assert_eq!(
+                reopened
+                    .read_history(&tabs[0].buffers.buffer.temp_id)
+                    .await
+                    .unwrap(),
+                history
+            );
+        }
+    });
+}

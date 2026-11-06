@@ -13,12 +13,19 @@ pub(super) fn run() {
         .document;
     super::FILE_PROBE_STORE
         .with(|slot| slot.borrow().as_ref().unwrap().flush_text_chunks().unwrap());
+    let storage_configuration = super::FILE_PROBE_STORE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .unwrap()
+            .profile_storage_configuration()
+            .unwrap()
+    });
     let snapshot = document.snapshot();
     let program = search_capacity_program();
     for index in 0..3 {
         emit_prepared_operation(
             descriptor("file_backed_search", index, 64 * MB),
-            serde_json::json!({"scope":"production snapshot chunk windows and search matcher; single-thread scan", "query":"needle"}),
+            serde_json::json!({"scope":"production snapshot chunk windows and search matcher; single-thread scan", "query":"needle", "storage_configuration":storage_configuration}),
             || {
                 let mut matches = 0;
                 for chunk in snapshot.chunk_iter_for_range(0..snapshot.len_chars(), 256 * KB, 5, 5)
@@ -197,6 +204,7 @@ pub(super) fn aged_storage() {
     .unwrap();
     fixture.seed_aged(3 * GB, 128).unwrap();
     let database_bytes = fixture.database_bytes();
+    let storage_configuration = fixture.storage_configuration().unwrap();
     assert!(database_bytes >= 3 * GB as u64);
     for id in ids {
         if !super::selected(id) {
@@ -212,6 +220,7 @@ pub(super) fn aged_storage() {
                 descriptor(id, index, 3 * GB),
                 serde_json::json!({"database_bytes":database_bytes,"seed_bytes":3 * GB,
                     "history_revisions":128,"initial_archives":128,"fixture_revision":2,
+                    "storage_configuration":storage_configuration,
                     "edit_preparation":"recorded_single_character_insert"}),
                 || {
                     let mut outcome = StepOutcome::items(1);
