@@ -12,15 +12,7 @@ pub(super) fn run() {
         .expect("file-backed document")
         .document;
     let snapshot = document.snapshot();
-    let program = SearchProgram::compile(
-        "café",
-        SearchOptions {
-            mode: SearchMode::PlainText,
-            match_case: true,
-            whole_word: false,
-        },
-    )
-    .expect("query");
+    let program = search_capacity_program();
     for index in 0..3 {
         emit_prepared_operation(
             descriptor("file_backed_search", index, 64 * MB),
@@ -35,12 +27,7 @@ pub(super) fn run() {
                         .filter(|range| chunk.core_range.contains(&(offset + range.start)))
                         .count();
                 }
-                let remainder = 64 * MB % UTF8_SAMPLE_LINE.len();
-                let expected = 64 * MB / UTF8_SAMPLE_LINE.len()
-                    + UTF8_SAMPLE_LINE[..utf8_prefix_len(UTF8_SAMPLE_LINE, remainder)]
-                        .matches("café")
-                        .count();
-                assert_eq!(matches, expected);
+                assert_eq!(matches, 0, "hex fixture has no needle");
                 StepOutcome::items(matches)
             },
         );

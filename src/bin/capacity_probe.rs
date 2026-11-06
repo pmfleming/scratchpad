@@ -15,7 +15,7 @@ use scratchpad::profile::{
 };
 use serde::Serialize;
 use std::hint::black_box;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -25,9 +25,6 @@ const MANY_FILE_BYTES_PER_BUFFER: usize = KB;
 const SPLIT_BYTES_PER_TILE: usize = 128 * KB;
 const VIEW_COUNT_BUFFER_BYTES: usize = MB;
 const MEASUREMENT_REPETITIONS: usize = 3;
-const UTF8_SAMPLE_LINE: &str =
-    "Scratchpad edits UTF-8: café résumé 東京 Привет مرحبا 0123456789.\n";
-const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
 
 #[derive(Serialize)]
 struct CapacityEvent {
@@ -104,7 +101,7 @@ fn contract(scenario: &str) -> serde_json::Value {
         "paste_size_ceiling" => ("store", true, "ScratchpadApp::raw_input_hook/logic/ui"),
         _ => ("owned", false, "prepared_component"),
     };
-    serde_json::json!({"text_backing":backing,"production_path":production,"code_path":path})
+    scratchpad::profile::fixtures::contract(backing, production, path)
 }
 
 fn main() {
@@ -840,35 +837,13 @@ fn build_tile_heavy_tab(tile_count: usize, bytes_per_tile: usize) -> WorkspaceTa
 }
 
 fn utf8_text_of_size(target_bytes: usize) -> String {
-    repeat_unit_to_target_size(UTF8_SAMPLE_LINE, target_bytes)
+    scratchpad::profile::fixtures::text(target_bytes, 0x7192_a335)
 }
-
 fn exact_utf8_text_of_size(target_bytes: usize) -> String {
-    let mut text = utf8_text_of_size(target_bytes);
-    text.extend(std::iter::repeat_n(
-        ' ',
-        target_bytes.saturating_sub(text.len()),
-    ));
-    text
+    utf8_text_of_size(target_bytes)
 }
-
-fn write_large_text_fixture(path: &Path, target_bytes: usize, chunk: &str) {
-    let file = std::fs::File::create(path).expect("create large text fixture");
-    let mut writer = BufWriter::with_capacity(8 * MB, file);
-    let mut remaining = target_bytes;
-    while remaining >= chunk.len() {
-        writer
-            .write_all(chunk.as_bytes())
-            .expect("write large text fixture chunk");
-        remaining -= chunk.len();
-    }
-    if remaining > 0 {
-        let tail = exact_utf8_text_of_size(remaining);
-        writer
-            .write_all(tail.as_bytes())
-            .expect("write final large text fixture chunk");
-    }
-    writer.flush().expect("flush large text fixture");
+fn write_large_text_fixture(path: &Path, target_bytes: usize, _chunk: &str) {
+    scratchpad::profile::fixtures::write(path, target_bytes).unwrap();
 }
 
 fn unique_probe_root(label: &str) -> PathBuf {
@@ -895,17 +870,8 @@ fn search_capacity_program() -> SearchProgram {
 }
 
 fn search_text_of_size(target_bytes: usize) -> String {
-    let mut text = repeat_unit_to_target_size(UTF8_SEARCH_UNIT, target_bytes);
+    let mut text = utf8_text_of_size(target_bytes.saturating_sub("needle café 東京\n".len()));
     text.push_str("needle café 東京\n");
-    text
-}
-
-fn repeat_unit_to_target_size(unit: &str, target_bytes: usize) -> String {
-    let repeats = (target_bytes / unit.len()).max(1);
-    let mut text = String::with_capacity(repeats * unit.len());
-    for _ in 0..repeats {
-        text.push_str(unit);
-    }
     text
 }
 

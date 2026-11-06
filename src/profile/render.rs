@@ -39,7 +39,7 @@ impl UiRenderFrameHarness {
             use crate::app::services::file_service::FileService;
             let path = session_root.join("frame-fixture.txt");
             std::fs::create_dir_all(&session_root).unwrap();
-            std::fs::write(&path, plain_text_of_size(bytes)).unwrap();
+            crate::profile::fixtures::write(&path, bytes).unwrap();
             let content = FileService::read_file_in_store(
                 &path,
                 app.state

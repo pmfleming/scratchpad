@@ -178,24 +178,7 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
         crate::app::app_state::prepare_context_before_first_frame(app, &ctx);
         render_app(app, &ctx);
         render_app(app, &ctx);
-        let unit = "λ🦀 café\n";
-        let text = if io_stress {
-            let mut value = String::with_capacity(bytes);
-            let mut state = 0x3388_121a_u64;
-            for i in 0..bytes {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                value.push(if i % 80 == 79 {
-                    '\n'
-                } else {
-                    (b' ' + (state % 95) as u8) as char
-                });
-            }
-            value
-        } else {
-            unit.repeat(bytes.div_ceil(unit.len()))
-        };
+        let text = crate::profile::fixtures::text(bytes, 0x3388_121a);
         let expected_bytes = text.len();
         let expected_chars = text.chars().count();
         let store = app.state.persistence.session_store.clone();

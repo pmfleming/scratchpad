@@ -86,7 +86,7 @@ fn main() {
             warmup_frames: WARMUP_FRAMES,
         },
         scenarios: vec![Scenario {
-            measurement_contract: serde_json::json!({"text_backing":"store","production_path":true,"code_path":"ScratchpadApp::logic/ui/tessellation","document_bytes":64 * MB}),
+            measurement_contract: serde_json::json!({"text_backing":"store","production_path":true,"code_path":"ScratchpadApp::logic/ui/tessellation","fixture_kind":scratchpad::profile::fixtures::kind(),"fixture_revision":scratchpad::profile::fixtures::REVISION,"document_bytes":64 * MB}),
             scenario_id: "editor_scroll_event_to_tessellation/67108864",
             scenario_label: "Editor scroll event to tessellated render data (64 MiB)",
             workload_family: "wheel-scroll",

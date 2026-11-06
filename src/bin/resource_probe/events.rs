@@ -160,27 +160,33 @@ fn emit_measured_step(
         setup_elapsed_ns,
         elapsed_ns,
         measurement_scope,
-        measurement_contract: match step.scenario {
-            "large_utf8_load_peak_memory"
-            | "file_backed_chunk_cache_tracking"
-            | "file_backed_random_window"
-            | "file_backed_search" => {
-                serde_json::json!({"text_backing":"store","production_path":true,"code_path":"FileService::read_file_in_store/DocumentSnapshot"})
-            }
-            "large_file_first_visible_paint" => {
-                serde_json::json!({"text_backing":"bounded_window","production_path":true,"code_path":"FileService::read_first_visible_window"})
-            }
-            "large_dirty_buffer_save"
-            | "typing_without_save"
-            | "typing_during_save"
-            | "session_persist_cost"
-            | "session_restore_cost"
-            | "startup_visible_restore_cost" => {
-                serde_json::json!({"text_backing":"store","production_path":true,"code_path":"SessionStore"})
-            }
-            _ => {
-                serde_json::json!({"text_backing":"owned","production_path":false,"code_path":"prepared_component"})
-            }
+        measurement_contract: {
+            let mut contract = match step.scenario {
+                "large_utf8_load_peak_memory"
+                | "file_backed_chunk_cache_tracking"
+                | "file_backed_random_window"
+                | "file_backed_search" => {
+                    serde_json::json!({"text_backing":"store","production_path":true,"code_path":"FileService::read_file_in_store/DocumentSnapshot"})
+                }
+                "large_file_first_visible_paint" => {
+                    serde_json::json!({"text_backing":"bounded_window","production_path":true,"code_path":"FileService::read_first_visible_window"})
+                }
+                "large_dirty_buffer_save"
+                | "typing_without_save"
+                | "typing_during_save"
+                | "session_persist_cost"
+                | "session_restore_cost"
+                | "startup_visible_restore_cost" => {
+                    serde_json::json!({"text_backing":"store","production_path":true,"code_path":"SessionStore"})
+                }
+                _ => {
+                    serde_json::json!({"text_backing":"owned","production_path":false,"code_path":"prepared_component"})
+                }
+            };
+            contract["fixture_kind"] = serde_json::json!(scratchpad::profile::fixtures::kind());
+            contract["fixture_revision"] =
+                serde_json::json!(scratchpad::profile::fixtures::REVISION);
+            contract
         },
         workload_details,
         allocator_scope: "process_wide_absolute_live_heap_with_interval_traffic_and_baseline",

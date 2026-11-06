@@ -28,7 +28,6 @@ use scratchpad::profile::{
     run_many_file_lazy_open_profile, run_search_all_tabs_profile, run_tab_strip_frame_profile,
 };
 use std::hint::black_box;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const KB: usize = 1024;
@@ -41,8 +40,6 @@ const VIEW_COUNT_BUFFER_BYTES: usize = MB;
 const PASTE_RESOURCE_BASE_BYTES: usize = MB;
 const FIRST_VISIBLE_PAINT_MAX_CHARS: usize = 192 * KB;
 const PREVIEW_LIMIT: usize = 10_000;
-const UTF8_SAMPLE_LINE: &str =
-    "Scratchpad edits UTF-8: café résumé 東京 Привет مرحبا 0123456789.\n";
 const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
 const FRAGMENT_UNIT: &str = "hay needle café 東京\n";
 
@@ -115,14 +112,21 @@ fn run_file_backed_open_first_visible_paint_cycle(path: &Path) -> StepOutcome {
 }
 
 fn run_large_utf8_load_cycle(path: &Path) -> StepOutcome {
-    let file = read_probe_file(path).expect("open large UTF-8 file through file service");
+    let directory = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(directory.path().join("import"));
+    let file = FileService::read_file_in_store(path, store.chunk_store_handle().unwrap()).unwrap();
+    store.flush_text_chunks().unwrap();
     let disk_state = FileService::read_disk_state(path).ok();
     let buffer = FileService::build_buffer_from_file_content(path, file, disk_state);
-    StepOutcome::items(black_box(
+    let mut outcome = StepOutcome::items(black_box(
         buffer.document().piece_tree().len_bytes()
             + buffer.document().piece_tree().metrics().newlines
             + buffer.line_count,
-    ))
+    ));
+    outcome.phase_elapsed_ns = serde_json::json!({"import_logical_bytes":std::fs::metadata(path).unwrap().len(),
+        "import_database_growth_bytes": std::fs::read_dir(store.root()).unwrap().filter_map(Result::ok)
+            .filter_map(|entry| entry.metadata().ok()).map(|m|m.len()).sum::<u64>()});
+    outcome
 }
 
 fn prepare_file_backed_cache_traversal(path: &Path) -> TextDocument {
@@ -603,18 +607,7 @@ fn combine_tabs(tabs: &mut Vec<WorkspaceTab>, source_idx: usize, target_idx: usi
 }
 
 fn write_utf8_text_file(path: &Path, target_bytes: usize) -> std::io::Result<()> {
-    let line = UTF8_SAMPLE_LINE.as_bytes();
-    let mut file = std::fs::File::create(path)?;
-    let repeats = target_bytes / line.len();
-    for _ in 0..repeats {
-        file.write_all(line)?;
-    }
-    let remaining = target_bytes % line.len();
-    if remaining > 0 {
-        let end = utf8_prefix_len(UTF8_SAMPLE_LINE, remaining);
-        file.write_all(&line[..end])?;
-    }
-    file.flush()
+    scratchpad::profile::fixtures::write(path, target_bytes)
 }
 
 fn file_backed_open_max_bytes() -> usize {
@@ -625,12 +618,7 @@ fn file_backed_open_max_bytes() -> usize {
 }
 
 fn utf8_text_of_size(target_bytes: usize) -> String {
-    let repeats = (target_bytes / UTF8_SAMPLE_LINE.len()).max(1);
-    let mut text = String::with_capacity(repeats * UTF8_SAMPLE_LINE.len());
-    for _ in 0..repeats {
-        text.push_str(UTF8_SAMPLE_LINE);
-    }
-    text
+    scratchpad::profile::fixtures::text(target_bytes, 0x7192_a335)
 }
 
 fn search_capacity_program() -> SearchProgram {
@@ -653,17 +641,6 @@ fn search_text_of_size(target_bytes: usize) -> String {
     }
     text.push_str("needle café 東京\n");
     text
-}
-
-fn utf8_prefix_len(text: &str, max_bytes: usize) -> usize {
-    if max_bytes >= text.len() {
-        return text.len();
-    }
-    let mut end = max_bytes;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    end
 }
 
 fn unique_probe_root(label: &str) -> PathBuf {

@@ -1,3 +1,4 @@
+pub mod fixtures;
 pub mod process_metrics;
 mod render;
 mod support;
