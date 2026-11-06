@@ -32,6 +32,20 @@
       "session_steady_persist_cost",
       "store_import",
       "ui_during_store_writes"
+    ],
+    "capacity_probe": [
+      "large_file_first_visible_ceiling",
+      "large_file_background_index_ceiling",
+      "in_memory_text_ingest_ceiling",
+      "text_layout_ceiling",
+      "many_file_first_visible_ceiling",
+      "many_file_background_hydration_ceiling",
+      "search_file_size_ceiling",
+      "search_target_count_ceiling",
+      "tab_count_ceiling",
+      "split_count_ceiling",
+      "view_count_ceiling",
+      "paste_size_ceiling"
     ]
   },
   "suites": {
@@ -298,6 +312,116 @@
       "max": 12000000,
       "unit": "ns",
       "basis": "existing frame p99 limit"
+    }
+  },
+  "capacity_budgets": {
+    "large_file_first_visible_ceiling": {
+      "threshold_ms": 180,
+      "basis": "existing capacity budget"
+    },
+    "large_file_background_index_ceiling": {
+      "threshold_ms": 5000,
+      "basis": "existing capacity budget"
+    },
+    "in_memory_text_ingest_ceiling": {
+      "threshold_ms": 180,
+      "basis": "existing capacity budget"
+    },
+    "text_layout_ceiling": {
+      "threshold_ms": 180,
+      "basis": "existing capacity budget"
+    },
+    "many_file_first_visible_ceiling": {
+      "threshold_ms": 180,
+      "basis": "existing capacity budget"
+    },
+    "many_file_background_hydration_ceiling": {
+      "threshold_ms": 5000,
+      "basis": "existing capacity budget"
+    },
+    "search_file_size_ceiling": {
+      "threshold_ms": 180,
+      "basis": "existing capacity budget"
+    },
+    "search_target_count_ceiling": {
+      "threshold_ms": 180,
+      "basis": "existing capacity budget"
+    },
+    "tab_count_ceiling": {
+      "threshold_ms": 140,
+      "basis": "existing capacity budget"
+    },
+    "split_count_ceiling": {
+      "threshold_ms": 120,
+      "basis": "existing capacity budget"
+    },
+    "view_count_ceiling": {
+      "threshold_ms": 120,
+      "basis": "existing capacity budget"
+    },
+    "paste_size_ceiling": {
+      "threshold_ms": 150,
+      "basis": "existing capacity budget"
+    }
+  },
+  "probe_measurements": {
+    "editor_scroll_frame_120hz": {
+      "probe": "frame_metrics",
+      "threshold_ms": 8.33,
+      "p99_budget_ms": 12
+    },
+    "editor_scroll_event_to_tessellation": {
+      "probe": "realistic_frame_metrics",
+      "threshold_ms": 8.33,
+      "p99_budget_ms": 12
+    },
+    "search_workflow_active_dispatch": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 50
+    },
+    "search_workflow_active_first_result": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 100
+    },
+    "search_workflow_active_first_render": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 120
+    },
+    "search_workflow_active_completion": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 500
+    },
+    "search_workflow_current_dispatch": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 50
+    },
+    "search_workflow_current_first_result": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 100
+    },
+    "search_workflow_current_first_render": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 120
+    },
+    "search_workflow_current_completion": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 500
+    },
+    "search_workflow_all_dispatch": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 50
+    },
+    "search_workflow_all_first_result": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 100
+    },
+    "search_workflow_all_first_render": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 120
+    },
+    "search_workflow_all_completion": {
+      "probe": "search_workflow_metrics",
+      "threshold_ms": 500
     }
   }
 }
