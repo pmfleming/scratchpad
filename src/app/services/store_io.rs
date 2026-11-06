@@ -11,152 +11,118 @@ pub(crate) fn write_atomic_with<F>(path: &Path, write: F) -> io::Result<()>
 where
     F: FnOnce(&mut fs::File) -> io::Result<()>,
 {
-    let temp_path = temp_path_for(path);
-    let mut file = fs::File::create(&temp_path).inspect_err(|error| {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    // Each writer owns one same-filesystem stage. Dropping it cleans up on
+    // every early return, including a failed replacement and unwinding.
+    let mut stage = tempfile::NamedTempFile::new_in(parent).inspect_err(|error| {
         diagnostics::record_io_error_with_details(
             "atomic_write_create_temp",
             Some(path),
             "store_io::write_atomic_with",
-            &error,
-            [("temp_path", temp_path.display().to_string())],
+            error,
+            [("temp_directory", parent.display().to_string())],
         );
     })?;
-    if let Err(error) = write(&mut file) {
-        diagnostics::record_io_error_with_details(
-            "atomic_write_content",
-            Some(path),
-            "store_io::write_atomic_with",
-            &error,
-            [("temp_path", temp_path.display().to_string())],
-        );
-        drop(file);
-        let _ = remove_file_if_exists(&temp_path);
-        return Err(error);
-    }
-    if let Err(error) = file.flush() {
-        diagnostics::record_io_error_with_details(
-            "atomic_write_flush",
-            Some(path),
-            "store_io::write_atomic_with",
-            &error,
-            [("temp_path", temp_path.display().to_string())],
-        );
-        drop(file);
-        let _ = remove_file_if_exists(&temp_path);
-        return Err(error);
-    }
-    if let Err(error) = file.sync_all() {
-        diagnostics::record_io_error_with_details(
-            "atomic_write_sync",
-            Some(path),
-            "store_io::write_atomic_with",
-            &error,
-            [("temp_path", temp_path.display().to_string())],
-        );
-        drop(file);
-        let _ = remove_file_if_exists(&temp_path);
-        return Err(error);
-    }
-    drop(file);
+    let mut operation = "atomic_write_content";
+    (|| {
+        write(stage.as_file_mut())?;
+        operation = "atomic_write_flush";
+        stage.as_file_mut().flush()?;
+        operation = "atomic_write_sync";
+        stage.as_file().sync_all()
+    })()
+    .inspect_err(|error| record_atomic_error(operation, path, stage.path(), error))?;
 
-    if let Err(error) = replace_file(&temp_path, path) {
-        diagnostics::record_io_error_with_details(
+    // persist replaces atomically, without deleting the destination first.
+    stage.persist(path).map_err(|failure| {
+        record_atomic_error(
             "atomic_write_replace",
-            Some(path),
-            "store_io::write_atomic_with",
-            &error,
-            [("temp_path", temp_path.display().to_string())],
+            path,
+            failure.file.path(),
+            &failure.error,
         );
-        let _ = remove_file_if_exists(&temp_path);
-        return Err(error);
-    }
-
+        failure.error
+    })?;
     Ok(())
 }
 
-fn temp_path_for(path: &Path) -> std::path::PathBuf {
-    path.with_extension(format!(
-        "{}.write",
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("tmp")
-    ))
-}
-
-fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
-    // On Windows, `std::fs::rename` uses MoveFileExW with replace semantics.
-    // Do not delete `to` first: if replacement fails, the user's file must
-    // remain intact, and there must not be a brief destination-missing window
-    // where another process with the user's filesystem rights can substitute it.
-    fs::rename(from, to)
-}
-
-pub(crate) fn remove_file_if_exists(path: &Path) -> io::Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            diagnostics::record_io_error(
-                "remove_file_if_exists",
-                Some(path),
-                "store_io::remove_file_if_exists",
-                &error,
-            );
-            Err(error)
-        }
-    }
+fn record_atomic_error(operation: &'static str, path: &Path, stage: &Path, error: &io::Error) {
+    diagnostics::record_io_error_with_details(
+        operation,
+        Some(path),
+        "store_io::write_atomic_with",
+        error,
+        [("temp_path", stage.display().to_string())],
+    );
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{temp_path_for, write_atomic_with};
-    use std::fs;
-    use std::io::{self, Write};
+    use super::{write_atomic, write_atomic_with};
+    use std::{
+        fs,
+        io::{self, Write},
+    };
 
     #[test]
-    fn write_atomic_with_leaves_existing_target_when_replace_fails() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("session.json");
-        fs::write(&path, b"old").unwrap();
-        let temp_path = temp_path_for(&path);
-
-        let error = write_atomic_with(&path, |file| {
-            file.write_all(b"new")?;
-            fs::rename(&temp_path, directory.path().join("moved-temp"))?;
-            Ok(())
-        })
-        .unwrap_err();
-
-        assert_eq!(error.kind(), io::ErrorKind::NotFound);
-        assert_eq!(fs::read(&path).unwrap(), b"old");
+    fn failed_atomic_writes_preserve_the_target_and_remove_staging_files() {
+        for replace_failure in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("state");
+            let original = if replace_failure {
+                fs::create_dir(&path).unwrap();
+                path.join("original")
+            } else {
+                path.clone()
+            };
+            fs::write(&original, b"old").unwrap();
+            let error = write_atomic_with(&path, |file| {
+                file.write_all(b"partial")?;
+                if replace_failure {
+                    Ok(())
+                } else {
+                    Err(io::Error::other("injected write failure"))
+                }
+            })
+            .unwrap_err();
+            if !replace_failure {
+                assert_eq!(error.kind(), io::ErrorKind::Other);
+            }
+            assert_eq!(fs::read(original).unwrap(), b"old");
+            assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+            let invoked = std::cell::Cell::new(false);
+            assert!(
+                write_atomic_with(&directory.path().join("missing/state"), |_| {
+                    invoked.set(true);
+                    Ok(())
+                })
+                .is_err()
+            );
+            assert!(!invoked.get());
+        }
     }
 
     #[test]
-    fn write_atomic_with_removes_temp_file_after_write_failure() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("session.json");
-        fs::write(&path, b"old").unwrap();
-        let temp_path = temp_path_for(&path);
-
-        let error = write_atomic_with(&path, |file| {
-            file.write_all(b"partial")?;
-            Err(io::Error::other("injected write failure"))
-        })
-        .unwrap_err();
-
-        assert_eq!(error.kind(), io::ErrorKind::Other);
-        assert_eq!(fs::read(&path).unwrap(), b"old");
-        assert!(!temp_path.exists());
-    }
-
-    #[test]
-    fn write_atomic_with_replaces_existing_target() {
+    fn overlapping_atomic_writers_publish_independent_complete_contents() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.toml");
+        let stale = path.with_extension("toml.write");
         fs::write(&path, b"old").unwrap();
-
-        write_atomic_with(&path, |file| file.write_all(b"new")).unwrap();
-
-        assert_eq!(fs::read(&path).unwrap(), b"new");
+        fs::write(&stale, b"untouched").unwrap();
+        // Nested calls deterministically overlap staging lifetimes, without a
+        // thread scheduler or timing assumption.
+        write_atomic_with(&path, |file| {
+            file.write_all(b"first")?;
+            write_atomic(&path, b"second")?;
+            assert_eq!(fs::read(&path)?, b"second");
+            file.write_all(b" tail")
+        })
+        .unwrap();
+        assert_eq!(fs::read(path).unwrap(), b"first tail");
+        assert_eq!(fs::read(stale).unwrap(), b"untouched");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
     }
 }
