@@ -29,7 +29,14 @@ fn editor_keeps_tab_and_pins_only_bounded_synchronous_input() {
         (key(true), true),
         (key(false), false),
         (egui::Event::PointerGone, false),
-        (egui::Event::Ime(egui::ImeEvent::Commit("λ".into())), false),
+        (egui::Event::Ime(egui::ImeEvent::Commit("λ".into())), true),
+        (
+            egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "λ".into(),
+                active_range_chars: None,
+            }),
+            false,
+        ),
         (egui::Event::Paste("x".repeat(BULK_TEXT_BYTES)), false),
     ] {
         assert_eq!(

@@ -19,7 +19,9 @@ impl InputRead {
         let mut needs = Self::default();
         for event in events {
             match event {
-                Event::Text(text) | Event::Paste(text) => {
+                Event::Text(text)
+                | Event::Paste(text)
+                | Event::Ime(eframe::egui::ImeEvent::Commit(text)) => {
                     needs.read = true;
                     needs.bulk |= text.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES;
                 }
