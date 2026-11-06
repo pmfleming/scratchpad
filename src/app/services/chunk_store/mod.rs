@@ -2,7 +2,9 @@
 mod rebind;
 pub(crate) use rebind::Rebind;
 mod budget;
+mod cache;
 pub use budget::{FailureRamBudget, total_memory};
+use cache::Cache;
 mod import;
 mod readers;
 pub(crate) use import::{ImportContext, Utf8Chunks};
@@ -116,51 +118,6 @@ enum State {
         loading: bool,
     },
 }
-#[derive(Default)]
-struct Cache {
-    loaded: HashMap<u64, (u64, Arc<String>)>,
-    order: VecDeque<u64>,
-    bytes: usize,
-    owners: HashMap<u64, usize>,
-    limit: usize,
-    per_owner: usize,
-}
-impl Cache {
-    fn remove(&mut self, id: u64) {
-        if let Some((owner, body)) = self.loaded.remove(&id) {
-            self.bytes -= body.len();
-            if let Some(bytes) = self.owners.get_mut(&owner) {
-                *bytes -= body.len();
-                if *bytes == 0 {
-                    self.owners.remove(&owner);
-                }
-            }
-        }
-    }
-    fn insert(&mut self, id: u64, owner: u64, body: Arc<String>) {
-        self.remove(id);
-        self.order.retain(|&key| key != id);
-        self.bytes += body.len();
-        *self.owners.entry(owner).or_default() += body.len();
-        self.loaded.insert(id, (owner, body));
-        self.order.push_back(id);
-        self.evict();
-    }
-    fn evict(&mut self) {
-        let mut kept = VecDeque::new();
-        while let Some(id) = self.order.pop_front() {
-            let Some((owner, _)) = self.loaded.get(&id) else {
-                continue;
-            };
-            if self.bytes > self.limit || self.owners[owner] > self.per_owner {
-                self.remove(id);
-            } else {
-                kept.push_back(id);
-            }
-        }
-        self.order = kept;
-    }
-}
 impl ChunkStoreHandle {
     pub(crate) fn open(path: &Path) -> io::Result<Self> {
         let (prefetch, incoming) = std::sync::mpsc::sync_channel::<Weak<Chunk>>(2);
@@ -214,11 +171,7 @@ impl ChunkStoreHandle {
             wake: Mutex::new(None),
             handles: Mutex::default(),
             restored: Mutex::default(),
-            cache: Mutex::new(Cache {
-                limit: 16 * 1024 * 1024,
-                per_owner: 4 * 1024 * 1024,
-                ..Cache::default()
-            }),
+            cache: Mutex::new(Cache::new(16 * 1024 * 1024, 4 * 1024 * 1024)),
         }))
     }
     #[must_use]
@@ -344,21 +297,14 @@ impl ChunkStoreHandle {
             .cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .loaded
-            .values()
-            .filter(|(id, _)| *id == owner)
-            .count()
+            .owner_loaded(owner)
     }
     pub(crate) fn owner_cached_bytes(&self, owner: u64) -> usize {
         self.0
             .cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .loaded
-            .values()
-            .filter(|(id, _)| *id == owner)
-            .map(|(_, body)| body.len())
-            .sum()
+            .owner_bytes(owner)
     }
     pub(crate) fn owner_cache_limit(&self) -> usize {
         self.0
