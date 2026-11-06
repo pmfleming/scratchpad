@@ -45,3 +45,47 @@ fn analyze_piece_tree_text_returns_metadata_and_cached_length() {
     );
     assert_eq!(format.line_ending_counts.lf, 2);
 }
+
+#[test]
+fn replacement_metadata_matches_materialized_unicode_and_boundary_edits() {
+    use super::{buffer_text_metadata, metadata_after_replacements};
+    use crate::app::domain::BufferState;
+    for original in ["ab\r\n東京z", "α\rβ\nc", ""] {
+        let buffer = BufferState::new("metadata".into(), original.into(), None);
+        let len = original.chars().count();
+        let mut cases = vec![
+            vec![],
+            vec![(0..len, "\nnew\r\n\u{200b}é".to_owned())],
+            vec![(0..0, "\r".to_owned()), (0..0, "\n".to_owned())],
+        ];
+        if len >= 4 {
+            cases.push(vec![
+                (len - 1..len, "\x1b\u{0085}".into()),
+                (1..3, "\n".into()),
+            ]);
+        }
+        for edits in cases {
+            let mut chars: Vec<_> = original.chars().collect();
+            for (range, text) in &edits {
+                chars.splice(range.clone(), text.chars());
+            }
+            let text: String = chars.into_iter().collect();
+            let actual = metadata_after_replacements(
+                buffer.document().piece_tree(),
+                &edits,
+                &mut buffer.format.clone(),
+            )
+            .unwrap();
+            let expected = buffer_text_metadata(&text, &mut buffer.format.clone());
+            assert_eq!(actual, expected, "{original:?} {edits:?}");
+        }
+        assert!(
+            metadata_after_replacements(
+                buffer.document().piece_tree(),
+                &[(len + 1..len + 1, String::new())],
+                &mut buffer.format.clone()
+            )
+            .is_err()
+        );
+    }
+}

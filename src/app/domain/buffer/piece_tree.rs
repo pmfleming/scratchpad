@@ -134,7 +134,7 @@ enum PieceTreeTextStorage<'a> {
 }
 
 impl<'a> PieceTreeText<'a> {
-    fn borrowed(text: &'a str) -> Self {
+    pub(crate) fn borrowed(text: &'a str) -> Self {
         Self {
             storage: PieceTreeTextStorage::Borrowed(text),
         }

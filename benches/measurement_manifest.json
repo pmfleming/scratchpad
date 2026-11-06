@@ -343,7 +343,8 @@
       "metric": "/phase_elapsed_ns/cold_read_p99_ns",
       "max": 4000000,
       "unit": "ns",
-      "basis": "storage-plan cold-read gate or existing session interaction limit"
+      "basis": "storage-plan cold-read gate or existing session interaction limit",
+      "min_independent_launches": 3
     },
     "aged_store_save": {
       "metric": "/elapsed_ns",

@@ -2,8 +2,8 @@
 use super::{BufferState, TextDocument, TextFormatMetadata};
 use crate::app::capacity_metrics::{PreparationPhase, record_preparation};
 use crate::app::domain::buffer::{
-    BufferTextMetadata, HistoryToken, PieceSource, normalize_inserted_text_line_endings,
-    try_analyze_piece_tree_text,
+    BufferTextMetadata, HistoryToken, PieceSource, metadata_after_replacements,
+    normalize_inserted_text_line_endings, try_analyze_piece_tree_text,
 };
 use crate::app::domain::{CharCursor, CursorRange};
 use std::{
@@ -87,6 +87,8 @@ impl PrepareTextRequest {
             }
         }
         record_preparation(PreparationPhase::Normalize, normalization.elapsed());
+        let replacement_base = (self.transform.is_none() && self.history_target.is_none())
+            .then(|| self.document.snapshot());
         let mutation = Instant::now();
         let next = if let Some((changes, _, transform)) = self.transform.take() {
             changes_document = changes;
@@ -143,7 +145,9 @@ impl PrepareTextRequest {
         self.document.piece_tree_mut().clear_anchors();
         record_preparation(PreparationPhase::Mutate, mutation.elapsed());
         let inspection = Instant::now();
-        let metadata = if changes_document {
+        let metadata = if let Some(base) = replacement_base {
+            metadata_after_replacements(base.piece_tree(), &self.replacements, &mut self.format)?
+        } else if changes_document {
             try_analyze_piece_tree_text(self.document.piece_tree(), &mut self.format)?.metadata
         } else {
             self.copy_metadata.take().expect("copy metadata captured")
@@ -387,6 +391,47 @@ impl PreparedText {
 mod tests {
     use super::*;
     use crate::app::services::session_store::SessionStore;
+    #[test]
+    fn preparation_inspects_owned_input_without_reading_newly_sealed_bodies() {
+        let root = tempfile::tempdir().unwrap();
+        let store = SessionStore::new(root.path().into());
+        let handle = store.chunk_store_handle().unwrap();
+        handle.set_limits(0, 0);
+        let mut buffer = BufferState::new("paste".into(), "base".into(), None);
+        buffer.document.bind_store(handle.clone()).unwrap();
+        let text = crate::profile::fixtures::text(40 * 1024 * 1024, 123);
+        assert!(buffer.queue_text_preparation(
+            vec![(0..4, text)],
+            CursorRange::default(),
+            None,
+            PieceSource::Paste,
+            None,
+        ));
+        let before = handle.epoch().read_count();
+        let prepared = buffer
+            .take_text_preparation()
+            .unwrap()
+            .prepare_with_store(Some(handle.clone()))
+            .unwrap();
+        assert!(
+            handle.epoch().read_count() - before <= 2,
+            "preparation must not read back the pasted store bodies"
+        );
+        let expected = try_analyze_piece_tree_text(
+            prepared.document.piece_tree(),
+            &mut prepared.format.clone(),
+        )
+        .unwrap()
+        .metadata;
+        assert_eq!(prepared.metadata, expected);
+        assert!(buffer.install_prepared_text(prepared).is_ok());
+        assert_eq!(buffer.document.piece_tree().len_bytes(), 40 * 1024 * 1024);
+        buffer.document.undo_last_operation().unwrap();
+        assert_eq!(buffer.text(), "base");
+        buffer.document.redo_last_operation().unwrap();
+        assert_eq!(buffer.document.piece_tree().len_bytes(), 40 * 1024 * 1024);
+    }
+
     #[test]
     fn prepared_unicode_is_atomic_undoable_bound_and_scan_preserves_the_viewport_cache() {
         let root = tempfile::tempdir().unwrap();

@@ -138,6 +138,40 @@ pub(crate) fn try_analyze_piece_tree_text(
     Ok(PieceTreeTextAnalysis { metadata, length })
 }
 
+/// Inspect the logical replacement result using the original spans and the
+/// already-owned normalized input. Newly sealed bodies need not be read back.
+pub(crate) fn metadata_after_replacements(
+    tree: &PieceTreeLite,
+    replacements: &[(std::ops::Range<usize>, String)],
+    format: &mut TextFormatMetadata,
+) -> std::io::Result<BufferTextMetadata> {
+    let end = tree.len_chars();
+    let mut previous_end = 0;
+    for (range, _) in replacements.iter().rev() {
+        if range.start < previous_end || range.start > range.end || range.end > end {
+            return Err(std::io::Error::other("invalid replacement metadata ranges"));
+        }
+        previous_end = range.end;
+    }
+    let final_range = end..end;
+    let mut previous_end = 0;
+    let spans = replacements
+        .iter()
+        .rev()
+        .map(|(range, text)| (range, text.as_str()))
+        .chain(std::iter::once((&final_range, "")))
+        .flat_map(|(range, text)| {
+            let original = tree
+                .try_spans_for_range(previous_end..range.start)
+                .map(|span| span.map(|span| span.text));
+            previous_end = range.end;
+            original.chain(std::iter::once(Ok(super::PieceTreeText::borrowed(text))))
+        });
+    let inspection = TextInspection::try_inspect_span_refs(spans)?;
+    format.apply_inspection(&inspection);
+    Ok(build_buffer_text_metadata(inspection, format, false))
+}
+
 fn build_buffer_text_metadata(
     inspection: TextInspection,
     format: &TextFormatMetadata,

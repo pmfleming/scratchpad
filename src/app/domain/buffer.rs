@@ -15,7 +15,7 @@ pub(crate) use analysis::display_line_count_from_piece_tree;
 pub(crate) use analysis::{
     BufferTextMetadata, StreamedTextInspection, StreamingTextInspector, buffer_text_metadata,
     buffer_text_metadata_from_piece_tree, detected_text_format_and_metadata,
-    normalize_inserted_text_line_endings, try_analyze_piece_tree_text,
+    metadata_after_replacements, normalize_inserted_text_line_endings, try_analyze_piece_tree_text,
 };
 pub use analysis::{
     EncodingSource, LineEndingCounts, LineEndingStyle, TextArtifactSummary, TextFormatMetadata,
