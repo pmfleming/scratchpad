@@ -1,6 +1,8 @@
 use super::{SearchRequest, SearchResult, SearchTargetSnapshot};
 use crate::app::app_state::search_state::SearchStatus;
-use crate::app::app_state::search_state::fragments::search_target_ranges;
+use crate::app::app_state::search_state::fragments::{
+    intra_buffer_parallelism, search_target_ranges,
+};
 use crate::app::app_state::search_state::helpers::SearchResultAccumulator;
 use crate::app::services::search::SearchProgram;
 use std::collections::HashMap;
@@ -11,7 +13,6 @@ use std::thread;
 
 const SEARCH_TARGET_PARALLELISM_CAP: usize = 8;
 const SEARCH_TARGET_PARALLELISM_MIN_TARGETS: usize = 4;
-const INTRA_BUFFER_PARALLELISM_CAP: usize = 8;
 
 struct TargetSearchOutcome {
     target_index: usize,
@@ -289,12 +290,6 @@ fn search_target_parallelism(target_count: usize) -> usize {
             parallelism.get().min(SEARCH_TARGET_PARALLELISM_CAP)
         })
         .min(target_count)
-}
-
-fn intra_buffer_parallelism() -> usize {
-    thread::available_parallelism()
-        .map_or(1, |p| p.get().min(INTRA_BUFFER_PARALLELISM_CAP))
-        .max(1)
 }
 
 #[cfg(test)]

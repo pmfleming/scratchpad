@@ -12,6 +12,12 @@ use std::thread;
 pub(super) const SEARCH_FRAGMENT_CHUNK_CHARS: usize = 256 * 1024;
 const INTRA_BUFFER_PARALLELISM_MIN_CHUNKS: usize = 4;
 
+pub(super) fn intra_buffer_parallelism() -> usize {
+    thread::available_parallelism()
+        .map_or(1, |p| p.get().min(8))
+        .max(1)
+}
+
 struct FragmentSearchContext<'a> {
     snapshot: &'a DocumentSnapshot,
     program: &'a SearchProgram,
@@ -115,107 +121,142 @@ fn search_fragmented(
     context: FragmentSearchContext<'_>,
     range: Range<usize>,
 ) -> Option<Vec<Range<usize>>> {
-    let mut plan = fragment_search_plan(&context, range);
+    let plan = fragment_search_plan(&context, range);
     let final_boundary = plan.final_boundary;
-    let mut matches = Vec::new();
-    loop {
-        if context.latest_generation.load(Ordering::Relaxed) != context.generation {
-            return None;
-        }
-        // Bound lookahead so planning does not evict the entire file before matching.
-        let chunks: Vec<_> = plan.chunks.by_ref().take(8).collect();
-        if chunks.is_empty() {
-            break;
-        }
-        capacity_metrics::record_search_chunks(chunks.len());
-        matches.extend(process_chunks_concurrent(
-            chunks,
-            context.intra_parallelism,
-            context.generation,
-            context.latest_generation,
-            |chunk| {
-                let (window_text, window_offset) = context
-                    .snapshot
-                    .try_search_text(Some(chunk.window_range.clone()))
-                    .ok()?;
-                let outcome = search::search_program_interruptible(
-                    window_text.as_ref(),
-                    context.program,
-                    || context.latest_generation.load(Ordering::Relaxed) == context.generation,
-                )?;
-                debug_assert!(outcome.error.is_none());
-                Some(
-                    outcome
-                        .matches
-                        .into_iter()
-                        .filter_map(|matched| {
-                            let global_start = window_offset + matched.start;
-                            let global_end = window_offset + matched.end;
-                            let in_core = global_start >= chunk.core_range.start
-                                && global_start < chunk.core_range.end;
-                            let at_final_boundary = final_boundary.is_some_and(|end| {
-                                chunk.core_range.end == end && global_start == end
-                            });
-                            (in_core || at_final_boundary).then_some(global_start..global_end)
-                        })
-                        .collect(),
-                )
-            },
-        )?);
-    }
-    Some(matches)
+    process_chunks_concurrent(
+        plan.chunks,
+        context.intra_parallelism,
+        context.generation,
+        context.latest_generation,
+        |chunk| {
+            let (window_text, window_offset) = context
+                .snapshot
+                .try_search_text(Some(chunk.window_range.clone()))
+                .ok()?;
+            let outcome = search::search_program_interruptible(
+                window_text.as_ref(),
+                context.program,
+                || context.latest_generation.load(Ordering::Relaxed) == context.generation,
+            )?;
+            debug_assert!(outcome.error.is_none());
+            Some(
+                outcome
+                    .matches
+                    .into_iter()
+                    .filter_map(|matched| {
+                        let start = window_offset + matched.start;
+                        let end = window_offset + matched.end;
+                        let in_core = chunk.core_range.contains(&start);
+                        let at_final_boundary = final_boundary.is_some_and(|boundary| {
+                            chunk.core_range.end == boundary && start == boundary
+                        });
+                        (in_core || at_final_boundary).then_some(start..end)
+                    })
+                    .collect(),
+            )
+        },
+    )
+}
+
+fn next_chunk_batch(chunks: &mut impl Iterator<Item = DocumentChunk>) -> Vec<DocumentChunk> {
+    // Planning and text loading stay bounded to the same eight windows.
+    let batch: Vec<_> = chunks.take(8).collect();
+    capacity_metrics::record_search_chunks(batch.len());
+    batch
 }
 
 fn process_chunks_concurrent(
-    chunks: Vec<DocumentChunk>,
+    mut input: impl Iterator<Item = DocumentChunk>,
     intra_parallelism: usize,
     generation: u64,
     latest_generation: &AtomicU64,
     process: impl Fn(&DocumentChunk) -> Option<Vec<Range<usize>>> + Sync,
 ) -> Option<Vec<Range<usize>>> {
+    let stale = AtomicBool::new(false);
+    if !generation_is_current(generation, latest_generation, &stale) {
+        return None;
+    }
+    let mut chunks = next_chunk_batch(&mut input);
     if chunks.is_empty() {
         return Some(Vec::new());
     }
-
     let workers = intra_parallelism.min(chunks.len()).max(1);
     if workers == 1 || chunks.len() < INTRA_BUFFER_PARALLELISM_MIN_CHUNKS {
-        return process_chunk_batch(
-            &chunks,
-            generation,
-            latest_generation,
-            &AtomicBool::new(false),
-            &process,
-        )
-        .map(|matches| matches.into_iter().flatten().collect());
+        let mut matches = Vec::new();
+        loop {
+            for mut found in
+                process_chunk_batch(&chunks, generation, latest_generation, &stale, &process)?
+            {
+                matches.append(&mut found);
+            }
+            if !generation_is_current(generation, latest_generation, &stale) {
+                return None;
+            }
+            chunks = next_chunk_batch(&mut input);
+            if chunks.is_empty() {
+                return Some(matches);
+            }
+        }
     }
-
     capacity_metrics::record_search_intra_buffer_workers(workers);
-    let stale = AtomicBool::new(false);
-    let chunk_size = chunks.len().div_ceil(workers);
-    let per_worker = thread::scope(|scope| {
-        let handles = chunks
-            .chunks(chunk_size)
-            .map(|worker_chunks| {
-                scope.spawn(|| {
-                    process_chunk_batch(
-                        worker_chunks,
-                        generation,
-                        latest_generation,
-                        &stale,
-                        &process,
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
-
-        handles
-            .into_iter()
-            .filter_map(|handle| handle.join().ok().flatten())
-            .collect::<Vec<_>>()
-    });
-
-    generation_is_current(generation, latest_generation, &stale)
-        .then(|| flatten_worker_matches(per_worker))
+    // Reuse one scoped cohort for the whole target instead of spawning another
+    // cohort per eight windows. Each worker has at most one outstanding batch.
+    thread::scope(|scope| {
+        let mut channels = Vec::with_capacity(workers);
+        let mut handles = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            let (send, receive) = std::sync::mpsc::sync_channel::<Vec<DocumentChunk>>(0);
+            let (results, completed) = std::sync::mpsc::sync_channel(1);
+            let stale = &stale;
+            let process = &process;
+            handles.push(scope.spawn(move || {
+                while let Ok(chunks) = receive.recv() {
+                    let result =
+                        process_chunk_batch(&chunks, generation, latest_generation, stale, process);
+                    let failed = result.is_none();
+                    if results.send(result).is_err() || failed {
+                        break;
+                    }
+                }
+            }));
+            channels.push((send, completed));
+        }
+        let result = (|| {
+            let mut matches = Vec::new();
+            loop {
+                if !generation_is_current(generation, latest_generation, &stale) {
+                    return None;
+                }
+                let chunk_size = chunks.len().div_ceil(workers);
+                let batches = chunks.chunks(chunk_size);
+                let used = batches.len();
+                for ((send, _), batch) in channels.iter().zip(batches) {
+                    send.send(batch.to_vec()).ok()?;
+                }
+                // Receive in input order, regardless of worker completion order.
+                for (_, completed) in &channels[..used] {
+                    for mut found in completed.recv().ok()?? {
+                        matches.append(&mut found);
+                    }
+                }
+                if !generation_is_current(generation, latest_generation, &stale) {
+                    return None;
+                }
+                chunks = next_chunk_batch(&mut input);
+                if chunks.is_empty() {
+                    return Some(matches);
+                }
+            }
+        })();
+        // Release both sides before joining, including cancellation, read failure
+        // and panic paths; no worker can remain blocked sending a result.
+        drop(channels);
+        let mut joined = true;
+        for handle in handles {
+            joined &= handle.join().is_ok();
+        }
+        result.filter(|_| joined)
+    })
 }
 
 fn process_chunk_batch(
@@ -247,17 +288,69 @@ fn generation_is_current(
     !stale.load(Ordering::Relaxed) && latest_generation.load(Ordering::Relaxed) == generation
 }
 
-fn flatten_worker_matches(per_worker: Vec<Vec<Vec<Range<usize>>>>) -> Vec<Range<usize>> {
-    let total = per_worker.iter().flatten().map(Vec::len).sum();
-    let mut matches = Vec::with_capacity(total);
-    for mut chunk_matches in per_worker.into_iter().flatten() {
-        matches.append(&mut chunk_matches);
-    }
-    matches
-}
-
 #[cfg(test)]
 mod batching_tests {
+    use super::*;
+
+    fn chunks(count: usize) -> impl Iterator<Item = DocumentChunk> {
+        (0..count).map(|index| DocumentChunk {
+            core_range: index..index + 1,
+            window_range: index..index + 1,
+        })
+    }
+
+    #[test]
+    fn one_worker_cohort_preserves_order_across_many_bounded_batches() {
+        let threads = std::sync::Mutex::new(std::collections::HashSet::new());
+        let generation = AtomicU64::new(1);
+        let found = process_chunks_concurrent(chunks(37), 3, 1, &generation, |chunk| {
+            threads.lock().unwrap().insert(thread::current().id());
+            if chunk.core_range.start.is_multiple_of(8) {
+                thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Some(vec![chunk.core_range.clone()])
+        })
+        .unwrap();
+        assert_eq!(
+            found,
+            (0..37).map(|index| index..index + 1).collect::<Vec<_>>()
+        );
+        assert_eq!(threads.into_inner().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn failed_cancelled_or_panicked_batches_never_return_partial_completion() {
+        for failed_index in [0, 11, 36] {
+            let generation = AtomicU64::new(1);
+            assert!(
+                process_chunks_concurrent(chunks(37), 4, 1, &generation, |chunk| (chunk
+                    .core_range
+                    .start
+                    != failed_index)
+                    .then(|| vec![chunk.core_range.clone()]))
+                .is_none()
+            );
+        }
+        let generation = AtomicU64::new(1);
+        assert!(
+            process_chunks_concurrent(chunks(37), 4, 1, &generation, |chunk| {
+                if chunk.core_range.start == 11 {
+                    generation.store(2, Ordering::Relaxed);
+                }
+                Some(vec![chunk.core_range.clone()])
+            })
+            .is_none()
+        );
+        generation.store(1, Ordering::Relaxed);
+        assert!(
+            process_chunks_concurrent(chunks(37), 4, 1, &generation, |chunk| {
+                assert_ne!(chunk.core_range.start, 11, "injected worker panic");
+                Some(vec![chunk.core_range.clone()])
+            })
+            .is_none()
+        );
+    }
+
     #[test]
     fn bounded_planning_preserves_unicode_regex_and_nonoverlapping_plain_matches() {
         use super::*;

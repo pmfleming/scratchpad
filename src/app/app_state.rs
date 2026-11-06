@@ -41,6 +41,7 @@ pub use frame::prepare_context_before_first_frame;
 pub(crate) use runtime_state::{BackgroundIoState, FileWatchState, OpenFileDialogState};
 pub use search_state::SearchScope;
 pub(crate) use search_state::api as search_controller;
+pub(crate) use search_state::profile_snapshot_search;
 pub(crate) use search_state::replace as search_replace;
 pub(crate) use search_state::runtime as search_runtime;
 pub(crate) use search_state::visual as search_visual;

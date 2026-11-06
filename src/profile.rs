@@ -31,6 +31,14 @@ use support::{
     with_steady_state_app,
 };
 
+/// Complete production matching; UI publication has its own workflow probes.
+pub fn search_snapshot_ranges(
+    snapshot: &crate::app::domain::DocumentSnapshot,
+    program: &crate::app::services::search::SearchProgram,
+) -> Option<Vec<std::ops::Range<usize>>> {
+    crate::app::app_state::profile_snapshot_search(snapshot, program)
+}
+
 pub const KB: usize = 1024;
 pub const MB: usize = 1024 * KB;
 pub const GB: usize = 1024 * MB;

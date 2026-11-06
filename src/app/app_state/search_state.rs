@@ -25,6 +25,21 @@ pub(crate) use types::{
 };
 use worker::{SearchRequest, SearchResult, SearchTargetSnapshot, spawn_search_worker};
 
+/// The same matcher and worker policy used by a single production search target.
+pub(crate) fn profile_snapshot_search(
+    snapshot: &crate::app::domain::DocumentSnapshot,
+    program: &crate::app::services::search::SearchProgram,
+) -> Option<Vec<std::ops::Range<usize>>> {
+    fragments::search_target_ranges(
+        snapshot,
+        None,
+        program,
+        1,
+        &AtomicU64::new(1),
+        fragments::intra_buffer_parallelism(),
+    )
+}
+
 const SEARCH_PREVIEW_CACHE_LIMIT: usize = 1024;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]

@@ -6,7 +6,7 @@ use scratchpad::app::domain::{
 };
 use scratchpad::app::memory_budget::{self, MemoryBudgetSnapshot};
 use scratchpad::app::services::file_service::FileService;
-use scratchpad::app::services::search::{SearchMode, SearchOptions, SearchProgram, search_program};
+use scratchpad::app::services::search::{SearchMode, SearchOptions, SearchProgram};
 use scratchpad::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
 use scratchpad::profile::process_metrics::{ProcessMeasurement, ProcessSnapshot, process_snapshot};
 use scratchpad::profile::{
@@ -40,6 +40,7 @@ struct CapacityEvent {
     elapsed_ns: u128,
     background_completion_ns: Option<u128>,
     completed_workload_value: Option<usize>,
+    result_value: Option<usize>,
     measurement_scope: &'static str,
     measurement_contract: serde_json::Value,
     metrics: CapacityMetricsSnapshot,
@@ -107,7 +108,7 @@ fn contract(scenario: &str) -> serde_json::Value {
         "search_file_size_ceiling" => (
             "store",
             true,
-            "DocumentSnapshot::chunks_for_range/search_program",
+            "search_target_ranges/production_worker_policy",
         ),
         "paste_size_ceiling" => ("store", true, "ScratchpadApp::raw_input_hook/logic/ui"),
         _ => ("owned", false, "prepared_component"),
@@ -476,7 +477,13 @@ fn emit_search_file_size_sweep() {
         let snapshot = document.snapshot();
         let program = search_capacity_program();
         for repeat_index in 0..MEASUREMENT_REPETITIONS {
-            emit_prepared_step(
+            let mut measured_contract = contract("search_file_size_ceiling");
+            measured_contract["search_fixture_revision"] = serde_json::json!(3);
+            measured_contract["document_bytes"] = serde_json::json!(snapshot.len_bytes());
+            measured_contract["expected_matches"] = serde_json::json!(1);
+            measured_contract["completion_endpoint"] = serde_json::json!("all_ranges_returned");
+            assert_eq!(snapshot.len_bytes(), bytes);
+            emit_measured_step_with_contract(
                 StepDescriptor {
                     scenario: "search_file_size_ceiling",
                     scenario_label: "Store-backed search completion",
@@ -488,18 +495,12 @@ fn emit_search_file_size_sweep() {
                 },
                 repeat_index,
                 0,
+                "prepared_search_component_completion",
+                measured_contract,
                 || {
-                    let mut matches = 0;
-                    for chunk in
-                        snapshot.chunk_iter_for_range(0..snapshot.len_chars(), 256 * KB, 5, 5)
-                    {
-                        let (text, offset) = snapshot.search_text_cow(Some(chunk.window_range));
-                        matches += search_program(&text, &program)
-                            .matches
-                            .into_iter()
-                            .filter(|range| chunk.core_range.contains(&(offset + range.start)))
-                            .count();
-                    }
+                    let matches = scratchpad::profile::search_snapshot_ranges(&snapshot, &program)
+                        .expect("production search completed")
+                        .len();
                     assert_eq!(matches, 1);
                     matches
                 },
@@ -696,6 +697,7 @@ fn emit_recorded_step(
         elapsed_ns,
         background_completion_ns,
         completed_workload_value,
+        result_value: None,
         measurement_scope,
         measurement_contract: contract(step.scenario),
         metrics: capacity_metrics_snapshot(),
@@ -722,6 +724,25 @@ fn emit_measured_step(
     measurement_scope: &'static str,
     run: impl FnOnce() -> usize,
 ) {
+    let measured_contract = contract(step.scenario);
+    emit_measured_step_with_contract(
+        step,
+        repeat_index,
+        setup_elapsed_ns,
+        measurement_scope,
+        measured_contract,
+        run,
+    );
+}
+
+fn emit_measured_step_with_contract(
+    step: StepDescriptor,
+    repeat_index: usize,
+    setup_elapsed_ns: u128,
+    measurement_scope: &'static str,
+    measured_contract: serde_json::Value,
+    run: impl FnOnce() -> usize,
+) {
     started(&step, repeat_index);
     reset_capacity_metrics();
     memory_budget::reset();
@@ -732,9 +753,9 @@ fn emit_measured_step(
     let metrics = capacity_metrics_snapshot();
     let memory_budget_snapshot = memory_budget::snapshot();
     let process_after = process_snapshot();
-    let (status, note) = match result {
-        Ok(_) => ("ok", None),
-        Err(payload) => ("panic", Some(panic_message(payload))),
+    let (status, note, result_value) = match result {
+        Ok(value) => ("ok", None, Some(value)),
+        Err(payload) => ("panic", Some(panic_message(payload)), None),
     };
 
     let event = CapacityEvent {
@@ -750,8 +771,9 @@ fn emit_measured_step(
         elapsed_ns,
         background_completion_ns: None,
         completed_workload_value: None,
+        result_value,
         measurement_scope,
-        measurement_contract: contract(step.scenario),
+        measurement_contract: measured_contract,
         metrics,
         memory_budget: memory_budget_snapshot,
         working_set_bytes: process_after.working_set_bytes,
