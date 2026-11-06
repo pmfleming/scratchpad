@@ -320,10 +320,21 @@ impl PieceTreeStorage {
     }
 
     pub(super) fn pin_span(&self, span: ByteSpan, retain: bool) -> io::Result<TextPin> {
+        self.pin_span_with_owned(span, retain, false)
+    }
+
+    // Text extraction also needs strong references to owned chunks in logical order;
+    // mutation preflight only needs bodies whose residency depends on the cache.
+    fn pin_span_with_owned(
+        &self,
+        span: ByteSpan,
+        retain: bool,
+        include_owned: bool,
+    ) -> io::Result<TextPin> {
         let result = if let Some(cause) = self.read_fault() {
             Err(io::Error::other(cause))
         } else {
-            self.pin_span_inner(span, retain)
+            self.pin_span_inner(span, retain, include_owned)
         };
         if let Err(error) = &result
             && error.kind() != io::ErrorKind::Interrupted
@@ -339,7 +350,12 @@ impl PieceTreeStorage {
         result
     }
 
-    fn pin_span_inner(&self, span: ByteSpan, retain: bool) -> io::Result<TextPin> {
+    fn pin_span_inner(
+        &self,
+        span: ByteSpan,
+        retain: bool,
+        include_owned: bool,
+    ) -> io::Result<TextPin> {
         let start = usize::try_from(span.start_byte).map_err(io::Error::other)?;
         let len = usize::try_from(span.byte_len).map_err(io::Error::other)?;
         let end = start
@@ -382,7 +398,12 @@ impl PieceTreeStorage {
                             ..(end - chunk.logical_start).min(body.len()),
                     )
                     .ok_or_else(invalid)?;
-                    pin.bodies.push(body);
+                    // Owned RAM remains alive through the tree. Retaining its Arc
+                    // here would force a full tail copy during the following edit.
+                    // Stored bodies need a pin because their resident handle is weak.
+                    if include_owned || matches!(chunk.text, ChunkText::Stored(_)) {
+                        pin.bodies.push(body);
+                    }
                 }
             }
             _ => {
@@ -406,7 +427,12 @@ impl PieceTreeStorage {
                             ..(end - chunk.start_byte).min(body.len()),
                     )
                     .ok_or_else(invalid)?;
-                    pin.bodies.push(body);
+                    // Owned RAM remains alive through the tree. Retaining its Arc
+                    // here would force a full tail copy during the following edit.
+                    // Stored bodies need a pin because their resident handle is weak.
+                    if include_owned || matches!(chunk.text, ChunkText::Stored(_)) {
+                        pin.bodies.push(body);
+                    }
                 }
             }
         }
@@ -418,7 +444,7 @@ impl PieceTreeStorage {
         span: ByteSpan,
         retain: bool,
     ) -> io::Result<PieceTreeText<'_>> {
-        let pin = self.pin_span(span, retain)?;
+        let pin = self.pin_span_with_owned(span, retain, true)?;
         let start = span.start_byte as usize;
         let end = start + span.byte_len as usize;
         if start == end {
@@ -648,5 +674,55 @@ pub(super) fn add_byte_span(start_byte: usize, byte_len: usize) -> ByteSpan {
         start_byte: start_byte as u64,
         byte_len: byte_len as u64,
         char_len: byte_len as u64,
+    }
+}
+
+#[cfg(test)]
+mod pin_tests {
+    use super::*;
+    use crate::app::domain::buffer::PieceTreeLite;
+
+    #[test]
+    fn boundary_pin_does_not_force_tail_copy_but_real_snapshots_stay_immutable() {
+        let mut tree = PieceTreeLite::from_string(String::new());
+        let initial = "λ".repeat(4096);
+        tree.insert_with_source(0, &initial, PieceSource::Paste);
+        let ChunkText::Inline(tail) = &mut tree.storage.add.chunks.last_mut().unwrap().text else {
+            panic!("inline tail");
+        };
+        Arc::get_mut(tail).unwrap().reserve(16);
+        let original_pointer = tail.as_ptr();
+        let pin = tree.pin_range(tree.len_chars()..tree.len_chars()).unwrap();
+        assert!(pin.bodies.is_empty());
+        tree.insert_with_source(tree.len_chars(), "é", PieceSource::Paste);
+        let ChunkText::Inline(tail) = &tree.storage.add.chunks.last().unwrap().text else {
+            panic!("inline tail");
+        };
+        assert_eq!(tail.as_ptr(), original_pointer);
+        let snapshot = tree.clone();
+        tree.insert_with_source(tree.len_chars(), "東京", PieceSource::Paste);
+        assert_eq!(snapshot.extract_text(), format!("{initial}é"));
+        assert_eq!(tree.extract_text(), format!("{initial}é東京"));
+        drop(pin);
+    }
+
+    #[test]
+    fn owned_span_pins_still_reject_invalid_utf8_boundaries() {
+        let mut tree = PieceTreeLite::from_string(String::new());
+        tree.insert_with_source(0, "λ", PieceSource::Paste);
+        assert!(
+            tree.storage
+                .pin_span(
+                    ByteSpan {
+                        buffer: PieceBuffer::Add,
+                        start_byte: 1,
+                        byte_len: 1,
+                        char_len: 1
+                    },
+                    true
+                )
+                .is_err()
+        );
+        assert!(tree.read_fault().is_some());
     }
 }

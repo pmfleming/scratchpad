@@ -334,16 +334,21 @@ fn run_provenance_retained_memory_cycle(edit_count: usize) -> StepOutcome {
         );
     }
 
-    let provenance_entries = 0; // The unused provenance store has been removed.
+    let history_entries = document.operation_undo_depth();
+    assert_eq!(
+        history_entries, edit_count,
+        "the full edit history must remain available"
+    );
+    assert_eq!(document.piece_tree().len_bytes(), 2 * edit_count);
     StepOutcome {
-        result_value: black_box(provenance_entries),
+        result_value: black_box(history_entries),
         retained_live_bytes_before_teardown: Some(alloc_metrics::allocation_snapshot().live_bytes),
-        phase_elapsed_ns: serde_json::json!({}),
+        phase_elapsed_ns: serde_json::json!({"history_entries":history_entries,
+            "document_bytes":document.piece_tree().len_bytes(),
+            "history_byte_usage":document.history_byte_usage(),
+            "history_fixture_revision":2}),
         result_unit: "entries",
-        result_label: format!(
-            "{provenance_entries} provenance entries, {} history entries",
-            document.operation_undo_depth()
-        ),
+        result_label: format!("{history_entries} retained edit-history entries"),
         manifest_size_bytes: None,
         retained_file_chunks: None,
         file_chunk_cache_limit: None,
