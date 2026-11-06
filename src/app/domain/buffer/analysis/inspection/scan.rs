@@ -128,6 +128,15 @@ impl InspectionState {
                 self.record_cr();
             }
 
+            // Ordinary printable ASCII carries no metadata. Skip it a word at
+            // a time; controls and UTF-8 still use the exact scalar decoder.
+            if let Some(word) = bytes.get(index..index + 8)
+                && printable_ascii_word(word.try_into().unwrap())
+            {
+                index += 8;
+                continue;
+            }
+
             match byte {
                 b'\r' => self.pending_cr = true,
                 b'\n' => self.record_lf(),
@@ -179,6 +188,32 @@ impl InspectionState {
             ends_with_cr: self.ends_with_cr,
             ends_with_lf: self.ends_with_lf,
             has_bytes: self.seen_any,
+        }
+    }
+}
+
+fn printable_ascii_word(bytes: [u8; 8]) -> bool {
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    let word = u64::from_ne_bytes(bytes);
+    word & HIGH == 0
+        && word.wrapping_add(0x6060_6060_6060_6060) & HIGH == HIGH
+        && word.wrapping_add(0x0101_0101_0101_0101) & HIGH == 0
+}
+
+#[cfg(test)]
+mod fast_scan_tests {
+    use super::printable_ascii_word;
+
+    #[test]
+    fn every_byte_and_position_preserves_control_and_utf8_detection() {
+        for padding in [b' ', b'~', b'a'] {
+            for index in 0..8 {
+                for byte in 0..=255 {
+                    let mut word = [padding; 8];
+                    word[index] = byte;
+                    assert_eq!(printable_ascii_word(word), (b' '..=b'~').contains(&byte));
+                }
+            }
         }
     }
 }

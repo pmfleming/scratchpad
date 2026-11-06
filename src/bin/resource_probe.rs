@@ -458,14 +458,27 @@ fn prepare_tab_text(tab_count: usize) -> (Vec<String>, Vec<WorkspaceTab>) {
 }
 
 fn run_tab_build_cycle(prepared: &mut (Vec<String>, Vec<WorkspaceTab>)) -> StepOutcome {
+    let mut buffer_ns = 0;
+    let mut workspace_ns = 0;
+    let input_bytes: usize = prepared.0.iter().map(String::len).sum();
     prepared.1 = std::mem::take(&mut prepared.0)
         .into_iter()
         .enumerate()
         .map(|(index, text)| {
-            WorkspaceTab::new(BufferState::new(format!("tab_{index}.txt"), text, None))
+            let start = std::time::Instant::now();
+            let buffer = BufferState::new(format!("tab_{index}.txt"), text, None);
+            buffer_ns += start.elapsed().as_nanos();
+            let start = std::time::Instant::now();
+            let tab = WorkspaceTab::new(buffer);
+            workspace_ns += start.elapsed().as_nanos();
+            tab
         })
         .collect();
-    StepOutcome::items(black_box(prepared.1.len()))
+    let mut outcome = StepOutcome::items(black_box(prepared.1.len()));
+    outcome.phase_elapsed_ns = serde_json::json!({
+        "buffer_construction_ns":buffer_ns,"workspace_construction_ns":workspace_ns,
+        "input_bytes":input_bytes});
+    outcome
 }
 
 fn run_search_app_result_cycle(tab_count: usize) -> StepOutcome {
