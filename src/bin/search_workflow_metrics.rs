@@ -3,6 +3,9 @@ use scratchpad::profile::search_workflow_sample;
 use serde_json::{Value, json};
 
 fn main() {
+    let manifest: Value =
+        serde_json::from_str(include_str!("../../benches/measurement_manifest.json"))
+            .expect("valid project measurement manifest");
     let repetitions = std::env::var("SCRATCHPAD_WORKFLOW_REPETITIONS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -11,24 +14,29 @@ fn main() {
     let max_targets = std::env::var("SCRATCHPAD_WORKFLOW_MAX_TARGETS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(10_000)
+        .unwrap_or(usize::MAX)
         .max(1);
     let mut rows = Vec::new();
-    for (mode, targets, bytes) in [
-        ("active", 1, 1024 * 1024),
-        ("current", 32, 16384),
-        ("all", 10_000, 16384),
-    ] {
-        let targets = targets.min(max_targets);
+    for mode in ["active", "current", "all"] {
+        let workload = &manifest["workflow_workloads"][mode];
+        let size = |key: &str| {
+            workload[key]
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .expect("positive workflow fixture size")
+        };
+        let targets = size("targets").min(max_targets);
+        let bytes = size("bytes_per_target");
         let samples: Vec<Value> = (0..repetitions)
             .map(|_| search_workflow_sample(mode, targets, bytes))
             .collect();
-        for (operation, budget) in [
-            ("dispatch", 50.0),
-            ("first_result", 100.0),
-            ("first_render", 120.0),
-            ("completion", 500.0),
-        ] {
+        for operation in ["dispatch", "first_result", "first_render", "completion"] {
+            let key = format!("search_workflow_{mode}_{operation}");
+            let budget = manifest["probe_measurements"][&key]["threshold_ms"]
+                .as_f64()
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .expect("positive project-owned workflow budget");
             let raw: Vec<f64> = samples
                 .iter()
                 .map(|sample| sample[operation].as_f64().expect("measured operation") / 1e6)
@@ -37,10 +45,9 @@ fn main() {
             sorted.sort_by(f64::total_cmp);
             let median = (sorted[sorted.len() / 2] + sorted[(sorted.len() - 1) / 2]) / 2.0;
             let maximum = sorted[sorted.len() - 1];
-            let key = format!("search_workflow_{mode}_{operation}");
             rows.push(json!({"name":format!("{key}/{targets}"), "benchmark_key":key,
                 "workload_family":"search", "measurement_status":"valid", "threshold_authoritative":true,
-                "threshold_source":"src/bin/search_workflow_metrics.rs", "threshold_ms":budget,
+                "threshold_source":"benches/measurement_manifest.json", "threshold_ms":budget,
                 "measurement_scope":format!("query_command_to_{operation}"),
                 "measurement_role":"promise_health", "present_included":false,
                 "omitted_work":["GPU upload and submission", "compositor and display present"],

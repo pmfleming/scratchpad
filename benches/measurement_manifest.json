@@ -1,5 +1,10 @@
 {
   "version": 1,
+  "workflow_workloads": {
+    "active": { "targets": 1, "bytes_per_target": 1048576 },
+    "current": { "targets": 32, "bytes_per_target": 16384 },
+    "all": { "targets": 10000, "bytes_per_target": 16384 }
+  },
   "probes": {
     "resource_probe": [
       "large_utf8_load_peak_memory",

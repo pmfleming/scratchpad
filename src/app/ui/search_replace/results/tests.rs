@@ -3,10 +3,7 @@ use crate::app::{
     app_state::test_support::test_app,
     fonts::{EditorFontPreset, EditorFontSelection, apply_editor_fonts},
 };
-use egui_kittest::{
-    Harness,
-    kittest::Queryable,
-};
+use egui_kittest::{Harness, kittest::Queryable};
 
 struct State {
     app: ScratchpadApp,
