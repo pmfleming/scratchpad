@@ -196,6 +196,10 @@ fn emit_measured_step(
         measurement_scope,
         measurement_contract: {
             let mut contract = match step.scenario {
+                "search_app_result_tracking" => {
+                    serde_json::json!({"text_backing":"owned","production_path":true,
+                    "code_path":"SearchResultFixture/ScratchpadApp::poll_search"})
+                }
                 "production_paste" | "ui_during_store_writes" => {
                     scratchpad::profile::fixtures::contract(
                         "store",

@@ -1,6 +1,8 @@
 pub mod fixtures;
 pub mod process_metrics;
 mod render;
+mod resource_fixtures;
+pub use resource_fixtures::SearchResultFixture;
 mod support;
 mod workflows;
 pub use workflows::{run_file_first_render_preparation, search_workflow_sample};

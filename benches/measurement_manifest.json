@@ -223,7 +223,8 @@
       "metric": "/elapsed_ns",
       "max": 180000000,
       "unit": "ns",
-      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+      "measurement_scope": "prepared_operation"
     },
     "edited_buffer_search_preview_rendering": {
       "metric": "/elapsed_ns",

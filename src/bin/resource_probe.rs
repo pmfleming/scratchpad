@@ -24,9 +24,7 @@ use scratchpad::app::ui::editor_content::native_editor::{
     CharCursor, CursorRange, EditOperation, OperationRecord,
 };
 use scratchpad::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
-use scratchpad::profile::{
-    run_many_file_lazy_open_profile, run_search_all_tabs_profile, run_tab_strip_frame_profile,
-};
+use scratchpad::profile::{run_many_file_lazy_open_profile, run_tab_strip_frame_profile};
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 
@@ -491,9 +489,17 @@ fn run_tab_build_cycle(prepared: &mut (Vec<String>, Vec<WorkspaceTab>)) -> StepO
     outcome
 }
 
-fn run_search_app_result_cycle(tab_count: usize) -> StepOutcome {
-    let match_count = run_search_all_tabs_profile(tab_count, 4 * KB, 1);
-    StepOutcome::items(black_box(match_count))
+fn run_search_app_result_cycle(
+    fixture: &mut scratchpad::profile::SearchResultFixture,
+) -> StepOutcome {
+    let sample = fixture.run();
+    let mut outcome = StepOutcome::items(black_box(
+        sample["result_matches"].as_u64().unwrap() as usize
+    ));
+    outcome.phase_elapsed_ns = sample;
+    outcome.retained_live_bytes_before_teardown =
+        Some(alloc_metrics::allocation_snapshot().live_bytes);
+    outcome
 }
 
 fn run_many_file_lazy_open_cycle(paths: &[PathBuf]) -> StepOutcome {

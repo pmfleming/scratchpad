@@ -181,7 +181,7 @@ fn emit_search_resource_tracking() {
         run_search_target_count_cycle,
     );
 
-    emit_workload_steps(
+    emit_prepared_workload_steps(
         [128usize, 1_000],
         WorkloadSpec {
             scenario: "search_app_result_tracking",
@@ -190,6 +190,7 @@ fn emit_search_resource_tracking() {
             focus: "result-storage",
             workload_unit: "tabs",
         },
+        |targets| scratchpad::profile::SearchResultFixture::new(targets, 4 * super::KB),
         run_search_app_result_cycle,
     );
 }

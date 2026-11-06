@@ -60,7 +60,8 @@ pub(crate) fn process_search_request_with_partials(
         )?;
     }
 
-    Some(final_search_result(results, generation))
+    (latest_generation.load(Ordering::Relaxed) == generation)
+        .then(|| final_search_result(results, generation))
 }
 
 fn process_search_targets_serial(
@@ -268,9 +269,14 @@ fn should_publish_partial(
     last_emitted_match_count: usize,
     completed_target_index: usize,
 ) -> bool {
-    const PARTIAL_MATCH_DELTA: usize = 64;
+    const MINIMUM_PARTIAL_MATCH_DELTA: usize = 64;
+    // Each partial owns a complete prefix. Geometric growth bounds cumulative
+    // cloning to linear work while preserving the first available match and final result.
     completed_target_index == 0
-        || current_match_count >= last_emitted_match_count.saturating_add(PARTIAL_MATCH_DELTA)
+        || (last_emitted_match_count == 0 && current_match_count > 0)
+        || current_match_count
+            >= last_emitted_match_count
+                .saturating_add(last_emitted_match_count.max(MINIMUM_PARTIAL_MATCH_DELTA))
 }
 
 fn search_target_parallelism(target_count: usize) -> usize {
@@ -289,4 +295,92 @@ fn intra_buffer_parallelism() -> usize {
     thread::available_parallelism()
         .map_or(1, |p| p.get().min(INTRA_BUFFER_PARALLELISM_CAP))
         .max(1)
+}
+
+#[cfg(test)]
+mod partial_tests {
+    use super::*;
+    use crate::app::app_state::search_state::worker::SearchFileIdentity;
+    use crate::app::domain::TextDocument;
+    use crate::app::services::search::SearchOptions;
+
+    fn request(count: usize) -> SearchRequest {
+        let text = TextDocument::new("needle ".repeat(50)).snapshot();
+        let empty = TextDocument::new("no matches".into()).snapshot();
+        SearchRequest {
+            generation: 1,
+            query: "needle".into(),
+            options: SearchOptions::default(),
+            targets: (0..count)
+                .map(|index| SearchTargetSnapshot {
+                    file_identity: SearchFileIdentity::Untitled(index as u64),
+                    tab_index: index,
+                    view_id: index as u64,
+                    buffer_id: index as u64,
+                    tab_label: format!("tab-{index}"),
+                    buffer_label: format!("file-{index}"),
+                    document_snapshot: if index == 0 {
+                        empty.clone()
+                    } else {
+                        text.clone()
+                    },
+                    search_range: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn streamed_prefixes_deliver_first_matches_and_bound_copying_in_both_paths() {
+        for count in [3, 200] {
+            let current = AtomicU64::new(1);
+            let mut prefixes = Vec::new();
+            let result = process_search_request_with_partials(
+                request(count),
+                &current,
+                Some(&mut |result| {
+                    let SearchStatus::Searching {
+                        scanned_targets, ..
+                    } = result.status
+                    else {
+                        panic!("partial status");
+                    };
+                    assert_eq!(result.matches.len(), scanned_targets.saturating_sub(1) * 50);
+                    prefixes.push((scanned_targets, result.matches.len()));
+                }),
+            )
+            .unwrap();
+            assert_eq!(
+                prefixes.iter().find(|(_, matches)| *matches > 0),
+                Some(&(2, 50))
+            );
+            assert_eq!(result.matches.len(), (count - 1) * 50);
+            assert!(
+                prefixes.iter().map(|(_, matches)| matches).sum::<usize>()
+                    <= 2 * result.matches.len()
+            );
+            assert!(matches!(result.status, SearchStatus::Ready));
+            for (index, matched) in result.matches.iter().enumerate() {
+                assert_eq!(matched.tab_index, 1 + index / 50);
+                assert_eq!(matched.range, (index % 50) * 7..(index % 50) * 7 + 6);
+            }
+        }
+    }
+
+    #[test]
+    fn cancelling_after_a_partial_does_not_publish_a_completed_result() {
+        let current = AtomicU64::new(1);
+        assert!(
+            process_search_request_with_partials(
+                request(200),
+                &current,
+                Some(&mut |result| {
+                    if !result.matches.is_empty() {
+                        current.store(2, Ordering::Relaxed);
+                    }
+                })
+            )
+            .is_none()
+        );
+    }
 }
