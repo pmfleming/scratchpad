@@ -29,6 +29,8 @@ pub struct CapacityMetricsSnapshot {
     pub layout_cache_hit_count: u64,
     pub layout_cache_miss_count: u64,
     pub search_request_count: u64,
+    pub search_result_groups_rendered: u64,
+    pub search_result_groups_skipped: u64,
     pub search_target_count: u64,
     pub search_chunk_count: u64,
     pub search_intra_buffer_max_workers: u64,
@@ -91,6 +93,8 @@ capacity_counters! {
     LAYOUT_INPUT_BYTES,
     LAYOUT_TIME_NS,
     SEARCH_REQUEST_COUNT,
+    SEARCH_RESULT_GROUPS_RENDERED,
+    SEARCH_RESULT_GROUPS_SKIPPED,
     SEARCH_TARGET_COUNT,
     SEARCH_CHUNK_COUNT,
     SEARCH_INTRA_BUFFER_MAX_WORKERS,
@@ -113,6 +117,8 @@ pub fn reset_capacity_metrics() {
         &LAYOUT_INPUT_BYTES,
         &LAYOUT_TIME_NS,
         &SEARCH_REQUEST_COUNT,
+        &SEARCH_RESULT_GROUPS_RENDERED,
+        &SEARCH_RESULT_GROUPS_SKIPPED,
         &SEARCH_TARGET_COUNT,
         &SEARCH_CHUNK_COUNT,
         &SEARCH_INTRA_BUFFER_MAX_WORKERS,
@@ -142,6 +148,8 @@ pub fn capacity_metrics_snapshot() -> CapacityMetricsSnapshot {
         layout_input_bytes: load_counter(&LAYOUT_INPUT_BYTES),
         layout_time_ns: load_counter(&LAYOUT_TIME_NS),
         search_request_count: load_counter(&SEARCH_REQUEST_COUNT),
+        search_result_groups_rendered: load_counter(&SEARCH_RESULT_GROUPS_RENDERED),
+        search_result_groups_skipped: load_counter(&SEARCH_RESULT_GROUPS_SKIPPED),
         search_target_count: load_counter(&SEARCH_TARGET_COUNT),
         search_chunk_count: load_counter(&SEARCH_CHUNK_COUNT),
         search_intra_buffer_max_workers: load_counter(&SEARCH_INTRA_BUFFER_MAX_WORKERS),
@@ -225,6 +233,11 @@ pub fn record_search_request(target_count: usize, coalesced_queue_depth: usize) 
         &SEARCH_MAX_QUEUE_DEPTH,
         saturating_u64(coalesced_queue_depth),
     );
+}
+
+pub fn record_search_result_groups(rendered: usize, skipped: usize) {
+    SEARCH_RESULT_GROUPS_RENDERED.fetch_add(saturating_u64(rendered), Ordering::Relaxed);
+    SEARCH_RESULT_GROUPS_SKIPPED.fetch_add(saturating_u64(skipped), Ordering::Relaxed);
 }
 
 pub fn record_search_chunks(chunk_count: usize) {

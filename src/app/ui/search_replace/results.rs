@@ -25,6 +25,9 @@ const SEARCH_RESULT_LINE_GUTTER_WIDTH: f32 = 48.0;
 const SEARCH_RESULT_LINE_DIVIDER_GAP: f32 = 8.0;
 const SEARCH_RESULT_ROW_OVERSCAN: usize = 2;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn show_search_results(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
@@ -54,12 +57,28 @@ pub(super) fn show_search_results(
                 return;
             }
 
+            let mut collapsed_height = None;
+            let mut rendered = 0;
             for (index, group) in state.result_groups.iter().enumerate() {
-                show_result_group(ui, app, index, group, state.active_match_index, actions);
+                let (height, painted) = show_result_group(
+                    ui,
+                    app,
+                    index,
+                    group,
+                    state.active_match_index,
+                    actions,
+                    collapsed_height,
+                );
+                collapsed_height = height.or(collapsed_height);
+                rendered += usize::from(painted);
                 if index + 1 < state.result_groups.len() {
                     ui.add_space(SEARCH_RESULT_FILE_SPACING);
                 }
             }
+            crate::app::capacity_metrics::record_search_result_groups(
+                rendered,
+                state.result_groups.len() - rendered,
+            );
         });
 }
 
@@ -70,13 +89,24 @@ fn show_result_group(
     group: &SearchResultGroup,
     active_match_index: Option<usize>,
     actions: &mut SearchStripActions,
-) {
-    widget_ids::surface_scope(ui, ("search_result_group", group_index), |ui| {
-        let active_id = search_result_group_expanded_id(group);
-        let pending_id = search_result_group_expanded_pending_id(group);
-        let expanded = widget_ids::read_deferred_persisted::<bool>(ui.ctx(), pending_id, active_id)
-            .unwrap_or(false);
-
+    collapsed_height: Option<f32>,
+) -> (Option<f32>, bool) {
+    let active_id = search_result_group_expanded_id(group);
+    let pending_id = search_result_group_expanded_pending_id(group);
+    let expanded = widget_ids::read_deferred_persisted::<bool>(ui.ctx(), pending_id, active_id)
+        .unwrap_or(false);
+    // Calibrate from a real row each frame so font/style/scale changes cannot
+    // leave a stale height. Expanded groups retain their match-row virtualization
+    // and active-match reveal even when their header is outside the viewport.
+    if !expanded && let Some(height) = collapsed_height {
+        let size = egui::vec2(ui.available_width(), height);
+        let rect = egui::Rect::from_min_size(ui.cursor().min, size);
+        if !ui.is_rect_visible(rect.expand(height * SEARCH_RESULT_ROW_OVERSCAN as f32)) {
+            ui.allocate_space(size);
+            return (Some(height), false);
+        }
+    }
+    let response = widget_ids::surface_scope(ui, ("search_result_group", group_index), |ui| {
         let (group_response, toggle_requested) = show_group_pill(ui, group_index, group, expanded);
         if group_response.clicked() && group.total_match_count > 0 {
             actions.focused_file_match_index = Some(group.first_match_index);
@@ -98,6 +128,7 @@ fn show_result_group(
             },
         );
     });
+    ((!expanded).then_some(response.response.rect.height()), true)
 }
 
 fn show_virtual_match_rows(
@@ -288,11 +319,13 @@ fn show_group_body(
         ui.add_sized(
             egui::vec2(label_width, SEARCH_RESULT_FILE_PILL_HEIGHT),
             egui::Button::new(group_body(ui, group))
+                .truncate()
                 .fill(egui::Color32::TRANSPARENT)
                 .stroke(egui::Stroke::NONE),
         )
     })
-    .inner;
+    .inner
+    .on_hover_text(&group.buffer_label);
     if group.tab_label == group.buffer_label {
         response
     } else {

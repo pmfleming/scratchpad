@@ -132,6 +132,8 @@ pub fn search_workflow_sample(mode: &str, targets: usize, bytes_per_target: usiz
                 first_render_ns = Some(start.elapsed().as_nanos());
                 let after = crate::app::capacity_metrics::capacity_metrics_snapshot();
                 first_render_layout = json!({
+                    "result_groups_rendered":after.search_result_groups_rendered.saturating_sub(layout_before.search_result_groups_rendered),
+                    "result_groups_skipped":after.search_result_groups_skipped.saturating_sub(layout_before.search_result_groups_skipped),
                     "layout_jobs":after.layout_job_count.saturating_sub(layout_before.layout_job_count),
                     "layout_input_bytes":after.layout_input_bytes.saturating_sub(layout_before.layout_input_bytes),
                     "layout_time_ns":after.layout_time_ns.saturating_sub(layout_before.layout_time_ns)});
