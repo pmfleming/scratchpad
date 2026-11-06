@@ -184,6 +184,25 @@ fn large_open_batch_hydrates_most_recent_tab_in_background() {
     wait_for_background_io(&mut app);
     assert!(app.state.pending_open_file_paths.is_empty());
     assert_eq!(app.tab_manager.cold_session_tabs().len(), paths.len() - 1);
+    let installed: Vec<_> = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .filter_map(|tab| tab.active_buffer().path.as_ref())
+        .map(|path| path.file_name().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        installed,
+        paths
+            .iter()
+            .map(|path| path.file_name().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        app.tab_manager.active_tab_index,
+        app.tab_manager.tabs.len() - 1
+    );
 }
 
 #[test]

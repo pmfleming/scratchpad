@@ -74,23 +74,12 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
                 request_id,
                 paths,
                 session_store,
-            } => LaneOutcome::result(BackgroundIoResult::ColdFileShellsBuilt {
+            } => LaneOutcome::HandledWithSendFailure(stream_cold_file_shells(
                 request_id,
-                shells: paths
-                    .into_iter()
-                    .map(|path| match session_store.cold_tab_for_path(&path) {
-                        Ok(Some(result)) => ColdFileShellResult {
-                            path,
-                            result: Ok(result),
-                        },
-                        Ok(None) => build_cold_file_shell(path, &session_store),
-                        Err(error) => ColdFileShellResult {
-                            path,
-                            result: Err(error.to_string()),
-                        },
-                    })
-                    .collect(),
-            }),
+                paths,
+                &session_store,
+                result_tx,
+            )),
             BackgroundIoRequest::SavePath {
                 request_id,
                 path,
@@ -100,6 +89,53 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
             _ => LaneOutcome::Skip,
         },
     );
+}
+
+fn stream_cold_file_shells(
+    request_id: u64,
+    mut paths: Vec<PathBuf>,
+    store: &crate::app::services::session_store::SessionStore,
+    result_tx: &Sender<BackgroundIoResult>,
+) -> bool {
+    let selected_path = paths.pop();
+    if let Some(path) = &selected_path {
+        let selected = load_one(PathLoadRequest::Retained {
+            path: path.clone(),
+            session_store: store.clone(),
+            claimed: Vec::new(),
+        });
+        if result_tx
+            .send(BackgroundIoResult::PathsLoaded {
+                request_id,
+                results: vec![selected],
+                is_partial: true,
+            })
+            .is_err()
+        {
+            return true;
+        }
+    }
+    let shells = paths
+        .into_iter()
+        .map(|path| match store.cold_tab_for_path(&path) {
+            Ok(Some(result)) => ColdFileShellResult {
+                path,
+                result: Ok(result),
+            },
+            Ok(None) => build_cold_file_shell(path, store),
+            Err(error) => ColdFileShellResult {
+                path,
+                result: Err(error.to_string()),
+            },
+        })
+        .collect();
+    result_tx
+        .send(BackgroundIoResult::ColdFileShellsBuilt {
+            request_id,
+            shells,
+            selected_path,
+        })
+        .is_err()
 }
 
 // Open multiple files concurrently to exploit SSD throughput while keeping
@@ -403,7 +439,61 @@ fn load_observed(
 
 #[cfg(test)]
 mod tests {
-    use super::{PathLoadRequest, load_one, load_paths};
+    use super::{
+        BackgroundIoResult, PathLoadRequest, load_one, load_paths, stream_cold_file_shells,
+    };
+
+    #[test]
+    fn large_batch_delivers_selected_text_before_the_inactive_shells() {
+        for selected_exists in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = crate::app::services::session_store::SessionStore::new(
+                directory.path().join("session"),
+            );
+            let paths: Vec<_> = (0..3)
+                .map(|index| {
+                    let path = directory.path().join(format!("file-{index}.txt"));
+                    if index < 2 || selected_exists {
+                        std::fs::write(&path, format!("text {index}")).unwrap();
+                    }
+                    path
+                })
+                .collect();
+            let (tx, rx) = std::sync::mpsc::channel();
+            assert!(!stream_cold_file_shells(42, paths.clone(), &store, &tx));
+            let BackgroundIoResult::PathsLoaded {
+                request_id,
+                results,
+                is_partial,
+            } = rx.recv().unwrap()
+            else {
+                panic!("selected file must arrive first");
+            };
+            assert_eq!(request_id, 42);
+            assert!(is_partial);
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].path, paths[2]);
+            assert_eq!(results[0].result.is_ok(), selected_exists);
+            if selected_exists {
+                assert_eq!(results[0].result.as_ref().unwrap().text(), "text 2");
+            }
+            let BackgroundIoResult::ColdFileShellsBuilt {
+                shells,
+                selected_path,
+                ..
+            } = rx.recv().unwrap()
+            else {
+                panic!("inactive shell batch must terminate the request");
+            };
+            assert_eq!(selected_path.as_ref(), Some(&paths[2]));
+            assert_eq!(
+                shells.iter().map(|s| &s.path).collect::<Vec<_>>(),
+                paths[..2].iter().collect::<Vec<_>>()
+            );
+            assert!(shells.iter().all(|s| s.result.is_ok()));
+            assert!(rx.try_recv().is_err());
+        }
+    }
 
     #[test]
     fn load_paths_preserves_input_order_for_parallel_reads() {

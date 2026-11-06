@@ -28,6 +28,8 @@ pub(crate) enum BackgroundIoResult {
     ColdFileShellsBuilt {
         request_id: u64,
         shells: Vec<ColdFileShellResult>,
+        /// Fully loaded first, before building the remaining inactive shells.
+        selected_path: Option<PathBuf>,
     },
     PathSaved {
         request_id: u64,

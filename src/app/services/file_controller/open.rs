@@ -307,6 +307,7 @@ impl FileController {
         app: &mut ScratchpadApp,
         action: PendingOpenTabsAction,
         shells: Vec<ColdFileShellResult>,
+        selected_path: Option<&Path>,
     ) {
         let mut summary = action.accumulator;
         let mut tabs = Vec::with_capacity(shells.len());
@@ -389,6 +390,13 @@ impl FileController {
         );
         if installed {
             let index = app.tab_manager.tabs.len() - 1;
+            if let Some((selected, _)) =
+                selected_path.and_then(|path| app.tab_manager.find_tab_by_path(path))
+            {
+                // The selected file arrived first. Restore requested order after
+                // installing the inactive batch without loading it a second time.
+                app.tab_manager.reorder_tab(selected, index);
+            }
             app.tab_manager.set_active_tab_index_clamped(index);
             if let Some(cold) = app.tab_manager.cold_session_tabs().get(&index).cloned() {
                 app.queue_session_tab_hydration(index, cold, false);

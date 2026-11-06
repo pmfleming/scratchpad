@@ -61,10 +61,14 @@ pub(super) fn render_opened_file(
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         app.poll_background_io(ctx);
-        if app
+        if !app
             .tab_manager
-            .active_tab()
-            .is_some_and(|tab| tab.active_buffer().path.as_deref() == Some(expected.as_path()))
+            .cold_session_tabs()
+            .contains_key(&app.tab_manager.active_tab_index)
+            && app
+                .tab_manager
+                .active_tab()
+                .is_some_and(|tab| tab.active_buffer().path.as_deref() == Some(expected.as_path()))
         {
             return render_app(app, ctx);
         }

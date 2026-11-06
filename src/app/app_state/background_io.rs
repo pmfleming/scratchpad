@@ -251,8 +251,12 @@ impl ScratchpadApp {
                 results,
                 is_partial,
             } => self.apply_paths_loaded_result(request_id, results, is_partial),
-            BackgroundIoResult::ColdFileShellsBuilt { request_id, shells } => {
-                self.apply_cold_file_shells_built_result(request_id, shells);
+            BackgroundIoResult::ColdFileShellsBuilt {
+                request_id,
+                shells,
+                selected_path,
+            } => {
+                self.apply_cold_file_shells_built_result(request_id, shells, selected_path);
             }
             BackgroundIoResult::PathSaved {
                 request_id,
@@ -323,6 +327,7 @@ impl ScratchpadApp {
         &mut self,
         request_id: u64,
         shells: Vec<ColdFileShellResult>,
+        selected_path: Option<std::path::PathBuf>,
     ) {
         match self
             .state
@@ -330,7 +335,12 @@ impl ScratchpadApp {
             .remove_pending_background_action(request_id)
         {
             Some(PendingBackgroundAction::OpenTabs(action)) => {
-                FileController::apply_async_cold_file_shells_result(self, action, shells);
+                FileController::apply_async_cold_file_shells_result(
+                    self,
+                    action,
+                    shells,
+                    selected_path.as_deref(),
+                );
             }
             Some(action) => record_background_result_mismatch(
                 request_id,

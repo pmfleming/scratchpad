@@ -255,6 +255,7 @@ impl ScratchpadApp {
             app.apply_background_io_result(BackgroundIoResult::ColdFileShellsBuilt {
                 request_id,
                 shells,
+                selected_path: None,
             });
         });
     }

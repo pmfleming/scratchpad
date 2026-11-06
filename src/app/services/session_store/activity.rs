@@ -63,13 +63,14 @@ impl ActivityEvent {
 }
 
 pub(crate) fn record_installed(app: &mut ScratchpadApp, documents: &[String], kind: ActivityKind) {
+    let documents: std::collections::HashSet<_> = documents.iter().map(String::as_str).collect();
     let events: Vec<_> = app
         .tab_manager
         .tabs
         .as_slice()
         .iter()
         .flat_map(|t| t.buffers())
-        .filter(|b| !b.is_loading_preview && documents.contains(&b.temp_id))
+        .filter(|b| !b.is_loading_preview && documents.contains(b.temp_id.as_str()))
         .map(|b| ActivityEvent::new(kind, b))
         .collect();
     if !events.is_empty() {
@@ -81,7 +82,7 @@ pub(crate) fn record_installed(app: &mut ScratchpadApp, documents: &[String], ki
                 .as_mut_slice()
                 .iter_mut()
                 .flat_map(|tab| tab.buffers_mut())
-                .filter(|b| documents.contains(&b.temp_id))
+                .filter(|b| documents.contains(b.temp_id.as_str()))
             {
                 buffer.pending_reopen_original = None;
                 if let Some(node) = buffer.pending_reopen_external.take() {

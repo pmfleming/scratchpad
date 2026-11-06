@@ -116,6 +116,9 @@ pub fn run_many_file_first_visible_profile(paths: Vec<PathBuf>) -> ManyFileFirst
         .clone();
     let ctx = egui::Context::default();
     prepare_context_before_first_frame(&mut app, &ctx);
+    let expected_bytes = std::fs::metadata(&expected_path)
+        .expect("inspect selected many-file fixture before timing")
+        .len() as usize;
     let start = Instant::now();
     crate::app::services::file_controller::FileController::open_paths_async(&mut app, paths);
     workflows::render_opened_file(&mut app, &ctx, &expected_path);
@@ -125,6 +128,10 @@ pub fn run_many_file_first_visible_profile(paths: Vec<PathBuf>) -> ManyFileFirst
         .active_tab()
         .map(|tab| tab.active_buffer().document().piece_tree().len_bytes())
         .unwrap_or_default();
+    assert_eq!(
+        active_buffer_bytes, expected_bytes,
+        "selected fixture must be loaded before first-visible timing is accepted"
+    );
     assert!(
         app.wait_for_background_io_idle_timeout(std::time::Duration::from_secs(30)),
         "many-file background installation did not complete"
