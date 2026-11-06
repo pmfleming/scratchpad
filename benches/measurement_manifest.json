@@ -1,9 +1,18 @@
 {
   "version": 1,
   "workflow_workloads": {
-    "active": { "targets": 1, "bytes_per_target": 1048576 },
-    "current": { "targets": 32, "bytes_per_target": 16384 },
-    "all": { "targets": 10000, "bytes_per_target": 16384 }
+    "active": {
+      "targets": 1,
+      "bytes_per_target": 1048576
+    },
+    "current": {
+      "targets": 32,
+      "bytes_per_target": 16384
+    },
+    "all": {
+      "targets": 10000,
+      "bytes_per_target": 16384
+    }
   },
   "probes": {
     "resource_probe": [
@@ -176,13 +185,13 @@
     },
     "typing_without_save": {
       "metric": "/phase_elapsed_ns/typing_p99_ns",
-      "max": 8330000.0,
+      "max": 8330000,
       "unit": "ns",
       "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
     },
     "typing_during_save": {
       "metric": "/phase_elapsed_ns/typing_p99_ns",
-      "max": 8330000.0,
+      "max": 8330000,
       "unit": "ns",
       "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
     },
@@ -220,7 +229,8 @@
       "metric": "/elapsed_ns",
       "max": 180000000,
       "unit": "ns",
-      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+      "measurement_scope": "prepared_operation"
     },
     "paste_allocation": {
       "metric": "/elapsed_ns",
@@ -238,35 +248,40 @@
       "metric": "/elapsed_ns",
       "max": 180000000,
       "unit": "ns",
-      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+      "measurement_scope": "prepared_operation"
     },
     "tab_count_resource_tracking": {
       "metric": "/elapsed_ns",
       "max": 140000000,
       "unit": "ns",
-      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+      "measurement_scope": "prepared_operation"
     },
     "tab_build_targeted": {
       "metric": "/elapsed_ns",
       "max": 140000000,
       "unit": "ns",
-      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+      "measurement_scope": "prepared_operation"
     },
     "tab_split_targeted": {
       "metric": "/elapsed_ns",
       "max": 140000000,
       "unit": "ns",
-      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+      "measurement_scope": "prepared_operation"
     },
     "tab_combine_targeted": {
       "metric": "/elapsed_ns",
       "max": 140000000,
       "unit": "ns",
-      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+      "measurement_scope": "prepared_operation"
     },
     "tab_strip_frame_rendering": {
       "metric": "/result_value",
-      "max": 8330000.0,
+      "max": 8330000,
       "unit": "ns",
       "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
     },

@@ -107,16 +107,31 @@ pub(super) fn emit_step(step: StepDescriptor, run: impl FnOnce() -> StepOutcome)
 pub(super) fn emit_prepared_step<T>(
     step: StepDescriptor,
     setup: impl FnOnce() -> T,
-    run: impl FnOnce(&T) -> StepOutcome,
+    run: impl FnOnce(&mut T) -> StepOutcome,
 ) {
     if !super::selected(step.scenario) {
         return;
     }
     started(&step);
     let setup_start = Instant::now();
-    let prepared = setup();
+    let mut prepared = setup();
     let setup_elapsed_ns = setup_start.elapsed().as_nanos();
-    emit_step_with_setup(step, setup_elapsed_ns, || run(&prepared));
+    emit_step_with_setup(step, setup_elapsed_ns, || run(&mut prepared));
+}
+
+pub(super) fn emit_prepared_workload_steps<T>(
+    values: impl IntoIterator<Item = usize>,
+    spec: WorkloadSpec,
+    setup: impl Fn(usize) -> T,
+    run: impl Fn(&mut T) -> StepOutcome,
+) {
+    for (step_index, workload_value) in values.into_iter().enumerate() {
+        emit_prepared_step(
+            spec.descriptor(step_index, workload_value),
+            || setup(workload_value),
+            &run,
+        );
+    }
 }
 
 pub(super) fn emit_prepared_operation(

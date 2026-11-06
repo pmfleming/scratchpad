@@ -279,8 +279,7 @@ fn run_search_target_count_cycle(file_count: usize) -> StepOutcome {
     ))
 }
 
-fn run_edited_buffer_search_preview_cycle(piece_count: usize) -> StepOutcome {
-    let document = build_fragmented_document(piece_count);
+fn run_edited_buffer_search_preview_cycle(document: &mut TextDocument) -> StepOutcome {
     let text = document.extract_text();
     let program = search_capacity_program();
     let matches = search_program(black_box(&text), &program).matches;
@@ -380,11 +379,12 @@ fn run_anchor_heavy_view_edit_cycle(anchor_count: usize) -> StepOutcome {
     StepOutcome::items(black_box(resolved))
 }
 
-fn run_fragmented_long_session_mutation_cycle(fragment_count: usize) -> StepOutcome {
-    let mut document = build_fragmented_document(fragment_count);
+fn run_fragmented_long_session_mutation_cycle(
+    prepared: &mut (TextDocument, String),
+) -> StepOutcome {
+    let (document, pasted) = prepared;
     let paste_at = document.piece_tree().len_chars() / 3;
-    let pasted = utf8_text_of_size(256 * KB);
-    document.insert_direct_with_source(paste_at, &pasted, PieceSource::Paste);
+    document.insert_direct_with_source(paste_at, pasted, PieceSource::Paste);
     document.push_edit_operation_with_source(
         OperationRecord {
             previous_cursor: CursorRange::one(CharCursor::new(paste_at)),
@@ -392,7 +392,7 @@ fn run_fragmented_long_session_mutation_cycle(fragment_count: usize) -> StepOutc
             edits: vec![EditOperation {
                 start_char: paste_at,
                 deleted_text: String::new(),
-                inserted_text: pasted,
+                inserted_text: std::mem::take(pasted),
                 deleted_spans: Vec::new(),
             }],
         },
@@ -436,10 +436,36 @@ fn run_fragmented_long_session_mutation_cycle(fragment_count: usize) -> StepOutc
     }
 }
 
-fn run_tab_count_cycle(tab_count: usize) -> StepOutcome {
-    let mut tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
-    let activations = split_tabs_once(&mut tabs) + combine_first_tabs(&mut tabs);
+fn run_tab_count_cycle(prepared: &mut (Vec<String>, Vec<WorkspaceTab>)) -> StepOutcome {
+    run_tab_build_cycle(prepared);
+    let tabs = &mut prepared.1;
+    let activations = split_tabs_once(tabs) + combine_first_tabs(tabs);
     StepOutcome::items(black_box(activations + tabs.len()))
+}
+
+fn prepare_tab_text(tab_count: usize) -> (Vec<String>, Vec<WorkspaceTab>) {
+    (
+        (0..tab_count)
+            .map(|index| {
+                scratchpad::profile::fixtures::text(
+                    TAB_BYTES_PER_BUFFER,
+                    0x7192_a335 ^ index as u64,
+                )
+            })
+            .collect(),
+        Vec::new(),
+    )
+}
+
+fn run_tab_build_cycle(prepared: &mut (Vec<String>, Vec<WorkspaceTab>)) -> StepOutcome {
+    prepared.1 = std::mem::take(&mut prepared.0)
+        .into_iter()
+        .enumerate()
+        .map(|(index, text)| {
+            WorkspaceTab::new(BufferState::new(format!("tab_{index}.txt"), text, None))
+        })
+        .collect();
+    StepOutcome::items(black_box(prepared.1.len()))
 }
 
 fn run_search_app_result_cycle(tab_count: usize) -> StepOutcome {

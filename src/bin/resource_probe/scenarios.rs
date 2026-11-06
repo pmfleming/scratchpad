@@ -1,6 +1,6 @@
 use super::events::{
-    StepDescriptor, StepOutcome, WorkloadSpec, emit_prepared_step, emit_step, emit_workload_steps,
-    human_bytes,
+    StepDescriptor, StepOutcome, WorkloadSpec, emit_prepared_step, emit_prepared_workload_steps,
+    emit_step, emit_workload_steps, human_bytes,
 };
 use super::{
     GB, MB, SESSION_BYTES_PER_BUFFER, SessionStore, TAB_BYTES_PER_BUFFER, black_box, build_tabs,
@@ -104,7 +104,7 @@ fn emit_large_utf8_load_peak_memory() {
                     workload_label: human_bytes(bytes),
                 },
                 || prepare_file_backed_cache_traversal(&path),
-                run_file_backed_cache_traversal_cycle,
+                |document| run_file_backed_cache_traversal_cycle(document),
             );
             emit_prepared_step(
                 StepDescriptor {
@@ -118,7 +118,7 @@ fn emit_large_utf8_load_peak_memory() {
                     workload_label: human_bytes(bytes),
                 },
                 || prepare_file_backed_cache_traversal(&path),
-                run_file_backed_random_window_cycle,
+                |document| run_file_backed_random_window_cycle(document),
             );
         }
     }
@@ -215,7 +215,7 @@ fn emit_edited_buffer_search_preview_rendering() {
     if !super::any_selected(&["edited_buffer_search_preview_rendering"]) {
         return;
     }
-    emit_workload_steps(
+    emit_prepared_workload_steps(
         [256usize, 2_048, 8_192],
         WorkloadSpec {
             scenario: "edited_buffer_search_preview_rendering",
@@ -224,6 +224,7 @@ fn emit_edited_buffer_search_preview_rendering() {
             focus: "preview-rendering",
             workload_unit: "pieces",
         },
+        super::build_fragmented_document,
         run_edited_buffer_search_preview_cycle,
     );
 }
@@ -266,7 +267,7 @@ fn emit_fragmented_long_session_mutations() {
     if !super::any_selected(&["fragmented_long_session_mutation"]) {
         return;
     }
-    emit_workload_steps(
+    emit_prepared_workload_steps(
         [1_000usize, 5_000, 20_000],
         WorkloadSpec {
             scenario: "fragmented_long_session_mutation",
@@ -274,6 +275,12 @@ fn emit_fragmented_long_session_mutations() {
             workload_family: "edit-paste",
             focus: "fragmented-mutation",
             workload_unit: "fragments",
+        },
+        |count| {
+            (
+                super::build_fragmented_document(count),
+                super::utf8_text_of_size(256 * super::KB),
+            )
         },
         run_fragmented_long_session_mutation_cycle,
     );
@@ -352,7 +359,7 @@ fn emit_tab_count_resource_tracking() {
     if !super::any_selected(&["tab_count_resource_tracking"]) {
         return;
     }
-    emit_workload_steps(
+    emit_prepared_workload_steps(
         [128usize, 512, 4_096, 10_000],
         WorkloadSpec {
             scenario: "tab_count_resource_tracking",
@@ -361,6 +368,7 @@ fn emit_tab_count_resource_tracking() {
             focus: "memory",
             workload_unit: "tabs",
         },
+        super::prepare_tab_text,
         run_tab_count_cycle,
     );
 }
@@ -374,7 +382,7 @@ fn emit_targeted_tab_phase_probes() {
         return;
     }
     for (step_index, tab_count) in [128usize, 512, 4_096, 10_000].into_iter().enumerate() {
-        emit_step(
+        emit_prepared_step(
             StepDescriptor {
                 scenario: "tab_build_targeted",
                 scenario_label: "Tab build targeted path",
@@ -385,11 +393,11 @@ fn emit_targeted_tab_phase_probes() {
                 workload_unit: "tabs",
                 workload_label: format!("{tab_count} tabs"),
             },
-            || StepOutcome::items(black_box(build_tabs(tab_count, TAB_BYTES_PER_BUFFER).len())),
+            || super::prepare_tab_text(tab_count),
+            super::run_tab_build_cycle,
         );
 
-        let mut split_tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
-        emit_step(
+        emit_prepared_step(
             StepDescriptor {
                 scenario: "tab_split_targeted",
                 scenario_label: "Tab split targeted path",
@@ -400,12 +408,11 @@ fn emit_targeted_tab_phase_probes() {
                 workload_unit: "tabs",
                 workload_label: format!("{tab_count} tabs"),
             },
-            || StepOutcome::items(black_box(split_tabs_once(&mut split_tabs))),
+            || build_tabs(tab_count, TAB_BYTES_PER_BUFFER),
+            |tabs| StepOutcome::items(black_box(split_tabs_once(tabs))),
         );
 
-        let mut combine_tabs_set = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
-        split_tabs_once(&mut combine_tabs_set);
-        emit_step(
+        emit_prepared_step(
             StepDescriptor {
                 scenario: "tab_combine_targeted",
                 scenario_label: "Tab combine targeted path",
@@ -416,7 +423,12 @@ fn emit_targeted_tab_phase_probes() {
                 workload_unit: "tabs",
                 workload_label: format!("{tab_count} tabs"),
             },
-            || StepOutcome::items(black_box(combine_first_tabs(&mut combine_tabs_set))),
+            || {
+                let mut tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
+                split_tabs_once(&mut tabs);
+                tabs
+            },
+            |tabs| StepOutcome::items(black_box(combine_first_tabs(tabs))),
         );
     }
 }
