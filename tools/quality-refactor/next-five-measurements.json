@@ -1,0 +1,564 @@
+{
+  "baseline": {
+    "run": "refactor-complete",
+    "functions": {
+      "functions": 5203,
+      "cognitive": 7918,
+      "cyclomatic": 13477,
+      "effort": 54825538,
+      "sloc": 86198
+    },
+    "test_functions": {
+      "functions": 777,
+      "cognitive": 720,
+      "cyclomatic": 1223,
+      "effort": 12718350,
+      "sloc": 18407
+    },
+    "clones": {
+      "ast_record_count": 38,
+      "duplicated_line_count": 7075,
+      "duplication_model_version": 2,
+      "duplication_percent": 7.06,
+      "record_count": 523,
+      "source_nonblank_line_count": 100260,
+      "token_record_count": 468
+    },
+    "coverage": {
+      "branches": {
+        "available": false,
+        "count": 0,
+        "covered": 0,
+        "percent": null
+      },
+      "file_count": 393,
+      "functions": {
+        "available": true,
+        "count": 6996,
+        "covered": 5404,
+        "percent": 77.24
+      },
+      "lines": {
+        "available": true,
+        "count": 64250,
+        "covered": 48297,
+        "percent": 75.17
+      },
+      "regions": {
+        "available": true,
+        "count": 91475,
+        "covered": 68458,
+        "percent": 74.84
+      }
+    },
+    "test_quality": {
+      "assertionless_test_count": 4,
+      "finding_count": 13,
+      "ignored_test_count": 9,
+      "test_count": 777
+    },
+    "function_risk": {
+      "coverage_attributed_count": 4497,
+      "function_count": 5203,
+      "high_crap_count": 64
+    },
+    "escape_hatches": {
+      "unsafe_block": 8,
+      "unsafe_fn": 4,
+      "unsafe_impl": 1,
+      "extern_block": 1,
+      "extern_fn": 4,
+      "glob_import": 35,
+      "deref_impl": 1,
+      "clippy_suppression": 2,
+      "lint_suppression": 2
+    },
+    "groups": {
+      "layout_decoding": {
+        "functions": 17,
+        "cognitive": 32,
+        "cyclomatic": 168,
+        "effort": 699948,
+        "sloc": 426
+      },
+      "editor_preflight": {
+        "functions": 68,
+        "cognitive": 88,
+        "cyclomatic": 167,
+        "effort": 741207,
+        "sloc": 1114
+      },
+      "search_dispatch": {
+        "functions": 3,
+        "cognitive": 3,
+        "cyclomatic": 22,
+        "effort": 22074,
+        "sloc": 74
+      },
+      "history_cache": {
+        "functions": 2,
+        "cognitive": 45,
+        "cyclomatic": 22,
+        "effort": 172429,
+        "sloc": 108
+      },
+      "atomic_writes": {
+        "functions": 8,
+        "cognitive": 6,
+        "cyclomatic": 20,
+        "effort": 93872,
+        "sloc": 140
+      }
+    },
+    "selected_files": {
+      "functions": 98,
+      "cognitive": 174,
+      "cyclomatic": 399,
+      "effort": 1729530,
+      "sloc": 1862
+    },
+    "key_functions": {
+      "src/app/services/session_store/database/layouts.rs::app::services::session_store::database::layouts::Database::read_layouts": {
+        "cognitive_complexity": 15,
+        "cyclomatic_complexity": 54,
+        "halstead_effort": 260671.935661346,
+        "sloc": 42
+      },
+      "src/app/ui/dialogs/text_history/timeline/model.rs::app::ui::dialogs::text_history::timeline::model::LiveRows::update": {
+        "cognitive_complexity": 35,
+        "cyclomatic_complexity": 18,
+        "halstead_effort": 163604.2756331819,
+        "sloc": 90
+      },
+      "src/app/ui/editor_content/native_editor/mod.rs::app::ui::editor_content::native_editor::render_editor_text_edit": {
+        "cognitive_complexity": 24,
+        "cyclomatic_complexity": 25,
+        "halstead_effort": 353381.4640348265,
+        "sloc": 216
+      },
+      "src/app/commands/search.rs::app::commands::search::handle_search_command": {
+        "cognitive_complexity": 1,
+        "cyclomatic_complexity": 18,
+        "halstead_effort": 19863.48,
+        "sloc": 60
+      },
+      "src/app/services/store_io.rs::app::services::store_io::write_atomic_with": {
+        "cognitive_complexity": 4,
+        "cyclomatic_complexity": 6,
+        "halstead_effort": 69326.32818918719,
+        "sloc": 66
+      }
+    },
+    "key_function_coverage": {
+      "src/app/commands/search.rs::app::commands::search::handle_search_command": {
+        "coverage_percent": 0.0,
+        "covered_lines": 0,
+        "executable_lines": 40,
+        "crap": 342.0
+      },
+      "src/app/services/session_store/database/layouts.rs::app::services::session_store::database::layouts::Database::read_layouts": {
+        "coverage_percent": 100.0,
+        "covered_lines": 36,
+        "executable_lines": 36,
+        "crap": 54.0
+      },
+      "src/app/services/store_io.rs::app::services::store_io::write_atomic_with": {
+        "coverage_percent": 58.7,
+        "covered_lines": 27,
+        "executable_lines": 46,
+        "crap": 8.54
+      },
+      "src/app/ui/editor_content/native_editor/mod.rs::app::ui::editor_content::native_editor::render_editor_text_edit": {
+        "coverage_percent": 93.63,
+        "covered_lines": 147,
+        "executable_lines": 157,
+        "crap": 25.16
+      },
+      "src/app/ui/dialogs/text_history/timeline/model.rs::app::ui::dialogs::text_history::timeline::model::LiveRows::update": {
+        "coverage_percent": 90.41,
+        "covered_lines": 66,
+        "executable_lines": 73,
+        "crap": 18.29
+      }
+    },
+    "leverage_metrics": {
+      "mean_score": 10.5952,
+      "complete": false,
+      "missing_input": [
+        "semantic identity is incomplete: 6896 dependency references were not resolved"
+      ]
+    },
+    "locality_metrics": {
+      "mean_score": 96.8318,
+      "complete": false,
+      "missing_input": [
+        "semantic identity is incomplete: 6896 dependency references were not resolved"
+      ]
+    },
+    "validation": {
+      "source_revision": "09f9cf2df874a96f14e67847c2c02ce8208d0df5",
+      "source_stable": true,
+      "source_blake3": "4069642ba869adc25156cf508c85978a6eb8b632b0b0ec4e27d121488117a374",
+      "tool_blake3": "01b45353fb3ac26e402ac8d8aa3770513f48510435b8b70f8f24dc56177cba3f",
+      "commands": {
+        "audit-tool": {
+          "status": "passed"
+        },
+        "cargo": {
+          "status": "passed"
+        },
+        "check": {
+          "exit_code": 1,
+          "status": "failed"
+        },
+        "coverage-tool": {
+          "status": "passed"
+        },
+        "feature-tool": {
+          "status": "passed"
+        },
+        "measure": {
+          "status": "passed"
+        },
+        "rqlens-version": {
+          "status": "passed"
+        },
+        "rustc": {
+          "status": "passed"
+        },
+        "verify": {
+          "status": "passed"
+        }
+      },
+      "gate_passed": false,
+      "gate_counts": {
+        "partial_artifacts": 14,
+        "test_failures": 0,
+        "practice_failures": 0,
+        "reliability_findings": 0,
+        "design_review_findings": 3,
+        "threshold_violations": 33,
+        "operational_failures": 0
+      }
+    }
+  },
+  "after": {
+    "run": "next-five-final",
+    "functions": {
+      "functions": 5213,
+      "cognitive": 7911,
+      "cyclomatic": 13468,
+      "effort": 54797925,
+      "sloc": 86490
+    },
+    "test_functions": {
+      "functions": 776,
+      "cognitive": 743,
+      "cyclomatic": 1235,
+      "effort": 13070851,
+      "sloc": 18671
+    },
+    "clones": {
+      "ast_record_count": 38,
+      "duplicated_line_count": 7029,
+      "duplication_model_version": 2,
+      "duplication_percent": 6.99,
+      "record_count": 520,
+      "source_nonblank_line_count": 100566,
+      "token_record_count": 465
+    },
+    "coverage": {
+      "branches": {
+        "available": false,
+        "count": 0,
+        "covered": 0,
+        "percent": null
+      },
+      "file_count": 394,
+      "functions": {
+        "available": true,
+        "count": 6997,
+        "covered": 5430,
+        "percent": 77.6
+      },
+      "lines": {
+        "available": true,
+        "count": 64291,
+        "covered": 48532,
+        "percent": 75.49
+      },
+      "regions": {
+        "available": true,
+        "count": 91385,
+        "covered": 68665,
+        "percent": 75.14
+      }
+    },
+    "test_quality": {
+      "assertionless_test_count": 4,
+      "finding_count": 13,
+      "ignored_test_count": 9,
+      "test_count": 776
+    },
+    "function_risk": {
+      "coverage_attributed_count": 4504,
+      "function_count": 5213,
+      "high_crap_count": 61
+    },
+    "escape_hatches": {
+      "unsafe_block": 8,
+      "unsafe_fn": 4,
+      "unsafe_impl": 1,
+      "extern_block": 1,
+      "extern_fn": 4,
+      "glob_import": 35,
+      "deref_impl": 1,
+      "clippy_suppression": 2,
+      "lint_suppression": 2
+    },
+    "groups": {
+      "layout_decoding": {
+        "functions": 25,
+        "cognitive": 27,
+        "cyclomatic": 146,
+        "effort": 514635,
+        "sloc": 505
+      },
+      "editor_preflight": {
+        "functions": 70,
+        "cognitive": 86,
+        "cyclomatic": 171,
+        "effort": 625022,
+        "sloc": 1116
+      },
+      "search_dispatch": {
+        "functions": 2,
+        "cognitive": 2,
+        "cyclomatic": 20,
+        "effort": 21458,
+        "sloc": 41
+      },
+      "history_cache": {
+        "functions": 3,
+        "cognitive": 29,
+        "cyclomatic": 24,
+        "effort": 142231,
+        "sloc": 115
+      },
+      "atomic_writes": {
+        "functions": 5,
+        "cognitive": 10,
+        "cyclomatic": 17,
+        "effort": 60046,
+        "sloc": 108
+      }
+    },
+    "selected_files": {
+      "functions": 105,
+      "cognitive": 154,
+      "cyclomatic": 378,
+      "effort": 1363391,
+      "sloc": 1885
+    },
+    "key_functions": {
+      "src/app/ui/dialogs/text_history/timeline/model.rs::app::ui::dialogs::text_history::timeline::model::LiveRows::update_buffer": {
+        "cognitive_complexity": 15,
+        "cyclomatic_complexity": 14,
+        "halstead_effort": 111014.1251789597,
+        "sloc": 70
+      },
+      "src/app/services/session_store/database/layouts.rs::app::services::session_store::database::layouts::Database::read_layouts": {
+        "cognitive_complexity": 7,
+        "cyclomatic_complexity": 19,
+        "halstead_effort": 73148.80986170008,
+        "sloc": 50
+      },
+      "src/app/ui/editor_content/native_editor/mod.rs::app::ui::editor_content::native_editor::render_editor_text_edit": {
+        "cognitive_complexity": 13,
+        "cyclomatic_complexity": 15,
+        "halstead_effort": 199163.39515731047,
+        "sloc": 173
+      },
+      "src/app/services/session_store/database/layouts.rs::app::services::session_store::database::layouts::read_view": {
+        "cognitive_complexity": 3,
+        "cyclomatic_complexity": 16,
+        "halstead_effort": 27975.747478880276,
+        "sloc": 39
+      },
+      "src/app/ui/editor_content/native_editor/editing.rs::app::ui::editor_content::native_editor::editing::InputRead::pin": {
+        "cognitive_complexity": 6,
+        "cyclomatic_complexity": 8,
+        "halstead_effort": 16498.831179218127,
+        "sloc": 22
+      },
+      "src/app/commands/search.rs::app::commands::search::handle_search_command": {
+        "cognitive_complexity": 1,
+        "cyclomatic_complexity": 18,
+        "halstead_effort": 18831.843207754147,
+        "sloc": 30
+      },
+      "src/app/ui/dialogs/text_history/timeline/model.rs::app::ui::dialogs::text_history::timeline::model::LiveRows::update": {
+        "cognitive_complexity": 6,
+        "cyclomatic_complexity": 5,
+        "halstead_effort": 21671.5721436895,
+        "sloc": 24
+      },
+      "src/app/services/store_io.rs::app::services::store_io::write_atomic_with": {
+        "cognitive_complexity": 0,
+        "cyclomatic_complexity": 6,
+        "halstead_effort": 24102.678550302637,
+        "sloc": 41
+      },
+      "src/app/ui/editor_content/native_editor/editing.rs::app::ui::editor_content::native_editor::editing::InputRead::from_events": {
+        "cognitive_complexity": 3,
+        "cyclomatic_complexity": 6,
+        "halstead_effort": 21535.029932296224,
+        "sloc": 23
+      }
+    },
+    "key_function_coverage": {
+      "src/app/commands/search.rs::app::commands::search::handle_search_command": {
+        "coverage_percent": 100.0,
+        "covered_lines": 24,
+        "executable_lines": 24,
+        "crap": 18.0
+      },
+      "src/app/services/session_store/database/layouts.rs::app::services::session_store::database::layouts::Database::read_layouts": {
+        "coverage_percent": 95.24,
+        "covered_lines": 40,
+        "executable_lines": 42,
+        "crap": 19.04
+      },
+      "src/app/services/session_store/database/layouts.rs::app::services::session_store::database::layouts::read_view": {
+        "coverage_percent": 100.0,
+        "covered_lines": 25,
+        "executable_lines": 25,
+        "crap": 16.0
+      },
+      "src/app/services/store_io.rs::app::services::store_io::write_atomic_with": {
+        "coverage_percent": 100.0,
+        "covered_lines": 28,
+        "executable_lines": 28,
+        "crap": 6.0
+      },
+      "src/app/ui/editor_content/native_editor/mod.rs::app::ui::editor_content::native_editor::render_editor_text_edit": {
+        "coverage_percent": 93.7,
+        "covered_lines": 119,
+        "executable_lines": 127,
+        "crap": 15.06
+      },
+      "src/app/ui/editor_content/native_editor/editing.rs::app::ui::editor_content::native_editor::editing::InputRead::from_events": {
+        "coverage_percent": 100.0,
+        "covered_lines": 15,
+        "executable_lines": 15,
+        "crap": 6.0
+      },
+      "src/app/ui/editor_content/native_editor/editing.rs::app::ui::editor_content::native_editor::editing::InputRead::pin": {
+        "coverage_percent": 100.0,
+        "covered_lines": 15,
+        "executable_lines": 15,
+        "crap": 8.0
+      },
+      "src/app/ui/dialogs/text_history/timeline/model.rs::app::ui::dialogs::text_history::timeline::model::LiveRows::update": {
+        "coverage_percent": 94.74,
+        "covered_lines": 18,
+        "executable_lines": 19,
+        "crap": 5.0
+      },
+      "src/app/ui/dialogs/text_history/timeline/model.rs::app::ui::dialogs::text_history::timeline::model::LiveRows::update_buffer": {
+        "coverage_percent": 100.0,
+        "covered_lines": 57,
+        "executable_lines": 57,
+        "crap": 14.0
+      }
+    },
+    "leverage_metrics": {
+      "mean_score": 10.5347,
+      "complete": false,
+      "missing_input": [
+        "semantic identity is incomplete: 6927 dependency references were not resolved"
+      ]
+    },
+    "locality_metrics": {
+      "mean_score": 96.8767,
+      "complete": false,
+      "missing_input": [
+        "semantic identity is incomplete: 6927 dependency references were not resolved"
+      ]
+    },
+    "validation": {
+      "source_revision": "1a5cd76633b507fdef06a8ec9ffa032419f6a35c",
+      "source_stable": true,
+      "source_blake3": "bd73219f3c88c6632998b49aadb201bd6f62a0f2c3b24eb800e308b2a9097380",
+      "tool_blake3": "01b45353fb3ac26e402ac8d8aa3770513f48510435b8b70f8f24dc56177cba3f",
+      "commands": {
+        "audit-tool": {
+          "status": "passed"
+        },
+        "cargo": {
+          "status": "passed"
+        },
+        "check": {
+          "exit_code": 1,
+          "status": "failed"
+        },
+        "coverage-tool": {
+          "status": "passed"
+        },
+        "feature-tool": {
+          "status": "passed"
+        },
+        "measure": {
+          "status": "passed"
+        },
+        "rqlens-version": {
+          "status": "passed"
+        },
+        "rustc": {
+          "status": "passed"
+        },
+        "verify": {
+          "status": "passed"
+        }
+      },
+      "gate_passed": false,
+      "gate_counts": {
+        "partial_artifacts": 14,
+        "test_failures": 0,
+        "practice_failures": 0,
+        "reliability_findings": 0,
+        "design_review_findings": 3,
+        "threshold_violations": 32,
+        "operational_failures": 0
+      }
+    }
+  },
+  "scopes": {
+    "layout_decoding": [
+      "src/app/services/session_store/database/layouts.rs",
+      "src/app/services/session_store/database/document_rows.rs",
+      "src/app/services/session_store/database/rows.rs"
+    ],
+    "editor_preflight": [
+      "src/app/ui/editor_content/native_editor/mod.rs",
+      "src/app/ui/editor_content/native_editor/editing.rs"
+    ],
+    "search_dispatch": [
+      "src/app/commands/search.rs"
+    ],
+    "history_cache": [
+      "src/app/ui/dialogs/text_history/timeline/model.rs"
+    ],
+    "atomic_writes": [
+      "src/app/services/store_io.rs"
+    ]
+  },
+  "implementation_commits": [
+    "72173d5",
+    "946eb41",
+    "bb1a4af",
+    "4eb5b5d",
+    "7777e3e"
+  ],
+  "ime_followup": "1a5cd76"
+}

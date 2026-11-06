@@ -101,3 +101,5 @@ direnv exec . cargo xtask quality /home/laufan/Projects/rust-quality-lens/target
 The command intentionally returns nonzero while the strict gate remains failed.
 When sharing build caches across checkouts, remove stale application artifacts
 before comparing instrumented coverage; retain dependency caches.
+
+Follow-up: [next five quality improvements and measured tradeoffs](NEXT-FIVE.md).
