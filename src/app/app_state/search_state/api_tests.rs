@@ -1,7 +1,6 @@
 use super::{SEARCH_PREVIEW_CACHE_LIMIT, ScratchpadApp, SearchMatch, SearchPreviewCacheKey};
-use crate::app::app_state::search_controller::{set_search_replace_open, set_search_replacement};
 use crate::app::app_state::test_support::test_app;
-use crate::app::commands::{AppCommand, WorkspaceCommand};
+use crate::app::commands::{AppCommand, SearchCommand, WorkspaceCommand};
 use crate::app::domain::{BufferState, WorkspaceTab};
 use crate::app::services::search::find_matches;
 use std::ops::Range;
@@ -89,18 +88,18 @@ fn lazy_preview_cache_evicts_least_recently_used_entry() {
 fn replace_current_advances_past_self_matching_replacement() {
     let mut app = app_with_search_text("foo foo");
     seed_search_matches(&mut app, "foo");
-    set_search_replacement(&mut app, "foobar");
+    set_replacement(&mut app, "foobar");
     app.state.search_state.panel.replace_open = true;
     app.state.search_state.results.active_match_index = Some(0);
 
-    assert!(crate::app::app_state::search_replace::replace_current_search_match(&mut app));
+    assert!(search(&mut app, SearchCommand::ReplaceCurrentMatch));
     wait_for_search_results(&mut app);
 
     assert_eq!(active_buffer_text(&app), "foobar foo");
     let active_match = active_search_match(&app).expect("active match after first replace");
     assert_eq!(active_match.range, 7..10);
 
-    assert!(crate::app::app_state::search_replace::replace_current_search_match(&mut app));
+    assert!(search(&mut app, SearchCommand::ReplaceCurrentMatch));
     wait_for_search_results(&mut app);
 
     assert_eq!(active_buffer_text(&app), "foobar foobar");
@@ -110,11 +109,11 @@ fn replace_current_advances_past_self_matching_replacement() {
 fn replace_current_advances_after_empty_replacement() {
     let mut app = app_with_search_text("foo foo");
     seed_search_matches(&mut app, "foo");
-    set_search_replacement(&mut app, "");
+    set_replacement(&mut app, "");
     app.state.search_state.panel.replace_open = true;
     app.state.search_state.results.active_match_index = Some(0);
 
-    assert!(crate::app::app_state::search_replace::replace_current_search_match(&mut app));
+    assert!(search(&mut app, SearchCommand::ReplaceCurrentMatch));
     wait_for_search_results(&mut app);
 
     assert_eq!(active_buffer_text(&app), " foo");
@@ -155,10 +154,60 @@ fn tab_reorder_marks_open_search_dirty() {
 fn active_buffer_search_counts_matches() {
     let mut app = app_with_search_text("foo bar foo");
 
-    app.open_search();
-    app.set_search_query("foo");
+    assert!(search(&mut app, SearchCommand::Open));
+    set_query(&mut app, "foo");
     wait_for_search_results(&mut app);
 
+    for command in [
+        SearchCommand::SetSearchMode {
+            mode: crate::app::services::search::SearchMode::Regex,
+        },
+        SearchCommand::SetSearchMatchCase { enabled: true },
+        SearchCommand::SetSearchWholeWord { enabled: true },
+    ] {
+        assert!(search(&mut app, command));
+    }
+    wait_for_search_results(&mut app);
+    assert!(app.state.search_state.query.match_case && app.state.search_state.query.whole_word);
+    assert_eq!(
+        app.state.search_state.query.mode,
+        crate::app::services::search::SearchMode::Regex
+    );
+    assert!(search(&mut app, SearchCommand::NextSearchMatch));
+    assert_eq!(app.search_active_match_index(), Some(1));
+    assert!(search(&mut app, SearchCommand::PreviousSearchMatch));
+    let view = app
+        .tab_manager
+        .active_tab()
+        .unwrap()
+        .layout
+        .active_view_id();
+    for (command, expected) in [
+        (
+            SearchCommand::FocusSearchResultFile { match_index: 1 },
+            true,
+        ),
+        (SearchCommand::ActivateSearchMatch { match_index: 0 }, true),
+        (
+            SearchCommand::FocusSearchResultFile {
+                match_index: usize::MAX,
+            },
+            false,
+        ),
+        (
+            SearchCommand::ActivateSearchMatch {
+                match_index: usize::MAX,
+            },
+            false,
+        ),
+    ] {
+        app.state.focus.clear();
+        assert_eq!(search(&mut app, command), expected);
+        assert_eq!(
+            crate::app::app_state::workspace::accessors::should_focus_view(&app, view),
+            expected
+        );
+    }
     assert_eq!(app.search_match_count(), 2);
     assert_eq!(app.search_active_match_index(), Some(0));
 }
@@ -176,9 +225,14 @@ fn all_open_tabs_search_counts_matches_across_tabs() {
         )),
     );
 
-    app.open_search();
-    app.set_search_scope(super::SearchScope::AllOpenTabs);
-    app.set_search_query("needle");
+    assert!(search(&mut app, SearchCommand::Open));
+    assert!(search(
+        &mut app,
+        SearchCommand::SetSearchScope {
+            scope: super::SearchScope::AllOpenTabs
+        }
+    ));
+    set_query(&mut app, "needle");
     wait_for_search_results(&mut app);
 
     assert_eq!(app.search_match_count(), 3);
@@ -197,14 +251,19 @@ fn replace_all_changes_every_buffer_in_scope() {
         )),
     );
 
-    app.open_search_and_replace();
-    app.set_search_scope(super::SearchScope::AllOpenTabs);
-    app.set_search_query("foo");
-    app.set_search_replacement("bar");
+    assert!(search(&mut app, SearchCommand::OpenAndReplace));
+    assert!(search(
+        &mut app,
+        SearchCommand::SetSearchScope {
+            scope: super::SearchScope::AllOpenTabs
+        }
+    ));
+    set_query(&mut app, "foo");
+    set_replacement(&mut app, "bar");
     wait_for_search_results(&mut app);
 
-    assert!(!app.replace_all_search_matches());
-    assert!(app.replace_all_search_matches());
+    assert!(!search(&mut app, SearchCommand::ReplaceAllMatches));
+    assert!(search(&mut app, SearchCommand::ReplaceAllMatches));
     wait_for_search_results(&mut app);
 
     assert_eq!(
@@ -224,7 +283,7 @@ fn replacement_typing_updates_preview_without_mutating_buffer() {
     app.state.search_state.panel.replace_open = true;
     let before_revision = active_buffer_revision(&app);
 
-    set_search_replacement(&mut app, "bar");
+    set_replacement(&mut app, "bar");
 
     assert_eq!(active_buffer_text(&app), "foo foo");
     assert_eq!(active_buffer_revision(&app), before_revision);
@@ -241,13 +300,52 @@ fn closing_replace_mode_clears_replacement_preview() {
     let mut app = app_with_search_text("foo");
     seed_search_matches(&mut app, "foo");
     app.state.search_state.panel.replace_open = true;
-    set_search_replacement(&mut app, "bar");
+    set_replacement(&mut app, "bar");
     assert!(active_view_replacement_preview(&app).is_some());
 
-    set_search_replace_open(&mut app, false);
+    assert!(search(
+        &mut app,
+        SearchCommand::SetSearchReplaceOpen { open: false }
+    ));
 
     assert!(active_view_replacement_preview(&app).is_none());
     assert_eq!(active_buffer_text(&app), "foo");
+    for (command, open, replace) in [
+        (SearchCommand::Close, false, false),
+        (SearchCommand::Toggle, true, false),
+        (SearchCommand::Toggle, false, false),
+        (SearchCommand::OpenAndReplace, true, true),
+    ] {
+        assert!(search(&mut app, command));
+        assert_eq!(app.state.search_state.panel.open, open);
+        assert_eq!(app.state.search_state.panel.replace_open, replace);
+    }
+    assert!(search(
+        &mut app,
+        SearchCommand::SetSearchReplaceOpen { open: true }
+    ));
+}
+
+fn set_replacement(app: &mut ScratchpadApp, value: &str) {
+    assert!(search(
+        app,
+        SearchCommand::SetSearchReplacement {
+            replacement: value.into()
+        }
+    ));
+}
+
+fn set_query(app: &mut ScratchpadApp, value: &str) {
+    assert!(search(
+        app,
+        SearchCommand::SetSearchQuery {
+            query: value.into()
+        }
+    ));
+}
+
+fn search(app: &mut ScratchpadApp, command: SearchCommand) -> bool {
+    crate::app::commands::handle_command(app, AppCommand::Search(command))
 }
 
 fn app_with_search_text(text: &str) -> ScratchpadApp {
