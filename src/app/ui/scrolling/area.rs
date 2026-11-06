@@ -40,6 +40,7 @@ pub struct ScrollArea {
     scrollbar_y: ScrollbarPolicy,
     eof_overscroll: bool,
     scrollbar_thickness: f32,
+    reserve_vertical_gutter: bool,
     min_content_size: Vec2,
     /// Optional fixed outer size; if `None`, fills `ui.available_rect_before_wrap()`.
     max_size: Option<Vec2>,
@@ -56,6 +57,7 @@ impl ScrollArea {
             scrollbar_y: ScrollbarPolicy::VisibleWhenNeeded,
             eof_overscroll: true,
             scrollbar_thickness: 7.0,
+            reserve_vertical_gutter: false,
             min_content_size: Vec2::ZERO,
             max_size: None,
         }
@@ -97,6 +99,14 @@ impl ScrollArea {
         self
     }
 
+    /// Keep text wrapping stable when the vertical scrollbar appears/disappears.
+    /// Visibility and interaction still follow the scrollbar policy.
+    #[must_use]
+    pub fn reserve_vertical_gutter(mut self, reserve: bool) -> Self {
+        self.reserve_vertical_gutter = reserve;
+        self
+    }
+
     #[must_use]
     pub fn min_content_size(mut self, size: Vec2) -> Self {
         self.min_content_size = size;
@@ -128,13 +138,16 @@ impl ScrollArea {
         // content/viewport sizes. This causes a one-frame lag on first show
         // when scrollbar visibility flips, matching egui's behavior.
         let layout_state = pass_stable_layout_state(ui, self.id, state);
-        let bars = visible_scrollbars(
+        let mut bars = visible_scrollbars(
             self.scrollbar_x,
             self.scrollbar_y,
             self.scrollbar_thickness,
             &layout_state,
             outer_rect,
         );
+        if self.reserve_vertical_gutter {
+            bars.y_extent = self.scrollbar_thickness;
+        }
         let inner_rect = inner_rect_for_bars(outer_rect, bars);
 
         state.viewport_size = inner_rect.size();
@@ -450,6 +463,36 @@ fn child_content_rect_size(content_size: Vec2, viewport_size: Vec2) -> Vec2 {
 #[cfg(test)]
 mod source_tests {
     use super::*;
+
+    #[test]
+    fn reserved_gutter_keeps_wrapping_width_stable_when_content_grows_and_shrinks() {
+        let ctx = egui::Context::default();
+        let scroll_id = Id::unique("stable-wrap-test");
+        let mut widths = Vec::new();
+        for height in [20., 2000., 2000., 20., 20.] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800., 400.),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let out = ScrollArea::new(scroll_id)
+                        .reserve_vertical_gutter(true)
+                        .scrollbar_x(ScrollbarPolicy::Hidden)
+                        .show_viewport(ui, |ui, _, viewport| {
+                            widths.push(viewport.width());
+                            ui.allocate_space(egui::vec2(viewport.width(), height));
+                        });
+                    assert_eq!(out.inner_rect.width(), *widths.last().unwrap());
+                },
+            );
+            output.textures_delta.clear();
+        }
+        assert!(widths.iter().all(|width| *width == widths[0]));
+    }
 
     #[test]
     fn wheel_and_unknown_keep_acceleration_but_trackpad_and_momentum_do_not() {

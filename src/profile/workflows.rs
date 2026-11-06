@@ -115,6 +115,13 @@ pub fn search_workflow_sample(mode: &str, targets: usize, bytes_per_target: usiz
         crate::app::app_state::prepare_context_before_first_frame(app, &ctx);
         render_app(app, &ctx);
         let layout_before = crate::app::capacity_metrics::capacity_metrics_snapshot();
+        let wrap_width = |app: &ScratchpadApp| {
+            app.tab_manager
+                .active_tab()
+                .and_then(|tab| tab.layout.view(tab.layout.active_view_id))
+                .and_then(|view| view.layout_cache.latest_wrap_width())
+        };
+        let prepared_wrap_width = wrap_width(app);
         let setup_elapsed_ns = setup.elapsed().as_nanos();
         let start = Instant::now();
         app.set_search_query("needle");
@@ -132,6 +139,9 @@ pub fn search_workflow_sample(mode: &str, targets: usize, bytes_per_target: usiz
                 first_render_ns = Some(start.elapsed().as_nanos());
                 let after = crate::app::capacity_metrics::capacity_metrics_snapshot();
                 first_render_layout = json!({
+                    "word_wrap":app.state.app_settings.word_wrap(),
+                    "prepared_wrap_width":prepared_wrap_width,
+                    "result_wrap_width":wrap_width(app),
                     "result_groups_rendered":after.search_result_groups_rendered.saturating_sub(layout_before.search_result_groups_rendered),
                     "result_groups_skipped":after.search_result_groups_skipped.saturating_sub(layout_before.search_result_groups_skipped),
                     "layout_jobs":after.layout_job_count.saturating_sub(layout_before.layout_job_count),

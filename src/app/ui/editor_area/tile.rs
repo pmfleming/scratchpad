@@ -264,6 +264,7 @@ fn show_editor_scroll_area(
         .source(local_scroll_source(request.scroll_bar_visibility))
         .scrollbar_x(scrollbar_x)
         .scrollbar_y(scrollbar_policy_from_egui(request.scroll_bar_visibility))
+        .reserve_vertical_gutter(word_wrap)
         .min_content_size(egui::vec2(0.0, frame.virtual_content_height))
         // Match the no-overscroll clamp applied in `resolve_editor_scroll_offset_override`.
         // Otherwise the scrollbar's track is sized for one extra viewport-height of

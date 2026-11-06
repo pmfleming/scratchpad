@@ -38,6 +38,12 @@ impl LayoutCache {
     const MAX_ENTRIES: usize = 8;
     const MAX_BYTES: usize = 4 * 1024 * 1024;
 
+    pub(crate) fn latest_wrap_width(&self) -> Option<f32> {
+        self.entries
+            .back()
+            .map(|entry| f32::from_bits(entry.key.wrap_width_bits))
+    }
+
     pub fn get(&mut self, key: &LayoutCacheKey) -> Option<Arc<egui::Galley>> {
         let index = self.entries.iter().position(|entry| &entry.key == key)?;
         let entry = self.entries.remove(index)?;
