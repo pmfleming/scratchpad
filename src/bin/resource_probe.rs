@@ -58,9 +58,14 @@ fn read_probe_file(
 }
 fn selected(id: &str) -> bool {
     let args: Vec<_> = std::env::args().collect();
-    args.windows(2)
-        .find(|pair| pair[0] == "--scenario")
-        .is_none_or(|pair| pair[1] == id)
+    scenario_selected(&args, id)
+}
+fn scenario_selected(args: &[String], id: &str) -> bool {
+    let mut requested = args
+        .windows(2)
+        .filter(|pair| pair[0] == "--scenario")
+        .peekable();
+    requested.peek().is_none() || requested.any(|pair| pair[1] == id)
 }
 fn any_selected(ids: &[&str]) -> bool {
     ids.iter().any(|id| selected(id))
@@ -708,4 +713,19 @@ fn unique_probe_root(label: &str) -> PathBuf {
         "scratchpad-resource-probe-{label}-{}-{nanos}",
         std::process::id()
     ))
+}
+
+#[cfg(test)]
+mod selection_tests {
+    #[test]
+    fn repeated_scenario_flags_select_the_union_without_enabling_other_work() {
+        let args: Vec<_> = ["probe", "--scenario", "save", "--scenario", "restore"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        assert!(super::scenario_selected(&args, "save"));
+        assert!(super::scenario_selected(&args, "restore"));
+        assert!(!super::scenario_selected(&args, "forget"));
+        assert!(super::scenario_selected(&[], "forget"));
+    }
 }

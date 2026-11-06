@@ -541,5 +541,28 @@
         }
       ]
     }
+  },
+  "probe_fixture_groups": {
+    "resource_probe": [
+      {
+        "id": "session_cost",
+        "scenarios": [
+          "session_persist_cost",
+          "session_steady_persist_cost",
+          "session_restore_cost",
+          "startup_visible_restore_cost"
+        ]
+      },
+      {
+        "id": "aged_storage",
+        "scenarios": [
+          "cold_reads_during_save",
+          "aged_store_save",
+          "aged_store_restore",
+          "aged_store_close",
+          "aged_store_forget"
+        ]
+      }
+    ]
   }
 }

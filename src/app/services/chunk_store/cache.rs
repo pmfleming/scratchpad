@@ -132,7 +132,9 @@ mod tests {
         let mut reference: Vec<(u64, u64, usize)> = Vec::new();
         let mut random = 0x0123_4567_89ab_cdef_u64;
         for step in 0..20_000 {
-            random = random.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            random = random
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             if step % 97 == 0 {
                 cache.limit = (random % 150) as usize;
                 cache.per_owner = ((random >> 8) % 70) as usize;
