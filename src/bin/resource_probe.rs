@@ -151,11 +151,15 @@ fn run_file_backed_cache_traversal_cycle(document: &TextDocument) -> StepOutcome
         .spans_for_range(0..tree.len_chars())
         .map(|span| black_box(span.text.len()))
         .sum();
-    StepOutcome::file_chunks(
+    let mut outcome = StepOutcome::file_chunks(
         tree.loaded_chunk_count(),
         tree.chunk_cache_limit(),
         visited_bytes,
-    )
+    );
+    let (bytes, limit) = tree.chunk_cache_bytes();
+    outcome.phase_elapsed_ns =
+        serde_json::json!({"retained_cache_bytes":bytes,"cache_limit_bytes":limit});
+    outcome
 }
 
 fn run_file_backed_random_window_cycle(document: &TextDocument) -> StepOutcome {
@@ -178,7 +182,9 @@ fn run_file_backed_random_window_cycle(document: &TextDocument) -> StepOutcome {
         tree.chunk_cache_limit(),
         visited_bytes,
     );
+    let (bytes, limit) = tree.chunk_cache_bytes();
     outcome.phase_elapsed_ns = serde_json::json!({
+        "retained_cache_bytes":bytes,"cache_limit_bytes":limit,
         "window_samples": samples.len(),
         "window_p50_ns": samples[samples.len() / 2],
         "window_p99_ns": samples[(samples.len() * 99).div_ceil(100) - 1],
@@ -571,7 +577,7 @@ fn build_tabs(tab_count: usize, bytes_per_buffer: usize) -> Vec<WorkspaceTab> {
         .map(|index| {
             let buffer = BufferState::new(
                 format!("tab_{index}.txt"),
-                utf8_text_of_size(bytes_per_buffer),
+                scratchpad::profile::fixtures::text(bytes_per_buffer, 0x7192_a335 ^ index as u64),
                 None,
             );
             WorkspaceTab::new(buffer)

@@ -549,6 +549,11 @@ impl PieceTreeLite {
     }
 
     #[must_use]
+    pub fn chunk_cache_bytes(&self) -> (usize, usize) {
+        self.storage.chunk_cache_bytes()
+    }
+
+    #[must_use]
     pub fn chunk_cache_limit(&self) -> usize {
         self.storage.chunk_cache_limit()
     }

@@ -349,6 +349,17 @@ impl ChunkStoreHandle {
             .filter(|(id, _)| *id == owner)
             .count()
     }
+    pub(crate) fn owner_cached_bytes(&self, owner: u64) -> usize {
+        self.0
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .loaded
+            .values()
+            .filter(|(id, _)| *id == owner)
+            .map(|(_, body)| body.len())
+            .sum()
+    }
     pub(crate) fn owner_cache_limit(&self) -> usize {
         self.0
             .cache

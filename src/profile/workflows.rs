@@ -248,6 +248,12 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
             };
             let timer = Instant::now();
             App::raw_input_hook(app, &ctx, &mut input);
+            saw_preparing |= app
+                .tab_manager
+                .active_tab()
+                .unwrap()
+                .active_buffer()
+                .is_preparing_text();
             assert!(!input.events.iter().any(|event|matches!(event,egui::Event::Paste(text) if text.len()>=crate::app::domain::buffer::BULK_TEXT_BYTES)),"focused editor paste must be moved before egui's begin-pass copy");
             let mut output = ctx.run_ui(input, |ui| {
                 App::logic(app, ui.ctx(), &mut frame);
@@ -268,7 +274,7 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
                 .active_buffer()
                 .is_preparing_text();
             saw_preparing |= preparing;
-            if preparing && !queued_typing {
+            if saw_preparing && !queued_typing {
                 events.push(egui::Event::Text("t".into()));
                 queued_typing = true;
             }
@@ -284,6 +290,7 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
             if saw_preparing
                 && !preparing
                 && queued_typing
+                && events.is_empty()
                 && pause.is_finished()
                 && stress
                     .as_ref()
@@ -339,6 +346,13 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn production_paste_finishes_without_an_injected_writer_pause() {
+        let profile = super::run_live_text_paste_profile(8 * super::super::MB);
+        assert_eq!(profile["writer_pause_ms"], 0);
+        assert_eq!(profile["queued_typing_preserved"], true);
+        assert!(profile["workflow_ns"].as_u64().unwrap() > 0);
+    }
     #[test]
     fn production_search_measures_delivery_and_tessellation_with_correct_results() {
         for mode in ["active", "current", "all"] {

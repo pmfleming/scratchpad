@@ -71,6 +71,7 @@ impl SessionMaintenanceFixture {
         self.store.flush_text_chunks()
     }
 
+    #[must_use]
     pub fn database_bytes(&self) -> u64 {
         ["session.db", "session.db-wal"]
             .iter()

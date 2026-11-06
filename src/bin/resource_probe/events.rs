@@ -181,13 +181,23 @@ fn emit_measured_step(
         measurement_scope,
         measurement_contract: {
             let mut contract = match step.scenario {
-                "store_import"
-                | "ui_during_store_writes"
-                | "cold_reads_during_save"
+                "production_paste" | "ui_during_store_writes" => {
+                    scratchpad::profile::fixtures::contract(
+                        "store",
+                        true,
+                        "ScratchpadApp::raw_input_hook/logic/ui/tessellation",
+                    )
+                }
+                "cold_reads_during_save"
                 | "aged_store_save"
                 | "aged_store_restore"
                 | "aged_store_close"
-                | "aged_store_forget"
+                | "aged_store_forget" => scratchpad::profile::fixtures::contract(
+                    "store",
+                    true,
+                    "SessionMaintenanceFixture/SessionStore/Chunk::load",
+                ),
+                "store_import"
                 | "large_utf8_load_peak_memory"
                 | "file_backed_chunk_cache_tracking"
                 | "file_backed_random_window"

@@ -21,7 +21,6 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 const TAB_BYTES_PER_BUFFER: usize = 48 * KB;
-const MANY_FILE_BYTES_PER_BUFFER: usize = KB;
 const SPLIT_BYTES_PER_TILE: usize = 128 * KB;
 const VIEW_COUNT_BUFFER_BYTES: usize = MB;
 const MEASUREMENT_REPETITIONS: usize = 3;
@@ -79,11 +78,16 @@ struct SweepDescriptor {
     workload_label: fn(usize) -> String,
 }
 
+thread_local! { static CAPACITY_STORE: std::cell::RefCell<Option<scratchpad::app::services::session_store::SessionStore>> = const {std::cell::RefCell::new(None)}; }
 fn read_stored_file(path: &Path) -> scratchpad::app::services::file_service::FileContent {
-    use scratchpad::app::services::session_store::SessionStore;
-    static STORE: std::sync::OnceLock<SessionStore> = std::sync::OnceLock::new();
-    let store = STORE.get_or_init(|| SessionStore::new(unique_probe_root("store")));
-    FileService::read_file_in_store(path, store.chunk_store_handle().unwrap()).unwrap()
+    CAPACITY_STORE.with(|slot| {
+        let store = slot.borrow();
+        let store = store.as_ref().unwrap();
+        let file =
+            FileService::read_file_in_store(path, store.chunk_store_handle().unwrap()).unwrap();
+        store.flush_text_chunks().unwrap();
+        file
+    })
 }
 
 fn contract(scenario: &str) -> serde_json::Value {
@@ -92,7 +96,14 @@ fn contract(scenario: &str) -> serde_json::Value {
         "large_file_first_visible_ceiling" => {
             ("bounded_window", true, "open_path_to_first_tessellation")
         }
-        "many_file_first_visible_ceiling" => ("store", true, "open_paths_to_first_tessellation"),
+        "many_file_first_visible_ceiling" | "many_file_background_hydration_ceiling" => (
+            "owned",
+            true,
+            "FileController::open_paths_async/poll_background_io",
+        ),
+        "search_target_count_ceiling" => {
+            ("owned", true, "ScratchpadApp::set_search_query/poll_search")
+        }
         "search_file_size_ceiling" => (
             "store",
             true,
@@ -105,12 +116,19 @@ fn contract(scenario: &str) -> serde_json::Value {
 }
 
 fn main() {
+    let directory = tempfile::tempdir().unwrap();
+    CAPACITY_STORE.with(|slot| {
+        *slot.borrow_mut() = Some(scratchpad::app::services::session_store::SessionStore::new(
+            directory.path().join("store"),
+        ))
+    });
     let args: Vec<_> = std::env::args().collect();
     let selection = args
         .windows(2)
         .find(|p| p[0] == "--scenario")
         .map(|p| p[1].as_str());
-    let sweeps: &[(&[&str], fn())] = &[
+    type CapacitySweep = (&'static [&'static str], fn());
+    let sweeps: &[CapacitySweep] = &[
         (
             &[
                 "large_file_first_visible_ceiling",
@@ -121,12 +139,11 @@ fn main() {
         (&["in_memory_text_ingest_ceiling"], emit_file_size_sweep),
         (&["text_layout_ceiling"], emit_text_layout_sweep),
         (
-            &["many_file_first_visible_ceiling"],
+            &[
+                "many_file_first_visible_ceiling",
+                "many_file_background_hydration_ceiling",
+            ],
             emit_many_file_first_visible_sweep,
-        ),
-        (
-            &["many_file_background_hydration_ceiling"],
-            emit_many_file_count_sweep,
         ),
         (&["search_file_size_ceiling"], emit_search_file_size_sweep),
         (
@@ -147,6 +164,7 @@ fn main() {
             run();
         }
     }
+    CAPACITY_STORE.with(|slot| drop(slot.borrow_mut().take()));
 }
 
 fn selected(scenario: &str) -> bool {
@@ -228,6 +246,17 @@ fn emit_large_file_first_visible_sweep() {
                 ),
             );
             }
+            let fresh_import = selected("large_file_background_index_ceiling")
+                .then(|| tempfile::tempdir().unwrap());
+            let previous_store = fresh_import.as_ref().map(|directory| {
+                CAPACITY_STORE.with(|slot| {
+                    slot.replace(Some(
+                        scratchpad::app::services::session_store::SessionStore::new(
+                            directory.path().join("store"),
+                        ),
+                    ))
+                })
+            });
             emit_prepared_step(
                 StepDescriptor {
                     scenario: "large_file_background_index_ceiling",
@@ -248,6 +277,9 @@ fn emit_large_file_first_visible_sweep() {
                     )
                 },
             );
+            if let Some(previous) = previous_store {
+                CAPACITY_STORE.with(|slot| drop(slot.replace(previous)));
+            }
         }
     }
 
@@ -326,8 +358,14 @@ fn emit_tab_count_sweep() {
 fn emit_many_file_first_visible_sweep() {
     let root = unique_probe_root("many-file-first-visible");
     std::fs::create_dir_all(&root).expect("create many-file fixture root");
+    let background = selected("many_file_background_hydration_ceiling")
+        && !selected("many_file_first_visible_ceiling");
     let descriptor = SweepDescriptor::count(
-        "many_file_first_visible_ceiling",
+        if background {
+            "many_file_background_hydration_ceiling"
+        } else {
+            "many_file_first_visible_ceiling"
+        },
         "Many-file first-visible workspace sweep",
         "files",
         files_label,
@@ -378,46 +416,55 @@ fn emit_many_file_first_visible_sweep() {
                 repeat_index,
                 setup_elapsed_ns,
                 RecordedTiming {
-                    elapsed_ns: profile.first_visible_ns,
+                    elapsed_ns: if background {
+                        profile.background_completion_ns
+                    } else {
+                        profile.first_visible_ns
+                    },
                     background_completion_ns: Some(profile.background_completion_ns),
                     completed_workload_value: Some(profile.installed_file_count),
-                    process_before,
+                    process_before: process_before.clone(),
                 },
-                "open_paths_to_first_tessellation_before_background_completion",
+                if background {
+                    "production_open_paths_background_completion"
+                } else {
+                    "open_paths_to_first_tessellation_before_background_completion"
+                },
                 Some(format!(
                     "background completion {:.3} ms; {} tabs installed",
                     profile.background_completion_ns as f64 / 1_000_000.0,
                     profile.tab_count_after_completion
                 )),
             );
+            if selected("many_file_first_visible_ceiling")
+                && selected("many_file_background_hydration_ceiling")
+            {
+                emit_recorded_step(
+                    StepDescriptor {
+                        scenario: "many_file_background_hydration_ceiling",
+                        scenario_label: "Production many-file background completion",
+                        workload_family: "many-files",
+                        step_index,
+                        workload_value: file_count,
+                        workload_unit: "files",
+                        workload_label: files_label(file_count),
+                    },
+                    repeat_index,
+                    setup_elapsed_ns,
+                    RecordedTiming {
+                        elapsed_ns: profile.background_completion_ns,
+                        background_completion_ns: None,
+                        completed_workload_value: Some(profile.installed_file_count),
+                        process_before,
+                    },
+                    "production_open_paths_background_completion",
+                    None,
+                );
+            }
         }
     }
 
     let _ = std::fs::remove_dir_all(root);
-}
-
-fn emit_many_file_count_sweep() {
-    emit_prepared_sweep(
-        SweepDescriptor::count(
-            "many_file_background_hydration_ceiling",
-            "Many-file background hydration completion sweep",
-            "files",
-            files_label,
-        ),
-        [2_048usize, 10_000, 50_000],
-        |file_count| {
-            (0..file_count)
-                .map(|index| {
-                    (
-                        format!("file_{index}.txt"),
-                        utf8_text_of_size(MANY_FILE_BYTES_PER_BUFFER),
-                        PathBuf::from(format!("file_{index}.txt")),
-                    )
-                })
-                .collect::<Vec<_>>()
-        },
-        run_many_file_background_hydration_cycle,
-    );
 }
 
 fn emit_search_file_size_sweep() {
@@ -461,17 +508,35 @@ fn emit_search_file_size_sweep() {
 }
 
 fn emit_search_target_count_sweep() {
-    emit_prepared_sweep(
-        SweepDescriptor::count(
-            "search_target_count_ceiling",
-            "Search target-count ceiling sweep",
-            "files",
-            files_label,
-        ),
-        [100usize, 1_000, 10_000],
-        |file_count| (file_count, search_text_of_size(4 * KB)),
-        |(file_count, target)| run_search_target_count_cycle(file_count, &target),
-    );
+    for (step_index, count) in [100, 1_000, 10_000].into_iter().enumerate() {
+        for repeat_index in 0..MEASUREMENT_REPETITIONS {
+            let step = StepDescriptor {
+                scenario: "search_target_count_ceiling",
+                scenario_label: "Production all-tabs search completion",
+                workload_family: "search",
+                step_index,
+                workload_value: count,
+                workload_unit: "files",
+                workload_label: files_label(count),
+            };
+            started(&step, repeat_index);
+            let before = process_snapshot();
+            let profile = scratchpad::profile::search_workflow_sample("all", count, 4 * KB);
+            emit_recorded_step(
+                step,
+                repeat_index,
+                profile["setup_elapsed_ns"].as_u64().unwrap() as u128,
+                RecordedTiming {
+                    elapsed_ns: profile["completion"].as_u64().unwrap() as u128,
+                    background_completion_ns: None,
+                    completed_workload_value: None,
+                    process_before: before,
+                },
+                "query_command_to_completion",
+                None,
+            );
+        }
+    }
 }
 
 fn emit_split_count_sweep() {
@@ -743,24 +808,6 @@ fn run_tab_capacity_cycle(manager: &mut TabManager) -> usize {
     operations + manager.tabs.len()
 }
 
-fn run_many_file_background_hydration_cycle(files: Vec<(String, String, PathBuf)>) -> usize {
-    let buffers = files
-        .into_iter()
-        .map(|(name, text, path)| BufferState::new(name, text, Some(path)))
-        .collect::<Vec<_>>();
-    buffers
-        .iter()
-        .map(|buffer| buffer.line_count + buffer.document().piece_tree().len_bytes())
-        .sum()
-}
-
-fn run_search_target_count_cycle(file_count: usize, target: &str) -> usize {
-    let program = search_capacity_program();
-    (0..file_count)
-        .map(|_| search_program(black_box(target), &program).matches.len())
-        .sum()
-}
-
 fn run_split_capacity_cycle(mut tab: WorkspaceTab) -> usize {
     let split_count = tab.layout.views.len();
     let _ = tab.rebalance_views_equally();
@@ -799,7 +846,7 @@ fn build_tabs(tab_count: usize, bytes_per_buffer: usize) -> Vec<WorkspaceTab> {
         .map(|index| {
             let buffer = BufferState::new(
                 format!("tab_{index}.txt"),
-                utf8_text_of_size(bytes_per_buffer),
+                scratchpad::profile::fixtures::text(bytes_per_buffer, 0x7192_a335 ^ index as u64),
                 None,
             );
             WorkspaceTab::new(buffer)

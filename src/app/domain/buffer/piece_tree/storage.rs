@@ -273,6 +273,14 @@ impl PieceTreeStorage {
             .as_ref()
             .map_or(0, |store| store.owner_loaded(self.add.owner))
     }
+    pub(super) fn chunk_cache_bytes(&self) -> (usize, usize) {
+        self.add.store.as_ref().map_or((0, 0), |store| {
+            (
+                store.owner_cached_bytes(self.add.owner),
+                store.owner_cache_limit(),
+            )
+        })
+    }
     pub(super) fn chunk_cache_limit(&self) -> usize {
         self.add
             .store

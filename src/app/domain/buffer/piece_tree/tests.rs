@@ -165,6 +165,9 @@ fn file_backed_chunk_cache_is_bounded_without_invalidating_active_text() {
 
     assert_eq!(pinned.as_ref(), "a");
     assert!(store.cached_bytes() <= 4 * 1024 * 1024);
+    let (retained_bytes, limit_bytes) = tree.chunk_cache_bytes();
+    assert_eq!(limit_bytes, 4 * 1024 * 1024);
+    assert_eq!(retained_bytes, store.cached_bytes());
     // Originals now share the configured per-owner/aggregate cache budget.
 }
 

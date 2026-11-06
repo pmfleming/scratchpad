@@ -36,7 +36,8 @@
       "aged_store_save",
       "aged_store_restore",
       "aged_store_close",
-      "aged_store_forget"
+      "aged_store_forget",
+      "production_paste"
     ],
     "capacity_probe": [
       "large_file_first_visible_ceiling",
@@ -347,6 +348,12 @@
       "max": 180000000,
       "unit": "ns",
       "basis": "storage-plan cold-read gate or existing session interaction limit"
+    },
+    "production_paste": {
+      "metric": "/phase_elapsed_ns/workflow_ns",
+      "max": 150000000,
+      "unit": "ns",
+      "basis": "existing paste latency budget applied to production input through publication"
     }
   },
   "capacity_budgets": {
@@ -457,6 +464,60 @@
     "search_workflow_all_completion": {
       "probe": "search_workflow_metrics",
       "threshold_ms": 500
+    }
+  },
+  "fixtures": {
+    "large_dirty_buffer_save": {
+      "equals": {
+        "fixture_revision": 2,
+        "history_retention": "unbounded",
+        "inserted_bytes": 1,
+        "synchronous": "FULL"
+      },
+      "minimum": {
+        "buffer_bytes": 52428800,
+        "history_payload_bytes": 52428800,
+        "history_entries": 1025
+      }
+    }
+  },
+  "diagnostics": {
+    "session_maintenance": {
+      "samples_per_scenario": 9,
+      "fixture": {
+        "equals": {
+          "fixture_revision": 1,
+          "buffer_bytes": 52428800,
+          "initial_archives": 128,
+          "synchronous": "FULL"
+        }
+      },
+      "scenarios": [
+        {
+          "id": "stored_usage",
+          "save_required": false
+        },
+        {
+          "id": "closed_token_lookup",
+          "save_required": false
+        },
+        {
+          "id": "closed_archive_append",
+          "save_required": false
+        },
+        {
+          "id": "save_after_branch",
+          "save_required": true
+        },
+        {
+          "id": "save_after_navigation",
+          "save_required": true
+        },
+        {
+          "id": "incremental_save",
+          "save_required": true
+        }
+      ]
     }
   }
 }

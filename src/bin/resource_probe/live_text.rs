@@ -132,6 +132,22 @@ pub(super) fn imports() {
 
 /// Standard lens rows for import cost and responsiveness against real writes.
 pub(super) fn storage_workflows() {
+    if super::selected("production_paste") {
+        for (index, bytes) in [64 * MB, 128 * MB].into_iter().enumerate() {
+            emit_prepared_operation(
+                descriptor("production_paste", index, bytes),
+                serde_json::json!({"writer_pause_ms":0}),
+                || {
+                    let profile = scratchpad::profile::run_live_text_paste_profile(bytes);
+                    let mut outcome =
+                        StepOutcome::items(profile["frames"].as_u64().unwrap() as usize);
+                    outcome.phase_elapsed_ns = profile;
+                    outcome
+                },
+            );
+        }
+    }
+
     if super::selected("store_import") {
         for (index, bytes) in [64 * MB, GB].into_iter().enumerate() {
             let directory = tempfile::tempdir().unwrap();
