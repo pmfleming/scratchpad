@@ -39,7 +39,7 @@ pub use piece_tree::{
     PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics,
     PieceTreeSlice, PieceTreeSpan, PieceTreeText, TextPin, TryPieceTreeSlice,
 };
-pub(crate) use piece_tree::{PieceBuffer, StorageBlock};
+pub(crate) use piece_tree::{PieceBuffer, StorageBlock, StorageCapture};
 pub(crate) use snapshot::SnapshotRevision;
 pub use snapshot::{DocumentChunk, DocumentSnapshot};
 pub use state::{

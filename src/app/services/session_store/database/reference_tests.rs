@@ -13,6 +13,34 @@ fn capture(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
 }
 
 #[test]
+fn batched_small_documents_survive_failed_manifest_retry_with_exact_history() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let texts: Vec<_> = (0..130)
+            .map(|i| format!("{i}: café 東京\n").repeat(300))
+            .collect();
+        let tabs: Vec<_> = texts.iter().map(|text| tab(text)).collect();
+        db.conn.execute_batch("CREATE TRIGGER fail_batch BEFORE INSERT ON document_pieces BEGIN SELECT RAISE(ABORT,'injected'); END;").await.unwrap();
+        assert!(db.persist(capture(&tabs), 1).await.is_err());
+        db.conn
+            .execute_batch("DROP TRIGGER fail_batch;")
+            .await
+            .unwrap();
+        db.persist(capture(&tabs), 2).await.unwrap();
+        let restored = db.load(ReadScope::All).await.unwrap().unwrap();
+        assert_eq!(restored.manifest.tabs.len(), texts.len());
+        for (mut tab, expected) in restored.manifest.tabs.into_iter().zip(texts) {
+            let mut document = tab.buffers.remove(0).history_document.unwrap();
+            assert_eq!(document.try_extract_text().unwrap(), expected);
+            document.undo_last_operation().unwrap();
+            assert_eq!(document.try_extract_text().unwrap(), "");
+            document.redo_last_operation().unwrap();
+            assert_eq!(document.try_extract_text().unwrap(), expected);
+        }
+    });
+}
+
+#[test]
 fn forget_releases_whole_chunks_without_rewriting_logical_offsets_or_old_clones() {
     block_on(async {
         let (_root, mut db) = database().await;

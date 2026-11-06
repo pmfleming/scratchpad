@@ -36,9 +36,9 @@ impl Database {
         &mut self,
         id: &str,
         tree: &PieceTreeLite,
+        capture: crate::app::domain::buffer::StorageCapture,
     ) -> io::Result<PreparedContent> {
         let store = self.chunk_store()?;
-        let capture = tree.capture_storage(&store)?;
         // The actor drains directly: submitting a job to itself would deadlock.
         while capture.blocks.iter().any(|b| b.chunk.reference().is_none()) {
             self.drain_chunk_batch().await?;

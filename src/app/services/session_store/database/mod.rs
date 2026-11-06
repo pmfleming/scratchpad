@@ -120,6 +120,9 @@ struct ContentInventory {
 
 pub(super) struct Database {
     conn: Connection,
+    // The actor runs operations serially. Reuse execution state as well as SQL
+    // programs; Turso's prepare_cached creates a fresh VM for every call.
+    statements: std::sync::Mutex<HashMap<String, turso::Statement>>,
     chunks: Option<crate::app::services::chunk_store::ChunkStoreHandle>,
     database: TursoDatabase,
     ownership: File,
@@ -195,6 +198,7 @@ impl Database {
         .map_err(error)?;
         Ok(Self {
             conn,
+            statements: std::sync::Mutex::new(HashMap::new()),
             chunks: None,
             database,
             ownership,
@@ -257,19 +261,24 @@ impl Database {
             .map_err(error)
     }
     async fn integer(&self, sql: &str) -> io::Result<i64> {
-        self.conn
-            .prepare_cached(sql)
-            .await
-            .map_err(error)?
-            .query(())
-            .await
-            .map_err(error)?
+        // Exhaust the cursor before retaining its VM, including scalar queries.
+        self.query_collect(sql, (), |row| row.get(0).map_err(error))
+            .await?
+            .into_iter()
             .next()
-            .await
-            .map_err(error)?
-            .ok_or_else(|| invalid("missing scalar database result"))?
-            .get(0)
-            .map_err(error)
+            .ok_or_else(|| invalid("missing scalar database result"))
+    }
+    async fn statement(&self, sql: &str) -> io::Result<turso::Statement> {
+        if let Some(statement) = self.statements.lock().unwrap().get(sql).cloned() {
+            return Ok(statement);
+        }
+        let statement = self.conn.prepare(sql).await.map_err(error)?;
+        let mut statements = self.statements.lock().unwrap();
+        if statements.len() >= 128 {
+            statements.clear();
+        }
+        statements.insert(sql.to_owned(), statement.clone());
+        Ok(statement)
     }
     // Map one row at a time: fingerprint callers release each undo payload here,
     // rather than materializing a second complete history before hashing it.
@@ -279,13 +288,22 @@ impl Database {
         params: impl turso::IntoParams,
         mut map: impl FnMut(&turso::Row) -> io::Result<T>,
     ) -> io::Result<Vec<T>> {
-        let mut statement = self.conn.prepare_cached(sql).await.map_err(error)?;
-        let mut rows = statement.query(params).await.map_err(error)?;
-        let mut values = Vec::new();
-        while let Some(row) = rows.next().await.map_err(error)? {
-            values.push(map(&row)?);
+        let mut statement = self.statement(sql).await?;
+        let result = async {
+            let mut rows = statement.query(params).await.map_err(error)?;
+            let mut values = Vec::new();
+            while let Some(row) = rows.next().await.map_err(error)? {
+                values.push(map(&row)?);
+            }
+            Ok(values)
         }
-        Ok(values)
+        .await;
+        if result.is_err() {
+            // A decoding failure can leave a cursor before Done. Drop that VM
+            // so recovery/rollback does not inherit an active statement.
+            self.statements.lock().unwrap().remove(sql);
+        }
+        result
     }
 
     async fn string_set(&self, sql: &str) -> io::Result<HashSet<String>> {
@@ -321,13 +339,12 @@ impl Database {
         sql: &str,
         params: impl turso::IntoParams,
     ) -> io::Result<u64> {
-        self.conn
-            .prepare_cached(sql)
-            .await
-            .map_err(error)?
-            .execute(params)
-            .await
-            .map_err(error)
+        let mut statement = self.statement(sql).await?;
+        let result = statement.execute(params).await.map_err(error);
+        if result.is_err() {
+            self.statements.lock().unwrap().remove(sql);
+        }
+        result
     }
     // Only acknowledge our own writes: an earlier unexpected write must still
     // invalidate the inventory on the next save.

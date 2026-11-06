@@ -285,6 +285,7 @@ impl Database {
             .iter()
             .map(|s| (s.temp_id.as_str(), s))
             .collect();
+        let mut trees = Vec::new();
         for (id, buffer) in &prepared.buffers {
             if let Some(history) = &buffer.history {
                 let changed = self.history_cache.get(id) != buffer.history_fingerprints.as_ref();
@@ -321,9 +322,25 @@ impl Database {
                     } else {
                         history.0.piece_tree()
                     };
-                    let content = self.prepare_content(id, tree).await?;
-                    prepared.contents.insert(id.clone(), content);
+                    trees.push((id, tree));
                 }
+            }
+        }
+        // Queue a bounded group before draining so small documents share body
+        // transactions. Large captures still drain before the next document.
+        let store = self.chunk_store()?;
+        let mut trees = trees.into_iter().peekable();
+        while trees.peek().is_some() {
+            let mut batch = Vec::new();
+            for (id, tree) in trees.by_ref() {
+                batch.push((id, tree, tree.capture_storage(&store)?));
+                if batch.len() >= 64 || store.pending_bytes() >= 1024 * 1024 {
+                    break;
+                }
+            }
+            for (id, tree, capture) in batch {
+                let content = self.prepare_content(id, tree, capture).await?;
+                prepared.contents.insert(id.clone(), content);
             }
         }
         Ok(())
