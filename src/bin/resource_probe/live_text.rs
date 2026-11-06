@@ -11,12 +11,14 @@ pub(super) fn run() {
     let document = read_probe_file(&path)
         .expect("file-backed document")
         .document;
+    super::FILE_PROBE_STORE
+        .with(|slot| slot.borrow().as_ref().unwrap().flush_text_chunks().unwrap());
     let snapshot = document.snapshot();
     let program = search_capacity_program();
     for index in 0..3 {
         emit_prepared_operation(
             descriptor("file_backed_search", index, 64 * MB),
-            serde_json::json!({"scope":"production snapshot chunk windows and search matcher; single-thread scan", "query":"café"}),
+            serde_json::json!({"scope":"production snapshot chunk windows and search matcher; single-thread scan", "query":"needle"}),
             || {
                 let mut matches = 0;
                 for chunk in snapshot.chunks_for_range(0..snapshot.len_chars(), 256 * KB, 5, 5) {
@@ -156,4 +158,55 @@ pub(super) fn storage_workflows() {
             },
         );
     }
+}
+
+pub(super) fn aged_storage() {
+    let ids = [
+        "cold_reads_during_save",
+        "aged_store_save",
+        "aged_store_restore",
+        "aged_store_close",
+        "aged_store_forget",
+    ];
+    if !super::any_selected(&ids) {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let mut fixture = SessionMaintenanceFixture::new(
+        root.path().join("aged"),
+        session_save::fixture(50 * MB),
+        128,
+    )
+    .unwrap();
+    fixture.seed_aged(3 * GB, 128).unwrap();
+    let database_bytes = fixture.database_bytes();
+    assert!(database_bytes >= 3 * GB as u64);
+    for id in ids {
+        if !super::selected(id) {
+            continue;
+        }
+        let repeats = if id == "cold_reads_during_save" { 1 } else { 3 };
+        for index in 0..repeats {
+            // Each forget starts with a new recorded edit, so it cannot become a no-op.
+            if id == "aged_store_forget" {
+                fixture.prepare("incremental_save").unwrap();
+            }
+            emit_prepared_operation(
+                descriptor(id, index, 3 * GB),
+                serde_json::json!({"database_bytes":database_bytes,"seed_bytes":3 * GB,
+                    "history_revisions":128,"initial_archives":128,"fixture_revision":1}),
+                || {
+                    let mut outcome = StepOutcome::items(1);
+                    outcome.phase_elapsed_ns = if id == "cold_reads_during_save" {
+                        fixture.cold_reads_during_saves().unwrap()
+                    } else {
+                        fixture.aged_operation(id).unwrap();
+                        serde_json::json!({})
+                    };
+                    outcome
+                },
+            );
+        }
+    }
+    fixture.verify().unwrap();
 }

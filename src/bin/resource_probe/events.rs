@@ -181,7 +181,14 @@ fn emit_measured_step(
         measurement_scope,
         measurement_contract: {
             let mut contract = match step.scenario {
-                "large_utf8_load_peak_memory"
+                "store_import"
+                | "ui_during_store_writes"
+                | "cold_reads_during_save"
+                | "aged_store_save"
+                | "aged_store_restore"
+                | "aged_store_close"
+                | "aged_store_forget"
+                | "large_utf8_load_peak_memory"
                 | "file_backed_chunk_cache_tracking"
                 | "file_backed_random_window"
                 | "file_backed_search" => {
@@ -193,6 +200,7 @@ fn emit_measured_step(
                 "large_dirty_buffer_save"
                 | "typing_without_save"
                 | "typing_during_save"
+                | "session_steady_persist_cost"
                 | "session_persist_cost"
                 | "session_restore_cost"
                 | "startup_visible_restore_cost" => {

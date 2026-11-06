@@ -43,6 +43,7 @@ pub(super) fn run_all() {
         super::live_text::run();
     }
     super::live_text::storage_workflows();
+    super::live_text::aged_storage();
 }
 
 /// Reuse the existing measured paths without the unrelated many-file/UI cases.

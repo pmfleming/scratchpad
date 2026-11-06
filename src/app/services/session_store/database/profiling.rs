@@ -10,6 +10,7 @@ pub struct SessionMaintenanceFixture {
     store: SessionStore,
     tabs: Vec<WorkspaceTab>,
     token: String,
+    aged_chunks: Vec<std::sync::Arc<crate::app::services::chunk_store::Chunk>>,
 }
 
 impl SessionMaintenanceFixture {
@@ -35,7 +36,162 @@ impl SessionMaintenanceFixture {
             request.closed_tabs.push(archive);
         }
         store.persist_request(request)?;
-        Ok(Self { store, tabs, token })
+        Ok(Self {
+            store,
+            tabs,
+            token,
+            aged_chunks: Vec::new(),
+        })
+    }
+
+    /// Build a populated store with retained chunk bodies, real edit history and archives.
+    pub fn seed_aged(&mut self, bytes: usize, revisions: usize) -> io::Result<()> {
+        self.aged_chunks = self.store.profile_seed_text(bytes, 0x8719_aab2)?;
+        for index in 0..revisions {
+            let buffer = self.tabs[0].active_buffer_mut();
+            let at = buffer.document().piece_tree().len_chars();
+            let text = format!("revision-{index}\n");
+            let document = buffer.document_mut();
+            document.insert_direct(at, &text);
+            document.push_edit_operation_with_source(
+                OperationRecord {
+                    previous_cursor: CursorRange::one(CharCursor::new(at)),
+                    next_cursor: CursorRange::one(CharCursor::new(at + text.len())),
+                    edits: vec![EditOperation {
+                        start_char: at,
+                        deleted_text: String::new(),
+                        inserted_text: text,
+                        deleted_spans: Vec::new(),
+                    }],
+                },
+                crate::app::domain::PieceSource::Edit,
+            );
+            self.store.persist(&self.tabs, 0, 16.0, false)?;
+        }
+        self.store.flush_text_chunks()
+    }
+
+    pub fn database_bytes(&self) -> u64 {
+        ["session.db", "session.db-wal"]
+            .iter()
+            .filter_map(|name| {
+                std::fs::metadata(self.store.root().join(name))
+                    .ok()
+                    .map(|m| m.len())
+            })
+            .sum()
+    }
+
+    /// Repeated, independently evicted reads while production saves run.
+    /// A read without observed physical I/O is reported as unverified, never cold.
+    pub fn cold_reads_during_saves(&mut self) -> io::Result<serde_json::Value> {
+        use crate::profile::process_metrics::{ProcessMeasurement, process_snapshot};
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        let done = AtomicBool::new(false);
+        let saves = AtomicU64::new(0);
+        let store = self.store.clone();
+        let tabs = self.tabs.clone();
+        let mut timings = Vec::new();
+        let mut raw = Vec::new();
+        // Flush dirty pages only in this disposable fixture, before timed reads.
+        for name in ["session.db", "session.db-wal"] {
+            if let Ok(file) = std::fs::File::open(self.store.root().join(name)) {
+                file.sync_all()?;
+            }
+        }
+        std::thread::scope(|scope| -> io::Result<()> {
+            let writer = scope.spawn(|| -> io::Result<()> {
+                while !done.load(Ordering::Acquire) {
+                    store.persist(&tabs, 0, 16.0, false)?;
+                    saves.fetch_add(1, Ordering::Release);
+                }
+                Ok(())
+            });
+            let reading = (|| -> io::Result<()> {
+                for index in 0..128 {
+                    self.store.chunk_store_handle()?.set_limits(0, 0);
+                    let mut evicted = cfg!(target_os = "linux");
+                    for name in ["session.db", "session.db-wal"] {
+                        let path = self.store.root().join(name);
+                        if path.exists() {
+                            evicted &= std::process::Command::new("fadvise")
+                                .args(["--advice", "dontneed"])
+                                .arg(&path)
+                                .output()
+                                .is_ok_and(|o| o.status.success());
+                        }
+                    }
+                    let chunk = &self.aged_chunks[(index * 97) % self.aged_chunks.len()];
+                    let before = process_snapshot();
+                    let started = Instant::now();
+                    let text = chunk.load(false, false)?;
+                    std::hint::black_box(text.len());
+                    let elapsed = started.elapsed().as_nanos();
+                    let io = ProcessMeasurement::between(before, process_snapshot());
+                    let counters = serde_json::to_value(io).map_err(io::Error::other)?;
+                    let verified =
+                        evicted && counters["read_bytes"].as_u64().is_some_and(|b| b > 0);
+                    if verified {
+                        timings.push(elapsed);
+                    }
+                    raw.push(
+                        serde_json::json!({"elapsed_ns":elapsed,"eviction_succeeded":evicted,
+                        "physical_read_verified":verified,"read_bytes":counters["read_bytes"]}),
+                    );
+                }
+                Ok(())
+            })();
+            done.store(true, Ordering::Release);
+            let writing = writer
+                .join()
+                .map_err(|_| io::Error::other("save thread panicked"))?;
+            reading?;
+            writing?;
+            Ok(())
+        })?;
+        timings.sort_unstable();
+        let p99 = (!timings.is_empty()).then(|| timings[(timings.len() * 99).div_ceil(100) - 1]);
+        Ok(
+            serde_json::json!({"cold_read_p99_ns":p99,"physical_read_verified_count":timings.len(),
+            "read_sample_count":raw.len(),"concurrent_saves":saves.load(Ordering::Acquire),
+            "physical_io_scope":"process read_bytes during each read; includes concurrent saves",
+            "cold_read_samples":raw}),
+        )
+    }
+
+    pub fn aged_operation(&mut self, operation: &str) -> io::Result<()> {
+        match operation {
+            "aged_store_save" => {
+                self.store.persist(&self.tabs, 0, 16.0, false)?;
+            }
+            "aged_store_restore" => {
+                std::hint::black_box(self.store.load_startup_visible()?);
+            }
+            "aged_store_close" => {
+                let closed = WorkspaceTab::new(BufferState::new(
+                    "closed-aged".into(),
+                    "archive".into(),
+                    None,
+                ));
+                let mut request = SessionPersistRequest::capture(&self.tabs, 0, 16.0, false);
+                request
+                    .closed_tabs
+                    .push(CapturedClosedTab::capture(&closed, None));
+                self.store.persist_request(request)?;
+            }
+            "aged_store_forget" => {
+                let buffer = self.tabs[0].active_buffer_mut();
+                buffer.document_mut().clear_operation_history();
+                let document = buffer.temp_id.clone();
+                let epoch = self.store.history_epoch() + 1;
+                self.store.invalidate_history();
+                let mut request = SessionPersistRequest::capture(&self.tabs, 0, 16.0, false);
+                request.forgotten.push((document, epoch));
+                self.store.persist_request(request)?;
+            }
+            _ => return Err(io::Error::other("unknown aged operation")),
+        }
+        Ok(())
     }
 
     /// Prepare a recorded edit; fixture setup is excluded from measured samples.
@@ -222,5 +378,30 @@ impl super::super::SessionStore {
         }
         self.flush_text_chunks()?;
         Ok(chunks)
+    }
+}
+
+#[cfg(test)]
+mod aged_profile_tests {
+    #[test]
+    fn aged_operations_preserve_text_and_run_against_persisted_history() {
+        let root = tempfile::tempdir().unwrap();
+        let mut fixture = super::SessionMaintenanceFixture::new(
+            root.path().join("aged"),
+            crate::profile::fixtures::text(1024 * 1024, 77),
+            2,
+        )
+        .unwrap();
+        fixture.seed_aged(4 * 1024 * 1024, 3).unwrap();
+        assert!(fixture.database_bytes() >= 4 * 1024 * 1024);
+        for operation in [
+            "aged_store_save",
+            "aged_store_restore",
+            "aged_store_close",
+            "aged_store_forget",
+        ] {
+            fixture.aged_operation(operation).unwrap();
+            fixture.verify().unwrap();
+        }
     }
 }

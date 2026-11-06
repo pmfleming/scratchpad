@@ -31,7 +31,12 @@
       "startup_visible_restore_cost",
       "session_steady_persist_cost",
       "store_import",
-      "ui_during_store_writes"
+      "ui_during_store_writes",
+      "cold_reads_during_save",
+      "aged_store_save",
+      "aged_store_restore",
+      "aged_store_close",
+      "aged_store_forget"
     ],
     "capacity_probe": [
       "large_file_first_visible_ceiling",
@@ -312,6 +317,36 @@
       "max": 12000000,
       "unit": "ns",
       "basis": "existing frame p99 limit"
+    },
+    "cold_reads_during_save": {
+      "metric": "/phase_elapsed_ns/cold_read_p99_ns",
+      "max": 4000000,
+      "unit": "ns",
+      "basis": "storage-plan cold-read gate or existing session interaction limit"
+    },
+    "aged_store_save": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "storage-plan cold-read gate or existing session interaction limit"
+    },
+    "aged_store_restore": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "storage-plan cold-read gate or existing session interaction limit"
+    },
+    "aged_store_close": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "storage-plan cold-read gate or existing session interaction limit"
+    },
+    "aged_store_forget": {
+      "metric": "/elapsed_ns",
+      "max": 180000000,
+      "unit": "ns",
+      "basis": "storage-plan cold-read gate or existing session interaction limit"
     }
   },
   "capacity_budgets": {
