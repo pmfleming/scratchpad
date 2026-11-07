@@ -6,6 +6,22 @@ use crate::app::ui::editor_content::native_editor::{
 };
 use std::{io, path::PathBuf, time::Instant};
 
+#[cfg(test)]
+mod configuration_tests {
+    #[test]
+    fn configuration_reports_actual_limits_without_changing_them() {
+        let root = tempfile::tempdir().unwrap();
+        let store = super::SessionStore::new(root.path().to_path_buf());
+        let chunks = store.chunk_store_handle().unwrap();
+        chunks.set_limits(123456, 12345);
+        let config = store.profile_storage_configuration().unwrap();
+        assert_eq!(config["chunk_cache"]["actual_aggregate_bytes"], 123456);
+        assert_eq!(config["chunk_cache"]["actual_per_owner_bytes"], 12345);
+        assert_eq!(config["chunk_cache"]["smaller_than_app_default"], true);
+        assert_eq!(chunks.cache_limits(), (123456, 12345));
+    }
+}
+
 pub struct SessionMaintenanceFixture {
     store: SessionStore,
     tabs: Vec<WorkspaceTab>,
@@ -339,10 +355,20 @@ impl SessionStore {
     pub fn profile_storage_configuration(&self) -> io::Result<serde_json::Value> {
         self.worker()?.call(|db| {
             futures_lite::future::block_on(async {
+                let app = crate::app::domain::buffer::TextHistoryBudget::derive_from_available_memory();
+                let limits = db.chunks.as_ref().map(|store| store.cache_limits());
                 Ok(
                     serde_json::json!({"page_size_bytes":db.integer("PRAGMA page_size").await?,
                 "writer_cache_size_pragma":db.integer("PRAGMA cache_size").await?,
-                "engine":"turso-0.8.3", "scope":"measured_store_connection"}),
+                "engine":"turso-0.8.3", "scope":"measured_store_connection",
+                "chunk_cache": {
+                    "actual_aggregate_bytes": limits.map(|v| v.0),
+                    "actual_per_owner_bytes": limits.map(|v| v.1),
+                    "app_default_aggregate_bytes": app.aggregate_byte_budget,
+                    "app_default_per_owner_bytes": app.per_file_byte_budget,
+                    "comparison_scope": "default_policy_at_observation_not_user_settings",
+                    "smaller_than_app_default": limits.map(|v| (v.0 as u64) < app.aggregate_byte_budget || (v.1 as u64) < app.per_file_byte_budget)
+                }}),
                 )
             })
         })

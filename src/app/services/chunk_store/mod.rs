@@ -313,6 +313,15 @@ impl ChunkStoreHandle {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .per_owner
     }
+    /// Observe configured limits without changing cache admission or residency.
+    pub(crate) fn cache_limits(&self) -> (usize, usize) {
+        let cache = self
+            .0
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (cache.limit, cache.per_owner)
+    }
     /// High-water mark for pending sealed bodies in this store epoch.
     #[must_use]
     pub fn peak_pending_bytes(&self) -> usize {
