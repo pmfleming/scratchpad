@@ -1,0 +1,1828 @@
+{
+  "resource": [
+    {
+      "scenario": "production_paste",
+      "workload": 67108864,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 1619.417604,
+        "min": 339.355594,
+        "max": 1877.515098,
+        "n": 3
+      },
+      "phases": {
+        "bytes": {
+          "median": 67108864,
+          "min": 67108864,
+          "max": 67108864,
+          "n": 3
+        },
+        "cache_bytes": {
+          "median": 67108620,
+          "min": 67108620,
+          "max": 67108620,
+          "n": 3
+        },
+        "concurrent_write_bytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "database_bytes": {
+          "median": 67481600,
+          "min": 67481600,
+          "max": 67481600,
+          "n": 3
+        },
+        "frame_max_ns": {
+          "median": 5410841,
+          "min": 5000411,
+          "max": 5419348,
+          "n": 3
+        },
+        "frame_p50_ns": {
+          "median": 365095,
+          "min": 312196,
+          "max": 373511,
+          "n": 3
+        },
+        "frame_p99_ns": {
+          "median": 5410841,
+          "min": 5000411,
+          "max": 5419348,
+          "n": 3
+        },
+        "frames": {
+          "median": 23,
+          "min": 22,
+          "max": 23,
+          "n": 3
+        },
+        "full_commit_timestamp_ns": {
+          "median": 1358824687,
+          "min": 216252207,
+          "max": 1659406926,
+          "n": 3
+        },
+        "measured_batch_overruns": {
+          "median": 12,
+          "min": 0,
+          "max": 13,
+          "n": 3
+        },
+        "peak_pending_bytes": {
+          "median": 63962893,
+          "min": 59768604,
+          "max": 63962893,
+          "n": 3
+        },
+        "pending_bytes_at_publication": {
+          "median": 63962893,
+          "min": 52428600,
+          "max": 63962893,
+          "n": 3
+        },
+        "pending_flow_threshold_bytes": {
+          "median": 268435456,
+          "min": 268435456,
+          "max": 268435456,
+          "n": 3
+        },
+        "policy_available_memory_bytes": {
+          "median": 57322446848,
+          "min": 57275609088,
+          "max": 57370308608,
+          "n": 3
+        },
+        "policy_failure_limit_bytes": {
+          "median": 15704948736,
+          "min": 15704948736,
+          "max": 15704948736,
+          "n": 3
+        },
+        "post_publication_flush_ns": {
+          "median": 1251722070,
+          "min": 148498952,
+          "max": 1579867786,
+          "n": 3
+        },
+        "prepare_completed": {
+          "median": 1,
+          "min": 1,
+          "max": 1,
+          "n": 3
+        },
+        "prepare_inspection_ns": {
+          "median": 7052354,
+          "min": 6254575,
+          "max": 7582511,
+          "n": 3
+        },
+        "prepare_mutation_ns": {
+          "median": 35614493,
+          "min": 35338013,
+          "max": 36871538,
+          "n": 3
+        },
+        "prepare_normalization_ns": {
+          "median": 4085523,
+          "min": 3444870,
+          "max": 4428897,
+          "n": 3
+        },
+        "prepare_store_binding_ns": {
+          "median": 952,
+          "min": 431,
+          "max": 1052,
+          "n": 3
+        },
+        "prepare_total_ns": {
+          "median": 49276129,
+          "min": 48445819,
+          "max": 50338860,
+          "n": 3
+        },
+        "publication_ns": {
+          "median": 59667384,
+          "min": 58270128,
+          "max": 59793988,
+          "n": 3
+        },
+        "seed_bytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "tail_bytes": {
+          "median": 251,
+          "min": 251,
+          "max": 251,
+          "n": 3
+        },
+        "wal_bytes_after_flush": {
+          "median": 4346632,
+          "min": 4346632,
+          "max": 4346632,
+          "n": 3
+        },
+        "wal_peak_sample_interval_ms": {
+          "median": 5,
+          "min": 5,
+          "max": 5,
+          "n": 3
+        },
+        "wal_peak_sampled_bytes": {
+          "median": 4523792,
+          "min": 4523792,
+          "max": 4523792,
+          "n": 3
+        },
+        "workflow_ns": {
+          "median": 1317151475,
+          "min": 209255056,
+          "max": 1640605909,
+          "n": 3
+        },
+        "writer_pause_ms": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "writer_paused_frames": {
+          "median": 0,
+          "min": 0,
+          "max": 1,
+          "n": 3
+        },
+        "writer_paused_frame_max_ns": {
+          "median": 867859,
+          "min": 867859,
+          "max": 867859,
+          "n": 1
+        }
+      },
+      "allocated_bytes": {
+        "median": 451307472,
+        "min": 451213739,
+        "max": 451317563,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "production_paste",
+      "workload": 67108864,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 339.194249,
+        "min": 319.013141,
+        "max": 882.232645,
+        "n": 3
+      },
+      "phases": {
+        "bytes": {
+          "median": 67108864,
+          "min": 67108864,
+          "max": 67108864,
+          "n": 3
+        },
+        "cache_bytes": {
+          "median": 67108620,
+          "min": 67108620,
+          "max": 67108620,
+          "n": 3
+        },
+        "concurrent_write_bytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "database_bytes": {
+          "median": 67481600,
+          "min": 67481600,
+          "max": 67481600,
+          "n": 3
+        },
+        "frame_max_ns": {
+          "median": 5251603,
+          "min": 5132418,
+          "max": 6656922,
+          "n": 3
+        },
+        "frame_p50_ns": {
+          "median": 269055,
+          "min": 208872,
+          "max": 299513,
+          "n": 3
+        },
+        "frame_p99_ns": {
+          "median": 5132418,
+          "min": 939033,
+          "max": 5251603,
+          "n": 3
+        },
+        "frames": {
+          "median": 54,
+          "min": 51,
+          "max": 181,
+          "n": 3
+        },
+        "measured_batch_overruns": {
+          "median": 0,
+          "min": 0,
+          "max": 3,
+          "n": 3
+        },
+        "peak_pending_bytes": {
+          "median": 33816449,
+          "min": 33816449,
+          "max": 33816449,
+          "n": 3
+        },
+        "pending_flow_threshold_bytes": {
+          "median": 33554432,
+          "min": 33554432,
+          "max": 33554432,
+          "n": 3
+        },
+        "post_publication_flush_ns": {
+          "median": 70789084,
+          "min": 62880926,
+          "max": 271269710,
+          "n": 3
+        },
+        "prepare_completed": {
+          "median": 1,
+          "min": 1,
+          "max": 1,
+          "n": 3
+        },
+        "prepare_inspection_ns": {
+          "median": 7392653,
+          "min": 7150528,
+          "max": 7716952,
+          "n": 3
+        },
+        "prepare_mutation_ns": {
+          "median": 109690282,
+          "min": 101786677,
+          "max": 404694441,
+          "n": 3
+        },
+        "prepare_normalization_ns": {
+          "median": 3541792,
+          "min": 3315095,
+          "max": 4043233,
+          "n": 3
+        },
+        "prepare_store_binding_ns": {
+          "median": 461,
+          "min": 461,
+          "max": 491,
+          "n": 3
+        },
+        "prepare_total_ns": {
+          "median": 123041256,
+          "min": 114325945,
+          "max": 418691297,
+          "n": 3
+        },
+        "publication_ns": {
+          "median": 132809872,
+          "min": 124691390,
+          "max": 430510684,
+          "n": 3
+        },
+        "seed_bytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "tail_bytes": {
+          "median": 251,
+          "min": 251,
+          "max": 251,
+          "n": 3
+        },
+        "wal_bytes_after_flush": {
+          "median": 4346632,
+          "min": 4346632,
+          "max": 4346632,
+          "n": 3
+        },
+        "wal_peak_sample_interval_ms": {
+          "median": 5,
+          "min": 5,
+          "max": 5,
+          "n": 3
+        },
+        "wal_peak_sampled_bytes": {
+          "median": 4523792,
+          "min": 4523792,
+          "max": 4523792,
+          "n": 3
+        },
+        "workflow_ns": {
+          "median": 208638871,
+          "min": 189346928,
+          "max": 706978976,
+          "n": 3
+        },
+        "writer_pause_ms": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "writer_paused_frame_max_ns": {
+          "median": 864253,
+          "min": 858732,
+          "max": 871958,
+          "n": 3
+        },
+        "writer_paused_frames": {
+          "median": 1,
+          "min": 1,
+          "max": 1,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 450746348,
+        "min": 450432147,
+        "max": 463955448,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "production_paste",
+      "workload": 134217728,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 1293.71857,
+        "min": 672.611222,
+        "max": 1785.479551,
+        "n": 3
+      },
+      "phases": {
+        "bytes": {
+          "median": 134217728,
+          "min": 134217728,
+          "max": 134217728,
+          "n": 3
+        },
+        "cache_bytes": {
+          "median": 67108608,
+          "min": 67108608,
+          "max": 67108608,
+          "n": 3
+        },
+        "concurrent_write_bytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "database_bytes": {
+          "median": 134754304,
+          "min": 130818048,
+          "max": 134754304,
+          "n": 3
+        },
+        "frame_max_ns": {
+          "median": 5265559,
+          "min": 5152225,
+          "max": 5741313,
+          "n": 3
+        },
+        "frame_p50_ns": {
+          "median": 315512,
+          "min": 288081,
+          "max": 319811,
+          "n": 3
+        },
+        "frame_p99_ns": {
+          "median": 5265559,
+          "min": 5152225,
+          "max": 5741313,
+          "n": 3
+        },
+        "frames": {
+          "median": 48,
+          "min": 47,
+          "max": 53,
+          "n": 3
+        },
+        "full_commit_timestamp_ns": {
+          "median": 952109793,
+          "min": 393501424,
+          "max": 1430001522,
+          "n": 3
+        },
+        "measured_batch_overruns": {
+          "median": 5,
+          "min": 0,
+          "max": 8,
+          "n": 3
+        },
+        "peak_pending_bytes": {
+          "median": 131071501,
+          "min": 114294348,
+          "max": 131071501,
+          "n": 3
+        },
+        "pending_bytes_at_publication": {
+          "median": 126877212,
+          "min": 101711484,
+          "max": 130022928,
+          "n": 3
+        },
+        "pending_flow_threshold_bytes": {
+          "median": 268435456,
+          "min": 268435456,
+          "max": 268435456,
+          "n": 3
+        },
+        "policy_available_memory_bytes": {
+          "median": 57311006720,
+          "min": 57196281856,
+          "max": 57387696128,
+          "n": 3
+        },
+        "policy_failure_limit_bytes": {
+          "median": 15704948736,
+          "min": 15704948736,
+          "max": 15704948736,
+          "n": 3
+        },
+        "post_publication_flush_ns": {
+          "median": 818063886,
+          "min": 244728458,
+          "max": 1234575933,
+          "n": 3
+        },
+        "prepare_completed": {
+          "median": 1,
+          "min": 1,
+          "max": 1,
+          "n": 3
+        },
+        "prepare_inspection_ns": {
+          "median": 13461711,
+          "min": 12667790,
+          "max": 13813313,
+          "n": 3
+        },
+        "prepare_mutation_ns": {
+          "median": 76227882,
+          "min": 74964262,
+          "max": 89961745,
+          "n": 3
+        },
+        "prepare_normalization_ns": {
+          "median": 6482365,
+          "min": 6338333,
+          "max": 6662702,
+          "n": 3
+        },
+        "prepare_store_binding_ns": {
+          "median": 1142,
+          "min": 370,
+          "max": 1252,
+          "n": 3
+        },
+        "prepare_total_ns": {
+          "median": 100491748,
+          "min": 97935702,
+          "max": 114640543,
+          "n": 3
+        },
+        "publication_ns": {
+          "median": 120235065,
+          "min": 117170575,
+          "max": 132536763,
+          "n": 3
+        },
+        "seed_bytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "tail_bytes": {
+          "median": 507,
+          "min": 507,
+          "max": 507,
+          "n": 3
+        },
+        "wal_bytes_after_flush": {
+          "median": 4371352,
+          "min": 4095312,
+          "max": 4371352,
+          "n": 3
+        },
+        "wal_peak_sample_interval_ms": {
+          "median": 5,
+          "min": 5,
+          "max": 5,
+          "n": 3
+        },
+        "wal_peak_sampled_bytes": {
+          "median": 4523792,
+          "min": 4523792,
+          "max": 4610312,
+          "n": 3
+        },
+        "workflow_ns": {
+          "median": 940160542,
+          "min": 382970075,
+          "max": 1357766989,
+          "n": 3
+        },
+        "writer_pause_ms": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "writer_paused_frame_max_ns": {
+          "median": 870906,
+          "min": 864374,
+          "max": 978067,
+          "n": 3
+        },
+        "writer_paused_frames": {
+          "median": 1,
+          "min": 1,
+          "max": 1,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 888012697,
+        "min": 887891372,
+        "max": 888383120,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "production_paste",
+      "workload": 134217728,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 1581.450678,
+        "min": 675.577691,
+        "max": 2524.617077,
+        "n": 3
+      },
+      "phases": {
+        "bytes": {
+          "median": 134217728,
+          "min": 134217728,
+          "max": 134217728,
+          "n": 3
+        },
+        "cache_bytes": {
+          "median": 67108612,
+          "min": 67108608,
+          "max": 67108612,
+          "n": 3
+        },
+        "concurrent_write_bytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "database_bytes": {
+          "median": 133705728,
+          "min": 131604480,
+          "max": 133705728,
+          "n": 3
+        },
+        "frame_max_ns": {
+          "median": 5343334,
+          "min": 4935378,
+          "max": 5418978,
+          "n": 3
+        },
+        "frame_p50_ns": {
+          "median": 247455,
+          "min": 208151,
+          "max": 290235,
+          "n": 3
+        },
+        "frame_p99_ns": {
+          "median": 995991,
+          "min": 849556,
+          "max": 1444914,
+          "n": 3
+        },
+        "frames": {
+          "median": 468,
+          "min": 138,
+          "max": 693,
+          "n": 3
+        },
+        "measured_batch_overruns": {
+          "median": 10,
+          "min": 0,
+          "max": 20,
+          "n": 3
+        },
+        "peak_pending_bytes": {
+          "median": 33816452,
+          "min": 33816448,
+          "max": 33816452,
+          "n": 3
+        },
+        "pending_flow_threshold_bytes": {
+          "median": 33554432,
+          "min": 33554432,
+          "max": 33554432,
+          "n": 3
+        },
+        "post_publication_flush_ns": {
+          "median": 62006240,
+          "min": 52100411,
+          "max": 517461209,
+          "n": 3
+        },
+        "prepare_completed": {
+          "median": 1,
+          "min": 1,
+          "max": 1,
+          "n": 3
+        },
+        "prepare_inspection_ns": {
+          "median": 14262524,
+          "min": 14157418,
+          "max": 20622540,
+          "n": 3
+        },
+        "prepare_mutation_ns": {
+          "median": 1107411252,
+          "min": 281913231,
+          "max": 1612652724,
+          "n": 3
+        },
+        "prepare_normalization_ns": {
+          "median": 6684713,
+          "min": 6232064,
+          "max": 7107689,
+          "n": 3
+        },
+        "prepare_store_binding_ns": {
+          "median": 982,
+          "min": 942,
+          "max": 1123,
+          "n": 3
+        },
+        "prepare_total_ns": {
+          "median": 1140320928,
+          "min": 307271040,
+          "max": 1636863182,
+          "n": 3
+        },
+        "publication_ns": {
+          "median": 1161084232,
+          "min": 327724821,
+          "max": 1654646340,
+          "n": 3
+        },
+        "seed_bytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "tail_bytes": {
+          "median": 507,
+          "min": 507,
+          "max": 507,
+          "n": 3
+        },
+        "wal_bytes_after_flush": {
+          "median": 26236192,
+          "min": 1087712,
+          "max": 26285632,
+          "n": 3
+        },
+        "wal_peak_sample_interval_ms": {
+          "median": 5,
+          "min": 5,
+          "max": 5,
+          "n": 3
+        },
+        "wal_peak_sampled_bytes": {
+          "median": 24102032,
+          "min": 12067512,
+          "max": 26236192,
+          "n": 3
+        },
+        "workflow_ns": {
+          "median": 1226657259,
+          "min": 382636621,
+          "max": 2178479055,
+          "n": 3
+        },
+        "writer_pause_ms": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "writer_paused_frame_max_ns": {
+          "median": 858612,
+          "min": 849556,
+          "max": 866547,
+          "n": 3
+        },
+        "writer_paused_frames": {
+          "median": 1,
+          "min": 1,
+          "max": 1,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 1189013009,
+        "min": 1145175223,
+        "max": 1230378400,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_persist_cost",
+      "workload": 100,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 105.013903,
+        "min": 26.192838,
+        "max": 128.821351,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 4789244,
+          "min": 1758973,
+          "max": 16845926,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 2623316,
+          "min": 2599041,
+          "max": 2632193,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 1060702,
+          "min": 1056795,
+          "max": 1085038,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 11259305,
+          "min": 7804586,
+          "max": 22903432,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 1001030,
+          "min": 981293,
+          "max": 1047147,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 3360060,
+          "min": 3335294,
+          "max": 3371171,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 1636824,
+          "min": 1624731,
+          "max": 2041985,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 4633482,
+          "min": 4575913,
+          "max": 4857864,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 409600,
+          "min": 409600,
+          "max": 409600,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 148479,
+          "min": 133370,
+          "max": 156775,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 26951959,
+        "min": 26951378,
+        "max": 26980568,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_persist_cost",
+      "workload": 100,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 28.768825,
+        "min": 27.701172,
+        "max": 32.337861,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 1775053,
+          "min": 1739437,
+          "max": 2082581,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 2731921,
+          "min": 2682528,
+          "max": 3897910,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 1146222,
+          "min": 1079257,
+          "max": 1463820,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 8977360,
+          "min": 7966711,
+          "max": 9022383,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 1054410,
+          "min": 1006169,
+          "max": 1380723,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 3584993,
+          "min": 3499542,
+          "max": 3785589,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 1988274,
+          "min": 1612729,
+          "max": 2208467,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 4852693,
+          "min": 4645654,
+          "max": 6533080,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 409600,
+          "min": 409600,
+          "max": 409600,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 147086,
+          "min": 132790,
+          "max": 162575,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 26942951,
+        "min": 26920164,
+        "max": 26948719,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_persist_cost",
+      "workload": 1000,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 238.359992,
+        "min": 115.305876,
+        "max": 287.502758,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 23019029,
+          "min": 2864760,
+          "max": 39459717,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 65030702,
+          "min": 34788911,
+          "max": 102110449,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 10663165,
+          "min": 10659699,
+          "max": 10948902,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 71685643,
+          "min": 51746737,
+          "max": 88286826,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 6477185,
+          "min": 6428111,
+          "max": 6985358,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 26206528,
+          "min": 26187058,
+          "max": 26503291,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 11718777,
+          "min": 11671559,
+          "max": 11816271,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 76297871,
+          "min": 45736710,
+          "max": 113785384,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 4096000,
+          "min": 4096000,
+          "max": 4096000,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 1935955,
+          "min": 1806092,
+          "max": 2143515,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 177427225,
+        "min": 177417393,
+        "max": 177440011,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_persist_cost",
+      "workload": 1000,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 132.375495,
+        "min": 117.869388,
+        "max": 207.681074,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 3092467,
+          "min": 2802223,
+          "max": 36799689,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 40540265,
+          "min": 35484487,
+          "max": 68179691,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 12950111,
+          "min": 10697399,
+          "max": 13013490,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 58541743,
+          "min": 53348564,
+          "max": 102697756,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 8177267,
+          "min": 6964299,
+          "max": 8679080,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 30035738,
+          "min": 27642170,
+          "max": 38014471,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 12753401,
+          "min": 11916258,
+          "max": 14869806,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 55279957,
+          "min": 46878713,
+          "max": 85765006,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 4096000,
+          "min": 4096000,
+          "max": 4096000,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 2258401,
+          "min": 1827422,
+          "max": 2695211,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 177396604,
+        "min": 177393144,
+        "max": 177406748,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_persist_cost",
+      "workload": 10000,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 1897.599731,
+        "min": 1156.560629,
+        "max": 2374.358738,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 44995979,
+          "min": 40214736,
+          "max": 201981035,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 1122926765,
+          "min": 386408888,
+          "max": 1369177468,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 120698153,
+          "min": 119362300,
+          "max": 132034096,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 583218143,
+          "min": 577952203,
+          "max": 753902757,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 74517381,
+          "min": 74175777,
+          "max": 75513008,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 291765334,
+          "min": 288515361,
+          "max": 292301233,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 127586063,
+          "min": 125758396,
+          "max": 129859455,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 1237184329,
+          "min": 501253908,
+          "max": 1482542954,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 40960000,
+          "min": 40960000,
+          "max": 40960000,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 22772555,
+          "min": 22161739,
+          "max": 22864751,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 1763977469,
+        "min": 1763695015,
+        "max": 1764119685,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_persist_cost",
+      "workload": 10000,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 1184.781388,
+        "min": 1164.257293,
+        "max": 2398.293133,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 42336519,
+          "min": 40704018,
+          "max": 68344061,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 395750534,
+          "min": 393371704,
+          "max": 1523713167,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 122437056,
+          "min": 121023112,
+          "max": 123005378,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 598533877,
+          "min": 581026447,
+          "max": 624632594,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 78757369,
+          "min": 74481729,
+          "max": 82597268,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 303854990,
+          "min": 291503729,
+          "max": 307515936,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 127749194,
+          "min": 126381343,
+          "max": 129336569,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 516197584,
+          "min": 511198595,
+          "max": 1649451634,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 40960000,
+          "min": 40960000,
+          "max": 40960000,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 22477253,
+          "min": 22052793,
+          "max": 24221137,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 1763579020,
+        "min": 1763447860,
+        "max": 1763684354,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_steady_persist_cost",
+      "workload": 100,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 2.139487,
+        "min": 2.126764,
+        "max": 2.201434,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 8977,
+          "min": 8927,
+          "max": 9367,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 391315,
+          "min": 384592,
+          "max": 397646,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 1963387,
+          "min": 1953299,
+          "max": 2015495,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 409600,
+          "min": 409600,
+          "max": 409600,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 79610,
+          "min": 78928,
+          "max": 98715,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 1096067,
+        "min": 1096067,
+        "max": 1096067,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_steady_persist_cost",
+      "workload": 100,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 2.16767,
+        "min": 2.095476,
+        "max": 2.689631,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 9568,
+          "min": 8797,
+          "max": 17903,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 433053,
+          "min": 400432,
+          "max": 579228,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 1967214,
+          "min": 1925135,
+          "max": 2500155,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 409600,
+          "min": 409600,
+          "max": 409600,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 91031,
+          "min": 88947,
+          "max": 98735,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 1096067,
+        "min": 1094801,
+        "max": 1096067,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_steady_persist_cost",
+      "workload": 1000,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 7.398403,
+        "min": 6.84756,
+        "max": 7.727883,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 193654,
+          "min": 188965,
+          "max": 213712,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 860136,
+          "min": 816574,
+          "max": 922813,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 5833565,
+          "min": 5504306,
+          "max": 6168475,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 4096000,
+          "min": 4096000,
+          "max": 4096000,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 924596,
+          "min": 766790,
+          "max": 953681,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 8088589,
+        "min": 8087421,
+        "max": 8095533,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_steady_persist_cost",
+      "workload": 1000,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 7.743482,
+        "min": 7.432798,
+        "max": 8.235276,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 197461,
+          "min": 191630,
+          "max": 247716,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 945816,
+          "min": 854655,
+          "max": 1113661,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 6252763,
+          "min": 6043529,
+          "max": 6670016,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 4096000,
+          "min": 4096000,
+          "max": 4096000,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 830520,
+          "min": 826723,
+          "max": 840078,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 8088589,
+        "min": 8087421,
+        "max": 8095533,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_steady_persist_cost",
+      "workload": 10000,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 89.934193,
+        "min": 88.272119,
+        "max": 102.731798,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 3589071,
+          "min": 3537464,
+          "max": 5118172,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 9203064,
+          "min": 9119165,
+          "max": 10929745,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 64820397,
+          "min": 63800082,
+          "max": 71875501,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 40960000,
+          "min": 40960000,
+          "max": 40960000,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 9194638,
+          "min": 9027623,
+          "max": 10547067,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 74663942,
+        "min": 74643603,
+        "max": 74684624,
+        "n": 3
+      }
+    },
+    {
+      "scenario": "session_steady_persist_cost",
+      "workload": 10000,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 91.983597,
+        "min": 91.66573,
+        "max": 93.073235,
+        "n": 3
+      },
+      "phases": {
+        "commit_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "content_prepare_ns": {
+          "median": 3601253,
+          "min": 3597065,
+          "max": 3614087,
+          "n": 3
+        },
+        "content_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "file_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "history_prepare_ns": {
+          "median": 9257365,
+          "min": 9212381,
+          "max": 9692052,
+          "n": 3
+        },
+        "history_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "layout_write_ns": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "n": 3
+        },
+        "manifest_serialize_ns": {
+          "median": 66548038,
+          "min": 66298052,
+          "max": 68170096,
+          "n": 3
+        },
+        "persist_logical_bytes": {
+          "median": 40960000,
+          "min": 40960000,
+          "max": 40960000,
+          "n": 3
+        },
+        "snapshot_capture_ns": {
+          "median": 9933575,
+          "min": 9364577,
+          "max": 9938784,
+          "n": 3
+        }
+      },
+      "allocated_bytes": {
+        "median": 74662874,
+        "min": 74643603,
+        "max": 74832096,
+        "n": 3
+      }
+    }
+  ],
+  "capacity": [
+    {
+      "scenario": "paste_size_ceiling",
+      "workload": 8388608,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 17.432942,
+        "min": 13.000257,
+        "max": 18.942305,
+        "n": 9
+      },
+      "phases": {},
+      "allocated_bytes": null
+    },
+    {
+      "scenario": "paste_size_ceiling",
+      "workload": 8388608,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 17.547405,
+        "min": 15.757016,
+        "max": 19.950207,
+        "n": 9
+      },
+      "phases": {},
+      "allocated_bytes": null
+    },
+    {
+      "scenario": "paste_size_ceiling",
+      "workload": 67108864,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 67.69047,
+        "min": 42.423557,
+        "max": 73.210768,
+        "n": 9
+      },
+      "phases": {},
+      "allocated_bytes": null
+    },
+    {
+      "scenario": "paste_size_ceiling",
+      "workload": 67108864,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 141.390142,
+        "min": 124.442351,
+        "max": 595.338605,
+        "n": 9
+      },
+      "phases": {},
+      "allocated_bytes": null
+    },
+    {
+      "scenario": "paste_size_ceiling",
+      "workload": 134217728,
+      "arm": "after",
+      "elapsed_ms": {
+        "median": 102.484003,
+        "min": 75.082306,
+        "max": 133.325383,
+        "n": 9
+      },
+      "phases": {},
+      "allocated_bytes": null
+    },
+    {
+      "scenario": "paste_size_ceiling",
+      "workload": 134217728,
+      "arm": "before",
+      "elapsed_ms": {
+        "median": 949.61235,
+        "min": 317.199228,
+        "max": 1789.161788,
+        "n": 9
+      },
+      "phases": {},
+      "allocated_bytes": null
+    }
+  ]
+}

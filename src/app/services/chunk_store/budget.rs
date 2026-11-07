@@ -72,6 +72,23 @@ mod admission_tests {
     use crate::app::services::chunk_store::{ChunkStoreHandle, Health};
     use std::{io, sync::Arc};
     #[test]
+    fn lowered_bulk_budget_blocks_without_discarding_accepted_bodies() {
+        let store = ChunkStoreHandle::unavailable("test".into());
+        store.set_health(Health::Healthy);
+        let accepted = store.seal(Arc::new("accepted".into()), 1);
+        store.set_failure_limit(4);
+        assert_eq!(
+            store.admission_observation().pending_flow_threshold_bytes,
+            4
+        );
+        assert_eq!(
+            store.wait_for_capacity_while(|| false).unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+        assert_eq!(store.pending_bytes(), 8);
+        assert_eq!(&*accepted.load(false, false).unwrap(), "accepted");
+    }
+    #[test]
     fn failure_limit_refuses_bulk_without_losing_accepted_text_and_reaps_only_abandoned_chunks() {
         let store = ChunkStoreHandle::unavailable("full disk".into());
         store.set_failure_limit(12);

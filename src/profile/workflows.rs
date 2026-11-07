@@ -254,6 +254,7 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
         let mut queued_typing = false;
         let mut saw_preparing = false;
         let mut publication_ns = None;
+        let mut publication_pending_bytes = None;
         loop {
             let was_paused = !pause.is_finished();
             let mut input = egui::RawInput {
@@ -298,6 +299,7 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
             }
             if saw_preparing && !preparing && queued_typing && events.is_empty() {
                 publication_ns.get_or_insert_with(|| started.elapsed().as_nanos());
+                publication_pending_bytes.get_or_insert_with(|| handle.pending_bytes());
             }
             if io_stress && saw_preparing && !preparing && durations.len() % 8 == 0 {
                 events.push(egui::Event::MouseWheel {
@@ -370,6 +372,23 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
             .as_object_mut()
             .unwrap()
             .extend(preparation.as_object().unwrap().clone());
+        profile.as_object_mut().unwrap().extend(
+            serde_json::to_value(handle.admission_observation())
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        profile["pending_bytes_at_publication"] = json!(publication_pending_bytes);
+        // Preserve workflow_ns above: the original endpoint stops after NORMAL
+        // flush. This extra explicit barrier is a separate diagnostic endpoint.
+        let full = store
+            .persist_profiled(app.tab_manager.tabs.as_slice(), 0, 16.0, false)
+            .expect("explicit FULL manifest barrier");
+        assert!(full.transaction_committed);
+        profile["full_commit_timestamp_ns"] = json!(started.elapsed().as_nanos());
+        profile["full_barrier_scope"] = json!("explicit_probe_barrier_after_normal_flush");
+        profile["full_barrier_transaction_committed"] = json!(true);
         profile
     })
 }
@@ -384,6 +403,8 @@ mod tests {
         let publication = profile["publication_ns"].as_u64().unwrap();
         let workflow = profile["workflow_ns"].as_u64().unwrap();
         assert!(publication > 0 && publication <= workflow);
+        assert!(profile["full_barrier_transaction_committed"] == true);
+        assert!(profile["full_commit_timestamp_ns"].as_u64().unwrap() >= workflow);
         assert!(profile["post_publication_flush_ns"].as_u64().unwrap() <= workflow - publication);
         assert_eq!(
             profile["publication_endpoint"],

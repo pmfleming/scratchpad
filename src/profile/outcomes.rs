@@ -133,8 +133,12 @@ pub fn memory(phases: &Value) -> Value {
         "accepted_not_durable_bytes": null,
         "accepted_not_durable_peak_bytes": null,
         "scratch_peak_bytes": null,
-        "publication_timestamp_ns": null,
-        "full_commit_timestamp_ns": null
+        "policy_available_memory_bytes": phases["policy_available_memory_bytes"],
+        "policy_failure_limit_bytes": phases["policy_failure_limit_bytes"],
+        "policy_memory_pressure": phases["policy_memory_pressure"],
+        "publication_timestamp_ns": if phases["full_barrier_transaction_committed"] == true { phases["publication_ns"].clone() } else { Value::Null },
+        "full_commit_timestamp_ns": if phases["full_barrier_transaction_committed"] == true { phases["full_commit_timestamp_ns"].clone() } else { Value::Null },
+        "exposure_scope": phases["full_barrier_scope"]
     })
 }
 pub fn capacity(id: &str, completed: bool) -> Value {

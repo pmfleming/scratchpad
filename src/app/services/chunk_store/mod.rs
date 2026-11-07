@@ -5,6 +5,8 @@ mod budget;
 mod cache;
 pub use budget::{FailureRamBudget, total_memory};
 use cache::Cache;
+mod headroom;
+pub use headroom::AdmissionObservation;
 mod import;
 mod readers;
 pub(crate) use import::{ImportContext, Utf8Chunks};
@@ -20,7 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Healthy bulk producers wait above this fixed threshold; typing never waits.
+/// Minimum healthy bulk threshold; memory headroom can raise it. Typing never waits.
 pub const BULK_PENDING_BYTES: usize = 32 * 1024 * 1024;
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
@@ -81,6 +83,7 @@ struct Core {
     epoch: Arc<ReadEpoch>,
     pending: Mutex<VecDeque<Arc<Chunk>>>,
     admission: Mutex<()>,
+    headroom: Mutex<headroom::Headroom>,
     batch_count: AtomicU64,
     batch_max_ns: AtomicU64,
     batch_overruns: AtomicU64,
@@ -155,6 +158,7 @@ impl ChunkStoreHandle {
             epoch,
             pending: Mutex::new(VecDeque::new()),
             admission: Mutex::new(()),
+            headroom: Mutex::new(headroom::Headroom::new()),
             batch_count: AtomicU64::new(0),
             batch_max_ns: AtomicU64::new(0),
             batch_overruns: AtomicU64::new(0),
@@ -327,6 +331,22 @@ impl ChunkStoreHandle {
     pub fn peak_pending_bytes(&self) -> usize {
         self.0.peak_pending_bytes.load(Ordering::Acquire)
     }
+    /// Last sampled producer budget. Reading this never samples the operating system.
+    #[must_use]
+    pub fn admission_observation(&self) -> AdmissionObservation {
+        self.0
+            .headroom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .observation(self.failure_limit())
+    }
+    fn refresh_headroom(&self) {
+        self.0
+            .headroom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .refresh();
+    }
     pub(crate) fn seal_bulk(&self, body: Arc<String>, owner: u64) -> io::Result<Arc<Chunk>> {
         let _gate = self
             .0
@@ -384,12 +404,13 @@ impl ChunkStoreHandle {
         self.wait_for_capacity_while(|| true)
     }
     pub(crate) fn wait_for_capacity_while(&self, active: impl Fn() -> bool) -> io::Result<()> {
+        self.refresh_headroom();
         let mut pending = self
             .0
             .pending
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        while self.pending_bytes() >= BULK_PENDING_BYTES {
+        while self.pending_bytes() >= self.admission_observation().pending_flow_threshold_bytes {
             if !active() {
                 return Err(io::Error::new(
                     io::ErrorKind::Interrupted,
@@ -407,6 +428,14 @@ impl ChunkStoreHandle {
                 .wait_timeout(pending, Duration::from_millis(50))
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .0;
+            // Sampling must not hold the queue lock needed by foreground typing.
+            drop(pending);
+            self.refresh_headroom();
+            pending = self
+                .0
+                .pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
         Ok(())
     }

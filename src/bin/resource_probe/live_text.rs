@@ -130,7 +130,7 @@ pub(super) fn imports() {
         let profile = session.persist_profiled(&tabs, 0, 14., false).unwrap();
         let hashed_new = store.hashed_bytes() - before;
         assert!(hashed_new <= (256 * KB) as u64);
-        assert!(store.peak_pending_bytes() <= 32 * MB + 256 * KB);
+        assert!(store.peak_pending_bytes() <= 256 * MB + 256 * KB);
         println!(
             "{}",
             serde_json::json!({"scenario":"store_import","bytes":size,"first_paint_ns":first_paint_ns,"first_paint_result":paint.result_value,"import_ns":import_ns,"read_p99_ns":reads[253],"read_max_ns":reads[255],"peak_pending_bytes":store.peak_pending_bytes(),"cached_bytes":store.cached_bytes(),"new_body_bytes_hashed_after_edit":hashed_new,"edit_save_ns":profile.total_ns})

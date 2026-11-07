@@ -1294,12 +1294,17 @@
   },
   "outcome_contract_version": 1,
   "durability_policy": {
-    "version": 1,
-    "pending_queue_limit_bytes": 33554432,
+    "version": 2,
+    "pending_queue_limit_bytes": 268435456,
     "manifest_sync": "FULL",
     "body_sync": "NORMAL",
     "maximum_exposure_ms": null,
     "exposure_limit_status": "not_specified_by_project",
-    "pending_limit_scope": "bulk_pending_queue_not_all_uncommitted_text"
+    "pending_limit_scope": "bulk_pending_queue_not_all_uncommitted_text",
+    "minimum_pending_queue_bytes": 33554432,
+    "available_memory_divisor": 32,
+    "pressure_pending_limit_bytes": 33554432,
+    "memory_pressure_some_avg10_percent": 1.0,
+    "pending_limit_policy": "available_memory_clamped_failure_budget"
   }
 }
