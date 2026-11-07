@@ -49,6 +49,8 @@ fn main() {
                 "workload_family":"search", "measurement_status":"valid", "threshold_authoritative":true,
                 "threshold_source":"benches/measurement_manifest.json", "threshold_ms":budget,
                 "measurement_scope":format!("query_command_to_{operation}"),
+                "observed_outcome":{"endpoint":operation,"residency":"owned","durability_at_endpoint":"not_required",
+                    "completed":samples.iter().all(|s| s[operation].as_u64().is_some())},
                 "measurement_role":"promise_health", "present_included":false,
                 "omitted_work":["GPU upload and submission", "compositor and display present"],
                 "parameter_value":targets, "parameter_unit":"targets", "bytes_per_target":bytes,

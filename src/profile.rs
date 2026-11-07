@@ -1,4 +1,5 @@
 pub mod fixtures;
+pub mod outcomes;
 pub mod process_metrics;
 mod render;
 mod resource_fixtures;

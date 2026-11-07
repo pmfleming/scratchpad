@@ -38,6 +38,7 @@ struct FrameMetricsMeta {
 #[derive(Serialize)]
 struct FrameScenario {
     measurement_contract: serde_json::Value,
+    observed_outcome: serde_json::Value,
     scenario_id: String,
     scenario_label: String,
     workload_family: &'static str,
@@ -113,6 +114,7 @@ fn frame_scenario(
     let p95_ms = ns_to_ms(metrics.frame_time_percentile_ns(0.95));
     let p99_ms = ns_to_ms(metrics.frame_time_percentile_ns(0.99));
     FrameScenario {
+        observed_outcome: serde_json::json!({"endpoint":"measured_frame_path_complete","residency":if bytes > 16 * MB {"store_uncontrolled"} else {"owned"},"durability_at_endpoint":"not_required","completed":metrics.frame_count > 0}),
         measurement_contract: serde_json::json!({"text_backing":if bytes > 16 * MB {"store"} else {"owned"},"production_path":true,"code_path":"ScratchpadApp::logic/ui","fixture_kind":scratchpad::profile::fixtures::kind(),"fixture_revision":scratchpad::profile::fixtures::REVISION,"document_bytes":bytes}),
         scenario_id: scenario_id.to_owned(),
         scenario_label: format!("Editor frame 120 Hz ({})", human_bytes(bytes)),
