@@ -51,14 +51,19 @@ pub(crate) struct Utf8Chunks<R> {
     reader: R,
     bytes: Vec<u8>,
     offset: usize,
+    capacity: usize,
     eof: bool,
     failed: bool,
 }
 impl<R: Read> Utf8Chunks<R> {
     pub(crate) fn new(reader: R) -> Self {
+        Self::with_capacity(reader, MAX_BYTES)
+    }
+    fn with_capacity(reader: R, capacity: usize) -> Self {
         Self {
             reader,
-            bytes: Vec::with_capacity(MAX_BYTES),
+            bytes: Vec::with_capacity(capacity),
+            capacity,
             offset: 0,
             eof: false,
             failed: false,
@@ -70,8 +75,8 @@ impl<R: Read> Utf8Chunks<R> {
             self.bytes.truncate(self.bytes.len() - self.offset);
             self.offset = 0;
             let mut filled = self.bytes.len();
-            self.bytes.resize(MAX_BYTES, 0);
-            while filled < MAX_BYTES {
+            self.bytes.resize(self.capacity, 0);
+            while filled < self.capacity {
                 match self.reader.read(&mut self.bytes[filled..]) {
                     Ok(0) => {
                         self.eof = true;
@@ -117,6 +122,11 @@ impl<R: Read> Utf8Chunks<R> {
         Ok(Some(text))
     }
 }
+impl<'a> Utf8Chunks<&'a [u8]> {
+    pub(crate) fn from_slice(bytes: &'a [u8]) -> Self {
+        Self::with_capacity(bytes, bytes.len().clamp(1, MAX_BYTES))
+    }
+}
 impl<R: Read> Iterator for Utf8Chunks<R> {
     type Item = io::Result<String>;
     fn next(&mut self) -> Option<Self::Item> {
@@ -137,6 +147,28 @@ impl<R: Read> Iterator for Utf8Chunks<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sized_capture_preserves_streaming_chunk_boundaries() {
+        for len in [
+            0,
+            1,
+            4096,
+            16_384,
+            65_536,
+            MAX_BYTES - 1,
+            MAX_BYTES,
+            MAX_BYTES + 1,
+        ] {
+            let text = crate::profile::fixtures::text(len, 712);
+            let expected = Utf8Chunks::new(text.as_bytes())
+                .collect::<io::Result<Vec<_>>>()
+                .unwrap();
+            let sized = Utf8Chunks::from_slice(text.as_bytes());
+            assert_eq!(sized.bytes.capacity(), text.len().clamp(1, MAX_BYTES));
+            assert_eq!(sized.collect::<io::Result<Vec<_>>>().unwrap(), expected);
+        }
+    }
+
     #[test]
     fn cdc_preserves_utf8_boundaries_and_rejects_truncated_input() {
         let text = "λ🦀\r\n東京 café ".repeat(100_000);

@@ -13,12 +13,12 @@ mod configuration_tests {
         let root = tempfile::tempdir().unwrap();
         let store = super::SessionStore::new(root.path().to_path_buf());
         let chunks = store.chunk_store_handle().unwrap();
-        chunks.set_limits(123456, 12345);
+        chunks.set_limits(123_456, 12345);
         let config = store.profile_storage_configuration().unwrap();
-        assert_eq!(config["chunk_cache"]["actual_aggregate_bytes"], 123456);
+        assert_eq!(config["chunk_cache"]["actual_aggregate_bytes"], 123_456);
         assert_eq!(config["chunk_cache"]["actual_per_owner_bytes"], 12345);
         assert_eq!(config["chunk_cache"]["smaller_than_app_default"], true);
-        assert_eq!(chunks.cache_limits(), (123456, 12345));
+        assert_eq!(chunks.cache_limits(), (123_456, 12345));
     }
 }
 

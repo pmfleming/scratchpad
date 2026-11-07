@@ -46,7 +46,9 @@ impl PieceTreeStorage {
         match &other.original {
             OriginalTextStorage::Owned(text) => {
                 let mut start = 0;
-                for body in crate::app::services::chunk_store::Utf8Chunks::new(text.as_bytes()) {
+                for body in
+                    crate::app::services::chunk_store::Utf8Chunks::from_slice(text.as_bytes())
+                {
                     let body = body?;
                     let len = body.len();
                     append(original_base + start, ChunkText::Memory(Arc::new(body)))?;

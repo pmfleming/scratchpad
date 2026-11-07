@@ -9,7 +9,7 @@ fn abrupt_writer() {
     let store = SessionStore::new(root.into());
     let tab = WorkspaceTab::new(BufferState::new(
         "unsaved".into(),
-        "committed\0λ\r\n".into(),
+        "committed\0λ\r\n".repeat(300_000),
         None,
     ));
     store.persist(&[tab], 0, 19.0, false).unwrap();
@@ -53,5 +53,8 @@ fn acknowledged_commit_survives_abrupt_exit() {
     assert!(!directory.path().join("session.json").exists());
     let store = SessionStore::new(directory.path().to_owned());
     let restored = store.load().unwrap().unwrap();
-    assert_eq!(restored.tabs[0].active_buffer().text(), "committed\0λ\r\n");
+    assert_eq!(
+        restored.tabs[0].active_buffer().text(),
+        "committed\0λ\r\n".repeat(300_000)
+    );
 }

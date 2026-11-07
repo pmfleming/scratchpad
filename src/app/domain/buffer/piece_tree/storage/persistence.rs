@@ -75,7 +75,8 @@ impl PieceTreeStorage {
             match &self.original {
                 OriginalTextStorage::Owned(text) => {
                     let mut start = 0;
-                    for body in crate::app::services::chunk_store::Utf8Chunks::new(text.as_bytes())
+                    for body in
+                        crate::app::services::chunk_store::Utf8Chunks::from_slice(text.as_bytes())
                     {
                         let body = body?;
                         let end = start + body.len();

@@ -1,0 +1,2358 @@
+[
+  {
+    "scenario": "production_paste",
+    "workload": 67108864,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 1173.492889,
+      "min": 698.329391,
+      "max": 1590.508233,
+      "n": 3
+    },
+    "phases": {
+      "bytes": {
+        "median": 67108864,
+        "min": 67108864,
+        "max": 67108864,
+        "n": 3
+      },
+      "cache_bytes": {
+        "median": 67108620,
+        "min": 67108620,
+        "max": 67108624,
+        "n": 3
+      },
+      "concurrent_write_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "database_bytes": {
+        "median": 67481600,
+        "min": 67481600,
+        "max": 67481600,
+        "n": 3
+      },
+      "frame_max_ns": {
+        "median": 4891484,
+        "min": 4792198,
+        "max": 5697371,
+        "n": 3
+      },
+      "frame_p50_ns": {
+        "median": 213792,
+        "min": 213041,
+        "max": 220725,
+        "n": 3
+      },
+      "frame_p99_ns": {
+        "median": 660383,
+        "min": 632670,
+        "max": 1537624,
+        "n": 3
+      },
+      "frames": {
+        "median": 222,
+        "min": 164,
+        "max": 344,
+        "n": 3
+      },
+      "measured_batch_overruns": {
+        "median": 8,
+        "min": 1,
+        "max": 11,
+        "n": 3
+      },
+      "peak_pending_bytes": {
+        "median": 33816449,
+        "min": 33816449,
+        "max": 33816449,
+        "n": 3
+      },
+      "pending_flow_threshold_bytes": {
+        "median": 33554432,
+        "min": 33554432,
+        "max": 33554432,
+        "n": 3
+      },
+      "post_publication_flush_ns": {
+        "median": 466354451,
+        "min": 121987500,
+        "max": 508763216,
+        "n": 3
+      },
+      "prepare_completed": {
+        "median": 1,
+        "min": 1,
+        "max": 1,
+        "n": 3
+      },
+      "prepare_inspection_ns": {
+        "median": 7464656,
+        "min": 7101543,
+        "max": 7673960,
+        "n": 3
+      },
+      "prepare_mutation_ns": {
+        "median": 505647120,
+        "min": 372553813,
+        "max": 810433705,
+        "n": 3
+      },
+      "prepare_normalization_ns": {
+        "median": 3449130,
+        "min": 3285693,
+        "max": 4007642,
+        "n": 3
+      },
+      "prepare_store_binding_ns": {
+        "median": 1072,
+        "min": 932,
+        "max": 1122,
+        "n": 3
+      },
+      "prepare_total_ns": {
+        "median": 518911861,
+        "min": 386497502,
+        "max": 823137211,
+        "n": 3
+      },
+      "publication_ns": {
+        "median": 530691097,
+        "min": 396858368,
+        "max": 832267802,
+        "n": 3
+      },
+      "seed_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "tail_bytes": {
+        "median": 251,
+        "min": 251,
+        "max": 251,
+        "n": 3
+      },
+      "wal_bytes_after_flush": {
+        "median": 4346632,
+        "min": 152472,
+        "max": 4346632,
+        "n": 3
+      },
+      "wal_peak_sample_interval_ms": {
+        "median": 5,
+        "min": 5,
+        "max": 5,
+        "n": 3
+      },
+      "wal_peak_sampled_bytes": {
+        "median": 4523792,
+        "min": 4523792,
+        "max": 4523792,
+        "n": 3
+      },
+      "workflow_ns": {
+        "median": 1002748170,
+        "min": 523792396,
+        "max": 1344769333,
+        "n": 3
+      },
+      "writer_pause_ms": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "writer_paused_frames": {
+        "median": 1,
+        "min": 0,
+        "max": 1,
+        "n": 3
+      },
+      "writer_paused_frame_max_ns": {
+        "median": 866641.0,
+        "min": 862934,
+        "max": 870348,
+        "n": 2
+      }
+    },
+    "allocated_bytes": {
+      "median": 468201072,
+      "min": 462163851,
+      "max": 483658199,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "production_paste",
+    "workload": 67108864,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 612.76021,
+      "min": 323.652914,
+      "max": 1085.963413,
+      "n": 3
+    },
+    "phases": {
+      "bytes": {
+        "median": 67108864,
+        "min": 67108864,
+        "max": 67108864,
+        "n": 3
+      },
+      "cache_bytes": {
+        "median": 67108620,
+        "min": 67108620,
+        "max": 67108620,
+        "n": 3
+      },
+      "concurrent_write_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "database_bytes": {
+        "median": 67481600,
+        "min": 67481600,
+        "max": 67481600,
+        "n": 3
+      },
+      "frame_max_ns": {
+        "median": 5032069,
+        "min": 5030426,
+        "max": 5141435,
+        "n": 3
+      },
+      "frame_p50_ns": {
+        "median": 220906,
+        "min": 210626,
+        "max": 271832,
+        "n": 3
+      },
+      "frame_p99_ns": {
+        "median": 1496607,
+        "min": 643941,
+        "max": 5030426,
+        "n": 3
+      },
+      "frames": {
+        "median": 131,
+        "min": 49,
+        "max": 300,
+        "n": 3
+      },
+      "measured_batch_overruns": {
+        "median": 2,
+        "min": 0,
+        "max": 8,
+        "n": 3
+      },
+      "peak_pending_bytes": {
+        "median": 33816449,
+        "min": 33816449,
+        "max": 33816449,
+        "n": 3
+      },
+      "pending_flow_threshold_bytes": {
+        "median": 33554432,
+        "min": 33554432,
+        "max": 33554432,
+        "n": 3
+      },
+      "post_publication_flush_ns": {
+        "median": 67986193,
+        "min": 65154554,
+        "max": 154649633,
+        "n": 3
+      },
+      "prepare_completed": {
+        "median": 1,
+        "min": 1,
+        "max": 1,
+        "n": 3
+      },
+      "prepare_inspection_ns": {
+        "median": 7593459,
+        "min": 6760622,
+        "max": 7695882,
+        "n": 3
+      },
+      "prepare_mutation_ns": {
+        "median": 289320238,
+        "min": 97702472,
+        "max": 698112645,
+        "n": 3
+      },
+      "prepare_normalization_ns": {
+        "median": 3322101,
+        "min": 2948007,
+        "max": 3506218,
+        "n": 3
+      },
+      "prepare_store_binding_ns": {
+        "median": 491,
+        "min": 320,
+        "max": 952,
+        "n": 3
+      },
+      "prepare_total_ns": {
+        "median": 302809932,
+        "min": 111179742,
+        "max": 710127464,
+        "n": 3
+      },
+      "publication_ns": {
+        "median": 313239738,
+        "min": 120738620,
+        "max": 718316022,
+        "n": 3
+      },
+      "seed_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "tail_bytes": {
+        "median": 251,
+        "min": 251,
+        "max": 251,
+        "n": 3
+      },
+      "wal_bytes_after_flush": {
+        "median": 4346632,
+        "min": 4346632,
+        "max": 4346632,
+        "n": 3
+      },
+      "wal_peak_sample_interval_ms": {
+        "median": 5,
+        "min": 5,
+        "max": 5,
+        "n": 3
+      },
+      "wal_peak_sampled_bytes": {
+        "median": 4523792,
+        "min": 4523792,
+        "max": 4523792,
+        "n": 3
+      },
+      "workflow_ns": {
+        "median": 384276411,
+        "min": 188697612,
+        "max": 877888508,
+        "n": 3
+      },
+      "writer_pause_ms": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "writer_paused_frame_max_ns": {
+        "median": 878002.0,
+        "min": 871690,
+        "max": 884314,
+        "n": 2
+      },
+      "writer_paused_frames": {
+        "median": 1,
+        "min": 0,
+        "max": 1,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 458735183,
+      "min": 450202775,
+      "max": 476314084,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "production_paste",
+    "workload": 134217728,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 1015.044743,
+      "min": 759.75087,
+      "max": 1135.563416,
+      "n": 3
+    },
+    "phases": {
+      "bytes": {
+        "median": 134217728,
+        "min": 134217728,
+        "max": 134217728,
+        "n": 3
+      },
+      "cache_bytes": {
+        "median": 67108608,
+        "min": 67108608,
+        "max": 67108612,
+        "n": 3
+      },
+      "concurrent_write_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "database_bytes": {
+        "median": 132653056,
+        "min": 131604480,
+        "max": 134754304,
+        "n": 3
+      },
+      "frame_max_ns": {
+        "median": 5423906,
+        "min": 4623891,
+        "max": 5845099,
+        "n": 3
+      },
+      "frame_p50_ns": {
+        "median": 218642,
+        "min": 213782,
+        "max": 229733,
+        "n": 3
+      },
+      "frame_p99_ns": {
+        "median": 867753,
+        "min": 597765,
+        "max": 1330934,
+        "n": 3
+      },
+      "frames": {
+        "median": 247,
+        "min": 170,
+        "max": 325,
+        "n": 3
+      },
+      "measured_batch_overruns": {
+        "median": 2,
+        "min": 1,
+        "max": 5,
+        "n": 3
+      },
+      "peak_pending_bytes": {
+        "median": 33816449,
+        "min": 33816449,
+        "max": 33816452,
+        "n": 3
+      },
+      "pending_flow_threshold_bytes": {
+        "median": 33554432,
+        "min": 33554432,
+        "max": 33554432,
+        "n": 3
+      },
+      "post_publication_flush_ns": {
+        "median": 59212513,
+        "min": 54591307,
+        "max": 60647103,
+        "n": 3
+      },
+      "prepare_completed": {
+        "median": 1,
+        "min": 1,
+        "max": 1,
+        "n": 3
+      },
+      "prepare_inspection_ns": {
+        "median": 13502589,
+        "min": 13444880,
+        "max": 14077801,
+        "n": 3
+      },
+      "prepare_mutation_ns": {
+        "median": 535042117,
+        "min": 357023649,
+        "max": 734775183,
+        "n": 3
+      },
+      "prepare_normalization_ns": {
+        "median": 6608235,
+        "min": 6605961,
+        "max": 6754521,
+        "n": 3
+      },
+      "prepare_store_binding_ns": {
+        "median": 551,
+        "min": 431,
+        "max": 902,
+        "n": 3
+      },
+      "prepare_total_ns": {
+        "median": 560022103,
+        "min": 381304469,
+        "max": 760283834,
+        "n": 3
+      },
+      "publication_ns": {
+        "median": 578300048,
+        "min": 399419116,
+        "max": 780214098,
+        "n": 3
+      },
+      "seed_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "tail_bytes": {
+        "median": 507,
+        "min": 507,
+        "max": 507,
+        "n": 3
+      },
+      "wal_bytes_after_flush": {
+        "median": 4371352,
+        "min": 2183632,
+        "max": 26442192,
+        "n": 3
+      },
+      "wal_peak_sample_interval_ms": {
+        "median": 5,
+        "min": 5,
+        "max": 5,
+        "n": 3
+      },
+      "wal_peak_sampled_bytes": {
+        "median": 21914312,
+        "min": 19738952,
+        "max": 24258592,
+        "n": 3
+      },
+      "workflow_ns": {
+        "median": 644642307,
+        "min": 463843967,
+        "max": 838108591,
+        "n": 3
+      },
+      "writer_pause_ms": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "writer_paused_frame_max_ns": {
+        "median": 871735.5,
+        "min": 867753,
+        "max": 875718,
+        "n": 2
+      },
+      "writer_paused_frames": {
+        "median": 1,
+        "min": 0,
+        "max": 1,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 1189328926,
+      "min": 1184978525,
+      "max": 1204405906,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "production_paste",
+    "workload": 134217728,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 678.967267,
+      "min": 672.740618,
+      "max": 737.235744,
+      "n": 3
+    },
+    "phases": {
+      "bytes": {
+        "median": 134217728,
+        "min": 134217728,
+        "max": 134217728,
+        "n": 3
+      },
+      "cache_bytes": {
+        "median": 67108608,
+        "min": 67108608,
+        "max": 67108608,
+        "n": 3
+      },
+      "concurrent_write_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "database_bytes": {
+        "median": 132653056,
+        "min": 131604480,
+        "max": 134754304,
+        "n": 3
+      },
+      "frame_max_ns": {
+        "median": 4972978,
+        "min": 4857491,
+        "max": 5049392,
+        "n": 3
+      },
+      "frame_p50_ns": {
+        "median": 257274,
+        "min": 250792,
+        "max": 264077,
+        "n": 3
+      },
+      "frame_p99_ns": {
+        "median": 1920695,
+        "min": 1684560,
+        "max": 2465450,
+        "n": 3
+      },
+      "frames": {
+        "median": 136,
+        "min": 134,
+        "max": 155,
+        "n": 3
+      },
+      "measured_batch_overruns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "peak_pending_bytes": {
+        "median": 33816448,
+        "min": 33816448,
+        "max": 33816449,
+        "n": 3
+      },
+      "pending_flow_threshold_bytes": {
+        "median": 33554432,
+        "min": 33554432,
+        "max": 33554432,
+        "n": 3
+      },
+      "post_publication_flush_ns": {
+        "median": 58894134,
+        "min": 56392246,
+        "max": 71591367,
+        "n": 3
+      },
+      "prepare_completed": {
+        "median": 1,
+        "min": 1,
+        "max": 1,
+        "n": 3
+      },
+      "prepare_inspection_ns": {
+        "median": 14157250,
+        "min": 13724206,
+        "max": 14180865,
+        "n": 3
+      },
+      "prepare_mutation_ns": {
+        "median": 279754558,
+        "min": 278600245,
+        "max": 325720425,
+        "n": 3
+      },
+      "prepare_normalization_ns": {
+        "median": 6310866,
+        "min": 6016963,
+        "max": 6858957,
+        "n": 3
+      },
+      "prepare_store_binding_ns": {
+        "median": 481,
+        "min": 451,
+        "max": 1032,
+        "n": 3
+      },
+      "prepare_total_ns": {
+        "median": 304020441,
+        "min": 303384072,
+        "max": 350725739,
+        "n": 3
+      },
+      "publication_ns": {
+        "median": 324047016,
+        "min": 320157936,
+        "max": 370189094,
+        "n": 3
+      },
+      "seed_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "tail_bytes": {
+        "median": 507,
+        "min": 507,
+        "max": 507,
+        "n": 3
+      },
+      "wal_bytes_after_flush": {
+        "median": 3275432,
+        "min": 2183632,
+        "max": 8775632,
+        "n": 3
+      },
+      "wal_peak_sample_interval_ms": {
+        "median": 5,
+        "min": 5,
+        "max": 5,
+        "n": 3
+      },
+      "wal_peak_sampled_bytes": {
+        "median": 17510032,
+        "min": 10938632,
+        "max": 23010232,
+        "n": 3
+      },
+      "workflow_ns": {
+        "median": 387722077,
+        "min": 381295782,
+        "max": 443923033,
+        "n": 3
+      },
+      "writer_pause_ms": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "writer_paused_frames": {
+        "median": 1,
+        "min": 0,
+        "max": 1,
+        "n": 3
+      },
+      "writer_paused_frame_max_ns": {
+        "median": 863535.0,
+        "min": 857413,
+        "max": 869657,
+        "n": 2
+      }
+    },
+    "allocated_bytes": {
+      "median": 1181818170,
+      "min": 1152838998,
+      "max": 1186702314,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_persist_cost",
+    "workload": 100,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 120.83462,
+      "min": 31.179703,
+      "max": 138.452133,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 5451058,
+        "min": 1701983,
+        "max": 29215015,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 2636110,
+        "min": 2634447,
+        "max": 2758501,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 1092656,
+        "min": 1061588,
+        "max": 1115289,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 11495212,
+        "min": 8471943,
+        "max": 35648421,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 1000362,
+        "min": 998529,
+        "max": 1053452,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 3599654,
+        "min": 3342791,
+        "max": 3694262,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 1646378,
+        "min": 1639665,
+        "max": 2054897,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 4782710,
+        "min": 4648628,
+        "max": 4910461,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 409600,
+        "min": 409600,
+        "max": 409600,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 140354,
+        "min": 138821,
+        "max": 143720,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 26918364,
+      "min": 26917599,
+      "max": 26944102,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_persist_cost",
+    "workload": 100,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 143.83396,
+      "min": 26.775815,
+      "max": 144.484583,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 1752248,
+        "min": 1583630,
+        "max": 30225677,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 2932137,
+        "min": 2855823,
+        "max": 2976060,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 1080694,
+        "min": 1076495,
+        "max": 1114437,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 7924563,
+        "min": 7505985,
+        "max": 36497740,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 1028094,
+        "min": 1008388,
+        "max": 1292161,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 3448389,
+        "min": 3195093,
+        "max": 3469078,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 1646438,
+        "min": 1626621,
+        "max": 1709107,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 4999478,
+        "min": 4886546,
+        "max": 5355197,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 409600,
+        "min": 409600,
+        "max": 409600,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 219614,
+        "min": 142619,
+        "max": 247326,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 52753303,
+      "min": 52722349,
+      "max": 52761322,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_persist_cost",
+    "workload": 1000,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 280.667737,
+      "min": 260.931658,
+      "max": 289.471443,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 37926468,
+        "min": 36538236,
+        "max": 44606247,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 80313901,
+        "min": 62583386,
+        "max": 108693564,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 10993056,
+        "min": 10713350,
+        "max": 11294844,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 88038827,
+        "min": 86481797,
+        "max": 93541461,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 6438165,
+        "min": 6380647,
+        "max": 6516262,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 26792536,
+        "min": 26540102,
+        "max": 27018472,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 11931923,
+        "min": 11681652,
+        "max": 12024748,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 91362451,
+        "min": 73543901,
+        "max": 120100429,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 4096000,
+        "min": 4096000,
+        "max": 4096000,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 1827319,
+        "min": 1736517,
+        "max": 1955109,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 177391106,
+      "min": 177381030,
+      "max": 177391186,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_persist_cost",
+    "workload": 1000,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 242.891019,
+      "min": 118.714,
+      "max": 321.870551,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 34908449,
+        "min": 2625400,
+        "max": 38750389,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 50964513,
+        "min": 35532253,
+        "max": 125614345,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 11255090,
+        "min": 11008545,
+        "max": 11392819,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 85460896,
+        "min": 53669322,
+        "max": 90511881,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 6835963,
+        "min": 6603296,
+        "max": 7023126,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 27611638,
+        "min": 26926819,
+        "max": 27912424,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 12423528,
+        "min": 12232689,
+        "max": 12593858,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 62211417,
+        "min": 46757957,
+        "max": 137388812,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 4096000,
+        "min": 4096000,
+        "max": 4096000,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 1873486,
+        "min": 1838229,
+        "max": 1956642,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 435443646,
+      "min": 435440918,
+      "max": 435444638,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_persist_cost",
+    "workload": 10000,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 2070.42007,
+      "min": 1877.398188,
+      "max": 2295.30061,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 250216215,
+        "min": 197737001,
+        "max": 279997596,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 1057080580,
+        "min": 784024439,
+        "max": 1224092195,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 123653796,
+        "min": 122502960,
+        "max": 125369314,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 804703322,
+        "min": 749358774,
+        "max": 831224979,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 75870680,
+        "min": 74845871,
+        "max": 77007860,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 299178829,
+        "min": 296867681,
+        "max": 300914947,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 129918074,
+        "min": 128990007,
+        "max": 129939704,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 1174340173,
+        "min": 899372226,
+        "max": 1343220154,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 40960000,
+        "min": 40960000,
+        "max": 40960000,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 22105176,
+        "min": 20859402,
+        "max": 22155741,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 1763481604,
+      "min": 1763147202,
+      "max": 1763840342,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_persist_cost",
+    "workload": 10000,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 2042.260458,
+      "min": 1187.59141,
+      "max": 2383.900467,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 204968900,
+        "min": 40566596,
+        "max": 239110056,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 1002439187,
+        "min": 401543806,
+        "max": 1331425150,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 125215535,
+        "min": 121390246,
+        "max": 126528805,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 769562332,
+        "min": 603246609,
+        "max": 785284981,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 75170102,
+        "min": 74365878,
+        "max": 76192175,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 305411257,
+        "min": 295591169,
+        "max": 306230479,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 131233699,
+        "min": 129193039,
+        "max": 132653160,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 1117068440,
+        "min": 516346967,
+        "max": 1444164758,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 40960000,
+        "min": 40960000,
+        "max": 40960000,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 23027742,
+        "min": 22896886,
+        "max": 23226897,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 4344251508,
+      "min": 4343987184,
+      "max": 4344502238,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_restore_cost",
+    "workload": 100,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 3.538909,
+      "min": 3.49667,
+      "max": 3.620593,
+      "n": 3
+    },
+    "phases": {
+      "content_validation_ns": {
+        "median": 112301,
+        "min": 104908,
+        "max": 116359,
+        "n": 3
+      },
+      "history_read_ns": {
+        "median": 1657128,
+        "min": 1653902,
+        "max": 1731098,
+        "n": 3
+      },
+      "layout_read_ns": {
+        "median": 1039506,
+        "min": 1034757,
+        "max": 1043593,
+        "n": 3
+      },
+      "manifest_read_parse_ns": {
+        "median": 3052985,
+        "min": 3011166,
+        "max": 3122636,
+        "n": 3
+      },
+      "orphan_validation_ns": {
+        "median": 173146,
+        "min": 158980,
+        "max": 181462,
+        "n": 3
+      },
+      "restore_fixture_revision": {
+        "median": 2,
+        "min": 2,
+        "max": 2,
+        "n": 3
+      },
+      "restore_reconstruction_ns": {
+        "median": 471448,
+        "min": 471026,
+        "max": 478009,
+        "n": 3
+      },
+      "restored_buffer_count": {
+        "median": 100,
+        "min": 100,
+        "max": 100,
+        "n": 3
+      },
+      "restored_tab_count": {
+        "median": 100,
+        "min": 100,
+        "max": 100,
+        "n": 3
+      },
+      "restored_text_bytes": {
+        "median": 409600,
+        "min": 409600,
+        "max": 409600,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 3890695,
+      "min": 3890695,
+      "max": 3892887,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_restore_cost",
+    "workload": 100,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 3.505807,
+      "min": 3.455252,
+      "max": 3.822774,
+      "n": 3
+    },
+    "phases": {
+      "content_validation_ns": {
+        "median": 105669,
+        "min": 103295,
+        "max": 113143,
+        "n": 3
+      },
+      "history_read_ns": {
+        "median": 1670825,
+        "min": 1634255,
+        "max": 1679971,
+        "n": 3
+      },
+      "layout_read_ns": {
+        "median": 1041100,
+        "min": 1004240,
+        "max": 1329181,
+        "n": 3
+      },
+      "manifest_read_parse_ns": {
+        "median": 3014041,
+        "min": 2995337,
+        "max": 3349433,
+        "n": 3
+      },
+      "orphan_validation_ns": {
+        "median": 175901,
+        "min": 159069,
+        "max": 180229,
+        "n": 3
+      },
+      "restore_fixture_revision": {
+        "median": 2,
+        "min": 2,
+        "max": 2,
+        "n": 3
+      },
+      "restore_reconstruction_ns": {
+        "median": 456930,
+        "min": 445418,
+        "max": 476436,
+        "n": 3
+      },
+      "restored_buffer_count": {
+        "median": 100,
+        "min": 100,
+        "max": 100,
+        "n": 3
+      },
+      "restored_tab_count": {
+        "median": 100,
+        "min": 100,
+        "max": 100,
+        "n": 3
+      },
+      "restored_text_bytes": {
+        "median": 409600,
+        "min": 409600,
+        "max": 409600,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 3890695,
+      "min": 3890695,
+      "max": 3890695,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_restore_cost",
+    "workload": 1000,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 24.976439,
+      "min": 24.741407,
+      "max": 25.025362,
+      "n": 3
+    },
+    "phases": {
+      "content_validation_ns": {
+        "median": 612472,
+        "min": 603196,
+        "max": 745864,
+        "n": 3
+      },
+      "history_read_ns": {
+        "median": 13450470,
+        "min": 13294908,
+        "max": 13625920,
+        "n": 3
+      },
+      "layout_read_ns": {
+        "median": 7062520,
+        "min": 7040860,
+        "max": 7292994,
+        "n": 3
+      },
+      "manifest_read_parse_ns": {
+        "median": 22103032,
+        "min": 21806584,
+        "max": 22285044,
+        "n": 3
+      },
+      "orphan_validation_ns": {
+        "median": 767785,
+        "min": 748448,
+        "max": 770319,
+        "n": 3
+      },
+      "restore_fixture_revision": {
+        "median": 2,
+        "min": 2,
+        "max": 2,
+        "n": 3
+      },
+      "restore_reconstruction_ns": {
+        "median": 2848400,
+        "min": 2708026,
+        "max": 2906780,
+        "n": 3
+      },
+      "restored_buffer_count": {
+        "median": 1000,
+        "min": 1000,
+        "max": 1000,
+        "n": 3
+      },
+      "restored_tab_count": {
+        "median": 1000,
+        "min": 1000,
+        "max": 1000,
+        "n": 3
+      },
+      "restored_text_bytes": {
+        "median": 4096000,
+        "min": 4096000,
+        "max": 4096000,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 34242583,
+      "min": 34242583,
+      "max": 34242583,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_restore_cost",
+    "workload": 1000,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 25.092758,
+      "min": 24.867264,
+      "max": 25.765895,
+      "n": 3
+    },
+    "phases": {
+      "content_validation_ns": {
+        "median": 619465,
+        "min": 604297,
+        "max": 670341,
+        "n": 3
+      },
+      "history_read_ns": {
+        "median": 13463405,
+        "min": 13391019,
+        "max": 13500955,
+        "n": 3
+      },
+      "layout_read_ns": {
+        "median": 7207904,
+        "min": 7028055,
+        "max": 7545348,
+        "n": 3
+      },
+      "manifest_read_parse_ns": {
+        "median": 22140051,
+        "min": 21921701,
+        "max": 22766040,
+        "n": 3
+      },
+      "orphan_validation_ns": {
+        "median": 783695,
+        "min": 783404,
+        "max": 1051458,
+        "n": 3
+      },
+      "restore_fixture_revision": {
+        "median": 2,
+        "min": 2,
+        "max": 2,
+        "n": 3
+      },
+      "restore_reconstruction_ns": {
+        "median": 2926397,
+        "min": 2916558,
+        "max": 2971161,
+        "n": 3
+      },
+      "restored_buffer_count": {
+        "median": 1000,
+        "min": 1000,
+        "max": 1000,
+        "n": 3
+      },
+      "restored_tab_count": {
+        "median": 1000,
+        "min": 1000,
+        "max": 1000,
+        "n": 3
+      },
+      "restored_text_bytes": {
+        "median": 4096000,
+        "min": 4096000,
+        "max": 4096000,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 34244775,
+      "min": 34243767,
+      "max": 34245959,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_restore_cost",
+    "workload": 10000,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 263.952973,
+      "min": 262.237015,
+      "max": 265.805649,
+      "n": 3
+    },
+    "phases": {
+      "content_validation_ns": {
+        "median": 6123473,
+        "min": 5951129,
+        "max": 6792441,
+        "n": 3
+      },
+      "history_read_ns": {
+        "median": 138503338,
+        "min": 136302167,
+        "max": 139323252,
+        "n": 3
+      },
+      "layout_read_ns": {
+        "median": 80387620,
+        "min": 80385776,
+        "max": 81105039,
+        "n": 3
+      },
+      "manifest_read_parse_ns": {
+        "median": 240519156,
+        "min": 239768635,
+        "max": 242711613,
+        "n": 3
+      },
+      "orphan_validation_ns": {
+        "median": 8346366,
+        "min": 8189430,
+        "max": 8497320,
+        "n": 3
+      },
+      "restore_fixture_revision": {
+        "median": 2,
+        "min": 2,
+        "max": 2,
+        "n": 3
+      },
+      "restore_reconstruction_ns": {
+        "median": 22779946,
+        "min": 22279504,
+        "max": 23243428,
+        "n": 3
+      },
+      "restored_buffer_count": {
+        "median": 10000,
+        "min": 10000,
+        "max": 10000,
+        "n": 3
+      },
+      "restored_tab_count": {
+        "median": 10000,
+        "min": 10000,
+        "max": 10000,
+        "n": 3
+      },
+      "restored_text_bytes": {
+        "median": 40960000,
+        "min": 40960000,
+        "max": 40960000,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 362396507,
+      "min": 362240843,
+      "max": 362404699,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_restore_cost",
+    "workload": 10000,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 264.474174,
+      "min": 260.050521,
+      "max": 269.826195,
+      "n": 3
+    },
+    "phases": {
+      "content_validation_ns": {
+        "median": 6207230,
+        "min": 5967039,
+        "max": 6469915,
+        "n": 3
+      },
+      "history_read_ns": {
+        "median": 137684147,
+        "min": 135156872,
+        "max": 141113660,
+        "n": 3
+      },
+      "layout_read_ns": {
+        "median": 81276472,
+        "min": 79703192,
+        "max": 83183991,
+        "n": 3
+      },
+      "manifest_read_parse_ns": {
+        "median": 242009722,
+        "min": 236776645,
+        "max": 247842847,
+        "n": 3
+      },
+      "orphan_validation_ns": {
+        "median": 8531735,
+        "min": 8273949,
+        "max": 9460582,
+        "n": 3
+      },
+      "restore_fixture_revision": {
+        "median": 2,
+        "min": 2,
+        "max": 2,
+        "n": 3
+      },
+      "restore_reconstruction_ns": {
+        "median": 22278923,
+        "min": 21704072,
+        "max": 23089158,
+        "n": 3
+      },
+      "restored_buffer_count": {
+        "median": 10000,
+        "min": 10000,
+        "max": 10000,
+        "n": 3
+      },
+      "restored_tab_count": {
+        "median": 10000,
+        "min": 10000,
+        "max": 10000,
+        "n": 3
+      },
+      "restored_text_bytes": {
+        "median": 40960000,
+        "min": 40960000,
+        "max": 40960000,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 362404699,
+      "min": 362396507,
+      "max": 362408795,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_steady_persist_cost",
+    "workload": 100,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 2.264271,
+      "min": 1.742018,
+      "max": 2.274841,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 9418,
+        "min": 9027,
+        "max": 12694,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 400103,
+        "min": 393531,
+        "max": 565845,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 2031843,
+        "min": 1561439,
+        "max": 2091105,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 409600,
+        "min": 409600,
+        "max": 409600,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 87855,
+        "min": 68599,
+        "max": 144071,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 1096067,
+      "min": 1096049,
+      "max": 1096067,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_steady_persist_cost",
+    "workload": 100,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 1.733532,
+      "min": 1.603548,
+      "max": 2.084873,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 8526,
+        "min": 8516,
+        "max": 8977,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 384994,
+        "min": 381508,
+        "max": 407207,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 1585904,
+        "min": 1444057,
+        "max": 1911087,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 409600,
+        "min": 409600,
+        "max": 409600,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 72386,
+        "min": 71815,
+        "max": 88707,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 1096001,
+      "min": 1095969,
+      "max": 1096067,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_steady_persist_cost",
+    "workload": 1000,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 7.308623,
+      "min": 6.883754,
+      "max": 7.338139,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 188856,
+        "min": 186210,
+        "max": 217179,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 806978,
+        "min": 798623,
+        "max": 852123,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 5976586,
+        "min": 5570823,
+        "max": 5980664,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 4096000,
+        "min": 4096000,
+        "max": 4096000,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 774647,
+        "min": 756714,
+        "max": 826144,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 8095438,
+      "min": 8087326,
+      "max": 8095438,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_steady_persist_cost",
+    "workload": 1000,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 6.983602,
+      "min": 6.812109,
+      "max": 7.398051,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 206248,
+        "min": 196560,
+        "max": 207270,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 875067,
+        "min": 866320,
+        "max": 889184,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 5716207,
+        "min": 5542399,
+        "max": 6077407,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 4096000,
+        "min": 4096000,
+        "max": 4096000,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 688986,
+        "min": 658659,
+        "max": 734422,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 8088494,
+      "min": 8087326,
+      "max": 8095438,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_steady_persist_cost",
+    "workload": 10000,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 91.132328,
+      "min": 90.110685,
+      "max": 95.604895,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 3614301,
+        "min": 3570468,
+        "max": 3695203,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 9189523,
+        "min": 9185936,
+        "max": 9413584,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 65254062,
+        "min": 65209388,
+        "max": 65677959,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 40960000,
+        "min": 40960000,
+        "max": 40960000,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 9738676,
+        "min": 9429764,
+        "max": 13933920,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 74643603,
+      "min": 74643603,
+      "max": 74684624,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "session_steady_persist_cost",
+    "workload": 10000,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 88.755586,
+      "min": 87.95545,
+      "max": 89.440635,
+      "n": 3
+    },
+    "phases": {
+      "commit_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "content_prepare_ns": {
+        "median": 3525434,
+        "min": 3498994,
+        "max": 3600876,
+        "n": 3
+      },
+      "content_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "file_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "history_prepare_ns": {
+        "median": 9408304,
+        "min": 9040081,
+        "max": 9507261,
+        "n": 3
+      },
+      "history_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "layout_write_ns": {
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "n": 3
+      },
+      "manifest_serialize_ns": {
+        "median": 64548104,
+        "min": 63288864,
+        "max": 65540421,
+        "n": 3
+      },
+      "persist_logical_bytes": {
+        "median": 40960000,
+        "min": 40960000,
+        "max": 40960000,
+        "n": 3
+      },
+      "snapshot_capture_ns": {
+        "median": 8597849,
+        "min": 8468495,
+        "max": 8806391,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 74643603,
+      "min": 74643603,
+      "max": 74684624,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "startup_visible_restore_cost",
+    "workload": 100,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 4.487194,
+      "min": 4.154588,
+      "max": 4.491803,
+      "n": 3
+    },
+    "phases": {
+      "first_paint_ns": {
+        "median": 3485379,
+        "min": 3456665,
+        "max": 3498293,
+        "n": 3
+      },
+      "startup_load_ns": {
+        "median": 998238,
+        "min": 649332,
+        "max": 1021903,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 2251349,
+      "min": 2249157,
+      "max": 2251349,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "startup_visible_restore_cost",
+    "workload": 100,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 4.121065,
+      "min": 4.072995,
+      "max": 5.028993,
+      "n": 3
+    },
+    "phases": {
+      "first_paint_ns": {
+        "median": 3417431,
+        "min": 3250196,
+        "max": 3938571,
+        "n": 3
+      },
+      "startup_load_ns": {
+        "median": 816176,
+        "min": 695018,
+        "max": 1082827,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 2251349,
+      "min": 2251349,
+      "max": 2251349,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "startup_visible_restore_cost",
+    "workload": 1000,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 5.453762,
+      "min": 5.423515,
+      "max": 5.656855,
+      "n": 3
+    },
+    "phases": {
+      "first_paint_ns": {
+        "median": 3182879,
+        "min": 3057393,
+        "max": 3273890,
+        "n": 3
+      },
+      "startup_load_ns": {
+        "median": 2359600,
+        "min": 2263880,
+        "max": 2375761,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 2400604,
+      "min": 2400604,
+      "max": 2400604,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "startup_visible_restore_cost",
+    "workload": 1000,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 5.702832,
+      "min": 5.085229,
+      "max": 5.827606,
+      "n": 3
+    },
+    "phases": {
+      "first_paint_ns": {
+        "median": 3346467,
+        "min": 3263442,
+        "max": 3531375,
+        "n": 3
+      },
+      "startup_load_ns": {
+        "median": 2289258,
+        "min": 1729886,
+        "max": 2432326,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 2398412,
+      "min": 2398412,
+      "max": 2400604,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "startup_visible_restore_cost",
+    "workload": 10000,
+    "arm": "after",
+    "elapsed_ms": {
+      "median": 15.780435,
+      "min": 15.447598,
+      "max": 16.182531,
+      "n": 3
+    },
+    "phases": {
+      "first_paint_ns": {
+        "median": 3409796,
+        "min": 3222143,
+        "max": 3428482,
+        "n": 3
+      },
+      "startup_load_ns": {
+        "median": 12339580,
+        "min": 12213503,
+        "max": 12748419,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 3188745,
+      "min": 3150694,
+      "max": 3198212,
+      "n": 3
+    }
+  },
+  {
+    "scenario": "startup_visible_restore_cost",
+    "workload": 10000,
+    "arm": "before",
+    "elapsed_ms": {
+      "median": 15.897505,
+      "min": 15.669536,
+      "max": 16.211426,
+      "n": 3
+    },
+    "phases": {
+      "first_paint_ns": {
+        "median": 3550721,
+        "min": 3450402,
+        "max": 3910709,
+        "n": 3
+      },
+      "startup_load_ns": {
+        "median": 12284246,
+        "min": 12206529,
+        "max": 12334280,
+        "n": 3
+      }
+    },
+    "allocated_bytes": {
+      "median": 3177088,
+      "min": 3036322,
+      "max": 3192674,
+      "n": 3
+    }
+  }
+]

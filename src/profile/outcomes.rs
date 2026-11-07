@@ -99,23 +99,22 @@ pub fn resource(id: &str, completed: bool, phases: &Value) -> Value {
             && phases["transaction_committed"] == false
             && phases["file_write_ns"] == 0
     );
-    if id == "cold_reads_during_save" {
-        if let Some(samples) = phases["cold_read_samples"].as_array() {
-            // The existing p99 gate uses only physically verified samples.
-            // Failed eviction attempts remain in the raw evidence and coverage checks.
-            let samples: Vec<_> = samples
+    if id == "cold_reads_during_save"
+        && let Some(samples) = phases["cold_read_samples"].as_array()
+    {
+        // The existing p99 gate uses only physically verified samples.
+        // Failed eviction attempts remain in the raw evidence and coverage checks.
+        let samples: Vec<_> = samples
+            .iter()
+            .filter(|s| s["physical_read_verified"] == true)
+            .collect();
+        result["eviction_succeeded"] =
+            json!(!samples.is_empty() && samples.iter().all(|s| s["eviction_succeeded"] == true));
+        result["physical_read_bytes"] = json!(
+            samples
                 .iter()
-                .filter(|s| s["physical_read_verified"] == true)
-                .collect();
-            result["eviction_succeeded"] = json!(
-                !samples.is_empty() && samples.iter().all(|s| s["eviction_succeeded"] == true)
-            );
-            result["physical_read_bytes"] = json!(
-                samples
-                    .iter()
-                    .try_fold(0u64, |sum, s| sum.checked_add(s["read_bytes"].as_u64()?))
-            );
-        }
+                .try_fold(0u64, |sum, s| sum.checked_add(s["read_bytes"].as_u64()?))
+        );
     }
     result
 }
