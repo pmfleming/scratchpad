@@ -470,6 +470,14 @@ fn emit_many_file_first_visible_sweep() {
 }
 
 fn emit_search_file_size_sweep() {
+    CAPACITY_STORE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .unwrap()
+            .chunk_store_handle()
+            .unwrap()
+            .enable_scan_cache()
+    });
     let root = tempfile::tempdir().unwrap();
     for (step_index, bytes) in [MB, 64 * MB, 256 * MB, GB].into_iter().enumerate() {
         let path = root.path().join(format!("search-{bytes}.txt"));
@@ -479,6 +487,8 @@ fn emit_search_file_size_sweep() {
         let program = search_capacity_program();
         for repeat_index in 0..MEASUREMENT_REPETITIONS {
             let mut measured_contract = contract("search_file_size_ceiling");
+            measured_contract["scan_cache_policy"] =
+                serde_json::json!("application_available_memory_v1");
             measured_contract["search_fixture_revision"] = serde_json::json!(3);
             measured_contract["document_bytes"] = serde_json::json!(snapshot.len_bytes());
             measured_contract["expected_matches"] = serde_json::json!(1);

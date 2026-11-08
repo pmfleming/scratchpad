@@ -41,7 +41,6 @@ pub use frame::prepare_context_before_first_frame;
 pub(crate) use runtime_state::{BackgroundIoState, FileWatchState, OpenFileDialogState};
 pub use search_state::SearchScope;
 pub(crate) use search_state::api as search_controller;
-pub(crate) use search_state::profile_snapshot_search;
 pub(crate) use search_state::replace as search_replace;
 pub(crate) use search_state::runtime as search_runtime;
 pub(crate) use search_state::visual as search_visual;
@@ -49,6 +48,7 @@ pub(crate) use search_state::{
     SearchFocusTarget, SearchFreshness, SearchProgress, SearchReplaceAvailability,
     SearchResultEntry, SearchResultGroup, SearchScopeOrigin, SearchStatus,
 };
+pub(crate) use search_state::{profile_snapshot_search, profile_snapshot_search_controlled};
 pub(crate) use settings_state::mutators as settings_controller;
 pub(crate) use types::{
     AppSurface, DeferredSave, PendingActionKind, PendingBackgroundAction,

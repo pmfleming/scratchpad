@@ -241,6 +241,39 @@ mod tests {
     use futures_lite::future::block_on;
 
     #[test]
+    fn bounded_scan_cache_keeps_viewport_separate_and_eviction_preserves_pins() {
+        block_on(async {
+            let (_root, mut db) = super::super::tests::database().await;
+            let store = db.chunk_store().unwrap();
+            store.set_limits(0, 0);
+            store.set_scan_limits(8192, 8192);
+            let visible = store.seal(Arc::new("a".repeat(4096)), 1);
+            let first = store.seal(Arc::new("λ".repeat(2048)), 2);
+            let second = store.seal(Arc::new("b".repeat(4096)), 2);
+            while store.pending_bytes() > 0 {
+                db.drain_chunk_batch().await.unwrap();
+            }
+            store.set_limits(4096, 4096);
+            drop(visible.load(false, true).unwrap());
+            drop(first.load(true, false).unwrap());
+            let pinned = second.load(true, false).unwrap();
+            assert_eq!(store.cached_bytes(), 4096);
+            assert_eq!(store.scan_observation().0, 8192);
+            let reads = store.epoch().read_count();
+            drop(first.load(true, false).unwrap());
+            assert_eq!(store.epoch().read_count(), reads);
+            store.set_scan_limits(0, 0);
+            assert_eq!(store.scan_observation().0, 0);
+            assert_eq!(pinned.as_str(), "b".repeat(4096));
+            drop(visible.load(false, true).unwrap());
+            assert_eq!(store.epoch().read_count(), reads);
+            drop(first.load(true, false).unwrap());
+            assert_eq!(store.epoch().read_count(), reads + 1);
+            assert_eq!(store.cached_bytes(), 4096);
+        });
+    }
+
+    #[test]
     fn mixed_chunk_batches_preserve_fifo_and_bound_committed_bytes() {
         block_on(async {
             let (_root, mut db) = super::super::tests::database().await;

@@ -361,6 +361,10 @@ impl SessionStore {
                     serde_json::json!({"page_size_bytes":db.integer("PRAGMA page_size").await?,
                 "writer_cache_size_pragma":db.integer("PRAGMA cache_size").await?,
                 "engine":"turso-0.8.3", "scope":"measured_store_connection",
+                "scan_cache": db.chunks.as_ref().map(|store| {
+                    let (bytes, aggregate, owner, hits) = store.scan_observation();
+                    serde_json::json!({"resident_bytes":bytes,"aggregate_limit_bytes":aggregate,"per_owner_limit_bytes":owner,"retained_read_hits":hits})
+                }),
                 "chunk_cache": {
                     "actual_aggregate_bytes": limits.map(|v| v.0),
                     "actual_per_owner_bytes": limits.map(|v| v.1),

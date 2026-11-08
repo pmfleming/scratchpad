@@ -19,6 +19,7 @@ impl ScratchpadApp {
     pub(crate) fn enforce_aggregate_text_history_budget(&mut self) {
         let budget = self.state.app_settings.history.budget;
         if let Some(store) = self.state.persistence.session_store.opened_chunk_store() {
+            store.enable_scan_cache();
             store.set_limits(
                 budget.aggregate_byte_budget as usize,
                 budget.per_file_byte_budget as usize,

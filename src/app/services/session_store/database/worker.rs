@@ -98,6 +98,7 @@ impl Actor {
         let mut retry_at = Instant::now();
         let mut backoff = Duration::from_millis(100);
         loop {
+            chunks.refresh_headroom();
             chunks.reap_abandoned();
             let drain = chunks.pending_bytes() > 0
                 && !matches!(chunks.health(), Health::Unavailable(_))

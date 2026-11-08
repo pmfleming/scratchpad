@@ -385,16 +385,54 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
         let full = store
             .persist_profiled(app.tab_manager.tabs.as_slice(), 0, 16.0, false)
             .expect("explicit FULL manifest barrier");
-        assert!(full.transaction_committed);
-        profile["full_commit_timestamp_ns"] = json!(started.elapsed().as_nanos());
-        profile["full_barrier_scope"] = json!("explicit_probe_barrier_after_normal_flush");
-        profile["full_barrier_transaction_committed"] = json!(true);
+        record_full_barrier(&mut profile, &full, started.elapsed().as_nanos());
         profile
     })
 }
 
+fn record_full_barrier(
+    profile: &mut Value,
+    full: &crate::app::services::session_store::SessionPersistProfile,
+    timestamp_ns: u128,
+) {
+    // A successful unchanged persist reuses the prior FULL snapshot. Its actual
+    // commit time is unknown here; barrier completion is only an upper bound.
+    assert!(full.transaction_committed || full.manifest_write_ns == 0);
+    profile["full_barrier_completed_timestamp_ns"] = json!(timestamp_ns);
+    profile["full_commit_timestamp_ns"] = if full.transaction_committed {
+        json!(timestamp_ns)
+    } else {
+        Value::Null
+    };
+    profile["full_barrier_scope"] = json!("explicit_probe_barrier_after_normal_flush");
+    profile["full_barrier_transaction_committed"] = json!(full.transaction_committed);
+    profile["full_barrier_previous_snapshot_reused"] = json!(!full.transaction_committed);
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_already_committed_snapshot_has_no_invented_full_commit_timestamp() {
+        use crate::app::domain::{BufferState, WorkspaceTab};
+        let root = tempfile::tempdir().unwrap();
+        let store =
+            crate::app::services::session_store::SessionStore::new(root.path().to_path_buf());
+        let tabs = vec![WorkspaceTab::new(BufferState::new(
+            "barrier".into(),
+            "exact λ".into(),
+            None,
+        ))];
+        let mut profile = serde_json::json!({"publication_ns":1});
+        let committed = store.persist_profiled(&tabs, 0, 16.0, false).unwrap();
+        super::record_full_barrier(&mut profile, &committed, 2);
+        assert_eq!(profile["full_commit_timestamp_ns"], 2);
+        let reused = store.persist_profiled(&tabs, 0, 16.0, false).unwrap();
+        super::record_full_barrier(&mut profile, &reused, 3);
+        assert_eq!(profile["full_barrier_previous_snapshot_reused"], true);
+        assert_eq!(profile["full_barrier_completed_timestamp_ns"], 3);
+        assert!(profile["full_commit_timestamp_ns"].is_null());
+        assert!(crate::profile::outcomes::memory(&profile)["full_commit_timestamp_ns"].is_null());
+    }
     #[test]
     fn production_paste_finishes_without_an_injected_writer_pause() {
         let profile = super::run_live_text_paste_profile(8 * super::super::MB);
@@ -403,8 +441,16 @@ mod tests {
         let publication = profile["publication_ns"].as_u64().unwrap();
         let workflow = profile["workflow_ns"].as_u64().unwrap();
         assert!(publication > 0 && publication <= workflow);
-        assert!(profile["full_barrier_transaction_committed"] == true);
-        assert!(profile["full_commit_timestamp_ns"].as_u64().unwrap() >= workflow);
+        assert!(
+            profile["full_barrier_transaction_committed"] == true
+                || profile["full_barrier_previous_snapshot_reused"] == true
+        );
+        assert!(
+            profile["full_barrier_completed_timestamp_ns"]
+                .as_u64()
+                .unwrap()
+                >= workflow
+        );
         assert!(profile["post_publication_flush_ns"].as_u64().unwrap() <= workflow - publication);
         assert_eq!(
             profile["publication_endpoint"],

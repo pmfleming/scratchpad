@@ -31,6 +31,15 @@ impl MemorySample {
             pressure,
         }
     }
+    pub(super) fn scan_limits(self) -> (usize, usize) {
+        if self.pressure {
+            return (0, 0);
+        }
+        let aggregate = usize::try_from(self.available / 8)
+            .unwrap_or(usize::MAX)
+            .min(2 * 1024 * 1024 * 1024);
+        (aggregate, aggregate.min(1024 * 1024 * 1024))
+    }
     pub(super) fn pending_limit(self, failure_limit: usize) -> usize {
         let headroom = if self.pressure {
             BULK_PENDING_BYTES
@@ -64,11 +73,16 @@ impl Headroom {
             refreshed: Instant::now(),
         }
     }
-    pub(super) fn refresh(&mut self) {
-        if self.refreshed.elapsed() >= Duration::from_secs(1) {
-            self.sample = MemorySample::read();
-            self.refreshed = Instant::now();
+    pub(super) fn refresh(&mut self) -> bool {
+        if self.refreshed.elapsed() < Duration::from_secs(1) {
+            return false;
         }
+        self.sample = MemorySample::read();
+        self.refreshed = Instant::now();
+        true
+    }
+    pub(super) fn scan_limits(&self) -> (usize, usize) {
+        self.sample.scan_limits()
     }
     pub(super) fn observation(&self, failure: usize) -> AdmissionObservation {
         AdmissionObservation {
@@ -103,6 +117,16 @@ mod tests {
                 pressure: false,
             };
             assert_eq!(sample.pending_limit(1 << 30), expected);
+            let (global, owner) = sample.scan_limits();
+            assert!(owner <= global && global <= 2 * 1024 * 1024 * 1024);
+            assert_eq!(
+                MemorySample {
+                    pressure: true,
+                    ..sample
+                }
+                .scan_limits(),
+                (0, 0)
+            );
             assert_eq!(sample.pending_limit(16 << 20), 16 << 20);
             assert_eq!(
                 MemorySample {

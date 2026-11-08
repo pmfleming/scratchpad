@@ -2,6 +2,7 @@ pub mod fixtures;
 pub mod outcomes;
 pub mod process_metrics;
 mod render;
+pub mod residency;
 mod resource_fixtures;
 pub use resource_fixtures::SearchResultFixture;
 mod support;

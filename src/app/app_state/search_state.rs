@@ -30,12 +30,20 @@ pub(crate) fn profile_snapshot_search(
     snapshot: &crate::app::domain::DocumentSnapshot,
     program: &crate::app::services::search::SearchProgram,
 ) -> Option<Vec<std::ops::Range<usize>>> {
+    profile_snapshot_search_controlled(snapshot, program, &AtomicU64::new(1))
+}
+
+pub(crate) fn profile_snapshot_search_controlled(
+    snapshot: &crate::app::domain::DocumentSnapshot,
+    program: &crate::app::services::search::SearchProgram,
+    generation: &AtomicU64,
+) -> Option<Vec<std::ops::Range<usize>>> {
     fragments::search_target_ranges(
         snapshot,
         None,
         program,
         1,
-        &AtomicU64::new(1),
+        generation,
         fragments::intra_buffer_parallelism(),
     )
 }

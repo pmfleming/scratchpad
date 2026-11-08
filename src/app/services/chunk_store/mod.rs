@@ -99,6 +99,9 @@ struct Core {
     health: Mutex<Health>,
     wake: Mutex<Option<Waker>>,
     cache: Mutex<Cache>,
+    scan_cache: Mutex<Cache>,
+    automatic_scan_cache: std::sync::atomic::AtomicBool,
+    retained_reads: AtomicU64,
     handles: Mutex<Vec<Weak<Chunk>>>,
     restored: Mutex<HashMap<(i64, u64), Weak<Chunk>>>,
 }
@@ -176,6 +179,9 @@ impl ChunkStoreHandle {
             handles: Mutex::default(),
             restored: Mutex::default(),
             cache: Mutex::new(Cache::new(16 * 1024 * 1024, 4 * 1024 * 1024)),
+            scan_cache: Mutex::new(Cache::new(0, 0)),
+            automatic_scan_cache: std::sync::atomic::AtomicBool::new(false),
+            retained_reads: AtomicU64::new(0),
         }))
     }
     #[must_use]
@@ -340,12 +346,70 @@ impl ChunkStoreHandle {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .observation(self.failure_limit())
     }
-    fn refresh_headroom(&self) {
-        self.0
+    pub(crate) fn refresh_headroom(&self) {
+        let mut headroom = self
+            .0
+            .headroom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let updated = headroom.refresh();
+        let limits = headroom.scan_limits();
+        drop(headroom);
+        if updated {
+            let mut cache = self
+                .0
+                .scan_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if self.0.automatic_scan_cache.load(Ordering::Acquire) {
+                cache.limit = limits.0;
+                cache.per_owner = limits.1;
+                cache.evict();
+            }
+        }
+    }
+    /// Enable the same pressure-aware scan policy used by the application.
+    pub fn enable_scan_cache(&self) {
+        self.0.automatic_scan_cache.store(true, Ordering::Release);
+        let limits = self
+            .0
             .headroom
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .refresh();
+            .scan_limits();
+        self.apply_scan_limits(limits.0, limits.1);
+    }
+    /// Explicit diagnostic/eviction override, separate from viewport budgets.
+    pub fn set_scan_limits(&self, aggregate: usize, per_owner: usize) {
+        self.0.automatic_scan_cache.store(false, Ordering::Release);
+        self.apply_scan_limits(aggregate, per_owner);
+    }
+    fn apply_scan_limits(&self, aggregate: usize, per_owner: usize) {
+        let mut cache = self
+            .0
+            .scan_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.limit != aggregate || cache.per_owner != per_owner {
+            cache.limit = aggregate;
+            cache.per_owner = per_owner;
+            cache.evict();
+        }
+    }
+    /// (resident bytes, aggregate limit, per-document limit, retained read hits).
+    #[must_use]
+    pub fn scan_observation(&self) -> (usize, usize, usize, u64) {
+        let cache = self
+            .0
+            .scan_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (
+            cache.bytes,
+            cache.limit,
+            cache.per_owner,
+            self.0.retained_reads.load(Ordering::Acquire),
+        )
     }
     pub(crate) fn seal_bulk(&self, body: Arc<String>, owner: u64) -> io::Result<Arc<Chunk>> {
         let _gate = self
@@ -479,7 +543,16 @@ impl ChunkStoreHandle {
             .cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(chunk.id, chunk.owner, body);
+            .insert(chunk.id, chunk.owner, body.clone());
+        // A just-committed immutable body is already verified and in RAM. Keep
+        // it within the scan budget instead of evicting and immediately rereading.
+        if self.0.automatic_scan_cache.load(Ordering::Acquire) {
+            self.0
+                .scan_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(chunk.id, chunk.owner, body);
+        }
         self.0.pending_bytes.fetch_sub(chunk.len, Ordering::AcqRel);
         self.0.changed.notify_all();
     }
@@ -664,7 +737,8 @@ impl Chunk {
             })
     }
     /// Load verified text through the selected reader. Scans should not retain
-    /// bodies in the foreground cache; returned Arcs remain valid through eviction.
+    /// bodies in the foreground cache. A separate bounded scan cache can retain
+    /// verified committed bodies; returned Arcs remain valid through eviction.
     pub fn load(&self, background: bool, retain: bool) -> io::Result<Arc<String>> {
         let deadline = Instant::now()
             + if background {
@@ -686,11 +760,20 @@ impl Chunk {
                         loading,
                     } => {
                         if let Some(body) = resident.upgrade() {
-                            if retain && let Some(core) = self.core.upgrade() {
-                                core.cache
-                                    .lock()
-                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                    .insert(self.id, self.owner, body.clone());
+                            if let Some(core) = self.core.upgrade() {
+                                core.retained_reads.fetch_add(1, Ordering::Relaxed);
+                                (if retain {
+                                    &core.cache
+                                } else {
+                                    &core.scan_cache
+                                })
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .insert(
+                                    self.id,
+                                    self.owner,
+                                    body.clone(),
+                                );
                             }
                             return Ok(body);
                         }
@@ -745,11 +828,15 @@ impl Chunk {
             }
             self.changed.notify_all();
         }
-        if retain && let (Ok(body), Some(core)) = (&result, self.core.upgrade()) {
-            core.cache
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(self.id, self.owner, body.clone());
+        if let (Ok(body), Some(core)) = (&result, self.core.upgrade()) {
+            (if retain {
+                &core.cache
+            } else {
+                &core.scan_cache
+            })
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(self.id, self.owner, body.clone());
         }
         result
     }

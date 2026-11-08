@@ -48,7 +48,7 @@ impl Cache {
     pub(super) fn insert(&mut self, id: u64, owner: u64, body: Arc<String>) {
         self.remove(id);
         // Empty text needs no retained body or bookkeeping allocation.
-        if body.is_empty() {
+        if body.is_empty() || self.limit == 0 || self.per_owner == 0 {
             return;
         }
         if self.next_access == u64::MAX {
