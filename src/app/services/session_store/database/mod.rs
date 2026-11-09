@@ -146,6 +146,7 @@ pub(super) struct Database {
     pub(super) blocked: Option<String>,
     verified: bool,
     collection_cursor: i64,
+    collection_after: std::time::Instant,
     quarantined: HashMap<String, super::model::SessionBuffer>,
 }
 impl Database {
@@ -223,6 +224,7 @@ impl Database {
             blocked: None,
             verified: false,
             collection_cursor: 0,
+            collection_after: std::time::Instant::now(),
             quarantined: HashMap::new(),
         })
     }
@@ -365,7 +367,9 @@ impl Database {
                 .map_err(error),
             Err(cause) => Err(cause),
         };
-        if result.is_err() {
+        if result.is_ok() {
+            self.collection_after = std::time::Instant::now();
+        } else {
             // A failed COMMIT can be ambiguous. Never trust pre-attempt caches.
             self.state_cache = None;
             self.layout_cache.clear();

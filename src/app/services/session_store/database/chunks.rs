@@ -14,7 +14,20 @@ CREATE TABLE chunks(id INTEGER PRIMARY KEY,digest BLOB NOT NULL UNIQUE CHECK(len
 CREATE TABLE chunk_bodies(chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id),body BLOB NOT NULL) STRICT;
 CREATE INDEX chunk_sizes ON chunks(byte_len,id);";
 const MAX_CHUNK_BATCH_BYTES: usize = 1024 * 1024;
+const COLLECTION_IDLE_DELAY: Duration = Duration::from_secs(5);
 impl Database {
+    pub(super) async fn collect_idle_chunk_batch(&mut self, now: Instant) -> io::Result<()> {
+        if now < self.collection_after {
+            return Ok(());
+        }
+        self.collect_chunk_batch().await?;
+        if self.collection_cursor == 0 {
+            // Revisit live-only rows after their handles may have been dropped,
+            // even if no further database writes occur.
+            self.collection_after = now + COLLECTION_IDLE_DELAY;
+        }
+        Ok(())
+    }
     pub(super) async fn collect_chunk_batch(&mut self) -> io::Result<()> {
         self.ensure_healthy()?;
         let store = self.chunk_store()?;

@@ -314,6 +314,101 @@ fn divergent_tail_capture_replaces_segments_without_changing_old_snapshot() {
 }
 
 #[test]
+fn completed_collection_sweep_does_not_query_again_until_its_idle_delay_expires() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let now = std::time::Instant::now();
+        db.collect_idle_chunk_batch(now).await.unwrap();
+        // Any attempted collection query now fails, so successful calls below
+        // demonstrate that the worker's idle path does not touch the database.
+        db.conn.execute("DROP TABLE chunks", ()).await.unwrap();
+        db.statements.lock().unwrap().clear();
+        for tick in 1..50 {
+            db.collect_idle_chunk_batch(now + std::time::Duration::from_millis(tick * 100))
+                .await
+                .unwrap();
+        }
+        assert!(
+            db.collect_idle_chunk_batch(now + std::time::Duration::from_secs(5))
+                .await
+                .is_err()
+        );
+    });
+}
+
+#[test]
+fn idle_collection_rechecks_dropped_live_handles_without_another_write() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let store = db.chunk_store().unwrap();
+        let chunk = store.seal(Arc::new("live-only chunk".into()), 1);
+        db.drain_chunk_batch().await.unwrap();
+        let now = std::time::Instant::now();
+        db.collect_idle_chunk_batch(now).await.unwrap();
+        db.collect_idle_chunk_batch(now).await.unwrap();
+        assert_eq!(db.collection_cursor, 0);
+        drop(chunk);
+        db.collect_idle_chunk_batch(now + std::time::Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 1);
+        db.collect_idle_chunk_batch(now + std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 0);
+    });
+}
+
+#[test]
+fn successful_writes_resume_collection_during_the_idle_delay() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        db.collect_idle_chunk_batch(std::time::Instant::now())
+            .await
+            .unwrap();
+        let store = db.chunk_store().unwrap();
+        let chunk = store.seal(Arc::new("newly abandoned chunk".into()), 1);
+        db.drain_chunk_batch().await.unwrap();
+        drop(chunk);
+        db.collect_idle_chunk_batch(std::time::Instant::now())
+            .await
+            .unwrap();
+        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 0);
+    });
+}
+
+#[test]
+fn idle_collection_keeps_scanning_past_live_batches_before_backing_off() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let store = db.chunk_store().unwrap();
+        let mut chunks: Vec<_> = (0..9)
+            .map(|n| store.seal(Arc::new(format!("collection chunk {n}")), 1))
+            .collect();
+        while store.pending_bytes() > 0 {
+            db.drain_chunk_batch().await.unwrap();
+        }
+        chunks.truncate(4);
+        for expected in [9, 5, 4, 4] {
+            db.collect_idle_chunk_batch(std::time::Instant::now())
+                .await
+                .unwrap();
+            assert_eq!(
+                db.integer("SELECT count(*) FROM chunks").await.unwrap(),
+                expected
+            );
+        }
+        assert_eq!(db.collection_cursor, 0);
+        for (n, chunk) in chunks.iter().enumerate() {
+            assert_eq!(
+                chunk.load(false, false).unwrap().as_str(),
+                format!("collection chunk {n}")
+            );
+        }
+    });
+}
+
+#[test]
 fn collection_keeps_live_only_handles_and_durable_history_roots() {
     block_on(async {
         let (_root, mut db) = database().await;

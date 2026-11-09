@@ -151,7 +151,7 @@ impl Actor {
             }
             if chunks.pending_bytes() == 0
                 && Instant::now() >= retry_at
-                && let Err(cause) = block_on(database.collect_chunk_batch())
+                && let Err(cause) = block_on(database.collect_idle_chunk_batch(Instant::now()))
             {
                 chunks.set_health(Health::Failing(cause.to_string()));
                 retry_at = Instant::now() + backoff;
