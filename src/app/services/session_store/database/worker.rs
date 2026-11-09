@@ -115,21 +115,14 @@ impl Actor {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Ok(Job::Close(reply)) => {
-                    chunks.close_readers();
-                    if let Err(cause) = block_on(database.checkpoint()) {
-                        let result = chunks.epoch().reopen(&root.join("session.db"));
-                        let cause = match result {
-                            Ok(()) => cause,
-                            Err(reopen) => error(format!(
-                                "Could not checkpoint the previous session: {cause}. Could not reopen its readers: {reopen}"
-                            )),
-                        };
+                    if let Err(cause) =
+                        block_on(database.checkpoint_for_replacement(&chunks, &root))
+                    {
                         let _ = reply.send(Err(cause));
                         continue;
                     }
-                    let ownership = database.ownership;
-                    drop(database.conn);
-                    drop(database.database);
+                    let ownership = database.release_for_replacement();
+                    drop(health);
                     let _ = reply.send(Ok(ownership));
                     return;
                 }
@@ -165,6 +158,33 @@ impl Actor {
             }
         }
         finish_on_disconnect(&mut database, &chunks, &root);
+    }
+}
+impl Database {
+    async fn checkpoint_for_replacement(
+        &self,
+        chunks: &ChunkStoreHandle,
+        root: &std::path::Path,
+    ) -> io::Result<()> {
+        chunks.close_readers();
+        if let Err(cause) = self.checkpoint().await {
+            return match chunks.epoch().reopen(&root.join("session.db")) {
+                Ok(()) => Err(cause),
+                Err(reopen) => Err(error(format!(
+                    "Could not checkpoint the previous session: {cause}. Could not reopen its readers: {reopen}"
+                ))),
+            };
+        }
+        Ok(())
+    }
+    fn release_for_replacement(self) -> File {
+        // Cached statements own connection clones. Consume the entire Database
+        // before returning its lock so no file handle outlives the close reply.
+        drop(self.statements);
+        drop(self.chunks);
+        drop(self.conn);
+        drop(self.database);
+        self.ownership
     }
 }
 fn finish_on_disconnect(
@@ -354,6 +374,46 @@ impl Drop for Worker {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn replacement_reply_retires_the_worker_and_keeps_the_session_locked() {
+        let root = tempfile::tempdir().unwrap();
+        let worker = DatabaseWorker::open(root.path().into()).unwrap();
+        worker
+            .call(|db| {
+                block_on(db.integer("SELECT 42"))?;
+                assert!(!db.statements.lock().unwrap().is_empty());
+                Ok(())
+            })
+            .unwrap();
+        let ownership = worker.close_for_replacement().unwrap();
+        assert!(worker.writes_blocked());
+        assert!(matches!(
+            worker.chunk_store().health(),
+            Health::Unavailable(_)
+        ));
+        let other = super::super::private_file(&root.path().join("session.db.lock")).unwrap();
+        assert!(other.try_lock().is_err());
+        assert!(worker.call(|_| Ok(())).is_err());
+
+        #[cfg(target_os = "linux")]
+        {
+            let root = root.path().canonicalize().unwrap();
+            let main = root.join("session.db");
+            let wal = root.join("session.db-wal");
+            for entry in std::fs::read_dir("/proc/self/fd").unwrap().flatten() {
+                if let Ok(path) = std::fs::read_link(entry.path()) {
+                    assert!(
+                        path != main && path != wal,
+                        "database handle still open: {}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        drop(ownership);
+        other.try_lock().unwrap();
+    }
 
     #[test]
     fn replacement_checkpoints_committed_data_into_the_main_file() {
