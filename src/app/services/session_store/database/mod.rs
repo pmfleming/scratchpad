@@ -252,16 +252,15 @@ impl Database {
         ))
         .await
     }
-    async fn create_schema(&self, sql: &str) -> io::Result<()> {
+    async fn create_schema(&mut self, sql: &str) -> io::Result<()> {
         self.conn
-            .transactional_batch(
-                sql.split(';')
-                    .filter(|statement| !statement.trim().is_empty()),
-                turso::transaction::TransactionBehavior::Immediate,
-            )
+            .execute("BEGIN IMMEDIATE", ())
             .await
-            .map(|_| ())
-            .map_err(error)
+            .map_err(error)?;
+        // Let Turso parse statement boundaries, including trigger bodies and
+        // quoted semicolons, while retaining all-or-nothing schema creation.
+        let result = self.conn.execute_batch(sql).await.map_err(error);
+        self.finish_transaction(result).await
     }
     async fn integer(&self, sql: &str) -> io::Result<i64> {
         // Exhaust the cursor before retaining its VM, including scalar queries.

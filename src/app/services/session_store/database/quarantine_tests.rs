@@ -383,7 +383,7 @@ fn old_schema_is_rejected_and_schema_batch_rolls_back() {
             .unwrap();
         drop(db);
         assert!(Database::open(directory.path()).await.is_err());
-        let (_fresh, db) = database().await;
+        let (_fresh, mut db) = database().await;
         assert!(
             db.create_schema("CREATE TABLE partial_schema(x); CREATE TABLE tabs(x);")
                 .await
@@ -396,6 +396,33 @@ fn old_schema_is_rejected_and_schema_batch_rolls_back() {
                 .unwrap(),
             0
         );
+    });
+}
+
+#[test]
+fn schema_batch_parses_triggers_and_quoted_semicolons_atomically() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let schema = "
+            CREATE TABLE schema_source(value TEXT);
+            CREATE TABLE schema_audit(value TEXT);
+            CREATE TRIGGER schema_trigger AFTER INSERT ON schema_source BEGIN
+                INSERT INTO schema_audit VALUES ('first; entry');
+                INSERT INTO schema_audit VALUES (new.value || '; second');
+            END;
+            INSERT INTO schema_source VALUES ('quoted; value');
+        ";
+        assert!(
+            db.create_schema(&format!("{schema} CREATE TABLE tabs(x);"))
+                .await
+                .is_err()
+        );
+        assert!(db.conn.is_autocommit().unwrap());
+        assert_eq!(db.integer("SELECT count(*) FROM sqlite_master WHERE name IN ('schema_source','schema_audit','schema_trigger')").await.unwrap(), 0);
+
+        db.create_schema(schema).await.unwrap();
+        assert!(db.conn.is_autocommit().unwrap());
+        assert_eq!(db.integer("SELECT count(*) FROM schema_audit WHERE value IN ('first; entry','quoted; value; second')").await.unwrap(), 2);
     });
 }
 
