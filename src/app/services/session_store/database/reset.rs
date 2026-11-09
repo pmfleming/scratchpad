@@ -6,12 +6,29 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const SESSION_FILES: [&str; 5] = [
+    "session.db",
     "session.db-wal",
     "session.db-shm",
     "session.db-tshm",
     "session.db-journal",
-    "session.db",
 ];
+
+#[derive(Debug)]
+struct BackupRemovalError {
+    cause: io::Error,
+    backup: PathBuf,
+}
+impl std::fmt::Display for BackupRemovalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Could not move the previous session: {}. Backup retained at {}. No new session was created.",
+            self.cause,
+            self.backup.display()
+        )
+    }
+}
+impl std::error::Error for BackupRemovalError {}
 
 pub(in crate::app::services::session_store) fn start_new_session(
     root: &Path,
@@ -56,6 +73,15 @@ pub(in crate::app::services::session_store) fn start_new_session(
             if let Some(old) = &old
                 && let Some(path) = &previous_path
             {
+                let retained = cause
+                    .get_ref()
+                    .and_then(|cause| cause.downcast_ref::<BackupRemovalError>());
+                let backup_path = retained.map(|failure| failure.backup.join("session.db"));
+                let path = if *path == root.join("session.db") {
+                    backup_path.as_ref().unwrap_or(path)
+                } else {
+                    path
+                };
                 let _ = old.epoch().reopen(path);
             }
             return Err(cause);
@@ -92,6 +118,14 @@ pub(in crate::app::services::session_store) fn start_new_session(
 }
 
 fn backup_session_files(root: &Path, temporary_root: &Path) -> io::Result<PathBuf> {
+    backup_session_files_with_remove(root, temporary_root, |path| fs::remove_file(path))
+}
+
+fn backup_session_files_with_remove(
+    root: &Path,
+    temporary_root: &Path,
+    remove: impl Fn(&Path) -> io::Result<()>,
+) -> io::Result<PathBuf> {
     let backup = tempfile::Builder::new()
         .prefix("scratchpad-session-backup-")
         .tempdir_in(temporary_root)?;
@@ -122,11 +156,12 @@ fn backup_session_files(root: &Path, temporary_root: &Path) -> io::Result<PathBu
     // Do not delete on app exit: leave this private backup to OS temp cleanup.
     let backup = backup.keep();
     for name in copied {
-        fs::remove_file(root.join(name)).map_err(|cause| {
-            error(format!(
-                "Could not move the previous session: {cause}. Backup retained at {}. No new session was created.",
-                backup.display()
-            ))
+        // Remove the main file first: a failed removal must leave its WAL intact.
+        remove(&root.join(name)).map_err(|cause| {
+            io::Error::other(BackupRemovalError {
+                cause,
+                backup: backup.clone(),
+            })
         })?;
     }
     Ok(backup)
@@ -135,6 +170,48 @@ fn backup_session_files(root: &Path, temporary_root: &Path) -> io::Result<PathBu
 #[cfg(test)]
 mod tests {
     use super::{SESSION_FILES, backup_session_files, error, fs};
+
+    #[test]
+    fn failed_removals_retain_a_complete_backup_and_preserve_wal_until_main_is_removed() {
+        for failed in ["session.db", "session.db-wal"] {
+            let root = tempfile::tempdir().unwrap();
+            let temporary = tempfile::tempdir().unwrap();
+            for name in SESSION_FILES {
+                fs::write(root.path().join(name), name).unwrap();
+            }
+            let cause =
+                super::backup_session_files_with_remove(root.path(), temporary.path(), |path| {
+                    if path.file_name().unwrap() == failed {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "injected removal failure",
+                        ))
+                    } else {
+                        fs::remove_file(path)
+                    }
+                })
+                .unwrap_err();
+            let retained = cause
+                .get_ref()
+                .unwrap()
+                .downcast_ref::<super::BackupRemovalError>()
+                .unwrap();
+            for name in SESSION_FILES {
+                assert_eq!(
+                    fs::read_to_string(retained.backup.join(name)).unwrap(),
+                    name
+                );
+            }
+            assert_eq!(
+                root.path().join("session.db").exists(),
+                failed == "session.db"
+            );
+            assert_eq!(
+                fs::read_to_string(root.path().join("session.db-wal")).unwrap(),
+                "session.db-wal"
+            );
+        }
+    }
 
     #[test]
     fn moves_database_and_sidecars_but_leaves_other_files() {

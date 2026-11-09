@@ -18,7 +18,7 @@ type DatabaseJob = Box<dyn FnOnce(&mut Database, &AtomicBool) + Send>;
 enum Job {
     Call(DatabaseJob),
     Drain,
-    Close(mpsc::SyncSender<File>),
+    Close(mpsc::SyncSender<io::Result<File>>),
 }
 #[derive(Clone)]
 pub(in crate::app::services::session_store) struct DatabaseWorker(Arc<Worker>);
@@ -116,10 +116,21 @@ impl Actor {
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Ok(Job::Close(reply)) => {
                     chunks.close_readers();
+                    if let Err(cause) = block_on(database.checkpoint()) {
+                        let result = chunks.epoch().reopen(&root.join("session.db"));
+                        let cause = match result {
+                            Ok(()) => cause,
+                            Err(reopen) => error(format!(
+                                "Could not checkpoint the previous session: {cause}. Could not reopen its readers: {reopen}"
+                            )),
+                        };
+                        let _ = reply.send(Err(cause));
+                        continue;
+                    }
                     let ownership = database.ownership;
                     drop(database.conn);
                     drop(database.database);
-                    let _ = reply.send(ownership);
+                    let _ = reply.send(Ok(ownership));
                     return;
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -327,7 +338,7 @@ impl DatabaseWorker {
             .ok_or_else(|| error("database worker closed"))?
             .send(Job::Close(sender))
             .map_err(error)?;
-        receiver.recv().map_err(error)
+        receiver.recv().map_err(error)?
     }
 }
 impl Drop for Worker {
@@ -343,6 +354,76 @@ impl Drop for Worker {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn replacement_checkpoints_committed_data_into_the_main_file() {
+        let root = tempfile::tempdir().unwrap();
+        let worker = DatabaseWorker::open(root.path().into()).unwrap();
+        worker
+            .call(|db| {
+                block_on(async {
+                    db.conn
+                        .execute_batch("PRAGMA wal_autocheckpoint=0; CREATE TABLE checkpoint_probe(value TEXT); INSERT INTO checkpoint_probe VALUES ('committed');")
+                        .await
+                        .map_err(error)
+                })
+            })
+            .unwrap();
+        assert!(
+            std::fs::metadata(root.path().join("session.db-wal"))
+                .unwrap()
+                .len()
+                > 0
+        );
+        let _ownership = worker.close_for_replacement().unwrap();
+        let copy = tempfile::tempdir().unwrap();
+        std::fs::copy(
+            root.path().join("session.db"),
+            copy.path().join("session.db"),
+        )
+        .unwrap();
+        block_on(async {
+            let db = Database::open(copy.path()).await.unwrap();
+            assert_eq!(
+                db.integer("SELECT count(*) FROM checkpoint_probe WHERE value='committed'")
+                    .await
+                    .unwrap(),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn failed_replacement_checkpoint_keeps_the_worker_and_readers_usable() {
+        let root = tempfile::tempdir().unwrap();
+        let worker = DatabaseWorker::open(root.path().into()).unwrap();
+        let chunks = worker.chunk_store();
+        let chunk = chunks.seal(Arc::new("retained text".into()), 1);
+        worker
+            .call(|db| {
+                block_on(async {
+                    db.drain_chunk_batch().await?;
+                    db.conn
+                        .execute("BEGIN IMMEDIATE", ())
+                        .await
+                        .map_err(error)?;
+                    Ok(())
+                })
+            })
+            .unwrap();
+        chunks.set_limits(0, 0);
+        assert!(worker.close_for_replacement().is_err());
+        assert!(!worker.writes_blocked());
+        assert_eq!(chunk.load(false, false).unwrap().as_str(), "retained text");
+        worker
+            .call(|db| {
+                block_on(db.conn.execute("ROLLBACK", ()))
+                    .map(|_| ())
+                    .map_err(error)
+            })
+            .unwrap();
+        let _ownership = worker.close_for_replacement().unwrap();
+    }
 
     #[test]
     fn health_query_does_not_wait_for_a_running_job_and_ack_publishes_latch() {
