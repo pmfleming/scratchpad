@@ -40,6 +40,47 @@ pub(super) async fn database() -> (tempfile::TempDir, Database) {
 }
 
 #[test]
+fn writer_retries_a_busy_transaction_until_the_other_connection_releases_it() {
+    block_on(async {
+        let (_root, db) = database().await;
+        let other = db.database.connect().unwrap();
+        other.execute("BEGIN IMMEDIATE", ()).await.unwrap();
+        let mut begin = std::pin::pin!(db.conn.execute("BEGIN IMMEDIATE", ()));
+        assert!(futures_lite::future::poll_once(&mut begin).await.is_none());
+        other.execute("ROLLBACK", ()).await.unwrap();
+        begin.await.unwrap();
+        db.conn.execute("ROLLBACK", ()).await.unwrap();
+        assert!(db.conn.is_autocommit().unwrap());
+    });
+}
+
+#[test]
+fn writer_busy_wait_is_bounded_and_can_be_retried_after_timeout() {
+    block_on(async {
+        let (_root, db) = database().await;
+        let other = db.database.connect().unwrap();
+        other.execute("BEGIN IMMEDIATE", ()).await.unwrap();
+        let started = std::time::Instant::now();
+        let result = db.conn.execute("BEGIN IMMEDIATE", ()).await;
+        let elapsed = started.elapsed();
+        assert!(matches!(result, Err(turso::Error::Busy(_))), "{result:?}");
+        assert!(
+            elapsed
+                >= super::WRITER_BUSY_TIMEOUT.saturating_sub(std::time::Duration::from_millis(10)),
+            "busy wait returned too soon: {elapsed:?}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "busy wait exceeded its bound: {elapsed:?}"
+        );
+        assert!(db.conn.is_autocommit().unwrap());
+        other.execute("ROLLBACK", ()).await.unwrap();
+        db.conn.execute("BEGIN IMMEDIATE", ()).await.unwrap();
+        db.conn.execute("ROLLBACK", ()).await.unwrap();
+    });
+}
+
+#[test]
 fn profiled_session_subdivisions_fit_their_parent_intervals() {
     use crate::app::services::session_store::SessionStore;
     let directory = tempfile::tempdir().unwrap();

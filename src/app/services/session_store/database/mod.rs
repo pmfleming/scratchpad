@@ -64,6 +64,7 @@ use turso::{Connection, Database as TursoDatabase};
 pub(super) use worker::DatabaseWorker;
 
 const APPLICATION_ID: i64 = 0x5350_4350;
+const WRITER_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
 const SCHEMA: &str = "
 CREATE TABLE activity(global_seq INTEGER PRIMARY KEY CHECK(global_seq>0), observed_at INTEGER NOT NULL,
     kind TEXT NOT NULL CHECK(kind IN ('created','opened','closed','disk_conflict','missing')),
@@ -194,6 +195,9 @@ impl Database {
             .await
             .map_err(error)?;
         let conn = database.connect().map_err(error)?;
+        // Retry brief lock contention on the actor thread without waiting
+        // indefinitely for an unexpected second writer.
+        conn.busy_timeout(WRITER_BUSY_TIMEOUT).map_err(error)?;
         conn.execute_batch(
             "PRAGMA synchronous=FULL; PRAGMA cache_size=-8192; PRAGMA foreign_keys=ON;",
         )
