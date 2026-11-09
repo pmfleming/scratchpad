@@ -389,7 +389,9 @@ fn idle_collection_keeps_scanning_past_live_batches_before_backing_off() {
             db.drain_chunk_batch().await.unwrap();
         }
         chunks.truncate(4);
-        for expected in [9, 5, 4, 4] {
+        // One wide scan skips the four live rows and deletes the next four; the
+        // short follow-up scan deletes the last row and completes the sweep.
+        for expected in [5, 4, 4] {
             db.collect_idle_chunk_batch(std::time::Instant::now())
                 .await
                 .unwrap();
@@ -405,6 +407,66 @@ fn idle_collection_keeps_scanning_past_live_batches_before_backing_off() {
                 format!("collection chunk {n}")
             );
         }
+    });
+}
+
+#[test]
+fn many_live_only_rows_cost_few_scans_before_the_idle_delay() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let store = db.chunk_store().unwrap();
+        let live: Vec<_> = (0..300)
+            .map(|n| store.seal(Arc::new(format!("live-only row {n}")), 1))
+            .collect();
+        let abandoned = store.seal(Arc::new("abandoned after live rows".into()), 1);
+        while store.pending_bytes() > 0 {
+            db.drain_chunk_batch().await.unwrap();
+        }
+        drop(abandoned);
+        let now = std::time::Instant::now();
+        // 301 unreferenced rows need three 128-row scans, not 76 four-row ones.
+        for _ in 0..3 {
+            db.collect_idle_chunk_batch(now).await.unwrap();
+        }
+        assert_eq!(
+            db.integer("SELECT count(*) FROM chunks").await.unwrap(),
+            300
+        );
+        assert_eq!(db.collection_cursor, 0);
+        db.conn
+            .execute("DROP TABLE chunk_bodies", ())
+            .await
+            .unwrap();
+        db.conn.execute("DROP TABLE chunks", ()).await.unwrap();
+        db.statements.lock().unwrap().clear();
+        // The completed sweep is paused, so no further query runs.
+        db.collect_idle_chunk_batch(now + std::time::Duration::from_secs(4))
+            .await
+            .unwrap();
+        drop(live);
+    });
+}
+
+#[test]
+fn collection_batches_never_skip_rows_past_the_delete_limit() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let store = db.chunk_store().unwrap();
+        let chunks: Vec<_> = (0..10)
+            .map(|n| store.seal(Arc::new(format!("garbage row {n}")), 1))
+            .collect();
+        while store.pending_bytes() > 0 {
+            db.drain_chunk_batch().await.unwrap();
+        }
+        drop(chunks);
+        // Ten deletable rows: 4 + 4 + 2, with the last batch completing the sweep.
+        assert!(!db.collect_chunk_batch().await.unwrap());
+        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 6);
+        assert!(!db.collect_chunk_batch().await.unwrap());
+        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 2);
+        assert!(db.collect_chunk_batch().await.unwrap());
+        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 0);
+        assert_eq!(db.collection_cursor, 0);
     });
 }
 

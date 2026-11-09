@@ -15,32 +15,59 @@ CREATE TABLE chunk_bodies(chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id),bod
 CREATE INDEX chunk_sizes ON chunks(byte_len,id);";
 const MAX_CHUNK_BATCH_BYTES: usize = 1024 * 1024;
 const COLLECTION_IDLE_DELAY: Duration = Duration::from_secs(5);
+// Scan widely but delete narrowly: rows held only by live handles cost one id
+// read each, not one worker loop iteration per four rows.
+const COLLECTION_SCAN_LIMIT: usize = 128;
+const COLLECTION_DELETE_LIMIT: usize = 4;
+/// Picks deletable rows from one ascending scan, stopping at the delete limit.
+/// Also returns how many scanned rows were examined, so the cursor never moves
+/// past a row that was fetched but not considered.
+fn collection_candidates(
+    unreferenced: &[i64],
+    live: &std::collections::HashSet<i64>,
+) -> (Vec<i64>, usize) {
+    let mut candidates = Vec::with_capacity(COLLECTION_DELETE_LIMIT);
+    for (index, id) in unreferenced.iter().enumerate() {
+        if !live.contains(id) {
+            candidates.push(*id);
+            if candidates.len() == COLLECTION_DELETE_LIMIT {
+                return (candidates, index + 1);
+            }
+        }
+    }
+    (candidates, unreferenced.len())
+}
 impl Database {
     pub(super) async fn collect_idle_chunk_batch(&mut self, now: Instant) -> io::Result<()> {
         if now < self.collection_after {
             return Ok(());
         }
-        self.collect_chunk_batch().await?;
-        if self.collection_cursor == 0 {
+        if self.collect_chunk_batch().await? {
             // Revisit live-only rows after their handles may have been dropped,
             // even if no further database writes occur.
             self.collection_after = now + COLLECTION_IDLE_DELAY;
         }
         Ok(())
     }
-    pub(super) async fn collect_chunk_batch(&mut self) -> io::Result<()> {
+    /// Deletes at most `COLLECTION_DELETE_LIMIT` unreferenced chunks. Returns
+    /// true once this batch finished a sweep of every unreferenced row.
+    pub(super) async fn collect_chunk_batch(&mut self) -> io::Result<bool> {
         self.ensure_healthy()?;
         let store = self.chunk_store()?;
         let live = store.live_row_ids();
-        let candidates=self.query_collect("SELECT id FROM chunks WHERE id>? AND id NOT IN (SELECT chunk_id FROM document_text) ORDER BY id LIMIT 4",[self.collection_cursor],|r|r.get::<i64>(0).map_err(error)).await?;
-        self.collection_cursor = candidates.last().copied().unwrap_or(0);
-        let candidates: Vec<_> = candidates
-            .into_iter()
-            .filter(|id| !live.contains(id))
-            .take(4)
-            .collect();
+        let unreferenced = self
+            .query_collect(
+                "SELECT id FROM chunks WHERE id>? AND id NOT IN (SELECT chunk_id FROM document_text) ORDER BY id LIMIT ?",
+                params![self.collection_cursor, COLLECTION_SCAN_LIMIT as i64],
+                |r| r.get::<i64>(0).map_err(error),
+            )
+            .await?;
+        let (candidates, examined) = collection_candidates(&unreferenced, &live);
+        // A short scan that was fully examined reached the end of the table.
+        let swept = examined == unreferenced.len() && unreferenced.len() < COLLECTION_SCAN_LIMIT;
+        self.collection_cursor = if swept { 0 } else { unreferenced[examined - 1] };
         if candidates.is_empty() {
-            return Ok(());
+            return Ok(swept);
         }
         let start = Instant::now();
         let count = candidates.len();
@@ -71,7 +98,7 @@ impl Database {
                 start.elapsed().as_micros()
             );
         }
-        Ok(())
+        Ok(swept)
     }
     pub(in crate::app::services::session_store) fn chunk_store(
         &self,
