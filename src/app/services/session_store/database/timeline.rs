@@ -1,3 +1,4 @@
+mod preview;
 use super::{Database, error, invalid};
 use crate::app::services::session_store::timeline::{
     TIMELINE_PAGE_SIZE, TimelineCursor, TimelineKind, TimelinePage, TimelineRow,
@@ -33,7 +34,7 @@ impl Database {
             |row| {
                 let source: String = row.get(4).map_err(error)?;
                 let source = serde_json::from_value(serde_json::Value::String(source)).map_err(invalid)?;
-                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:row.get::<i64>(2).map_err(error)? as u64},timestamp:row.get::<i64>(3).map_err(error)? as u64,kind:TimelineKind::Edit(source),summary:row.get(5).map_err(error)?,name:row.get(6).map_err(error)?,path:row.get(7).map_err(error)?})
+                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:row.get::<i64>(2).map_err(error)? as u64},timestamp:row.get::<i64>(3).map_err(error)? as u64,kind:TimelineKind::Edit(source),summary:row.get(5).map_err(error)?,name:row.get(6).map_err(error)?,path:row.get(7).map_err(error)?,preview:None})
             },
         ).await?;
         // The engine's UNION plan sorts both full sources. Limit each source
@@ -47,12 +48,15 @@ impl Database {
             |row| {
                 let kind:String=row.get(3).map_err(error)?;
                 let kind:super::super::activity::ActivityKind=serde_json::from_value(serde_json::Value::String(kind)).map_err(invalid)?;
-                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:0},timestamp:row.get::<i64>(2).map_err(error)? as u64,name:row.get(4).map_err(error)?,path:row.get(5).map_err(error)?,summary:kind.label().into(),kind:TimelineKind::Activity(kind)})
+                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:0},timestamp:row.get::<i64>(2).map_err(error)? as u64,name:row.get(4).map_err(error)?,path:row.get(5).map_err(error)?,summary:kind.label().into(),kind:TimelineKind::Activity(kind),preview:None})
             },
         ).await?);
         rows.sort_by(|a, b| b.cursor.cmp(&a.cursor));
         let more = rows.len() > TIMELINE_PAGE_SIZE;
-        let rows: Vec<_> = rows.into_iter().take(TIMELINE_PAGE_SIZE).collect();
+        let mut rows: Vec<_> = rows.into_iter().take(TIMELINE_PAGE_SIZE).collect();
+        for row in &mut rows {
+            row.preview = self.timeline_preview(row).await?;
+        }
         let older = more
             .then(|| rows.last().map(|r| r.cursor.clone()))
             .flatten();

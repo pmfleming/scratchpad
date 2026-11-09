@@ -287,3 +287,185 @@ fn closing_or_persisting_preserves_loaded_pages_and_the_reading_anchor() {
     assert!(state.persisted.is_empty());
     assert!(state.anchor.is_none());
 }
+
+#[test]
+fn edit_presentation_matches_live_closed_and_reopened_history() {
+    use crate::app::domain::buffer::PieceSource;
+    use crate::app::services::session_store::{CapturedClosedTab, SessionPersistRequest};
+    use egui_phosphor::regular as icons;
+
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app(root.path());
+    let cases = [
+        ("", "hello", PieceSource::Edit, "hello", icons::PLUS),
+        ("hello", "", PieceSource::Edit, "hello", icons::MINUS),
+        (
+            "",
+            "pasted",
+            PieceSource::Paste,
+            "pasted",
+            icons::CLIPBOARD_TEXT,
+        ),
+        ("cut", "", PieceSource::Cut, "cut", icons::SCISSORS),
+        ("old", "new", PieceSource::Edit, "new", icons::SWAP),
+        (
+            "old",
+            "new",
+            PieceSource::SearchReplace,
+            "Replace match",
+            icons::MAGNIFYING_GLASS,
+        ),
+        (
+            "old",
+            "disk",
+            PieceSource::External,
+            "External changes loaded",
+            icons::ARROWS_CLOCKWISE,
+        ),
+        ("", "\r\n", PieceSource::Edit, "newline", icons::PLUS),
+        (
+            "",
+            "   ",
+            PieceSource::Paste,
+            "3 spaces",
+            icons::CLIPBOARD_TEXT,
+        ),
+        ("\t\t", "", PieceSource::Cut, "2 tabs", icons::SCISSORS),
+        (
+            "",
+            "\n",
+            PieceSource::SearchReplace,
+            "newline",
+            icons::MAGNIFYING_GLASS,
+        ),
+    ];
+    let mut originals = Vec::new();
+    let mut save = SessionPersistRequest::capture(app.tab_manager.tabs.as_slice(), 0, 16.0, false);
+    for (i, (before, after, source, _, _)) in cases.iter().enumerate() {
+        let buffer = action_buffer(i, before, after, *source);
+        save.closed_tabs.push(CapturedClosedTab::capture(
+            &WorkspaceTab::new(buffer.clone()),
+            None,
+        ));
+        originals.push(buffer);
+    }
+    app.state
+        .persistence
+        .session_store
+        .persist_request(save)
+        .unwrap();
+    let stored = app
+        .state
+        .persistence
+        .session_store
+        .timeline_page(None, vec![], String::new())
+        .unwrap();
+    let ctx = egui::Context::default();
+    for (original, (_, _, _, expected, icon)) in originals.iter().zip(cases) {
+        let node = original.document().history_now();
+        let row = stored
+            .rows
+            .iter()
+            .find(|r| r.cursor.document == original.temp_id && r.node() == Some(node))
+            .unwrap();
+        apply(
+            &ctx,
+            &mut app,
+            Action {
+                document: original.temp_id.clone(),
+                node: Some(node),
+                inspect: false,
+            },
+        );
+        crate::app::app_state::test_support::wait_for_background_io(&mut app);
+        let reopened = app.tab_manager.active_tab().unwrap().active_buffer();
+        assert_eq!(reopened.temp_id, original.temp_id);
+        assert_eq!(reopened.text(), original.text());
+        assert_edit_presentation(&ctx, original, reopened, row, expected, icon);
+    }
+}
+
+fn assert_edit_presentation(
+    ctx: &egui::Context,
+    original: &BufferState,
+    reopened: &BufferState,
+    row: &TimelineRow,
+    expected: &str,
+    icon: &str,
+) {
+    use crate::app::domain::buffer::PieceSource;
+    use egui_phosphor::regular as icons;
+    let TimelineKind::Edit(source) = row.kind else {
+        panic!("expected an edit");
+    };
+    let node = row.cursor.node;
+    assert_eq!(
+        row.summary,
+        original
+            .document()
+            .history_entries()
+            .last()
+            .unwrap()
+            .summary
+    );
+    for dark in [false, true] {
+        ctx.set_visuals(if dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        });
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let live = presentation::change(ui, original, node);
+            let closed = row_change(ui, row).unwrap();
+            let restored = presentation::change(ui, reopened, node);
+            let color = match source {
+                PieceSource::Paste => theme::diff_add(ui),
+                PieceSource::Cut => theme::diff_del(ui),
+                PieceSource::Edit if icon == icons::PLUS => theme::diff_add(ui),
+                PieceSource::Edit if icon == icons::MINUS => theme::diff_del(ui),
+                _ => theme::tab_selected_accent(ui),
+            };
+            for change in [&live, &closed, &restored] {
+                assert_eq!(change.display_title(), expected);
+                assert_eq!(change.icon, icon);
+                assert_eq!(change.color, color);
+                assert_eq!(change.title, live.title);
+            }
+            paint_row(ui, row, false, true);
+        });
+        output.textures_delta.clear();
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == expected)),
+            "missing compact title {expected}"
+        );
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == icon)),
+            "missing action icon"
+        );
+    }
+}
+
+fn action_buffer(
+    i: usize,
+    before: &str,
+    after: &str,
+    source: crate::app::domain::buffer::PieceSource,
+) -> BufferState {
+    let mut buffer = BufferState::new(format!("action-{i}"), before.into(), None);
+    buffer
+        .document_mut()
+        .replace_char_ranges_with_source(
+            &[(0..before.chars().count(), after.into())],
+            CursorRange::default(),
+            CursorRange::default(),
+            source,
+        )
+        .unwrap();
+    buffer
+}

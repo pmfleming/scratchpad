@@ -5,7 +5,7 @@ use super::{
 use futures_lite::future::block_on;
 
 #[test]
-fn pages_use_total_sequence_order_skip_baselines_and_never_read_edit_payloads() {
+fn pages_use_total_sequence_order_skip_baselines_and_keep_ordinary_edits_metadata_only() {
     block_on(async {
         let (_root, mut db) = database().await;
         let mut tabs = vec![tab("one"), tab("two")];
@@ -14,7 +14,7 @@ fn pages_use_total_sequence_order_skip_baselines_and_never_read_edit_payloads() 
             insert(&mut tabs[index], 0, &format!("{i}"));
         }
         db.persist(request(&tabs), 1).await.unwrap();
-        // Deliberately corrupt payloads: drawing the timeline must only use columns.
+        // Ordinary text previews must not read or decode replay payloads.
         db.conn
             .execute(
                 "UPDATE history SET packed_spans=x'00',global_seq=42 WHERE edited_at<>0",
@@ -106,5 +106,121 @@ fn retained_unicode_names_use_the_same_search_normalization_as_live_documents() 
             "{plan:?}"
         );
         eprintln!("timeline keyset plan: {plan:?}");
+    });
+}
+
+#[test]
+fn whitespace_previews_are_exact_bounded_and_optional() {
+    use crate::app::domain::{
+        CursorRange,
+        buffer::{HistoryPreview, PieceSource},
+    };
+    use crate::app::services::session_store::SessionPersistRequest;
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let mut tabs = Vec::new();
+        for (before, after) in [
+            ("", "\r\n".to_owned()),
+            ("\t\t", String::new()),
+            ("", " ".repeat(256)),
+            ("", " ".repeat(257)),
+            ("old", "\n".into()),
+        ] {
+            let mut live = tab(before);
+            live.active_buffer_mut()
+                .document_mut()
+                .replace_char_ranges_with_source(
+                    &[(0..before.chars().count(), after)],
+                    CursorRange::default(),
+                    CursorRange::default(),
+                    PieceSource::Edit,
+                )
+                .unwrap();
+            tabs.push(live);
+        }
+        db.persist(SessionPersistRequest::capture(&tabs, 0, 16.0, false), 1)
+            .await
+            .unwrap();
+        let page = db.timeline_page(None, vec![], String::new()).await.unwrap();
+        for (i, tab) in tabs.iter().enumerate() {
+            let row = page
+                .rows
+                .iter()
+                .find(|r| r.cursor.document == tab.active_buffer().temp_id)
+                .unwrap();
+            let expected = match i {
+                0 => Some(HistoryPreview {
+                    inserted: true,
+                    text: "\n".into(), // The edit API normalizes inserted line endings.
+                }),
+                1 => Some(HistoryPreview {
+                    inserted: false,
+                    text: "\t\t".into(),
+                }),
+                2 => Some(HistoryPreview {
+                    inserted: true,
+                    text: " ".repeat(256),
+                }),
+                _ => None,
+            };
+            assert_eq!(row.preview, expected, "case {i}");
+        }
+        // Unavailable bytes must not prevent navigation metadata from displaying.
+        db.conn
+            .execute("DELETE FROM document_tail", ())
+            .await
+            .unwrap();
+        db.conn
+            .execute("DELETE FROM chunk_bodies", ())
+            .await
+            .unwrap();
+        let missing = db.timeline_page(None, vec![], String::new()).await.unwrap();
+        assert_eq!(missing.rows.len(), page.rows.len());
+        assert!(missing.rows.iter().all(|r| r.preview.is_none()));
+    });
+}
+
+#[test]
+fn coalesced_whitespace_preview_crosses_incremental_tail_segments() {
+    use crate::app::domain::{
+        CharCursor, CursorRange,
+        buffer::{OperationRecord, TextDocumentEditOperation},
+    };
+    use crate::app::services::session_store::SessionPersistRequest;
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let mut live = tab("");
+        for at in 0..3 {
+            let doc = live.active_buffer_mut().document_mut();
+            doc.insert_direct(at, " ");
+            doc.push_edit_operation(OperationRecord {
+                previous_cursor: CursorRange::one(CharCursor::new(at)),
+                next_cursor: CursorRange::one(CharCursor::new(at + 1)),
+                edits: vec![TextDocumentEditOperation {
+                    start_char: at,
+                    deleted_text: String::new(),
+                    inserted_text: " ".into(),
+                    deleted_spans: vec![],
+                }],
+            });
+            db.persist(
+                SessionPersistRequest::capture(&[live.clone()], 0, 16.0, false),
+                at as u64 + 1,
+            )
+            .await
+            .unwrap();
+            let page = db.timeline_page(None, vec![], String::new()).await.unwrap();
+            assert_eq!(page.rows.len(), 1);
+            assert_eq!(
+                page.rows[0].preview.as_ref().unwrap().text,
+                " ".repeat(at + 1)
+            );
+        }
+        assert!(
+            db.integer("SELECT count(*) FROM document_tail")
+                .await
+                .unwrap()
+                > 1
+        );
     });
 }

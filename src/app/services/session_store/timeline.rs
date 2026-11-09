@@ -1,6 +1,6 @@
-//! Metadata-only timeline reads. Edit identity remains stable when coalescing moves it.
+//! Paged timeline reads with bounded whitespace previews. Edit identity remains stable when coalescing moves it.
 use super::SessionStore;
-use crate::app::domain::buffer::PieceSource;
+use crate::app::domain::buffer::{HistoryPreview, PieceSource};
 use futures_lite::future::block_on;
 use std::io;
 
@@ -33,6 +33,7 @@ pub(crate) struct TimelineRow {
     pub path: Option<String>,
     pub summary: String,
     pub kind: TimelineKind,
+    pub preview: Option<HistoryPreview>,
 }
 
 impl TimelineRow {
@@ -66,6 +67,7 @@ impl super::activity::ActivityEvent {
             path: self.path.clone(),
             summary: self.kind.label().into(),
             kind: TimelineKind::Activity(self.kind),
+            preview: None,
         }
     }
 }

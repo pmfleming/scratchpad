@@ -111,7 +111,50 @@ impl PieceHistoryEdit {
     }
 }
 
+/// Exact, bounded payload used only for history labels, never replay.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HistoryPreview {
+    pub inserted: bool,
+    pub text: String,
+}
+
+impl HistoryPreview {
+    pub const MAX_BYTES: u64 = 256;
+
+    /// Summaries flatten line endings, so whitespace must be read from the span.
+    /// Ordinary text and multi-range edits need no payload for their labels.
+    pub fn needed(source: PieceSource, summary: &str) -> bool {
+        if matches!(source, PieceSource::Load | PieceSource::External) {
+            return false;
+        }
+        summary == "Replace match"
+            || summary.split_once('"').is_some_and(|(_, text)| {
+                let text = text.strip_suffix('"').unwrap_or(text);
+                let text = text.strip_suffix("...").unwrap_or(text);
+                !text.is_empty() && text.chars().all(char::is_whitespace)
+            })
+    }
+}
+
 impl PieceHistoryEntry {
+    pub(crate) fn label_preview(&self, tree: &PieceTreeLite) -> Option<HistoryPreview> {
+        if !HistoryPreview::needed(self.source, &self.summary) {
+            return None;
+        }
+        let [edit] = self.edits.as_slice() else {
+            return None;
+        };
+        let mut spans = edit.spans();
+        let span = spans.next()?;
+        if spans.next().is_some() || span.byte_len > HistoryPreview::MAX_BYTES {
+            return None;
+        }
+        Some(HistoryPreview {
+            inserted: edit.inserted_span().is_some(),
+            text: tree.text_for_span(span).to_string(),
+        })
+    }
+
     pub fn is_undone(&self) -> bool {
         self.flags.undone
     }

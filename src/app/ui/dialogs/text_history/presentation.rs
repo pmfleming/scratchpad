@@ -1,7 +1,10 @@
 //! Read-only labels for the controls; persisted operation summaries stay intact.
 use super::style;
 use crate::app::{
-    domain::{BufferState, buffer::PieceSource},
+    domain::{
+        BufferState,
+        buffer::{HistoryPreview, PieceSource},
+    },
     theme,
 };
 use eframe::egui;
@@ -62,57 +65,58 @@ pub(super) fn change(ui: &egui::Ui, buffer: &BufferState, id: u64) -> Change {
             whitespace: false,
         };
     };
-    let (icon, color) = if entry.summary == "Initial contents" {
+    edit_change(
+        ui,
+        entry.source,
+        &entry.summary,
+        entry.edited_at,
+        entry.label_preview(buffer.document().piece_tree()).as_ref(),
+    )
+}
+
+pub(super) fn edit_change(
+    ui: &egui::Ui,
+    source: PieceSource,
+    summary: &str,
+    edited_at: u64,
+    preview: Option<&HistoryPreview>,
+) -> Change {
+    let (icon, color) = if summary == "Initial contents" {
         (icons::FILE_TEXT, theme::text_muted(ui))
-    } else if entry.source == PieceSource::Paste {
+    } else if source == PieceSource::Paste {
         (icons::CLIPBOARD_TEXT, theme::diff_add(ui))
-    } else if entry.source == PieceSource::Cut {
+    } else if source == PieceSource::Cut {
         (icons::SCISSORS, theme::diff_del(ui))
-    } else if entry.source == PieceSource::SearchReplace {
+    } else if source == PieceSource::SearchReplace {
         (icons::MAGNIFYING_GLASS, theme::tab_selected_accent(ui))
-    } else if entry.source == PieceSource::External {
+    } else if source == PieceSource::External {
         (icons::ARROWS_CLOCKWISE, theme::tab_selected_accent(ui))
-    } else if entry.edits.len() == 1 && entry.edits[0].deleted_spans().is_empty() {
+    } else if summary.starts_with("Insert ") {
         (icons::PLUS, theme::diff_add(ui))
-    } else if entry.edits.len() == 1 && entry.edits[0].inserted_span().is_none() {
+    } else if summary.starts_with("Delete ") {
         (icons::MINUS, theme::diff_del(ui))
     } else {
         (icons::SWAP, theme::tab_selected_accent(ui))
     };
-    let mut title = entry.summary.clone();
+    let mut title = summary.to_owned();
     let mut is_whitespace = false;
-    // A short, single payload can be classified without reconstructing a document
-    // or allocating a potentially large paste/deletion. Larger/mixed edits retain
-    // their existing summary rather than claiming a misleading whitespace token.
-    if entry.edits.len() == 1 && !matches!(entry.source, PieceSource::Load | PieceSource::External)
+    if let Some(preview) = preview
+        && let Some(token) = whitespace(&preview.text)
     {
-        let edit = &entry.edits[0];
-        let mut spans = edit.spans();
-        if let Some(span) = spans.next()
-            && spans.next().is_none()
-            && span.byte_len <= 256
-        {
-            let payload = buffer.document().piece_tree().text_for_span(span);
-            if let Some(token) = whitespace(&payload) {
-                let verb = if entry.source == PieceSource::Paste {
-                    "Paste"
-                } else if entry.source == PieceSource::Cut {
-                    "Cut"
-                } else if edit.inserted_span().is_some() {
-                    "Insert"
-                } else {
-                    "Delete"
-                };
-                title = format!("{verb} {token}");
-                is_whitespace = true;
-            }
-        }
+        let verb = match source {
+            PieceSource::Paste => "Paste",
+            PieceSource::Cut => "Cut",
+            _ if preview.inserted => "Insert",
+            _ => "Delete",
+        };
+        title = format!("{verb} {token}");
+        is_whitespace = true;
     }
     Change {
         title,
         icon,
         color,
-        edited_at: entry.edited_at,
+        edited_at,
         whitespace: is_whitespace,
     }
 }

@@ -622,9 +622,13 @@ fn paint_row(ui: &mut egui::Ui, row: &TimelineRow, selected: bool, closed: bool)
         egui::Sense::click(),
         "timeline-row",
     );
+    let change = row_change(ui, row);
+    let title = change
+        .as_ref()
+        .map_or(row.summary.as_str(), |c| c.title.as_str());
     let label = format!(
         "{} · {}{}",
-        row.summary,
+        title,
         row.name,
         if closed { " · Closed" } else { "" }
     );
@@ -665,7 +669,7 @@ fn paint_row(ui: &mut egui::Ui, row: &TimelineRow, selected: bool, closed: bool)
     response
         .on_hover_text(format!(
             "{}\n{}\n{}",
-            row.summary,
+            title,
             row.label(),
             presentation::full_time(row.timestamp)
         ))
@@ -684,12 +688,23 @@ fn describe_row(ui: &egui::Ui, response: &egui::Response, row: &TimelineRow, clo
     });
 }
 
+fn row_change(ui: &egui::Ui, row: &TimelineRow) -> Option<presentation::Change> {
+    let TimelineKind::Edit(source) = row.kind else {
+        return None;
+    };
+    Some(presentation::edit_change(
+        ui,
+        source,
+        &row.summary,
+        row.timestamp,
+        row.preview.as_ref(),
+    ))
+}
+
 fn paint_labels(ui: &egui::Ui, row: &TimelineRow, rect: egui::Rect, closed: bool) {
+    let change = row_change(ui, row);
     let icon = match row.kind {
-        TimelineKind::Edit(crate::app::domain::buffer::PieceSource::External) => {
-            egui_phosphor::regular::ARROWS_CLOCKWISE
-        }
-        TimelineKind::Edit(_) => egui_phosphor::regular::PENCIL_SIMPLE,
+        TimelineKind::Edit(_) => change.as_ref().map_or("", |c| c.icon),
         TimelineKind::Activity(
             crate::app::services::session_store::activity::ActivityKind::Created,
         ) => egui_phosphor::regular::FILE_PLUS,
@@ -709,19 +724,20 @@ fn paint_labels(ui: &egui::Ui, row: &TimelineRow, rect: egui::Rect, closed: bool
         ),
         icon,
         14.0,
-        theme::tab_selected_accent(ui),
+        change
+            .as_ref()
+            .map_or_else(|| theme::tab_selected_accent(ui), |c| c.color),
     );
     let right = rect.right() - 80.0;
-    style::text(
-        ui,
-        egui::Rect::from_min_max(
-            rect.min + egui::vec2(32.0, 2.0),
-            egui::pos2(right, rect.top() + 23.0),
-        ),
-        &row.summary,
-        13.0,
-        theme::text_primary(ui),
+    let title_rect = egui::Rect::from_min_max(
+        rect.min + egui::vec2(32.0, 2.0),
+        egui::pos2(right, rect.top() + 23.0),
     );
+    if let Some(change) = change {
+        change.paint_title(ui, title_rect, theme::text_primary(ui));
+    } else {
+        style::text(ui, title_rect, &row.summary, 13.0, theme::text_primary(ui));
+    }
     let file = format!("{}{}", row.label(), if closed { " · Closed" } else { "" });
     style::text_end(
         ui,

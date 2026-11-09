@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Timeline edit actions now share the scrubber and This file icons, colors, compact text previews and whitespace badges, including retained closed-file edits.
+
 - Large undo, redo, indentation and clipboard operations prepare in the background. Tab and final-view closes wait for an acknowledged session commit without blocking input; a newer edit keeps the work open. Live text no longer uses temporary spill files.
 
 - Session storage failures show a persistent warning and affected-file dots. Small edits keep working; a configurable RAM limit controls large operations while saving is unavailable. Reset preserves live text and undo through a private backup, and recovery export includes retained and closed documents.

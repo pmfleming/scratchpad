@@ -107,6 +107,7 @@ impl LiveRows {
                         name: buffer.name.clone(),
                         path: path.clone(),
                         summary: entry.summary.clone(),
+                        preview: entry.label_preview(buffer.document().piece_tree()),
                         kind: crate::app::services::session_store::timeline::TimelineKind::Edit(
                             entry.source,
                         ),
