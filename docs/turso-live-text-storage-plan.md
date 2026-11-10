@@ -31,7 +31,7 @@ Not in scope:
   durable storage.
 - Non-UTF-8 large files. They decode into RAM through `StagedDocument` today and
   continue to do so.
-- History age or size limits. [Retention](../SESSION-RETENTION.md) stays unbounded
+- History age or size limits. [Retention](SESSION-RETENTION.md) stays unbounded
   until the user forgets history.
 
 ## Current behavior the design must account for
@@ -955,7 +955,7 @@ native Windows and the strict quality-policy findings remain explicit release ga
 
 Run the full validation below. Then remove `tempfile` use from `storage.rs` and `text_cache.rs`,
 along with the scaffold. Keep `tempfile` where reset and tests still use it. Update
-[SESSION-RETENTION.md](../SESSION-RETENTION.md), which describes temporary backing, and
+[SESSION-RETENTION.md](SESSION-RETENTION.md), which describes temporary backing, and
 [Incremental Turso sessions](turso-incremental-session.md), which describes the old schema.
 
 **Exit:** all sealed text uses the store, with no spill path and with documented evidence.

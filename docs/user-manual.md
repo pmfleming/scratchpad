@@ -456,7 +456,7 @@ first character.
 
 **Forget history** in This file requires confirmation for the named file, removes
 its branches and activity, and starts a baseline from current text. History has
-no automatic expiry. See [the navigation contract](../HISTORY-NAVIGATION.md).
+no automatic expiry. See [the navigation contract](HISTORY-NAVIGATION.md).
 
 ## Settings
 
@@ -492,7 +492,7 @@ dot marks unsaved content. Hover for full paths, closing time and recovery detai
 A tab containing split editor panes reopens as one tab with its retained layout.
 Missing files remain recoverable when a retained copy exists; otherwise the row is
 disabled. There are no separate pin or archived-text controls.
-The [retention guide](../SESSION-RETENTION.md) documents durable storage and the
+The [retention guide](SESSION-RETENTION.md) documents durable storage and the
 explicit incompatible-session reset with a temporary backup.
 
 Settings are stored in `settings.toml`:

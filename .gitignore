@@ -7,7 +7,11 @@
 /target_test/
 /dist/
 /design/
-/docs/
+/docs/*
+!/docs/BUILD-CACHE.md
+!/docs/HISTORY-NAVIGATION.md
+!/docs/SESSION-RETENTION.md
+!/docs/archive/
 /result
 /check_output.txt
 /clippy_output.txt

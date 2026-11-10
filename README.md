@@ -102,7 +102,7 @@ path remains nonblocking and compositor-paced. See the
 [WGPU recovery investigation](docs/wgpu-recovery-investigation.md) and
 [Wayland startup validation](docs/wayland-startup.md) for the fixes and native probe.
 
-The host's shutdown service applies [a 4 GiB Cargo cache budget](BUILD-CACHE.md).
+The host's shutdown service applies [a 4 GiB Cargo cache budget](docs/BUILD-CACHE.md).
 Development-shell entry does not trim caches. Run
 `python3 scripts/trim-build-cache.py --dry-run` for a manual preview. Incremental
 and coverage caches go first; debug/release artifacts may also be removed.
@@ -152,7 +152,7 @@ older or newer incompatible format, the `[]` status panel shows the full error
 and offers **Start new session**. After warning you, this action moves the old
 database to a temporary backup and creates a fresh session at the usual location.
 The backup path remains visible in Status; temporary-file cleanup may delete it.
-Saved text files and settings are preserved. See [history storage](SESSION-RETENTION.md).
+Saved text files and settings are preserved. See [history storage](docs/SESSION-RETENTION.md).
 
 Closing during startup restore leaves the previous session intact. If startup
 restore fails, session saving stays paused until you start a new session. If you
@@ -196,7 +196,7 @@ detected by the metadata watcher.
 **Forget history** requires confirmation and removes that file's branches and
 activity, establishing a baseline from current text. It does not save the file.
 **Settings > History & Recovery** contains memory limits and measured disk usage.
-See [history storage and schema changes](SESSION-RETENTION.md).
+See [history storage and schema changes](docs/SESSION-RETENTION.md).
 
 Start with [the configuration guide](docs/configuration.md). It documents the
 TOML sections, shortcut syntax, platform overrides, runtime environment
@@ -259,11 +259,15 @@ docs/                  user, configuration, architecture, and review documents
 
 - [User manual](docs/user-manual.md)
 - [Configuration guide](docs/configuration.md)
+- [History navigation](docs/HISTORY-NAVIGATION.md)
+- [History storage](docs/SESSION-RETENTION.md)
+- [Build-cache maintenance](docs/BUILD-CACHE.md)
+- [Archived plans, reviews, and profiling charts](docs/archive/)
 - [NixOS/Hyprland configuration](docs/hyprland-nixos-configuration.md)
 - [Measurement tools](docs/measurement-tools.md)
 
 Scratchpad uses Rust 2024 and upstream `eframe`/`egui` 0.37.0.
-See [the upgrade validation notes](EGUI-UPGRADE.md) for backend coverage and limitations. Unsafe Rust is forbidden
+See [the upgrade validation notes](docs/archive/EGUI-UPGRADE.md) for backend coverage and limitations. Unsafe Rust is forbidden
 at the crate level. Generated performance and capacity artifacts are written to
 `target/analysis/`; the measurement boundary is described in
 [docs/measurement-tools.md](docs/measurement-tools.md).
