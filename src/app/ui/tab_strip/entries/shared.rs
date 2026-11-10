@@ -203,6 +203,7 @@ fn render_tab_slot_cell(
                 pending_scroll_to_active: context.pending_scroll_to_active,
                 width: context.width,
                 label_font_id: context.label_font_id.clone(),
+                row_height: context.row_height,
             },
         );
         apply_tab_interaction(outcome, cell_outcome.interaction);
@@ -218,7 +219,9 @@ fn render_tab_slot_cell(
         "Settings",
         is_active,
         is_selected,
-        TabButtonOptions::new(context.width).with_label_font_id(context.label_font_id.clone()),
+        TabButtonOptions::new(context.width)
+            .with_label_font_id(context.label_font_id.clone())
+            .with_row_height(context.row_height),
     );
     let tab_clicked = tab_response.clicked()
         && handle_settings_tab_click(app, slot_index, ui.input(|input| input.modifiers));

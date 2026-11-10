@@ -27,6 +27,7 @@ pub struct TabButtonOptions {
     pub attention: Option<TabAttention>,
     pub width: f32,
     pub label_font_id: Option<egui::FontId>,
+    pub row_height: Option<f32>,
 }
 
 pub struct TabRenameEditorOptions {
@@ -35,6 +36,7 @@ pub struct TabRenameEditorOptions {
     pub width: f32,
     pub request_focus: bool,
     pub label_font_id: Option<egui::FontId>,
+    pub row_height: Option<f32>,
 }
 
 impl TabRenameEditorOptions {
@@ -46,12 +48,19 @@ impl TabRenameEditorOptions {
             width,
             request_focus: false,
             label_font_id: None,
+            row_height: None,
         }
     }
 
     #[must_use]
     pub fn with_focus_request(mut self, request_focus: bool) -> Self {
         self.request_focus = request_focus;
+        self
+    }
+
+    #[must_use]
+    pub fn with_row_height(mut self, row_height: f32) -> Self {
+        self.row_height = Some(row_height);
         self
     }
 
@@ -70,6 +79,7 @@ impl TabButtonOptions {
             attention: None,
             width,
             label_font_id: None,
+            row_height: None,
         }
     }
 
@@ -84,7 +94,14 @@ impl TabButtonOptions {
             attention,
             width,
             label_font_id: None,
+            row_height: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_row_height(mut self, row_height: f32) -> Self {
+        self.row_height = Some(row_height);
+        self
     }
 
     #[must_use]
@@ -146,6 +163,7 @@ pub fn tab_button_with_actions(
         ui,
         options.width,
         options.label_font_id.as_ref(),
+        options.row_height,
         surface_key,
     );
     paint_tab_background(
@@ -212,6 +230,7 @@ pub fn tab_rename_editor_sized(
         ui,
         options.width,
         options.label_font_id.as_ref(),
+        options.row_height,
         surface_key,
     );
     paint_tab_background(
@@ -295,9 +314,11 @@ fn allocate_tab_button_frame(
     ui: &mut egui::Ui,
     width: f32,
     font: Option<&egui::FontId>,
+    row_height: Option<f32>,
     surface_key: impl Hash,
 ) -> TabButtonFrame {
-    let height = font.map_or(TAB_HEIGHT, |font| tab_row_height(ui.ctx(), font.size));
+    let height = row_height
+        .unwrap_or_else(|| font.map_or(TAB_HEIGHT, |font| tab_row_height(ui.ctx(), font.size)));
     let size = Vec2::new(width, height);
     let (_, rect) = ui.allocate_space(size);
     let surface_id = widget_ids::surface_id(&surface_key);
@@ -567,6 +588,22 @@ fn text_width(ui: &egui::Ui, text: &str, font_id: &egui::FontId) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{EDITOR_FONT_FAMILY, egui, tab_label_font_id};
+
+    #[test]
+    fn shared_row_height_avoids_font_lookups_when_allocating_each_tab() {
+        let ctx = egui::Context::default();
+        // This family is deliberately unregistered: resolving it would panic.
+        // Allocation must use the height already measured by the list.
+        let font = egui::FontId::new(48.0, egui::FontFamily::Name("unregistered".into()));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            for index in 0..100 {
+                let frame =
+                    super::allocate_tab_button_frame(ui, 400.0, Some(&font), Some(96.0), index);
+                assert_eq!(frame.rect.height(), 96.0);
+            }
+        });
+        output.textures_delta.clear();
+    }
 
     #[test]
     fn tab_label_font_matches_editor_at_every_configured_size() {

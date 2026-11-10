@@ -75,6 +75,7 @@ pub(crate) struct TabCellProps<'a> {
     pub pending_scroll_to_active: bool,
     pub width: f32,
     pub label_font_id: egui::FontId,
+    pub row_height: f32,
 }
 
 pub(crate) struct TabCellOutcome {
@@ -176,7 +177,8 @@ fn render_tab_rename_cell(
             draft,
             TabRenameEditorOptions::new(props.is_active, props.is_selected, props.width)
                 .with_focus_request(request_focus)
-                .with_label_font_id(props.label_font_id.clone()),
+                .with_label_font_id(props.label_font_id.clone())
+                .with_row_height(props.row_height),
         )
     };
 
@@ -217,7 +219,8 @@ fn tab_button_with_width(
         props.is_active,
         props.is_selected,
         TabButtonOptions::with_actions(props.width, props.can_promote_all_files, attention_marker)
-            .with_label_font_id(props.label_font_id.clone()),
+            .with_label_font_id(props.label_font_id.clone())
+            .with_row_height(props.row_height),
     )
 }
 

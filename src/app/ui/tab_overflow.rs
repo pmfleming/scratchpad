@@ -36,6 +36,8 @@ pub(crate) struct OverflowMenuOutcome {
 
 struct OverflowMenuContext<'a> {
     row_width: f32,
+    row_height: f32,
+    label_font_id: egui::FontId,
     outcome: &'a mut OverflowMenuOutcome,
     overflow_popup_open: &'a mut bool,
 }
@@ -165,6 +167,8 @@ fn show_overflow_popup(
 
                 let mut menu = OverflowMenuContext {
                     row_width,
+                    row_height,
+                    label_font_id: tab_label_font_id(request.app.state.app_settings.font_size()),
                     outcome,
                     overflow_popup_open,
                 };
@@ -442,8 +446,7 @@ fn show_overflow_row(
     menu: &mut OverflowMenuContext<'_>,
 ) -> egui::Rect {
     widget_ids::surface_scope(ui, ("tab_overflow.slot", slot_index), |ui| {
-        let row_height =
-            crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size());
+        let row_height = menu.row_height;
         if is_drag_source {
             return render_drag_source_placeholder(ui, menu.row_width, row_height);
         }
@@ -463,7 +466,8 @@ fn show_overflow_row(
                 row_state.presentation.can_promote_all_files,
                 row_state.presentation.attention_state.map(attention_marker),
             )
-            .with_label_font_id(tab_label_font_id(app.state.app_settings.font_size())),
+            .with_label_font_id(menu.label_font_id.clone())
+            .with_row_height(row_height),
         );
         let response = maybe_attach_overflow_row_tooltip(response, &row_state, truncated);
         tab_drag::begin_tab_drag_if_needed(
