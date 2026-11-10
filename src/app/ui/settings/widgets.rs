@@ -292,7 +292,7 @@ pub(super) fn toggle_select_row(
     }
 }
 
-/// Right-align every select together with its optional unit.
+/// Right-align a select and optional unit, honoring the caller's width in points.
 pub(super) fn dropdown<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
     key: &str,
@@ -314,12 +314,7 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
             .size()
             .x + ui.spacing().item_spacing.x
         };
-        let width = if key == "Size" {
-            SettingsUi::size_dropdown_width(ui, lane.width())
-        } else {
-            width * SettingsUi::scale(ui).max(1.0)
-        }
-        .min((lane.width() - unit_width).max(0.0));
+        let width = width.min((lane.width() - unit_width).max(0.0));
         let left = lane.right() - width - unit_width;
         let rect = egui::Rect::from_min_max(egui::pos2(left, lane.top()), lane.max);
         widget_ids::rect_scope_with_layout(

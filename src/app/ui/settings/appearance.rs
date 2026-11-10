@@ -31,7 +31,7 @@ pub(super) fn render_workspace(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 &mut delay,
                 &DELAYS,
                 |delay| format!("{delay}"),
-                96.0,
+                96.0 * SettingsUi::scale(ui).max(1.0),
                 "s",
             ) {
                 settings::set_tab_list_auto_hide_delay_seconds(app, delay);
@@ -70,7 +70,7 @@ pub(super) fn render_workspace(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 }
                 .into()
             },
-            210.0,
+            210.0 * SettingsUi::scale(ui).max(1.0),
             "",
         ) {
             settings::set_new_tab_placement(app, placement);

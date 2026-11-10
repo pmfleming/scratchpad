@@ -30,7 +30,7 @@ pub(super) fn render_appearance(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             &mut font,
             &EditorFontPreset::ALL,
             |font| font.label().into(),
-            180.0,
+            180.0 * SettingsUi::scale(ui).max(1.0),
             "",
         ) {
             use_app_appearance(app);
@@ -100,7 +100,7 @@ fn font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             &mut size,
             &options,
             |size| format!("{size:.0}"),
-            96.0,
+            SettingsUi::size_dropdown_width(ui, ui.max_rect().width()),
             "pt",
         );
         if slider_changed || preset_changed {

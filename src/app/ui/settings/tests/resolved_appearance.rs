@@ -226,7 +226,7 @@ fn dropdown_popups_stay_near_their_controls_instead_of_filling_the_window() {
                             &mut value,
                             &FONT_SIZE_OPTIONS,
                             |size| size.to_string(),
-                            96.0,
+                            SettingsUi::size_dropdown_width(ui, ui.max_rect().width()),
                             "pt",
                         );
                         app.state.app_settings.editor.font_size = value as f32;
@@ -332,4 +332,42 @@ fn selected_search_text_uses_highlight_foreground_in_the_rendered_glyphs() {
         }
         assert!(glyph_vertices > 0);
     }
+}
+
+#[test]
+fn dropdown_width_is_explicit_and_independent_of_its_label() {
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(900.0, 600.0))
+        .with_context_setup(setup)
+        .build_ui_state(
+            |ui, app| {
+                SettingsUi::apply_appearance(ui, &app.state.app_settings);
+                SettingsUi::apply_controls(ui);
+                for key in ["Size", "Renamed size"] {
+                    widgets::inner_select_row(ui, key, None, |ui| {
+                        let mut value = 14;
+                        widgets::dropdown(
+                            ui,
+                            key,
+                            &mut value,
+                            &[14, 20],
+                            |n| n.to_string(),
+                            120.0,
+                            "",
+                        );
+                    });
+                }
+            },
+            custom_app(32.0, false),
+        );
+    h.run();
+    let size = h.get_by_role_and_label(egui::Role::ComboBox, "Size").rect();
+    let renamed = h
+        .get_by_role_and_label(egui::Role::ComboBox, "Renamed size")
+        .rect();
+    assert_eq!(size.width(), renamed.width());
+    assert!(
+        (size.width() - 120.0).abs() <= 1.0,
+        "Explicit width was changed: {size:?}"
+    );
 }
