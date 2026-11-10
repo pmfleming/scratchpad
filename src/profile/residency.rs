@@ -45,6 +45,28 @@ fn fixture_text(bytes: usize, fixture: &str) -> String {
 }
 
 pub fn search_trial(bytes: usize, fixture: &str, rung: &str, launch: u64) -> Value {
+    let revision = std::env::var("SCRATCHPAD_DIAGNOSTIC_REVISION").unwrap_or_else(|_| {
+        String::from_utf8(
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_owned()
+    });
+    search_trial_with_revision(bytes, fixture, rung, launch, &revision)
+}
+
+fn search_trial_with_revision(
+    bytes: usize,
+    fixture: &str,
+    rung: &str,
+    launch: u64,
+    revision: &str,
+) -> Value {
     assert!(
         [
             "owned_contiguous",
@@ -58,18 +80,6 @@ pub fn search_trial(bytes: usize, fixture: &str, rung: &str, launch: u64) -> Val
     let text = fixture_text(bytes, fixture);
     let expected_start = text.chars().count() - 8;
     let expected: Vec<_> = std::iter::once(expected_start..expected_start + 6).collect();
-    let revision = std::env::var("SCRATCHPAD_DIAGNOSTIC_REVISION").unwrap_or_else(|_| {
-        String::from_utf8(
-            std::process::Command::new("git")
-                .args(["rev-parse", "HEAD"])
-                .output()
-                .unwrap()
-                .stdout,
-        )
-        .unwrap()
-        .trim()
-        .to_owned()
-    });
     let mut trial = json!({"scenario":"search_file_size_ceiling", "workload_value":bytes,"workload_unit":"bytes", "fixture":fixture,
         "fixture_digest":digest(text.as_bytes()),"result_digest":"","result_count":0,"expected_result_count":1,
         "code_path":format!("search/{rung}"),"completion_endpoint":"all_ranges_returned","revision":revision,"rung":rung,
@@ -222,7 +232,15 @@ mod tests {
                 "store_resident",
                 "store_warm",
             ] {
-                let result = super::search_trial(16 * 1024 * 1024, fixture, rung, 0);
+                // Unit tests run from source archives without Git or a checkout.
+                let result = super::search_trial_with_revision(
+                    16 * 1024 * 1024,
+                    fixture,
+                    rung,
+                    0,
+                    "test-revision",
+                );
+                assert_eq!(result["revision"], "test-revision");
                 assert_eq!(result["status"], "ok", "{result}");
                 let identity = (
                     result["fixture_digest"].clone(),
