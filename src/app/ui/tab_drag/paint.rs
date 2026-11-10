@@ -2,6 +2,7 @@ use super::state::{TabDragState, TabDropAxis, TabDropZone};
 use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::theme::{
     TAB_BUTTON_WIDTH, TAB_HEIGHT, border_for_visuals, tab_active_bg_for_visuals,
+    text_primary_for_visuals,
 };
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -75,7 +76,7 @@ pub(super) fn paint_dragged_tab_ghost(
         egui::Align2::LEFT_CENTER,
         display_name,
         crate::app::chrome::tab_label_font_id(app.state.app_settings.font_size()),
-        app.state.app_settings.editor_text_color(),
+        text_primary_for_visuals(visuals),
     );
 
     if dragged_slots.len() > 1 {

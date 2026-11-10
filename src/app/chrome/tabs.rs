@@ -228,6 +228,7 @@ pub fn tab_rename_editor_sized(
                 WidgetRole::TabRenameEditor,
             ))
             .frame(egui::Frame::NONE)
+            .text_color(text_primary(ui))
             .desired_width(text_rect.width())
             .margin(egui::Margin::symmetric(4, 2))
             .align(egui::Align2::LEFT_CENTER)
@@ -343,9 +344,7 @@ fn paint_tab_label(
         egui::Align2::LEFT_CENTER,
         &visible_label,
         label_font_id,
-        ui.visuals()
-            .override_text_color
-            .unwrap_or_else(|| text_primary(ui)),
+        text_primary(ui),
     );
     truncated
 }

@@ -440,7 +440,6 @@ fn show_overflow_row(
     menu: &mut OverflowMenuContext<'_>,
 ) -> egui::Rect {
     widget_ids::surface_scope(ui, ("tab_overflow.slot", slot_index), |ui| {
-        ui.visuals_mut().override_text_color = Some(app.state.app_settings.editor_text_color());
         let row_height =
             crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size());
         if is_drag_source {

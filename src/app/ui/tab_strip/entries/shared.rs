@@ -58,7 +58,6 @@ pub(super) fn collect_slot_entries(
     outcome: &mut TabStripOutcome,
     mut on_rect: impl FnMut(usize, egui::Rect),
 ) -> Vec<TabRectEntry> {
-    ui.visuals_mut().override_text_color = Some(app.state.app_settings.editor_text_color());
     let total_slots = crate::app::app_state::workspace::display_tabs::total_tab_slots(app);
     let ranges = visible_slot_ranges(ui, total_slots, context);
     let visible_slots = ranges

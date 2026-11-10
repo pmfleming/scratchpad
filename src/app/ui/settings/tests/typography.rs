@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn labels_tabs_and_both_previews_share_the_configured_font_and_palette() {
+fn labels_tabs_and_both_previews_share_the_configured_font() {
     for preset in [EditorFontPreset::Mono, EditorFontPreset::Serif] {
         for size in [8.0, 16.0, 32.0, 72.0] {
             let mut app = app();
@@ -64,7 +64,9 @@ fn labels_tabs_and_both_previews_share_the_configured_font_and_palette() {
                         } else {
                             section.format.color
                         },
-                        if highlighted {
+                        if value == "Tab label" {
+                            crate::app::theme::text_primary_for_visuals(&ctx.global_style().visuals)
+                        } else if highlighted {
                             settings.editor_text_highlight_text_color()
                         } else {
                             settings.editor_text_color()
@@ -112,6 +114,7 @@ fn large_tab_labels_fit_in_each_tab_list_position() {
         let mut app = app();
         app.state.app_settings.editor.appearance_source = EditorAppearanceSource::App;
         app.state.app_settings.editor.font_size = 72.0;
+        app.state.app_settings.editor.theme_mode = super::AppThemeMode::Light;
         app.state.app_settings.editor.editor_text_color = "#e4c7a2".into();
         app.state.app_settings.workspace.tab_list_position = position;
         app.state.app_settings.workspace.auto_hide_tab_list = false;
@@ -149,7 +152,7 @@ fn large_tab_labels_fit_in_each_tab_list_position() {
                     } else {
                         text.galley.job.sections[0].format.color
                     },
-                    h.state().state.app_settings.editor_text_color()
+                    crate::app::theme::text_primary_for_visuals(&h.ctx.global_style().visuals)
                 );
                 let bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
                 assert!(
