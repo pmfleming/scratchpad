@@ -1,5 +1,10 @@
 //! A virtualized activity list, independent of per-document branch navigation.
 mod model;
+mod navigation;
+mod row;
+#[cfg(test)]
+use row::row_change;
+use row::{RowState, paint_row};
 #[cfg(test)]
 mod tests;
 
@@ -33,6 +38,28 @@ struct Source {
     commit: u64,
 }
 
+impl Source {
+    fn capture(app: &ScratchpadApp, search: &str, loaded: Vec<String>) -> Self {
+        Self {
+            loaded,
+            opened: app
+                .tab_manager
+                .tabs
+                .as_slice()
+                .iter()
+                .flat_map(|tab| tab.buffers())
+                .filter(|buffer| !buffer.is_loading_preview)
+                .map(|buffer| buffer.temp_id.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+            search: search.to_owned(),
+            epoch: app.state.persistence.session_store.history_epoch(),
+            commit: app.state.persistence.session_store.commit_epoch(),
+        }
+    }
+}
+
 enum Row {
     Date(String),
     Entry(TimelineRow),
@@ -59,6 +86,9 @@ struct State {
     offset: f32,
     anchor: Option<(TimelineId, f32)>,
     scroll_to_selection: bool,
+    reveal_now: Option<TimelineId>,
+    viewport_height: f32,
+    jump_latest: bool,
 }
 
 impl Default for State {
@@ -79,6 +109,9 @@ impl Default for State {
             offset: 0.0,
             anchor: None,
             scroll_to_selection: false,
+            reveal_now: None,
+            viewport_height: 0.0,
+            jump_latest: false,
         }
     }
 }
@@ -136,23 +169,7 @@ impl State {
 
     fn refresh(&mut self, app: &ScratchpadApp, search: &str, ctx: &egui::Context) {
         let (loaded, mut changed) = self.live.update(app, search);
-        let source = Source {
-            loaded,
-            opened: app
-                .tab_manager
-                .tabs
-                .as_slice()
-                .iter()
-                .flat_map(|tab| tab.buffers())
-                .filter(|buffer| !buffer.is_loading_preview)
-                .map(|buffer| buffer.temp_id.clone())
-                .collect::<std::collections::BTreeSet<_>>()
-                .into_iter()
-                .collect(),
-            search: search.to_owned(),
-            epoch: app.state.persistence.session_store.history_epoch(),
-            commit: app.state.persistence.session_store.commit_epoch(),
-        };
+        let source = Source::capture(app, search, loaded);
         if self.source.as_ref() != Some(&source) {
             let preserve = self
                 .source
@@ -185,6 +202,7 @@ impl State {
                     );
                 }
             } else {
+                self.reveal_now = None;
                 self.persisted.clear();
                 self.live.retired.clear();
                 self.resume_older = None;
@@ -290,7 +308,8 @@ impl State {
             rows.push(Row::Entry(row.clone()));
         }
         self.rows = rows;
-        if let Some((id, fraction)) = &self.anchor
+        if self.reveal_now.is_none()
+            && let Some((id, fraction)) = &self.anchor
             && let Some(index) = self
                 .rows
                 .iter()
@@ -451,11 +470,11 @@ pub(super) fn show(
     state.refresh(app, &history.search.to_lowercase(), ui.ctx());
     let mut action = None;
     let mut changed = false;
+    let now = navigation::active_now(app);
+    let list_height = (height - 64.0).max(ROW_HEIGHT);
     ui.horizontal(|ui| {
-        if ui.button("Latest").clicked() {
-            state.offset = 0.0;
-            state.anchor = None;
-        }
+        navigation::latest_button(ui, &mut state, "top");
+        navigation::now_button(ui, &mut state, now.as_ref());
         if state.pending.is_some() {
             ui.spinner();
             ui.label("Loading history…");
@@ -480,32 +499,39 @@ pub(super) fn show(
         }
         state.scroll_to_selection = false;
     }
+    navigation::reveal(ui.ctx(), app, &mut state, now.as_ref());
     let mut near_end = false;
     let output = ui
         .scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             egui::ScrollArea::vertical()
                 .id_salt("history.timeline.scroll")
-                .max_height((height - 32.0).max(ROW_HEIGHT))
+                .max_height(list_height)
                 .auto_shrink([false, false])
                 .vertical_scroll_offset(state.offset)
                 .show_rows(ui, ROW_HEIGHT, state.rows.len().max(1), |ui, range| {
+                    navigation::scroll_target(ui, &state, range.start);
                     near_end = range.end >= state.rows.len();
-                    action = paint_visible(ui, &mut state, range, history);
+                    action =
+                        paint_visible(ui, &mut state, range, history, now.as_ref().map(|p| &p.id));
                 })
         })
         .inner;
     state.offset = output.state.clamped_offset().y;
+    state.viewport_height = output.inner_rect.height();
+    navigation::finish_scroll(&mut state);
     let index = (state.offset / ROW_HEIGHT).floor() as usize;
-    state.anchor = state
-        .rows
-        .iter()
-        .enumerate()
-        .skip(index)
-        .find_map(|(i, r)| match r {
-            Row::Entry(row) => Some((row.id(), state.offset - i as f32 * ROW_HEIGHT)),
-            Row::Date(_) => None,
-        });
+    if state.reveal_now.is_none() && !state.jump_latest {
+        state.anchor = state
+            .rows
+            .iter()
+            .enumerate()
+            .skip(index)
+            .find_map(|(i, r)| match r {
+                Row::Entry(row) => Some((row.id(), state.offset - i as f32 * ROW_HEIGHT)),
+                Row::Date(_) => None,
+            });
+    }
     if near_end && state.pending.is_none() && state.error.is_none() {
         if state.next.is_some() {
             state.limit += TIMELINE_PAGE_SIZE;
@@ -530,6 +556,7 @@ pub(super) fn show(
         state.rebuild();
         ui.ctx().request_repaint();
     }
+    ui.horizontal(|ui| navigation::latest_button(ui, &mut state, "bottom"));
     action
 }
 
@@ -538,6 +565,7 @@ fn paint_visible(
     state: &mut State,
     range: std::ops::Range<usize>,
     history: &HistoryUi,
+    now: Option<&TimelineId>,
 ) -> Option<Action> {
     let mut action = None;
     if state.rows.is_empty() {
@@ -580,7 +608,19 @@ fn paint_visible(
                     .source
                     .as_ref()
                     .is_none_or(|s| s.opened.binary_search(&row.cursor.document).is_err());
-                if let Some(inspect) = paint_row(ui, &row, selected, closed) {
+                let previous = index.checked_sub(1).and_then(|i| state.rows.get(i));
+                let visuals = RowState {
+                    selected,
+                    closed,
+                    current: now == Some(&row.id()),
+                    previous_time: match previous {
+                        Some(Row::Entry(r)) => Some(r.timestamp),
+                        _ => None,
+                    },
+                    above: matches!(previous, Some(Row::Entry(_))),
+                    below: matches!(state.rows.get(index + 1), Some(Row::Entry(_))),
+                };
+                if let Some(inspect) = paint_row(ui, &row, &visuals) {
                     state.selected = Some(row.id());
                     action = Some(Action {
                         document: row.cursor.document.clone(),
@@ -592,175 +632,4 @@ fn paint_visible(
         }
     }
     action
-}
-
-fn paint_row(ui: &mut egui::Ui, row: &TimelineRow, selected: bool, closed: bool) -> Option<bool> {
-    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), ROW_HEIGHT));
-    if row.node().is_none() {
-        let response = widget_ids::interact(
-            ui,
-            rect,
-            egui::Id::unique(("history.timeline.information", row.id())),
-            egui::Sense::hover(),
-            "timeline-information",
-        );
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::Role::Label,
-                true,
-                format!("{} · {}", row.summary, row.name),
-            )
-        });
-        describe_row(ui, &response, row, closed);
-        paint_labels(ui, row, rect, closed);
-        return None;
-    }
-    let response = widget_ids::interact(
-        ui,
-        rect,
-        egui::Id::unique(("history.timeline.row", row.id())),
-        egui::Sense::click(),
-        "timeline-row",
-    );
-    let change = row_change(ui, row);
-    let title = change
-        .as_ref()
-        .map_or(row.summary.as_str(), |c| c.title.as_str());
-    let label = format!(
-        "{} · {}{}",
-        title,
-        row.name,
-        if closed { " · Closed" } else { "" }
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::Role::ListBoxOption, true, selected, &label)
-    });
-    describe_row(ui, &response, row, closed);
-    if selected || response.hovered() {
-        ui.painter().rect_filled(
-            rect,
-            0,
-            if selected {
-                theme::tab_selected_bg(ui)
-            } else {
-                theme::action_bg(ui)
-            },
-        );
-    }
-    paint_labels(ui, row, rect, closed);
-    let right = rect.right() - 80.0;
-    let button = widget_ids::scope(ui, ("history.timeline.file", row.id()), |ui| {
-        ui.put(
-            egui::Rect::from_min_max(egui::pos2(right, rect.top() + 21.0), rect.max),
-            egui::Button::new(egui::RichText::new("This file").size(10.5)).frame(false),
-        )
-    })
-    .inner;
-    button.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::Role::Button,
-            true,
-            format!("Inspect branches for {}", row.name),
-        )
-    });
-    if button.clicked() {
-        return Some(true);
-    }
-    response
-        .on_hover_text(format!(
-            "{}\n{}\n{}",
-            title,
-            row.label(),
-            presentation::full_time(row.timestamp)
-        ))
-        .clicked()
-        .then_some(false)
-}
-
-fn describe_row(ui: &egui::Ui, response: &egui::Response, row: &TimelineRow, closed: bool) {
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_description(format!(
-            "{} · {}{}",
-            row.label(),
-            presentation::full_time(row.timestamp),
-            if closed { " · Closed" } else { "" }
-        ));
-    });
-}
-
-fn row_change(ui: &egui::Ui, row: &TimelineRow) -> Option<presentation::Change> {
-    let TimelineKind::Edit(source) = row.kind else {
-        return None;
-    };
-    Some(presentation::edit_change(
-        ui,
-        source,
-        &row.summary,
-        row.timestamp,
-        row.preview.as_ref(),
-    ))
-}
-
-fn paint_labels(ui: &egui::Ui, row: &TimelineRow, rect: egui::Rect, closed: bool) {
-    let change = row_change(ui, row);
-    let icon = match row.kind {
-        TimelineKind::Edit(_) => change.as_ref().map_or("", |c| c.icon),
-        TimelineKind::Activity(
-            crate::app::services::session_store::activity::ActivityKind::Created,
-        ) => egui_phosphor::regular::FILE_PLUS,
-        TimelineKind::Activity(
-            crate::app::services::session_store::activity::ActivityKind::Opened,
-        ) => egui_phosphor::regular::FOLDER_OPEN,
-        TimelineKind::Activity(
-            crate::app::services::session_store::activity::ActivityKind::Closed,
-        ) => egui_phosphor::regular::X,
-        TimelineKind::Activity(_) => egui_phosphor::regular::WARNING,
-    };
-    style::text(
-        ui,
-        egui::Rect::from_min_size(
-            rect.min + egui::vec2(8.0, 0.0),
-            egui::vec2(20.0, ROW_HEIGHT),
-        ),
-        icon,
-        14.0,
-        change
-            .as_ref()
-            .map_or_else(|| theme::tab_selected_accent(ui), |c| c.color),
-    );
-    let right = rect.right() - 80.0;
-    let title_rect = egui::Rect::from_min_max(
-        rect.min + egui::vec2(32.0, 2.0),
-        egui::pos2(right, rect.top() + 23.0),
-    );
-    if let Some(change) = change {
-        change.paint_title(ui, title_rect, theme::text_primary(ui));
-    } else {
-        style::text(ui, title_rect, &row.summary, 13.0, theme::text_primary(ui));
-    }
-    let file = format!("{}{}", row.label(), if closed { " · Closed" } else { "" });
-    style::text_end(
-        ui,
-        egui::Rect::from_min_max(
-            rect.min + egui::vec2(32.0, 22.0),
-            egui::pos2(right, rect.bottom() - 2.0),
-        ),
-        &file,
-        11.0,
-        theme::text_muted(ui),
-    );
-    let time = chrono::DateTime::from_timestamp(row.timestamp as i64, 0)
-        .map_or_else(String::new, |d| {
-            d.with_timezone(&chrono::Local).format("%H:%M").to_string()
-        });
-    style::text_right(
-        ui,
-        egui::Rect::from_min_max(
-            egui::pos2(right, rect.top()),
-            egui::pos2(rect.right() - 8.0, rect.top() + 21.0),
-        ),
-        &time,
-        11.0,
-        theme::text_muted(ui),
-    );
 }

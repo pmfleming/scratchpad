@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Timeline now shows an event rail and the active file’s Now position, with scroll-only controls for Now and the latest event. Rows show filenames, with full paths on hover, and share This file’s time-label rules.
+
 - Timeline edit actions now share the scrubber and This file icons, colors, compact text previews and whitespace badges, including retained closed-file edits.
 
 - Large undo, redo, indentation and clipboard operations prepare in the background. Tab and final-view closes wait for an acknowledged session commit without blocking input; a newer edit keeps the work open. Live text no longer uses temporary spill files.

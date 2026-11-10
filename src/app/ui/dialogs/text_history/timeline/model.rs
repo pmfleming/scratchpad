@@ -1,7 +1,7 @@
 use crate::app::{
     app_state::ScratchpadApp,
     domain::BufferState,
-    services::session_store::timeline::{TimelineCursor, TimelineRow},
+    services::session_store::timeline::{TimelineCursor, TimelineId, TimelineRow},
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -26,6 +26,15 @@ pub(super) struct LiveRows {
 }
 
 impl LiveRows {
+    pub fn contains(&self, id: &TimelineId) -> bool {
+        let TimelineId::Edit { document, node } = id else {
+            return false;
+        };
+        self.documents
+            .get(document)
+            .is_some_and(|cache| cache.keys.contains_key(node))
+    }
+
     pub fn update(&mut self, app: &ScratchpadApp, search: &str) -> (Vec<String>, bool) {
         let mut changed = false;
         if self.search != search {

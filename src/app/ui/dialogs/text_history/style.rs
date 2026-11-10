@@ -161,3 +161,15 @@ pub(super) fn icon_label(
     job.append(text, 5.0, egui::TextFormat::simple(font(ui, size), color));
     job
 }
+
+pub(super) fn now_badge(ui: &egui::Ui, rect: egui::Rect) {
+    ui.painter()
+        .rect_filled(rect, 0, theme::tab_selected_accent(ui));
+    text(
+        ui,
+        rect.shrink2(egui::vec2(4.0, 0.0)),
+        "NOW",
+        10.0,
+        on_accent(ui),
+    );
+}

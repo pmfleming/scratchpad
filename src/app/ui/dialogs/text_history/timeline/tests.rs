@@ -1,3 +1,5 @@
+mod display;
+mod navigation;
 use super::*;
 use crate::app::{
     domain::{
@@ -431,7 +433,14 @@ fn assert_edit_presentation(
                 assert_eq!(change.color, color);
                 assert_eq!(change.title, live.title);
             }
-            paint_row(ui, row, false, true);
+            paint_row(
+                ui,
+                row,
+                &RowState {
+                    closed: true,
+                    ..RowState::default()
+                },
+            );
         });
         output.textures_delta.clear();
         assert!(

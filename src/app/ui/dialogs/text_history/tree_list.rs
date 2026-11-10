@@ -187,19 +187,7 @@ fn metadata(
             egui::pos2(right - 18.0, rect.center().y),
             egui::vec2(36.0, 17.0),
         );
-        ui.painter()
-            .rect_filled(tag, 0, theme::tab_selected_accent(ui));
-        style::text(
-            ui,
-            tag.shrink2(egui::vec2(4.0, 0.0)),
-            "NOW",
-            10.0,
-            if ui.visuals().dark_mode {
-                egui::Color32::BLACK
-            } else {
-                egui::Color32::WHITE
-            },
-        );
+        style::now_badge(ui, tag);
         right -= 44.0;
     } else if !time.is_empty() {
         let width = ui
@@ -208,7 +196,7 @@ fn metadata(
             .size()
             .x
             + 2.0;
-        if response.hovered() || previous_time.is_none_or(|at| presentation::clock(at) != time) {
+        if presentation::show_time(edited_at, previous_time, response.hovered()) {
             style::text(
                 ui,
                 egui::Rect::from_min_max(

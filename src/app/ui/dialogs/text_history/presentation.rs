@@ -183,3 +183,9 @@ pub(super) fn full_time(seconds: u64) -> String {
             .to_string()
     })
 }
+
+/// Repeated time labels appear on hover; the first row of a group always has one.
+pub(super) fn show_time(seconds: u64, previous: Option<u64>, hovered: bool) -> bool {
+    let time = clock(seconds);
+    !time.is_empty() && (hovered || previous.is_none_or(|at| clock(at) != time))
+}
