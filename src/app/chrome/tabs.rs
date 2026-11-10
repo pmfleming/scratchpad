@@ -94,15 +94,18 @@ impl TabButtonOptions {
     }
 }
 
-const MIN_TAB_LABEL_FONT_SIZE: f32 = 11.0;
-const MAX_TAB_LABEL_FONT_SIZE: f32 = 16.0;
-
 #[must_use]
 pub fn tab_label_font_id(editor_font_size: f32) -> egui::FontId {
     egui::FontId::new(
-        editor_font_size.clamp(MIN_TAB_LABEL_FONT_SIZE, MAX_TAB_LABEL_FONT_SIZE),
+        editor_font_size,
         egui::FontFamily::Name(EDITOR_FONT_FAMILY.into()),
     )
+}
+
+/// Reserve the actual font line height plus room for the rename field.
+#[must_use]
+pub fn tab_row_height(ctx: &egui::Context, font_size: f32) -> f32 {
+    (ctx.fonts_mut(|fonts| fonts.row_height(&tab_label_font_id(font_size))) + 12.0).max(TAB_HEIGHT)
 }
 
 pub fn tab_button(
@@ -132,7 +135,12 @@ pub fn tab_button_with_actions(
     selected: bool,
     options: TabButtonOptions,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    let frame = allocate_tab_button_frame(ui, options.width, surface_key);
+    let frame = allocate_tab_button_frame(
+        ui,
+        options.width,
+        options.label_font_id.as_ref(),
+        surface_key,
+    );
     paint_tab_background(
         ui,
         frame.rect,
@@ -193,7 +201,12 @@ pub fn tab_rename_editor_sized(
     text: &mut String,
     options: TabRenameEditorOptions,
 ) -> (egui::Rect, egui::Response) {
-    let frame = allocate_tab_button_frame(ui, options.width, surface_key);
+    let frame = allocate_tab_button_frame(
+        ui,
+        options.width,
+        options.label_font_id.as_ref(),
+        surface_key,
+    );
     paint_tab_background(
         ui,
         frame.rect,
@@ -216,7 +229,7 @@ pub fn tab_rename_editor_sized(
             ))
             .frame(egui::Frame::NONE)
             .desired_width(text_rect.width())
-            .margin(egui::Margin::symmetric(4, 6))
+            .margin(egui::Margin::symmetric(4, 2))
             .align(egui::Align2::LEFT_CENTER)
             .font(
                 options
@@ -273,9 +286,11 @@ fn paint_selected_tab_overlay(ui: &egui::Ui, rect: Rect) {
 fn allocate_tab_button_frame(
     ui: &mut egui::Ui,
     width: f32,
+    font: Option<&egui::FontId>,
     surface_key: impl Hash,
 ) -> TabButtonFrame {
-    let size = Vec2::new(width, TAB_HEIGHT);
+    let height = font.map_or(TAB_HEIGHT, |font| tab_row_height(ui.ctx(), font.size));
+    let size = Vec2::new(width, height);
     let (_, rect) = ui.allocate_space(size);
     let surface_id = widget_ids::surface_id(&surface_key);
     let response = widget_ids::interact(
@@ -328,7 +343,9 @@ fn paint_tab_label(
         egui::Align2::LEFT_CENTER,
         &visible_label,
         label_font_id,
-        text_primary(ui),
+        ui.visuals()
+            .override_text_color
+            .unwrap_or_else(|| text_primary(ui)),
     );
     truncated
 }
@@ -546,14 +563,14 @@ mod tests {
     use super::{EDITOR_FONT_FAMILY, egui, tab_label_font_id};
 
     #[test]
-    fn tab_label_font_uses_editor_family_with_chrome_safe_size() {
+    fn tab_label_font_matches_editor_at_every_configured_size() {
         let small = tab_label_font_id(8.0);
         let normal = tab_label_font_id(14.0);
         let large = tab_label_font_id(72.0);
 
-        assert_eq!(small.size, 11.0);
+        assert_eq!(small.size, 8.0);
         assert_eq!(normal.size, 14.0);
-        assert_eq!(large.size, 16.0);
+        assert_eq!(large.size, 72.0);
         assert_eq!(
             normal.family,
             egui::FontFamily::Name(EDITOR_FONT_FAMILY.into())

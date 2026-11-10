@@ -2,7 +2,6 @@ use super::state::{TabDragState, TabDropAxis, TabDropZone};
 use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::theme::{
     TAB_BUTTON_WIDTH, TAB_HEIGHT, border_for_visuals, tab_active_bg_for_visuals,
-    text_primary_for_visuals,
 };
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -31,7 +30,10 @@ pub(super) fn paint_dragged_tab_ghost(
     };
     let rect = egui::Rect::from_center_size(
         drag_state.current_pos,
-        egui::vec2(TAB_BUTTON_WIDTH, TAB_HEIGHT),
+        egui::vec2(
+            TAB_BUTTON_WIDTH,
+            crate::app::chrome::tab_row_height(ctx, app.state.app_settings.font_size()),
+        ),
     )
     .translate(egui::vec2(0.0, 2.0));
     let painter = ctx.layer_painter(widget_ids::layer_id(
@@ -68,12 +70,12 @@ pub(super) fn paint_dragged_tab_ghost(
         egui::Stroke::new(1.0, border_for_visuals(visuals)),
         egui::StrokeKind::Outside,
     );
-    painter.text(
+    painter.with_clip_rect(rect).text(
         rect.left_center() + egui::vec2(8.0, 0.0),
         egui::Align2::LEFT_CENTER,
         display_name,
-        egui::FontId::proportional(14.0),
-        text_primary_for_visuals(visuals),
+        crate::app::chrome::tab_label_font_id(app.state.app_settings.font_size()),
+        app.state.app_settings.editor_text_color(),
     );
 
     if dragged_slots.len() > 1 {

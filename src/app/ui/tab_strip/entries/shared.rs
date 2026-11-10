@@ -1,7 +1,6 @@
 use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::chrome::{TabButtonOptions, tab_button_with_actions, tab_label_font_id};
 use crate::app::domain::WorkspaceTab;
-use crate::app::theme::TAB_HEIGHT;
 use crate::app::ui::tab_drag::{TabDropAxis, TabRectEntry};
 use crate::app::ui::tab_strip::context_menu::{
     attach_tab_context_menu, attach_tab_list_context_menu,
@@ -23,9 +22,11 @@ pub(super) struct SlotCellContext<'a> {
     spacing: f32,
     axis: TabDropAxis,
     label_font_id: egui::FontId,
+    row_height: f32,
 }
 
 pub(super) fn slot_cell_context<'a>(
+    ui: &egui::Ui,
     app: &ScratchpadApp,
     duplicate_name_counts: &'a HashMap<String, usize>,
     width: f32,
@@ -43,6 +44,10 @@ pub(super) fn slot_cell_context<'a>(
         spacing,
         axis,
         label_font_id: tab_label_font_id(app.state.app_settings.font_size()),
+        row_height: crate::app::chrome::tab_row_height(
+            ui.ctx(),
+            app.state.app_settings.font_size(),
+        ),
     }
 }
 
@@ -53,6 +58,7 @@ pub(super) fn collect_slot_entries(
     outcome: &mut TabStripOutcome,
     mut on_rect: impl FnMut(usize, egui::Rect),
 ) -> Vec<TabRectEntry> {
+    ui.visuals_mut().override_text_color = Some(app.state.app_settings.editor_text_color());
     let total_slots = crate::app::app_state::workspace::display_tabs::total_tab_slots(app);
     let ranges = visible_slot_ranges(ui, total_slots, context);
     let visible_slots = ranges
@@ -137,7 +143,7 @@ fn add_virtual_slot_space(ui: &mut egui::Ui, slot_count: usize, context: &SlotCe
 fn slot_advance(context: &SlotCellContext<'_>) -> f32 {
     match context.axis {
         TabDropAxis::Horizontal => context.width + context.spacing,
-        TabDropAxis::Vertical => TAB_HEIGHT + context.spacing,
+        TabDropAxis::Vertical => context.row_height + context.spacing,
     }
     .max(1.0)
 }
@@ -303,7 +309,6 @@ pub(crate) fn apply_settings_tab_interaction(
 #[cfg(test)]
 mod tests {
     use super::{SlotCellContext, slot_advance};
-    use crate::app::theme::TAB_HEIGHT;
     use crate::app::ui::tab_drag::TabDropAxis;
     use eframe::egui;
     use std::collections::HashMap;
@@ -320,9 +325,10 @@ mod tests {
             spacing: 4.0,
             axis: TabDropAxis::Vertical,
             label_font_id: egui::FontId::proportional(14.0),
+            row_height: 96.0,
         };
 
-        assert_eq!(slot_advance(&context), TAB_HEIGHT + 4.0);
+        assert_eq!(slot_advance(&context), 100.0);
     }
 
     #[test]
@@ -337,6 +343,7 @@ mod tests {
             spacing: 4.0,
             axis: TabDropAxis::Horizontal,
             label_font_id: egui::FontId::proportional(14.0),
+            row_height: 96.0,
         };
 
         assert_eq!(slot_advance(&context), 164.0);

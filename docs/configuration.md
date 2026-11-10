@@ -178,7 +178,11 @@ split_tile = "ctrl+alt+enter"
 
 The existing `increase_font_size` and `decrease_font_size` keys now control zoom
 for the active pane, not the global font-size preference. `reset_zoom` returns
-that pane to 100%. The default line-number shortcut is now `ctrl+9`.
+that pane to 100%. At 100%, editor text, Settings labels and tab labels use the
+same configured font size; tabs have no separate size cap. Settings previews show
+this unzoomed appearance, including the configured text, background and highlight
+colours. Headings and descriptions retain their relative sizes.
+The default line-number shortcut is now `ctrl+9`.
 
 Names and modifiers are case-insensitive. Supported modifiers are `ctrl`,
 `shift`, `alt`, and `command`/`super`/`win`. Separate multiple bindings with

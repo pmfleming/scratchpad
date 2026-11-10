@@ -1,4 +1,5 @@
 mod resolved_appearance;
+mod typography;
 
 use super::*;
 use egui_kittest::{

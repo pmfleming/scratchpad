@@ -6,7 +6,7 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
-use crate::app::theme::{BUTTON_SIZE, TAB_BUTTON_WIDTH, TAB_HEIGHT, action_bg, action_hover_bg};
+use crate::app::theme::{BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, action_hover_bg};
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone, TabRectEntry};
 use crate::app::ui::tab_overflow;
 use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
@@ -38,7 +38,10 @@ pub(super) fn show_tab_region(
 
     widget_ids::feature_scope(ui, "tab_strip_horizontal", |ui| {
         ui.allocate_ui_with_layout(
-            egui::vec2(layout.tab_area_width, TAB_HEIGHT),
+            egui::vec2(
+                layout.tab_area_width,
+                crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size()),
+            ),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 tab_drag::sync_drag_state(ui);
@@ -72,7 +75,10 @@ fn allocate_tab_strip_entries(
     outcome: &mut TabStripOutcome,
 ) -> (Vec<TabRectEntry>, egui::Rect) {
     let output = ui.allocate_ui_with_layout(
-        egui::vec2(layout.visible_strip_width, TAB_HEIGHT),
+        egui::vec2(
+            layout.visible_strip_width,
+            crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size()),
+        ),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             configure_tab_strip_viewport(ui, layout.visible_strip_width);
@@ -108,7 +114,16 @@ fn render_tab_strip_entries(
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = layout.spacing;
-            ui.horizontal(|ui| collect_tab_entries(ui, context)).inner
+            let height = crate::app::chrome::tab_row_height(
+                ui.ctx(),
+                context.app.state.app_settings.font_size(),
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), height),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| collect_tab_entries(ui, context),
+            )
+            .inner
         });
     maybe_auto_scroll_tab_strip(
         ui,
@@ -126,6 +141,7 @@ fn collect_tab_entries(
     context: &mut TabStripEntriesContext<'_>,
 ) -> Vec<TabRectEntry> {
     let cell_context = slot_cell_context(
+        ui,
         context.app,
         context.duplicate_name_counts,
         TAB_BUTTON_WIDTH,
@@ -281,7 +297,10 @@ fn show_drag_region(
         return;
     }
 
-    let (_, rect) = ui.allocate_space(egui::vec2(drag_width, TAB_HEIGHT));
+    let (_, rect) = ui.allocate_space(egui::vec2(
+        drag_width,
+        crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size()),
+    ));
     let drag_response = widget_ids::interact(
         ui,
         rect,

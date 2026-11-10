@@ -167,6 +167,7 @@ fn collect_vertical_tab_entries(
     outcome: &mut TabStripOutcome,
 ) -> Vec<crate::app::ui::tab_drag::TabRectEntry> {
     let context = slot_cell_context(
+        ui,
         app,
         duplicate_name_counts,
         ui.available_width().max(TAB_BUTTON_WIDTH),
@@ -187,15 +188,16 @@ fn maybe_auto_scroll_vertical_entries(
         ui,
         scroll_area_id,
         viewport_rect,
-        estimated_vertical_tab_list_height(app, 4.0),
+        estimated_vertical_tab_list_height(ui, app, 4.0),
         scroll_state,
     );
 }
 
-fn estimated_vertical_tab_list_height(app: &ScratchpadApp, spacing: f32) -> f32 {
+fn estimated_vertical_tab_list_height(ui: &egui::Ui, app: &ScratchpadApp, spacing: f32) -> f32 {
     let tab_count = crate::app::app_state::workspace::display_tabs::total_tab_slots(app);
     if tab_count > 0 {
-        (tab_count as f32 * crate::app::theme::TAB_HEIGHT)
+        (tab_count as f32
+            * crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size()))
             + ((tab_count.saturating_sub(1)) as f32 * spacing)
     } else {
         0.0

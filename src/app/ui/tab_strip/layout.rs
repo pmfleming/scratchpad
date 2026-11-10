@@ -204,7 +204,12 @@ pub(crate) fn horizontal_bar_visible(
     auto_hide_visible(
         app,
         ui.ctx(),
-        pointer_near_bar(ui, HEADER_HEIGHT, position),
+        pointer_near_bar(
+            ui,
+            crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size())
+                + HEADER_VERTICAL_PADDING * 2.0,
+            position,
+        ),
         now,
     )
 }
@@ -233,6 +238,7 @@ pub(crate) fn show_horizontal_tab_panel(
     ui: &mut egui::Ui,
     position: TabListPosition,
     panel_id: &'static str,
+    row_height: f32,
     bar_visible: bool,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
@@ -245,7 +251,10 @@ pub(crate) fn show_horizontal_tab_panel(
     };
 
     panel
-        .exact_size(auto_hide_panel_extent(bar_visible, HEADER_HEIGHT))
+        .exact_size(auto_hide_panel_extent(
+            bar_visible,
+            row_height + HEADER_VERTICAL_PADDING * 2.0,
+        ))
         .frame(horizontal_tab_list_frame(ui))
         .show(ui, |ui| {
             if !bar_visible {
@@ -259,6 +268,7 @@ pub(crate) fn show_horizontal_edge_tab_list(
     ui: &mut egui::Ui,
     position: TabListPosition,
     panel_id: &'static str,
+    row_height: f32,
     selected: bool,
     bar_visible: bool,
     add_contents: impl FnOnce(&mut egui::Ui),
@@ -267,7 +277,14 @@ pub(crate) fn show_horizontal_edge_tab_list(
         return;
     }
 
-    show_horizontal_tab_panel(ui, position, panel_id, bar_visible, add_contents);
+    show_horizontal_tab_panel(
+        ui,
+        position,
+        panel_id,
+        row_height,
+        bar_visible,
+        add_contents,
+    );
 }
 
 pub(crate) fn vertical_tab_list_frame(ui: &egui::Ui) -> egui::Frame {

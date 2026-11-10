@@ -6,7 +6,7 @@ use crate::app::theme::TAB_HEIGHT;
 #[test]
 fn overflow_popup_height_tracks_visible_rows() {
     assert_eq!(
-        overflow_popup_target_height(4, TAB_HEIGHT * 20.0),
+        overflow_popup_target_height(4, TAB_HEIGHT * 20.0, TAB_HEIGHT),
         TAB_HEIGHT * 4.0
     );
 }
@@ -14,7 +14,7 @@ fn overflow_popup_height_tracks_visible_rows() {
 #[test]
 fn overflow_popup_height_caps_at_viewport_max() {
     assert_eq!(
-        overflow_popup_target_height(20, TAB_HEIGHT * 4.5),
+        overflow_popup_target_height(20, TAB_HEIGHT * 4.5, TAB_HEIGHT),
         TAB_HEIGHT * 4.5
     );
 }

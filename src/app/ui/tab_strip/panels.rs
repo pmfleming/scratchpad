@@ -88,10 +88,20 @@ fn show_horizontal_tab_list(
 
     let ctx = ui.ctx().clone();
     let bar_visible = horizontal_bar_visible(ui, app, position, Instant::now());
-    show_horizontal_edge_tab_list(ui, position, panel_id, true, bar_visible, |ui| {
-        let outcome = show_horizontal_tab_bar(&ctx, ui, app);
-        apply_tab_outcome(app, outcome);
-    });
+    let row_height =
+        crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size());
+    show_horizontal_edge_tab_list(
+        ui,
+        position,
+        panel_id,
+        row_height,
+        true,
+        bar_visible,
+        |ui| {
+            let outcome = show_horizontal_tab_bar(&ctx, ui, app);
+            apply_tab_outcome(app, outcome);
+        },
+    );
 }
 
 fn show_horizontal_tab_bar(
@@ -99,21 +109,26 @@ fn show_horizontal_tab_bar(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
 ) -> super::TabStripOutcome {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        if show_primary_actions(ui, app) {
-            ui.add_space(8.0);
-        }
+    let height = crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size());
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            if show_primary_actions(ui, app) {
+                ui.add_space(8.0);
+            }
 
-        let layout = HeaderLayout::measure(app, ui.available_width(), 4.0, true);
-        let outcome = show_tab_region(ctx, ui, app, &layout);
+            let layout = HeaderLayout::measure(app, ui.available_width(), 4.0, true);
+            let outcome = show_tab_region(ctx, ui, app, &layout);
 
-        if layout.caption_controls_width > 0.0 {
-            ui.add_space(8.0);
-            show_caption_controls(ctx, ui, app, &layout);
-        }
-        outcome
-    })
+            if layout.caption_controls_width > 0.0 {
+                ui.add_space(8.0);
+                show_caption_controls(ctx, ui, app, &layout);
+            }
+            outcome
+        },
+    )
     .inner
 }
 

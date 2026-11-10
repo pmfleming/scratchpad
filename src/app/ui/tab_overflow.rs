@@ -147,7 +147,10 @@ fn show_overflow_popup(
     let popup_width = row_width + TAB_LIST_SCROLLBAR_GUTTER;
     let popup_max_height = overflow_popup_max_height(ctx, request.anchor, request.pivot);
     let visible_row_count = overflow_row_count(request.app, request.visible_tab_indices);
-    let popup_target_height = overflow_popup_target_height(visible_row_count, popup_max_height);
+    let row_height =
+        crate::app::chrome::tab_row_height(ctx, request.app.state.app_settings.font_size());
+    let popup_target_height =
+        overflow_popup_target_height(visible_row_count, popup_max_height, row_height);
     let area_response = widget_ids::area(request.overflow_popup_id)
         .order(egui::Order::Foreground)
         .constrain(true)
@@ -258,17 +261,19 @@ fn maybe_auto_scroll_overflow_popup(
         ui.ctx(),
         scroll_area_id,
         viewport_rect,
-        estimated_overflow_popup_content_height(app, visible_tab_indices),
+        estimated_overflow_popup_content_height(ui, app, visible_tab_indices),
         scroll_state,
         tab_drag::TabDropAxis::Vertical,
     );
 }
 
 fn estimated_overflow_popup_content_height(
+    ui: &egui::Ui,
     app: &ScratchpadApp,
     visible_tab_indices: &HashSet<usize>,
 ) -> f32 {
-    overflow_row_count(app, visible_tab_indices) as f32 * TAB_HEIGHT
+    overflow_row_count(app, visible_tab_indices) as f32
+        * crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size())
 }
 
 fn overflow_popup_scroll_id(overflow_popup_id: egui::Id) -> egui::Id {
@@ -329,10 +334,14 @@ fn overflow_popup_max_height(ctx: &egui::Context, anchor: egui::Pos2, pivot: egu
     (available_height - OVERFLOW_POPUP_VIEWPORT_MARGIN).max(TAB_HEIGHT)
 }
 
-fn overflow_popup_target_height(visible_row_count: usize, popup_max_height: f32) -> f32 {
-    (visible_row_count as f32 * TAB_HEIGHT)
+fn overflow_popup_target_height(
+    visible_row_count: usize,
+    popup_max_height: f32,
+    row_height: f32,
+) -> f32 {
+    (visible_row_count as f32 * row_height)
+        .max(row_height)
         .min(popup_max_height)
-        .max(TAB_HEIGHT)
 }
 
 fn overflow_row_count(app: &ScratchpadApp, visible_tab_indices: &HashSet<usize>) -> usize {
@@ -431,12 +440,15 @@ fn show_overflow_row(
     menu: &mut OverflowMenuContext<'_>,
 ) -> egui::Rect {
     widget_ids::surface_scope(ui, ("tab_overflow.slot", slot_index), |ui| {
+        ui.visuals_mut().override_text_color = Some(app.state.app_settings.editor_text_color());
+        let row_height =
+            crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size());
         if is_drag_source {
-            return render_drag_source_placeholder(ui, menu.row_width);
+            return render_drag_source_placeholder(ui, menu.row_width, row_height);
         }
 
         let Some(row_state) = overflow_row_state(app, slot_index, duplicate_name_counts) else {
-            return render_drag_source_placeholder(ui, menu.row_width);
+            return render_drag_source_placeholder(ui, menu.row_width, row_height);
         };
 
         let (response, promote_response, close_response, truncated) = tab_button_with_actions(
@@ -559,8 +571,8 @@ fn handle_overflow_slot_action(
     *menu.overflow_popup_open = false;
 }
 
-fn render_drag_source_placeholder(ui: &mut egui::Ui, width: f32) -> egui::Rect {
-    let (_, rect) = ui.allocate_space(egui::vec2(width, TAB_HEIGHT));
+fn render_drag_source_placeholder(ui: &mut egui::Ui, width: f32, row_height: f32) -> egui::Rect {
+    let (_, rect) = ui.allocate_space(egui::vec2(width, row_height));
     ui.painter()
         .rect_filled(rect, 4.0, tab_active_bg(ui).gamma_multiply(0.25));
     ui.painter().rect_stroke(

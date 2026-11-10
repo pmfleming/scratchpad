@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Tab labels use the configured font size without a separate cap and match the editor at 100% zoom and Settings labels. Tab rows grow to fit, and tab text follows the configured text colour.
+
 - Settings follows the selected System or Scratchpad font, size, text and background palette, including menus and color pickers. Headings scale with the base size and controls wrap or stack in narrow layouts.
 
 - Timeline uses the same blue rail as This file, without date headings. Connected up/down controls jump to the newest and oldest events without changing the document.
