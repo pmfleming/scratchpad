@@ -17,10 +17,22 @@ pub(super) fn usage_row_with_marker(
 ) {
     let value = format_bytes(bytes);
     let value_galley = ui.fonts_mut(|fonts| {
-        fonts.layout_no_wrap(value.clone(), SettingsUi::font(ui, 13.0), text_primary(ui))
+        fonts.layout(
+            value.clone(),
+            SettingsUi::font(ui, 13.0),
+            text_primary(ui),
+            ui.available_width(),
+        )
     });
     let marker_width = if marker.is_some() { 19.0 } else { 0.0 };
-    let label_width = (ui.available_width() - marker_width - value_galley.size().x - 12.0).max(0.0);
+    let stacked =
+        ui.available_width() < value_galley.size().x + marker_width + 150.0 * SettingsUi::scale(ui);
+    let label_width = if stacked {
+        ui.available_width() - marker_width
+    } else {
+        ui.available_width() - marker_width - value_galley.size().x - 12.0
+    }
+    .max(1.0);
     let label_galley = ui.fonts_mut(|fonts| {
         fonts.layout(
             label.to_owned(),
@@ -29,9 +41,13 @@ pub(super) fn usage_row_with_marker(
             label_width,
         )
     });
-    let height = 24.0_f32
-        .max(label_galley.size().y)
-        .max(value_galley.size().y);
+    let height = if stacked {
+        label_galley.size().y + value_galley.size().y + 6.0
+    } else {
+        24.0_f32
+            .max(label_galley.size().y)
+            .max(value_galley.size().y)
+    };
     let row = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), height));
     if let Some(color) = marker {
         let rect = egui::Rect::from_center_size(
@@ -52,14 +68,22 @@ pub(super) fn usage_row_with_marker(
     let label_rect = egui::Rect::from_min_size(
         egui::pos2(
             row.left() + marker_width,
-            row.center().y - label_galley.size().y / 2.0,
+            if stacked {
+                row.top()
+            } else {
+                row.center().y - label_galley.size().y / 2.0
+            },
         ),
         label_galley.size(),
     );
     let value_rect = egui::Rect::from_min_size(
         egui::pos2(
             row.right() - value_galley.size().x,
-            row.center().y - value_galley.size().y / 2.0,
+            if stacked {
+                row.bottom() - value_galley.size().y
+            } else {
+                row.center().y - value_galley.size().y / 2.0
+            },
         ),
         value_galley.size(),
     );

@@ -87,6 +87,23 @@ pub(super) fn render_workspace(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn tab_position_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    if SettingsUi::scale(ui) > 1.3 {
+        let mut selected = app.state.app_settings.tab_list_position();
+        if super::widgets::segmented_row(
+            ui,
+            "Tabs",
+            &mut selected,
+            &[
+                (TabListPosition::Top, "Top"),
+                (TabListPosition::Bottom, "Bottom"),
+                (TabListPosition::Left, "Left"),
+                (TabListPosition::Right, "Right"),
+            ],
+        ) {
+            settings::set_tab_list_position(app, selected);
+        }
+        return;
+    }
     inner_select_row(ui, "Tabs", None, |ui| {
         let selected = app.state.app_settings.tab_list_position();
         let lane = ui.max_rect();

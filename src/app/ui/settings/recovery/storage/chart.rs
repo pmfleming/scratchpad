@@ -120,14 +120,15 @@ pub(super) fn render(ui: &mut egui::Ui, usage: &StorageUsage) {
 /// categories even when their slices are not visible.
 pub(super) fn breakdown(ui: &mut egui::Ui, key: &str, parts: &[Part]) {
     ui.add_space(12.0);
-    if ui.available_width() >= 600.0 {
+    let diameter = 156.0 * SettingsUi::scale(ui).max(1.0);
+    if ui.available_width() >= 600.0 * SettingsUi::scale(ui).max(1.0) {
         ui.horizontal_top(|ui| {
-            pie(ui, key, parts, 156.0);
+            pie(ui, key, parts, diameter);
             ui.add_space(16.0);
             ui.vertical(|ui| legend(ui, parts));
         });
     } else {
-        let diameter = ui.available_width().min(156.0);
+        let diameter = ui.available_width().min(diameter);
         ui.horizontal(|ui| {
             ui.add_space((ui.available_width() - diameter) / 2.0);
             pie(ui, key, parts, diameter);
@@ -179,13 +180,17 @@ fn pie(ui: &mut egui::Ui, key: &str, parts: &[Part], diameter: f32) {
     if total == 0.0 {
         ui.painter()
             .circle_filled(center, radius, SettingsUi::control_bg(ui));
-        ui.painter().text(
-            center,
-            egui::Align2::CENTER_CENTER,
-            "No data",
-            SettingsUi::font(ui, SettingsUi::TYPOGRAPHY.description),
-            super::text_muted(ui),
-        );
+        let galley = ui.fonts_mut(|fonts| {
+            fonts.layout(
+                "No data".into(),
+                SettingsUi::font(ui, SettingsUi::TYPOGRAPHY.description),
+                super::text_muted(ui),
+                diameter - 16.0,
+            )
+        });
+        ui.painter()
+            .with_clip_rect(response.rect.intersect(ui.clip_rect()))
+            .galley(center - galley.size() / 2.0, galley, super::text_muted(ui));
         response.on_hover_text(label);
         return;
     }

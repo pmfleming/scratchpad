@@ -1,11 +1,13 @@
 use super::{ScratchpadApp, SettingsUi, egui, text_muted, text_primary};
 use crate::app::ui::widget_ids;
-use std::{hash::Hash, ops::RangeInclusive};
+use std::hash::Hash;
+mod numeric;
+pub(super) use numeric::numeric_slider;
 
 mod card;
 mod layout_state;
 mod primitives;
-pub(super) use primitives::destructive_button;
+pub(super) use primitives::{color_button, destructive_button};
 mod segmented;
 pub(super) use card::{render_preview_panel, settings_card_frame};
 #[cfg(test)]
@@ -36,49 +38,7 @@ pub(super) fn category(
             .data_mut(|data| data.get_persisted::<bool>(id))
             .unwrap_or(true);
     settings_card_frame(ui, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            key,
-            widget_ids::WidgetRole::SettingsCardHeader,
-            |ui| {
-                ui.add_sized(
-                    egui::vec2(ui.available_width(), 44.0),
-                    egui::Button::new("").frame(false),
-                )
-            },
-        );
-        response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::DisclosureTriangle, true, title));
-        ui.ctx()
-            .accesskit_node_builder(response.id, |node| node.set_expanded(open));
-        let rect = response.rect;
-        ui.painter().text(
-            rect.left_center(),
-            egui::Align2::LEFT_CENTER,
-            if open {
-                egui_phosphor::regular::CARET_DOWN
-            } else {
-                egui_phosphor::regular::CARET_RIGHT
-            },
-            egui_phosphor::font_id(16.0),
-            SettingsUi::accent(ui),
-        );
-        ui.painter().text(
-            rect.left_center() + egui::vec2(28.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            title,
-            SettingsUi::font(ui, 20.0),
-            text_primary(ui),
-        );
-        if rect.width() > 560.0 {
-            ui.painter().text(
-                rect.right_center(),
-                egui::Align2::RIGHT_CENTER,
-                subtitle,
-                SettingsUi::font(ui, 12.5),
-                text_muted(ui),
-            );
-        }
+        let response = category_heading(ui, key, title, subtitle, open);
         if response.clicked() && !reveal {
             ui.data_mut(|data| data.insert_persisted(id, !open));
         }
@@ -89,13 +49,76 @@ pub(super) fn category(
     });
 }
 
+fn category_heading(
+    ui: &mut egui::Ui,
+    key: &str,
+    title: &str,
+    subtitle: &str,
+    open: bool,
+) -> egui::Response {
+    let width = ui.available_width();
+    let title_galley = ui.fonts_mut(|fonts| {
+        fonts.layout(
+            title.to_owned(),
+            SettingsUi::font(ui, 20.0),
+            text_primary(ui),
+            (width - 28.0).max(1.0),
+        )
+    });
+    let subtitle_galley = ui.fonts_mut(|fonts| {
+        fonts.layout_no_wrap(
+            subtitle.to_owned(),
+            SettingsUi::font(ui, 12.5),
+            text_muted(ui),
+        )
+    });
+    let height = (44.0 * SettingsUi::scale(ui).max(1.0)).max(title_galley.size().y + 12.0);
+    let response =
+        widget_ids::surface_response(ui, key, widget_ids::WidgetRole::SettingsCardHeader, |ui| {
+            ui.add_sized(
+                egui::vec2(width, height),
+                egui::Button::new("").frame(false),
+            )
+        });
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::DisclosureTriangle, true, title));
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_expanded(open));
+    let rect = response.rect;
+    ui.painter().text(
+        rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        if open {
+            egui_phosphor::regular::CARET_DOWN
+        } else {
+            egui_phosphor::regular::CARET_RIGHT
+        },
+        egui_phosphor::font_id(16.0),
+        SettingsUi::accent(ui),
+    );
+    let title_pos = egui::pos2(
+        rect.left() + 28.0,
+        rect.center().y - title_galley.size().y / 2.0,
+    );
+    let title_width = title_galley.size().x;
+    ui.painter()
+        .galley(title_pos, title_galley, text_primary(ui));
+    if width > 560.0 && title_width + subtitle_galley.size().x + 52.0 < width {
+        let pos = egui::pos2(
+            rect.right() - subtitle_galley.size().x,
+            rect.center().y - subtitle_galley.size().y / 2.0,
+        );
+        ui.painter().galley(pos, subtitle_galley, text_muted(ui));
+    }
+    response
+}
+
 pub(super) fn group_heading(ui: &mut egui::Ui, title: &str) {
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(8.0);
     ui.label(
         egui::RichText::new(title)
-            .size(12.5)
+            .font(SettingsUi::font(ui, 12.5))
             .strong()
             .color(text_muted(ui)),
     );
@@ -107,7 +130,7 @@ pub(super) fn inner_select_row(
     description: Option<&str>,
     control: impl FnOnce(&mut egui::Ui),
 ) {
-    inner_select_row_with_height(ui, label, description, 56.0, control);
+    inner_select_row_with_height(ui, label, description, SettingsUi::row_height(ui), control);
 }
 
 fn inner_select_row_with_height(
@@ -130,8 +153,8 @@ fn render_select_row(
     control: impl FnOnce(&mut egui::Ui),
 ) {
     let width = ui.available_width();
-    let stacked = width < 540.0;
-    let control_width = width.min(SettingsUi::CONTROLS.column_width);
+    let stacked = width < 540.0 * SettingsUi::scale(ui).max(1.0);
+    let control_width = width.min(SettingsUi::column_width(ui));
     let label_width = if stacked {
         width
     } else {
@@ -271,7 +294,12 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
             .size()
             .x + ui.spacing().item_spacing.x
         };
-        let width = width.min((lane.width() - unit_width).max(0.0));
+        let width = if key == "Size" {
+            SettingsUi::size_dropdown_width(ui, lane.width())
+        } else {
+            width * SettingsUi::scale(ui).max(1.0)
+        }
+        .min((lane.width() - unit_width).max(0.0));
         let left = lane.right() - width - unit_width;
         let rect = egui::Rect::from_min_max(egui::pos2(left, lane.top()), lane.max);
         widget_ids::rect_scope_with_layout(
@@ -280,13 +308,23 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
             (key, "dropdown"),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
+                let popup_style = (**ui.style()).clone();
                 let response = widget_ids::combo_box(ui, key)
                     .selected_text(label(*value))
                     .width(width.min(ui.available_width()))
                     .truncate()
+                    .popup_style(popup_style.into())
                     .show_ui(ui, |ui| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                        ui.set_max_width((ui.ctx().content_rect().width() - 32.0).max(40.0));
                         for &option in options {
-                            if ui.selectable_value(value, option, label(option)).clicked() {
+                            let text =
+                                egui::RichText::new(label(option)).color(if *value == option {
+                                    ui.visuals().selection.stroke.color
+                                } else {
+                                    text_primary(ui)
+                                });
+                            if ui.selectable_value(value, option, text).clicked() {
                                 ui.close();
                             }
                         }
@@ -295,7 +333,11 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
                 record_settings_control_box(format!("combo.{key}"), response.rect);
                 let mut control_rect = response.rect;
                 if !unit.is_empty() {
-                    let unit = ui.label(egui::RichText::new(unit).size(12.5).color(text_muted(ui)));
+                    let unit = ui.label(
+                        egui::RichText::new(unit)
+                            .font(SettingsUi::font(ui, 12.5))
+                            .color(text_muted(ui)),
+                    );
                     record_settings_control_box(format!("unit.{key}"), unit.rect);
                     control_rect = control_rect.union(unit.rect);
                 }
@@ -304,103 +346,6 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
         );
     });
     *value != original
-}
-
-/// Track / exact value / short unit have identical columns for every slider.
-/// Neither widget clamps an existing value merely because settings are rendered.
-pub(super) fn numeric_slider(
-    ui: &mut egui::Ui,
-    label: &str,
-    value: &mut u64,
-    range: RangeInclusive<u64>,
-    unit: &str,
-) -> bool {
-    let mut changed = false;
-    inner_select_row(ui, label, None, |ui| {
-        available_width_control(ui, |ui| {
-            let lane = ui.max_rect();
-            let width = lane.width().min(SettingsUi::CONTROLS.column_width);
-            let start = lane.right() - width;
-            let number_width = 78.0;
-            let unit_width = 32.0;
-            let gap = 10.0;
-            let track_width = (width - number_width - unit_width - gap * 2.0).max(20.0);
-            let slider_rect = egui::Rect::from_min_size(
-                egui::pos2(start, lane.top()),
-                egui::vec2(track_width, lane.height()),
-            );
-            widget_ids::rect_scope_with_layout(
-                ui,
-                slider_rect,
-                (label, "slider"),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    ui.spacing_mut().slider_width = track_width;
-                    SettingsUi::apply_slider_style(ui);
-                    // Preview resizing moves this row. Keep drag identity
-                    // independent of the surrounding rectangle-based scopes.
-                    let response = widget_ids::surface_response(
-                        ui,
-                        ("settings.numeric", label),
-                        "slider",
-                        |ui| {
-                            ui.add(
-                                egui::Slider::new(value, range.clone())
-                                    .step_by(1.0)
-                                    .clamping(egui::SliderClamping::Edits)
-                                    .handle_shape(egui::style::HandleShape::Circle)
-                                    .trailing_fill(true)
-                                    .show_value(false),
-                            )
-                        },
-                    );
-                    changed |= response.changed();
-                    record_settings_control_box(format!("slider.{label}"), response.rect);
-                },
-            );
-            let number_rect = egui::Rect::from_min_size(
-                egui::pos2(start + track_width + gap, lane.top()),
-                egui::vec2(number_width, lane.height()),
-            );
-            widget_ids::rect_scope_with_layout(
-                ui,
-                number_rect,
-                (label, "number"),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    let response = widget_ids::surface_response(
-                        ui,
-                        ("settings.numeric", label),
-                        "number",
-                        |ui| {
-                            ui.add_sized(
-                                egui::vec2(number_width, SettingsUi::CONTROLS.height),
-                                egui::DragValue::new(value)
-                                    .range(range)
-                                    .clamp_existing_to_range(false)
-                                    .update_while_editing(false)
-                                    .speed(1),
-                            )
-                        },
-                    );
-                    changed |= response.changed();
-                    record_settings_control_box(format!("number.{label}"), response.rect);
-                },
-            );
-            let unit_rect = egui::Rect::from_min_size(
-                egui::pos2(number_rect.right() + gap, lane.top()),
-                egui::vec2(unit_width, lane.height()),
-            );
-            ui.painter().text(
-                unit_rect.left_center(),
-                egui::Align2::LEFT_CENTER,
-                unit,
-                SettingsUi::font(ui, 12.5),
-                text_muted(ui),
-            );
-        });
-    });
-    changed
 }
 
 pub(super) fn action_row(ui: &mut egui::Ui, label: &str, button: &str, help: Option<&str>) -> bool {
@@ -424,12 +369,30 @@ fn action_row_with(
     add_button: impl FnOnce(&mut egui::Ui, &str) -> egui::Response,
 ) -> bool {
     let mut clicked = false;
-    inner_select_row(ui, label, help, |ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let response = add_button(ui, button);
-            record_settings_control_box(format!("button.{button}"), response.rect);
-            clicked = response.clicked();
-        });
-    });
+    let width = ui.available_width().min(SettingsUi::column_width(ui));
+    let button_height =
+        ui.fonts_mut(|fonts| {
+            fonts.layout(
+                button.to_owned(),
+                egui::TextStyle::Button.resolve(ui.style()),
+                text_primary(ui),
+                (width - 20.0).max(1.0),
+            )
+        })
+        .size()
+        .y + 14.0;
+    inner_select_row_with_height(
+        ui,
+        label,
+        help,
+        SettingsUi::row_height(ui).max(button_height),
+        |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let response = add_button(ui, button);
+                record_settings_control_box(format!("button.{button}"), response.rect);
+                clicked = response.clicked();
+            });
+        },
+    );
     clicked
 }

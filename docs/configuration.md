@@ -63,10 +63,13 @@ editor_text_highlight_color = "#fff36d"
 editor_text_highlight_text_color = "#0b0f3d"
 ```
 
-With `appearance_source = "system"`, Scratchpad resolves the editor font,
+With `appearance_source = "system"`, Scratchpad resolves the editor and Settings-page font,
 font size, theme, and palette from the desktop and uses conservative fallbacks
 when a value is unavailable. With `appearance_source = "app"`, the remaining
 editor values are authoritative. Colors use six-digit `#RRGGBB` notation.
+The Settings page and its menus use the resolved font, base size, text and background
+colors too. Headings and descriptions scale with the base size; controls wrap or
+stack to fit larger fonts.
 
 `font_source = "scratchpad"` selects one of the bundled font presets.
 `font_source = "os"` uses `os_font_family`, or the desktop's default editor

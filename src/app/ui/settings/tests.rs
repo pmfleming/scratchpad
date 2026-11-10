@@ -1,3 +1,5 @@
+mod resolved_appearance;
+
 use super::*;
 use egui_kittest::{
     Harness,
@@ -500,7 +502,12 @@ fn both_reset_actions_are_destructive_without_restyling_ordinary_buttons() {
                     opening::render_application(ui, app);
                     opening::reset_confirmation(ui.ctx(), app);
                 },
-                app(),
+                {
+                    let mut state = app();
+                    state.state.app_settings.editor.editor_background_color =
+                        if dark { "#15181d" } else { "#ffffff" }.into();
+                    state
+                },
             );
         harness.run();
         let reset = harness

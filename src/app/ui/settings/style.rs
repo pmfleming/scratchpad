@@ -1,3 +1,5 @@
+mod appearance;
+
 use crate::app::theme;
 use eframe::egui;
 
@@ -47,7 +49,7 @@ impl SettingsUi {
             .override_font_id
             .clone()
             .unwrap_or_else(|| egui::TextStyle::Body.resolve(ui.style()));
-        font.size = size;
+        font.size = size * Self::scale(ui);
         font
     }
 
@@ -56,16 +58,23 @@ impl SettingsUi {
         let field = Self::field_bg(ui);
         let hover = Self::control_bg(ui);
         let border = Self::card_border(ui);
-        let text = theme::text_primary(ui);
-        let selected = theme::tab_selected_bg(ui);
+        let text = super::text_primary(ui);
+        let selected = if ui.visuals().override_text_color.is_some() {
+            ui.visuals().selection.bg_fill
+        } else {
+            theme::tab_selected_bg(ui)
+        };
         let accent = Self::accent(ui);
+        let height = Self::control_height(ui);
         let style = ui.style_mut();
-        style.spacing.interact_size.y = Self::CONTROLS.height;
+        style.spacing.interact_size.y = height;
         style.spacing.button_padding = egui::vec2(10.0, 7.0);
         style.visuals.extreme_bg_color = field;
         style.visuals.widgets.noninteractive.fg_stroke.color = text;
         style.visuals.selection.bg_fill = selected;
-        style.visuals.selection.stroke = egui::Stroke::new(1.0, accent);
+        if style.visuals.override_text_color.is_none() {
+            style.visuals.selection.stroke = egui::Stroke::new(1.0, accent);
+        }
         for widget in [
             &mut style.visuals.widgets.inactive,
             &mut style.visuals.widgets.hovered,
@@ -85,8 +94,8 @@ impl SettingsUi {
     }
     /// Scoped to sliders so their rail and handle don't inherit dark field fills.
     pub(super) fn apply_slider_style(ui: &mut egui::Ui) {
-        let rail = theme::text_muted(ui);
-        let accent = ui.visuals().selection.stroke.color;
+        let rail = super::text_muted(ui);
+        let accent = Self::accent(ui);
         let style = ui.style_mut();
         style.spacing.slider_rail_height = 6.0;
         style.visuals.widgets.inactive.bg_fill = rail;
@@ -96,19 +105,33 @@ impl SettingsUi {
     }
 
     pub(super) fn field_bg(ui: &egui::Ui) -> egui::Color32 {
-        theme::action_bg(ui)
+        if ui.visuals().override_text_color.is_some() {
+            ui.visuals().extreme_bg_color
+        } else {
+            theme::action_bg(ui)
+        }
     }
     pub(super) fn card_bg(ui: &egui::Ui) -> egui::Color32 {
         ui.visuals().window_fill()
     }
     pub(super) fn card_border(ui: &egui::Ui) -> egui::Color32 {
-        theme::border(ui)
+        if ui.visuals().override_text_color.is_some() {
+            ui.visuals().window_stroke.color
+        } else {
+            theme::border(ui)
+        }
     }
     pub(super) fn control_bg(ui: &egui::Ui) -> egui::Color32 {
-        theme::action_hover_bg(ui)
+        if ui.visuals().override_text_color.is_some() {
+            ui.visuals()
+                .panel_fill
+                .lerp_to_gamma(super::text_primary(ui), 0.14)
+        } else {
+            theme::action_hover_bg(ui)
+        }
     }
     pub(super) fn icon_color(ui: &egui::Ui) -> egui::Color32 {
-        crate::app::theme::text_muted(ui)
+        super::text_muted(ui)
     }
     /// Foreground, resting border, and hover fill for destructive actions.
     pub(super) fn destructive_colors(dark: bool) -> [egui::Color32; 3] {
@@ -120,7 +143,11 @@ impl SettingsUi {
         colors.map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
     }
     pub(super) fn accent(ui: &egui::Ui) -> egui::Color32 {
-        theme::tab_selected_accent(ui)
+        if ui.visuals().override_text_color.is_some() {
+            ui.visuals().selection.bg_fill
+        } else {
+            theme::tab_selected_accent(ui)
+        }
     }
     pub(super) fn card_frame(ui: &egui::Ui) -> egui::Frame {
         egui::Frame::new()

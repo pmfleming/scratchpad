@@ -137,7 +137,7 @@ pub(super) fn highlight_row(ui: &mut egui::Ui, label: &str, render: impl FnOnce(
             egui::epaint::RectShape::new(
                 rect,
                 6.0,
-                crate::app::theme::tab_selected_bg(ui),
+                SettingsUi::card_bg(ui).lerp_to_gamma(SettingsUi::accent(ui), 0.15),
                 egui::Stroke::new(1.0, SettingsUi::accent(ui)),
                 egui::StrokeKind::Inside,
             ),

@@ -29,7 +29,7 @@ pub(in crate::app::ui::settings) fn render_preview_panel(
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(if tabs { "Tab preview" } else { "Text preview" })
-                .size(12.5)
+                .font(SettingsUi::font(ui, 12.5))
                 .color(text_muted(ui)),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -39,7 +39,7 @@ pub(in crate::app::ui::settings) fn render_preview_panel(
                     settings.editor_font_selection().label(),
                     settings.font_size()
                 ))
-                .size(12.5)
+                .font(SettingsUi::font(ui, 12.5))
                 .color(text_muted(ui)),
             );
         });

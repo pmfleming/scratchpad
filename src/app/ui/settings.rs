@@ -3,7 +3,6 @@ use crate::app::fonts::{EDITOR_FONT_FAMILY, EditorFontPreset};
 use crate::app::services::settings_store::{
     AppThemeMode, EditorAppearanceSource, IndentationStyle, TabDisplayMode, TabListPosition,
 };
-use crate::app::theme::{text_muted, text_primary};
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
@@ -36,24 +35,30 @@ pub(crate) const PREVIEW_QUOTES: [(&str, &str); 3] = [
 ];
 
 pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    egui::CentralPanel::default().show(ui, |ui| {
-        widget_ids::feature_scope(ui, "settings", |ui| {
-            SettingsUi::apply_typography(ui);
-            let width = ui.available_width();
-            egui::ScrollArea::vertical()
-                .id_salt(widget_ids::scroll_id(ui, "settings_page_scroll"))
-                .scroll_source(egui::scroll_area::ScrollSource {
-                    drag: egui::scroll_area::DragScroll::Never,
-                    ..Default::default()
-                })
-                .auto_shrink([false, false])
-                .show(ui, |ui| render_page_body(ui, app, width));
-        });
+    widget_ids::scope(ui, "settings.appearance", |ui| {
+        SettingsUi::apply_appearance(ui, &app.state.app_settings);
+        egui::CentralPanel::default()
+            .frame(egui::Frame::central_panel(ui.style()).fill(ui.visuals().panel_fill))
+            .show(ui, |ui| {
+                widget_ids::feature_scope(ui, "settings", |ui| {
+                    SettingsUi::apply_typography(ui);
+                    let width = ui.available_width();
+                    egui::ScrollArea::vertical()
+                        .id_salt(widget_ids::scroll_id(ui, "settings_page_scroll"))
+                        .scroll_source(egui::scroll_area::ScrollSource {
+                            drag: egui::scroll_area::DragScroll::Never,
+                            ..Default::default()
+                        })
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| render_page_body(ui, app, width));
+                });
+            });
     });
     opening::reset_confirmation(ui.ctx(), app);
 }
 
 fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp, viewport_width: f32) {
+    SettingsUi::apply_appearance(ui, &app.state.app_settings);
     SettingsUi::apply_typography(ui);
     SettingsUi::apply_controls(ui);
     let available = ui.available_width().min(viewport_width);
@@ -69,7 +74,7 @@ fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp, viewport_width: 
             ui.set_max_width(width);
             ui.label(
                 egui::RichText::new("Settings")
-                    .size(28.0)
+                    .font(SettingsUi::font(ui, 28.0))
                     .strong()
                     .color(text_primary(ui)),
             );
@@ -116,4 +121,16 @@ pub(crate) fn dialog_card_border(ui: &egui::Ui) -> egui::Color32 {
     } else {
         egui::Color32::from_rgb(204, 213, 226)
     }
+}
+
+fn text_primary(ui: &egui::Ui) -> egui::Color32 {
+    ui.visuals()
+        .override_text_color
+        .unwrap_or_else(|| crate::app::theme::text_primary(ui))
+}
+
+fn text_muted(ui: &egui::Ui) -> egui::Color32 {
+    ui.visuals()
+        .weak_text_color
+        .unwrap_or_else(|| crate::app::theme::text_muted(ui))
 }

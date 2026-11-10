@@ -8,7 +8,7 @@ pub(super) fn toggle_switch(
     value: &mut bool,
 ) -> egui::Response {
     // Keep the compact track, with a full-height keyboard/pointer target.
-    let desired_size = egui::vec2(42.0, SettingsUi::CONTROLS.height);
+    let desired_size = egui::vec2(42.0, SettingsUi::control_height(ui));
     let available_rect = ui.available_rect_before_wrap();
     let top = available_rect.center().y - desired_size.y * 0.5;
     let min = if ui.layout().main_dir() == egui::Direction::RightToLeft {
@@ -54,7 +54,11 @@ pub(super) fn toggle_switch(
     ui.painter().circle_filled(
         egui::pos2(thumb_x, rect.center().y),
         radius - 3.0,
-        egui::Color32::WHITE,
+        if *value {
+            ui.visuals().selection.stroke.color
+        } else {
+            super::text_primary(ui)
+        },
     );
 
     if response.has_focus() && ui.is_enabled() {
@@ -78,6 +82,7 @@ pub(in crate::app::ui::settings) fn destructive_button(
     let field = SettingsUi::field_bg(ui);
     widget_ids::scope(ui, ("settings.destructive", text), |ui| {
         let visuals = ui.visuals_mut();
+        visuals.override_text_color = Some(foreground);
         for widget in [
             &mut visuals.widgets.inactive,
             &mut visuals.widgets.hovered,
@@ -93,10 +98,49 @@ pub(in crate::app::ui::settings) fn destructive_button(
         visuals.widgets.inactive.weak_bg_fill = field;
         // Keep keyboard focus distinct from the resting destructive border.
         visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, visuals.selection.stroke.color);
-        ui.add(egui::Button::new(text).min_size(egui::vec2(0.0, SettingsUi::CONTROLS.height)))
+        ui.add(egui::Button::new(text).min_size(egui::vec2(0.0, SettingsUi::control_height(ui))))
     })
     .inner
 }
 
 #[cfg(test)]
 mod tests;
+
+pub(in crate::app::ui::settings) fn color_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    color: &mut egui::Color32,
+) -> egui::Response {
+    let mut response = widget_ids::surface_response(ui, ("settings.color", label), "color", |ui| {
+        ui.add(egui::Button::new("").min_size(egui::vec2(48.0, SettingsUi::control_height(ui))))
+    });
+    egui::color_picker::show_color_at(ui.painter(), *color, response.rect.shrink(4.0));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            ui.is_enabled(),
+            format!("Edit {label} color"),
+        )
+    });
+    let style = (**ui.style()).clone();
+    egui::Popup::menu(&response)
+        .style(style)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            let viewport = ui.ctx().content_rect().size() - egui::vec2(48.0, 48.0);
+            egui::ScrollArea::both()
+                .max_width(viewport.x.max(100.0))
+                .max_height(viewport.y.max(100.0))
+                .show(ui, |ui| {
+                    ui.spacing_mut().slider_width = 275.0;
+                    if egui::color_picker::color_picker_color32(
+                        ui,
+                        color,
+                        egui::color_picker::Alpha::Opaque,
+                    ) {
+                        response.mark_changed();
+                    }
+                });
+        });
+    response
+}

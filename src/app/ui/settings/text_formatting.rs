@@ -122,7 +122,12 @@ fn font_size_slider(ui: &mut egui::Ui, size: &mut f32) -> bool {
             .size()
             .x
     });
-    let width = (lane.width() - 96.0 - unit_width - ui.spacing().item_spacing.x - 10.0).max(20.0);
+    let width = (lane.width()
+        - SettingsUi::size_dropdown_width(ui, lane.width())
+        - unit_width
+        - ui.spacing().item_spacing.x
+        - 10.0)
+        .max(20.0);
     let rect = egui::Rect::from_min_size(lane.min, egui::vec2(width, lane.height()));
     let response = widget_ids::rect_scope_with_layout(
         ui,
@@ -169,7 +174,7 @@ fn color_row(
     inner_select_row(ui, label, None, |ui| {
         let mut color = initial;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let response = ui.color_edit_button_srgba(&mut color);
+            let response = super::widgets::color_button(ui, label, &mut color);
             record_settings_control_box(format!("color.{label}"), response.rect);
             if response.changed() {
                 use_app_appearance(app);

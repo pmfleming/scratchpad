@@ -26,7 +26,7 @@ pub(in crate::app::ui::settings) fn segmented_row<T: Copy + PartialEq>(
             .x + 2.0 * ui.spacing().button_padding.x
         })
         .collect();
-    let available = ui.available_width().min(SettingsUi::CONTROLS.column_width);
+    let available = ui.available_width().min(SettingsUi::column_width(ui));
     let padding = 4.0;
     let gap = 2.0;
     let horizontal_width =
@@ -38,59 +38,65 @@ pub(in crate::app::ui::settings) fn segmented_row<T: Copy + PartialEq>(
         horizontal_width
     }
     .min(available);
-    let button_height = SettingsUi::CONTROLS.height;
+    let button_height = choice_height(ui, options, width - 2.0 * padding - 20.0);
     let height = 2.0 * padding
         + if vertical {
             button_height * options.len() as f32 + gap * (options.len() - 1) as f32
         } else {
             button_height
         };
-    inner_select_row_with_height(ui, label, None, height.max(56.0), |ui| {
-        available_width_control(ui, |ui| {
-            let lane = ui.max_rect();
-            let rect = egui::Rect::from_min_size(
-                egui::pos2(lane.right() - width, lane.center().y - height / 2.0),
-                egui::vec2(width, height),
-            );
-            ui.painter().rect(
-                rect,
-                8.0,
-                SettingsUi::field_bg(ui),
-                egui::Stroke::new(1.0, SettingsUi::card_border(ui)),
-                egui::StrokeKind::Inside,
-            );
-            record_settings_control_box(format!("segments.{label}"), rect);
-            let mut origin = rect.min + egui::Vec2::splat(padding);
-            for ((option, text), button_width) in options.iter().zip(&widths) {
-                let size = egui::vec2(
+    inner_select_row_with_height(
+        ui,
+        label,
+        None,
+        height.max(SettingsUi::row_height(ui)),
+        |ui| {
+            available_width_control(ui, |ui| {
+                let lane = ui.max_rect();
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(lane.right() - width, lane.center().y - height / 2.0),
+                    egui::vec2(width, height),
+                );
+                ui.painter().rect(
+                    rect,
+                    8.0,
+                    SettingsUi::field_bg(ui),
+                    egui::Stroke::new(1.0, SettingsUi::card_border(ui)),
+                    egui::StrokeKind::Inside,
+                );
+                record_settings_control_box(format!("segments.{label}"), rect);
+                let mut origin = rect.min + egui::Vec2::splat(padding);
+                for ((option, text), button_width) in options.iter().zip(&widths) {
+                    let size = egui::vec2(
+                        if vertical {
+                            (width - 2.0 * padding).max(0.0)
+                        } else {
+                            *button_width
+                        },
+                        button_height,
+                    );
+                    let button_rect = egui::Rect::from_min_size(origin, size);
+                    widget_ids::rect_scope_with_layout(
+                        ui,
+                        button_rect,
+                        (label, *text),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            let response = choice_button(ui, label, text, *value == *option, size);
+                            if response.clicked() {
+                                *value = *option;
+                            }
+                        },
+                    );
                     if vertical {
-                        (width - 2.0 * padding).max(0.0)
+                        origin.y += button_height + gap;
                     } else {
-                        *button_width
-                    },
-                    button_height,
-                );
-                let button_rect = egui::Rect::from_min_size(origin, size);
-                widget_ids::rect_scope_with_layout(
-                    ui,
-                    button_rect,
-                    (label, *text),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        let response = choice_button(ui, label, text, *value == *option, size);
-                        if response.clicked() {
-                            *value = *option;
-                        }
-                    },
-                );
-                if vertical {
-                    origin.y += button_height + gap;
-                } else {
-                    origin.x += button_width + gap;
+                        origin.x += button_width + gap;
+                    }
                 }
-            }
-        });
-    });
+            });
+        },
+    );
     *value != original
 }
 
@@ -108,9 +114,16 @@ fn choice_button(
         |ui| {
             ui.add_sized(
                 size,
-                egui::Button::selectable(selected, text)
-                    .truncate()
-                    .corner_radius(5),
+                egui::Button::selectable(
+                    selected,
+                    egui::RichText::new(text).color(if selected {
+                        ui.visuals().selection.stroke.color
+                    } else {
+                        text_primary(ui)
+                    }),
+                )
+                .wrap()
+                .corner_radius(5),
             )
         },
     );
@@ -119,4 +132,22 @@ fn choice_button(
     });
     record_settings_control_box(format!("segment.{label}.{text}"), response.rect);
     response
+}
+
+fn choice_height<T>(ui: &egui::Ui, options: &[(T, &str)], width: f32) -> f32 {
+    options
+        .iter()
+        .map(|(_, text)| {
+            ui.fonts_mut(|fonts| {
+                fonts.layout(
+                    (*text).to_owned(),
+                    egui::TextStyle::Button.resolve(ui.style()),
+                    text_primary(ui),
+                    width.max(1.0),
+                )
+            })
+            .size()
+            .y + 14.0
+        })
+        .fold(SettingsUi::control_height(ui), f32::max)
 }

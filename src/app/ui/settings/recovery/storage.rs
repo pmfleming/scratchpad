@@ -11,7 +11,7 @@ mod tests;
 fn storage_heading(ui: &mut egui::Ui, title: &str) {
     ui.label(
         egui::RichText::new(title)
-            .size(15.0)
+            .font(SettingsUi::font(ui, 15.0))
             .strong()
             .color(text_primary(ui)),
     );
@@ -28,7 +28,7 @@ pub(super) fn summary(ui: &mut egui::Ui, usage: &StorageUsage) {
     storage_heading(ui, "Files on disk");
     let total = ui.label(
         egui::RichText::new(format_bytes(usage.total_file_bytes))
-            .size(30.0)
+            .font(SettingsUi::font(ui, 30.0))
             .color(text_primary(ui)),
     );
     super::super::widgets::record_settings_control_box("storage.total", total.rect);
@@ -160,7 +160,7 @@ pub(super) fn notice(ui: &mut egui::Ui, glyph: &str, title: &str, detail: &str) 
 fn description(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
-            .size(SettingsUi::TYPOGRAPHY.description)
+            .font(SettingsUi::font(ui, SettingsUi::TYPOGRAPHY.description))
             .color(text_muted(ui)),
     );
 }

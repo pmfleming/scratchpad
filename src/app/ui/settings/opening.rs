@@ -1,5 +1,5 @@
 use super::{
-    ScratchpadApp, egui,
+    ScratchpadApp, SettingsUi, egui,
     widgets::{
         action_row, destructive_action_row, destructive_button, group_heading, segmented_row,
     },
@@ -54,7 +54,7 @@ pub(super) fn render_application(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     }
     ui.label(
         egui::RichText::new(path)
-            .size(12.5)
+            .font(SettingsUi::font(ui, 12.5))
             .color(super::text_muted(ui)),
     );
     let confirm_id = egui::Id::unique("settings.confirm_reset");
@@ -79,25 +79,35 @@ pub(super) fn reset_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp) {
         return;
     }
     let mut close = false;
-    let response = egui::Modal::new(id).show(ctx, |ui| {
-        super::SettingsUi::apply_typography(ui);
-        super::SettingsUi::apply_controls(ui);
-        ui.set_max_width(360.0);
-        ui.heading("Reset all settings?");
-        ui.label("Restore default preferences. Documents and recovery data will not be deleted.");
-        ui.horizontal(|ui| {
-            if ui.button("Cancel").clicked() {
-                close = true;
-            }
-            if destructive_button(ui, "Reset all settings").clicked() {
-                settings::reset_settings_to_defaults(app);
-                ctx.data_mut(|data| {
-                    data.remove::<bool>(egui::Id::unique("settings.custom_palette"));
-                });
-                close = true;
-            }
+    let background = app
+        .state
+        .app_settings
+        .editor_background_color()
+        .lerp_to_gamma(app.state.app_settings.editor_text_color(), 0.03);
+    let response = egui::Modal::new(id)
+        .frame(egui::Frame::popup(&ctx.global_style()).fill(background))
+        .show(ctx, |ui| {
+            super::SettingsUi::apply_appearance(ui, &app.state.app_settings);
+            super::SettingsUi::apply_typography(ui);
+            super::SettingsUi::apply_controls(ui);
+            ui.set_max_width(360.0);
+            ui.heading("Reset all settings?");
+            ui.label(
+                "Restore default preferences. Documents and recovery data will not be deleted.",
+            );
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+                if destructive_button(ui, "Reset all settings").clicked() {
+                    settings::reset_settings_to_defaults(app);
+                    ctx.data_mut(|data| {
+                        data.remove::<bool>(egui::Id::unique("settings.custom_palette"));
+                    });
+                    close = true;
+                }
+            });
         });
-    });
     if close || response.should_close() {
         ctx.data_mut(|data| data.insert_temp(id, false));
     }

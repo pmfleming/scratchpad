@@ -56,7 +56,7 @@ pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut Scratchpad
         .data_mut(|data| data.get_temp::<String>(search_id))
         .unwrap_or_default();
     let response = ui.add_sized(
-        egui::vec2(ui.available_width(), 34.0),
+        egui::vec2(ui.available_width(), SettingsUi::control_height(ui)),
         egui::TextEdit::singleline(&mut query).hint_text("Find a setting…"),
     );
     response
@@ -83,7 +83,7 @@ pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut Scratchpad
                                 egui::RichText::new(icon).font(egui_phosphor::font_id(18.0)),
                             )
                             .frame(false)
-                            .min_size(egui::Vec2::splat(SettingsUi::CONTROLS.height)),
+                            .min_size(egui::vec2(36.0, SettingsUi::control_height(ui))),
                         )
                     },
                 );
