@@ -14,7 +14,7 @@ fn app() -> ScratchpadApp {
     let root = tempfile::tempdir().unwrap().keep();
     crate::app::app_state::test_support::test_app(&root)
 }
-fn setup(ctx: &egui::Context) {
+pub(super) fn setup(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
     fonts.families.insert(

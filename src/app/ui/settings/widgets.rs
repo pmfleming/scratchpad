@@ -18,6 +18,26 @@ pub(super) use layout_state::{
 use layout_state::{active_settings_control_lane, with_settings_control_lane};
 pub(super) use segmented::segmented_row;
 
+/// Text selection keeps its own foreground; the focus frame uses the accent.
+pub(super) fn search_field(ui: &mut egui::Ui, query: &mut String) -> egui::Response {
+    let response = ui.add_sized(
+        egui::vec2(ui.available_width(), SettingsUi::control_height(ui)),
+        egui::TextEdit::singleline(query).hint_text("Find a setting…"),
+    );
+    if response.has_focus() && ui.is_enabled() {
+        ui.painter().rect_stroke(
+            response.rect,
+            7.0,
+            egui::Stroke::new(2.0, SettingsUi::accent(ui)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), "Search settings")
+    });
+    response
+}
+
 pub(super) fn record_settings_control_box(label: impl Into<String>, rect: egui::Rect) {
     layout_state::record_settings_control_box(label, rect);
 }

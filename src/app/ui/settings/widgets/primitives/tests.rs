@@ -23,10 +23,11 @@ fn has_ring(
 #[test]
 fn keyboard_focus_is_painted_for_on_and_off_switches_in_both_themes() {
     for dark in [true, false] {
-        for initial in [true, false] {
+        for (initial, custom) in [(true, false), (false, false), (true, true), (false, true)] {
             let mut harness = Harness::builder()
                 .with_size(egui::vec2(400.0, 220.0))
                 .with_context_setup(move |ctx| {
+                    crate::app::ui::settings::tests::setup(ctx);
                     ctx.set_visuals(if dark {
                         egui::Visuals::dark()
                     } else {
@@ -34,10 +35,19 @@ fn keyboard_focus_is_painted_for_on_and_off_switches_in_both_themes() {
                     });
                 })
                 .build_ui_state(
-                    |ui, state: &mut (bool, bool, egui::Color32)| {
+                    move |ui, state: &mut (bool, bool, egui::Color32)| {
+                        if custom {
+                            let mut settings =
+                                crate::app::services::settings_store::AppSettings::default();
+                            settings.editor.appearance_source =
+                                crate::app::services::settings_store::EditorAppearanceSource::App;
+                            settings.editor.editor_background_color =
+                                if dark { "#15181d" } else { "#ffffff" }.into();
+                            SettingsUi::apply_appearance(ui, &settings);
+                        }
                         SettingsUi::apply_typography(ui);
                         SettingsUi::apply_controls(ui);
-                        state.2 = ui.visuals().selection.stroke.color;
+                        state.2 = SettingsUi::accent(ui);
                         let _ = ui.button("Before");
                         ui.add_enabled_ui(state.1, |ui| {
                             ui.name_inputs("Example switch", |ui| {

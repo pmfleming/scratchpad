@@ -250,3 +250,36 @@ fn dropdown_popups_stay_near_their_controls_instead_of_filling_the_window() {
         assert_eq!(h.state().state.app_settings.font_size(), 11.0);
     }
 }
+
+#[test]
+fn keyboard_focus_uses_the_accent_without_changing_selected_text_color() {
+    for light in [false, true] {
+        let mut app = custom_app(14.0, light);
+        app.state.app_settings.editor.editor_text_highlight_color = "#fff36d".into();
+        let accent = app.state.app_settings.editor_text_highlight_color();
+        let mut h = Harness::builder().with_context_setup(setup).build_ui_state(
+            |ui, app| {
+                SettingsUi::apply_appearance(ui, &app.state.app_settings);
+                SettingsUi::apply_controls(ui);
+                assert_eq!(
+                    ui.visuals().selection.stroke.color,
+                    app.state.app_settings.editor_text_highlight_text_color()
+                );
+                let mut query = String::from("Find a setting");
+                widgets::search_field(ui, &mut query);
+                widgets::destructive_button(ui, "Reset settings…");
+            },
+            app,
+        );
+        h.run();
+        for label in ["Search settings", "Reset settings…"] {
+            h.get_by_label(label).focus();
+            h.run_steps(2);
+            let rect = h.get_by_label(label).rect();
+            assert!(
+                has_button_border(&h.output().shapes, rect, accent),
+                "Missing accent focus on {label}"
+            );
+        }
+    }
+}

@@ -65,7 +65,7 @@ pub(super) fn toggle_switch(
         ui.painter().rect_stroke(
             rect.expand(3.0),
             radius + 3.0,
-            egui::Stroke::new(2.0, ui.visuals().selection.stroke.color),
+            egui::Stroke::new(2.0, SettingsUi::accent(ui)),
             egui::StrokeKind::Inside,
         );
     }
@@ -80,6 +80,7 @@ pub(in crate::app::ui::settings) fn destructive_button(
 ) -> egui::Response {
     let [foreground, border, hover] = SettingsUi::destructive_colors(ui.visuals().dark_mode);
     let field = SettingsUi::field_bg(ui);
+    let focus = SettingsUi::accent(ui);
     widget_ids::scope(ui, ("settings.destructive", text), |ui| {
         let visuals = ui.visuals_mut();
         visuals.override_text_color = Some(foreground);
@@ -97,7 +98,7 @@ pub(in crate::app::ui::settings) fn destructive_button(
         visuals.widgets.inactive.bg_fill = field;
         visuals.widgets.inactive.weak_bg_fill = field;
         // Keep keyboard focus distinct from the resting destructive border.
-        visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, visuals.selection.stroke.color);
+        visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, focus);
         ui.add(egui::Button::new(text).min_size(egui::vec2(0.0, SettingsUi::control_height(ui))))
     })
     .inner

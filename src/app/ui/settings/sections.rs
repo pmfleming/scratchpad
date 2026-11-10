@@ -55,12 +55,7 @@ pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut Scratchpad
     let mut query = ui
         .data_mut(|data| data.get_temp::<String>(search_id))
         .unwrap_or_default();
-    let response = ui.add_sized(
-        egui::vec2(ui.available_width(), SettingsUi::control_height(ui)),
-        egui::TextEdit::singleline(&mut query).hint_text("Find a setting…"),
-    );
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Search settings"));
+    super::widgets::search_field(ui, &mut query);
     ui.data_mut(|data| data.insert_temp(search_id, query.clone()));
     let query = query.trim().to_lowercase();
     let search = super::search::Search::new(&query);
