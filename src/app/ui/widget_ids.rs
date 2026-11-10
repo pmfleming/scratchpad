@@ -124,6 +124,11 @@ pub(crate) fn layer_id(order: Order, key: impl Hash) -> LayerId {
     LayerId::new(order, root_id(key))
 }
 
+/// State owned by this particular UI instance rather than its persistent scope.
+pub(crate) fn transient(ui: &egui::Ui, key: impl Hash) -> Id {
+    child(ui.unique_id(), key)
+}
+
 pub(crate) fn local(ui: &egui::Ui, key: impl Hash) -> Id {
     ui.make_persistent_id((ID_NAMESPACE, hash_key(&key)))
 }

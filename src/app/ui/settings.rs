@@ -58,7 +58,9 @@ pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp, viewport_width: f32) {
-    SettingsUi::apply_appearance(ui, &app.state.app_settings);
+    if !SettingsUi::has_appearance(ui) {
+        SettingsUi::apply_appearance(ui, &app.state.app_settings);
+    }
     SettingsUi::apply_typography(ui);
     SettingsUi::apply_controls(ui);
     let available = ui.available_width().min(viewport_width);

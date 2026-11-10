@@ -371,3 +371,45 @@ fn dropdown_width_is_explicit_and_independent_of_its_label() {
         "Explicit width was changed: {size:?}"
     );
 }
+
+#[test]
+fn appearance_state_is_independent_of_text_overrides_and_expires_with_its_scope() {
+    let app = custom_app(14.0, false);
+    let ctx = egui::Context::default();
+    setup(&ctx);
+    for apply in [true, false] {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let fallback = [
+                crate::app::theme::action_bg(ui),
+                crate::app::theme::border(ui),
+                crate::app::theme::action_hover_bg(ui),
+                crate::app::theme::tab_selected_accent(ui),
+            ];
+            let colors = |ui: &egui::Ui| {
+                [
+                    SettingsUi::field_bg(ui),
+                    SettingsUi::card_border(ui),
+                    SettingsUi::control_bg(ui),
+                    SettingsUi::accent(ui),
+                ]
+            };
+            widget_ids::scope(ui, "appearance-owner", |ui| {
+                if apply {
+                    SettingsUi::apply_appearance(ui, &app.state.app_settings);
+                }
+                let expected = colors(ui);
+                widget_ids::scope(ui, "destructive-text", |ui| {
+                    ui.visuals_mut().override_text_color = Some(egui::Color32::RED);
+                    assert_eq!(SettingsUi::has_appearance(ui), apply);
+                    assert_eq!(colors(ui), expected);
+                    ui.visuals_mut().override_text_color = None;
+                    assert_eq!(colors(ui), expected);
+                });
+            });
+            ui.visuals_mut().override_text_color = Some(egui::Color32::RED);
+            assert!(!SettingsUi::has_appearance(ui));
+            assert_eq!(colors(ui), fallback);
+        });
+        output.textures_delta.clear();
+    }
+}

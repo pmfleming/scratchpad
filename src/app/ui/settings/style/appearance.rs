@@ -1,4 +1,4 @@
-use super::SettingsUi;
+use super::{SettingsPalette, SettingsUi};
 use crate::app::{fonts::EDITOR_FONT_FAMILY, services::settings_store::AppSettings};
 use eframe::egui;
 
@@ -43,6 +43,15 @@ impl SettingsUi {
         visuals.selection.bg_fill = accent;
         visuals.selection.stroke.color = settings.editor_text_highlight_text_color();
         visuals.hyperlink_color = accent;
+        let palette = SettingsPalette {
+            field: visuals.extreme_bg_color,
+            border: visuals.window_stroke.color,
+            control: background.lerp_to_gamma(text, 0.14),
+            accent,
+        };
+        let pass = ui.ctx().cumulative_pass_nr();
+        let id = crate::app::ui::widget_ids::transient(ui, "settings.palette");
+        ui.data_mut(|data| data.insert_temp(id, (pass, palette)));
     }
 
     /// Changing the base font also changes every control's geometry. Keep the
@@ -51,10 +60,10 @@ impl SettingsUi {
         let size = ui.style().override_font_id.as_ref().map(|font| font.size);
         ui.data_mut(|data| {
             let id = egui::Id::unique("settings.font_size.drag_layout");
-            if data.get_temp::<f32>(id).is_none() {
-                if let Some(size) = size {
-                    data.insert_temp(id, size);
-                }
+            if data.get_temp::<f32>(id).is_none()
+                && let Some(size) = size
+            {
+                data.insert_temp(id, size);
             }
         });
     }

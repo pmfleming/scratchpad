@@ -16,6 +16,14 @@ pub(super) struct ControlMetrics {
     pub gap: f32,
     pub height: f32,
 }
+#[derive(Clone, Copy)]
+struct SettingsPalette {
+    field: egui::Color32,
+    border: egui::Color32,
+    control: egui::Color32,
+    accent: egui::Color32,
+}
+
 pub(super) struct SettingsUi;
 
 impl SettingsUi {
@@ -59,20 +67,21 @@ impl SettingsUi {
         let hover = Self::control_bg(ui);
         let border = Self::card_border(ui);
         let text = super::text_primary(ui);
-        let selected = if ui.visuals().override_text_color.is_some() {
+        let selected = if Self::has_appearance(ui) {
             ui.visuals().selection.bg_fill
         } else {
             theme::tab_selected_bg(ui)
         };
         let accent = Self::accent(ui);
         let height = Self::control_height(ui);
+        let has_appearance = Self::has_appearance(ui);
         let style = ui.style_mut();
         style.spacing.interact_size.y = height;
         style.spacing.button_padding = egui::vec2(10.0, 7.0);
         style.visuals.extreme_bg_color = field;
         style.visuals.widgets.noninteractive.fg_stroke.color = text;
         style.visuals.selection.bg_fill = selected;
-        if style.visuals.override_text_color.is_none() {
+        if !has_appearance {
             style.visuals.selection.stroke = egui::Stroke::new(1.0, accent);
         }
         for widget in [
@@ -104,31 +113,37 @@ impl SettingsUi {
         style.visuals.selection.bg_fill = accent;
     }
 
+    // Store appearance explicitly on the UI that owns it. Descendants inherit
+    // it through the UI stack; unrelated scopes and later passes do not.
+    fn palette(ui: &egui::Ui) -> Option<SettingsPalette> {
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.data(|data| {
+            ui.stack().iter().find_map(|stack| {
+                data.get_temp::<(u64, SettingsPalette)>(crate::app::ui::widget_ids::child(
+                    stack.unique_id,
+                    "settings.palette",
+                ))
+                .filter(|(applied, _)| *applied == pass)
+                .map(|(_, palette)| palette)
+            })
+        })
+    }
+
+    pub(super) fn has_appearance(ui: &egui::Ui) -> bool {
+        Self::palette(ui).is_some()
+    }
+
     pub(super) fn field_bg(ui: &egui::Ui) -> egui::Color32 {
-        if ui.visuals().override_text_color.is_some() {
-            ui.visuals().extreme_bg_color
-        } else {
-            theme::action_bg(ui)
-        }
+        Self::palette(ui).map_or_else(|| theme::action_bg(ui), |palette| palette.field)
     }
     pub(super) fn card_bg(ui: &egui::Ui) -> egui::Color32 {
         ui.visuals().window_fill()
     }
     pub(super) fn card_border(ui: &egui::Ui) -> egui::Color32 {
-        if ui.visuals().override_text_color.is_some() {
-            ui.visuals().window_stroke.color
-        } else {
-            theme::border(ui)
-        }
+        Self::palette(ui).map_or_else(|| theme::border(ui), |palette| palette.border)
     }
     pub(super) fn control_bg(ui: &egui::Ui) -> egui::Color32 {
-        if ui.visuals().override_text_color.is_some() {
-            ui.visuals()
-                .panel_fill
-                .lerp_to_gamma(super::text_primary(ui), 0.14)
-        } else {
-            theme::action_hover_bg(ui)
-        }
+        Self::palette(ui).map_or_else(|| theme::action_hover_bg(ui), |palette| palette.control)
     }
     pub(super) fn icon_color(ui: &egui::Ui) -> egui::Color32 {
         super::text_muted(ui)
@@ -143,11 +158,7 @@ impl SettingsUi {
         colors.map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
     }
     pub(super) fn accent(ui: &egui::Ui) -> egui::Color32 {
-        if ui.visuals().override_text_color.is_some() {
-            ui.visuals().selection.bg_fill
-        } else {
-            theme::tab_selected_accent(ui)
-        }
+        Self::palette(ui).map_or_else(|| theme::tab_selected_accent(ui), |palette| palette.accent)
     }
     pub(super) fn card_frame(ui: &egui::Ui) -> egui::Frame {
         egui::Frame::new()
