@@ -1,4 +1,10 @@
-use super::{ROW_HEIGHT, Row, ScratchpadApp, State, TimelineId, egui, style};
+use super::{RAIL_X, ROW_HEIGHT, ScratchpadApp, State, TimelineId, egui, theme, widget_ids};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum End {
+    Newest,
+    Oldest,
+}
 
 pub(super) struct Now {
     pub id: TimelineId,
@@ -40,29 +46,87 @@ pub(super) fn active_now(app: &ScratchpadApp) -> Option<Now> {
     })
 }
 
-pub(super) fn latest_button(ui: &mut egui::Ui, state: &mut State, position: &str) {
-    if style::icon_button(
+pub(super) fn header(
+    ui: &mut egui::Ui,
+    app: &ScratchpadApp,
+    state: &mut State,
+    now: Option<&Now>,
+) -> egui::Rect {
+    ui.horizontal(|ui| {
+        let end = end_button(ui, state, End::Newest);
+        now_button(ui, state, now);
+        if state.pending.is_some() {
+            ui.spinner();
+            ui.label("Loading history…");
+        }
+        if let Some(error) = state.error.clone() {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+            if ui.button("Retry").clicked() {
+                state.fetch(
+                    app.state.persistence.session_store.clone(),
+                    ui.ctx().clone(),
+                );
+            }
+        }
+        end
+    })
+    .inner
+}
+
+pub(super) fn end_button(ui: &mut egui::Ui, state: &mut State, end: End) -> egui::Rect {
+    let (icon, label) = match end {
+        End::Newest => (
+            egui_phosphor::regular::CARET_DOUBLE_UP,
+            "Go to latest event",
+        ),
+        End::Oldest => (
+            egui_phosphor::regular::CARET_DOUBLE_DOWN,
+            "Go to oldest event",
+        ),
+    };
+    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(RAIL_X * 2.0, 26.0));
+    let enabled = !state.rows.is_empty();
+    let response = widget_ids::interact(
         ui,
-        ("timeline.latest", position),
-        egui_phosphor::regular::SKIP_FORWARD,
-        "Go to latest event",
-        true,
-    )
-    .clicked()
-    {
-        state.jump_latest = true;
+        rect,
+        egui::Id::unique(("timeline.end", end)),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+        "timeline-end",
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
+    if response.hovered() && enabled {
+        ui.painter().rect_filled(rect, 0, theme::action_bg(ui));
+    }
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        icon,
+        egui_phosphor::font_id(16.0),
+        if enabled {
+            theme::tab_selected_accent(ui)
+        } else {
+            theme::text_muted(ui)
+        },
+    );
+    if response.on_hover_text(label).clicked() && enabled {
+        state.jump_end = Some(end);
         state.anchor = None;
         state.reveal_now = None;
         state.scroll_to_selection = false;
+        if end == End::Oldest {
+            state.rebuild();
+        }
         ui.ctx().request_repaint();
     }
+    rect
 }
 
 fn index(state: &State, id: &TimelineId) -> Option<usize> {
-    state
-        .rows
-        .iter()
-        .position(|r| matches!(r, Row::Entry(row) if row.id() == *id))
+    state.rows.iter().position(|row| row.id() == *id)
 }
 
 pub(super) fn now_button(ui: &mut egui::Ui, state: &mut State, now: Option<&Now>) {
@@ -81,7 +145,7 @@ pub(super) fn now_button(ui: &mut egui::Ui, state: &mut State, now: Option<&Now>
     // A search can exclude the active file. Do not offer a jump to a missing row.
     let available = state.live.contains(&now.id);
     if !visible && available && ui.button("Go to Now").clicked() {
-        state.jump_latest = false;
+        state.jump_end = None;
         state.reveal_now = Some(now.id.clone());
         state.anchor = Some((now.id.clone(), 0.0));
         state.scroll_to_selection = false;
@@ -121,8 +185,11 @@ fn visible(state: &State, target: &TimelineId) -> bool {
 }
 
 pub(super) fn scroll_target(ui: &egui::Ui, state: &State, first: usize) {
-    let (target, align) = if state.jump_latest {
-        (0, egui::Align::Min)
+    let (target, align) = if let Some(end) = state.jump_end {
+        match end {
+            End::Newest => (0, egui::Align::Min),
+            End::Oldest => (state.rows.len().saturating_sub(1), egui::Align::Max),
+        }
     } else if let Some(index) = state.reveal_now.as_ref().and_then(|id| index(state, id)) {
         (index, egui::Align::Center)
     } else {
@@ -146,7 +213,21 @@ pub(super) fn finish_scroll(state: &mut State) {
     {
         state.reveal_now = None;
     }
-    if state.offset <= 0.5 {
-        state.jump_latest = false;
+    let reached = match state.jump_end {
+        Some(End::Newest) => state.offset <= 0.5,
+        Some(End::Oldest) => {
+            state.fetched
+                && state.next.is_none()
+                && state.pending.is_none()
+                && state
+                    .rows
+                    .last()
+                    .is_none_or(|row| visible(state, &row.id()))
+        }
+        None => false,
+    };
+    if reached {
+        state.limit = state.limit.max(state.rows.len());
+        state.jump_end = None;
     }
 }

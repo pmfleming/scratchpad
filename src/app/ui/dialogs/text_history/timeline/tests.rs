@@ -220,11 +220,7 @@ fn viewport_anchor_stays_on_its_row_when_new_activity_arrives() {
     newest.cursor.node += 100;
     state.live.rows.insert(newest.cursor.clone(), newest);
     state.rebuild();
-    let index = state
-        .rows
-        .iter()
-        .position(|r| matches!(r,Row::Entry(r) if r.id()==row.id()))
-        .unwrap();
+    let index = state.rows.iter().position(|r| r.id() == row.id()).unwrap();
     assert_eq!(state.offset, index as f32 * ROW_HEIGHT + 7.0);
 }
 
@@ -277,12 +273,7 @@ fn closing_or_persisting_preserves_loaded_pages_and_the_reading_anchor() {
     app.tab_manager.set_tabs(Vec::new(), 0);
     state.refresh(&app, "", &ctx);
     assert!(state.persisted.values().any(|r| r.id() == row.id()));
-    assert!(
-        state
-            .rows
-            .iter()
-            .any(|r| matches!(r,Row::Entry(r) if r.id()==row.id()))
-    );
+    assert!(state.rows.iter().any(|r| r.id() == row.id()));
     assert!(state.offset >= 3.0);
     app.state.persistence.session_store.invalidate_history();
     state.refresh(&app, "", &ctx);

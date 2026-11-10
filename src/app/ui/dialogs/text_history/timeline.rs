@@ -27,6 +27,7 @@ use std::{
 };
 
 const ROW_HEIGHT: f32 = 44.0;
+const RAIL_X: f32 = 11.0;
 type PendingPage = Arc<Mutex<Option<Result<TimelinePage, String>>>>;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -60,11 +61,6 @@ impl Source {
     }
 }
 
-enum Row {
-    Date(String),
-    Entry(TimelineRow),
-}
-
 enum CachedTail {
     More(TimelineCursor),
     Complete,
@@ -80,7 +76,7 @@ struct State {
     resume_older: Option<CachedTail>,
     fetched: bool,
     error: Option<String>,
-    rows: Vec<Row>,
+    rows: Vec<TimelineRow>,
     limit: usize,
     selected: Option<TimelineId>,
     offset: f32,
@@ -88,7 +84,7 @@ struct State {
     scroll_to_selection: bool,
     reveal_now: Option<TimelineId>,
     viewport_height: f32,
-    jump_latest: bool,
+    jump_end: Option<navigation::End>,
 }
 
 impl Default for State {
@@ -111,7 +107,7 @@ impl Default for State {
             scroll_to_selection: false,
             reveal_now: None,
             viewport_height: 0.0,
-            jump_latest: false,
+            jump_end: None,
         }
     }
 }
@@ -203,6 +199,7 @@ impl State {
                 }
             } else {
                 self.reveal_now = None;
+                self.jump_end = None;
                 self.persisted.clear();
                 self.live.retired.clear();
                 self.resume_older = None;
@@ -260,10 +257,9 @@ impl State {
         let mut disk = self.persisted.iter().rev().peekable();
         let mut overlay = self.overlay.iter().rev().peekable();
         let mut rows = Vec::new();
-        let mut day = String::new();
         let mut count = 0;
         let mut anchored = self.anchor.is_none();
-        while count < self.limit || !anchored {
+        while count < self.limit || !anchored || self.jump_end == Some(navigation::End::Oldest) {
             let key = [
                 memory.peek().map(|(k, _)| *k),
                 overlay.peek().map(|(k, _)| *k),
@@ -300,35 +296,16 @@ impl State {
             if self.next.as_ref().is_some_and(|bound| row.cursor < *bound) {
                 break;
             }
-            let date = date(row.timestamp);
-            if date != day {
-                day.clone_from(&date);
-                rows.push(Row::Date(date));
-            }
-            rows.push(Row::Entry(row.clone()));
+            rows.push(row.clone());
         }
         self.rows = rows;
         if self.reveal_now.is_none()
             && let Some((id, fraction)) = &self.anchor
-            && let Some(index) = self
-                .rows
-                .iter()
-                .position(|r| matches!(r,Row::Entry(row) if row.id()==*id))
+            && let Some(index) = self.rows.iter().position(|row| row.id() == *id)
         {
             self.offset = index as f32 * ROW_HEIGHT + fraction;
         }
     }
-}
-
-fn date(timestamp: u64) -> String {
-    chrono::DateTime::from_timestamp(timestamp as i64, 0).map_or_else(
-        || "Unknown date".into(),
-        |d| {
-            d.with_timezone(&chrono::Local)
-                .format("%A, %-d %B %Y")
-                .to_string()
-        },
-    )
 }
 
 pub(super) fn keyboard(ctx: &egui::Context, app: &ScratchpadApp) -> Option<Action> {
@@ -344,7 +321,7 @@ pub(super) fn keyboard(ctx: &egui::Context, app: &ScratchpadApp) -> Option<Actio
         .rows
         .iter()
         .enumerate()
-        .filter_map(|(i, r)| matches!(r, Row::Entry(row) if row.node().is_some()).then_some(i))
+        .filter_map(|(i, row)| row.node().is_some().then_some(i))
         .collect();
     if indices.is_empty() {
         ctx.input_mut(|i| {
@@ -362,7 +339,7 @@ pub(super) fn keyboard(ctx: &egui::Context, app: &ScratchpadApp) -> Option<Actio
     }
     let mut position = indices
         .iter()
-        .position(|&i| matches!(&state.rows[i],Row::Entry(r) if Some(r.id())==state.selected));
+        .position(|&i| Some(state.rows[i].id()) == state.selected);
     let mut changed = false;
     let mut select = false;
     ctx.input_mut(|input| {
@@ -387,9 +364,7 @@ pub(super) fn keyboard(ctx: &egui::Context, app: &ScratchpadApp) -> Option<Actio
         }
     });
     if changed {
-        let Row::Entry(row) = &state.rows[indices[position?]] else {
-            return None;
-        };
+        let row = &state.rows[indices[position?]];
         let action = Action {
             document: row.cursor.document.clone(),
             node: row.node(),
@@ -397,6 +372,8 @@ pub(super) fn keyboard(ctx: &egui::Context, app: &ScratchpadApp) -> Option<Actio
         };
         state.selected = Some(row.id());
         state.scroll_to_selection = true;
+        state.jump_end = None;
+        state.reveal_now = None;
         if select {
             return Some(action);
         }
@@ -472,28 +449,13 @@ pub(super) fn show(
     let mut changed = false;
     let now = navigation::active_now(app);
     let list_height = (height - 64.0).max(ROW_HEIGHT);
-    ui.horizontal(|ui| {
-        navigation::latest_button(ui, &mut state, "top");
-        navigation::now_button(ui, &mut state, now.as_ref());
-        if state.pending.is_some() {
-            ui.spinner();
-            ui.label("Loading history…");
-        }
-        if let Some(error) = state.error.clone() {
-            ui.colored_label(ui.visuals().error_fg_color, error);
-            if ui.button("Retry").clicked() {
-                state.fetch(
-                    app.state.persistence.session_store.clone(),
-                    ui.ctx().clone(),
-                );
-            }
-        }
-    });
+    let rail = ui.painter().add(egui::Shape::Noop);
+    let top = navigation::header(ui, app, &mut state, now.as_ref());
     if state.scroll_to_selection {
         if let Some(index) = state
             .rows
             .iter()
-            .position(|r| matches!(r,Row::Entry(row) if Some(row.id())==state.selected))
+            .position(|row| Some(row.id()) == state.selected)
         {
             state.offset = (index as f32 * ROW_HEIGHT - height * 0.5).max(0.0);
         }
@@ -521,16 +483,11 @@ pub(super) fn show(
     state.viewport_height = output.inner_rect.height();
     navigation::finish_scroll(&mut state);
     let index = (state.offset / ROW_HEIGHT).floor() as usize;
-    if state.reveal_now.is_none() && !state.jump_latest {
+    if state.reveal_now.is_none() && state.jump_end.is_none() {
         state.anchor = state
             .rows
-            .iter()
-            .enumerate()
-            .skip(index)
-            .find_map(|(i, r)| match r {
-                Row::Entry(row) => Some((row.id(), state.offset - i as f32 * ROW_HEIGHT)),
-                Row::Date(_) => None,
-            });
+            .get(index)
+            .map(|row| (row.id(), state.offset - index as f32 * ROW_HEIGHT));
     }
     if near_end && state.pending.is_none() && state.error.is_none() {
         if state.next.is_some() {
@@ -540,12 +497,7 @@ pub(super) fn show(
                 ui.ctx().clone(),
             );
             changed = true;
-        } else if state
-            .rows
-            .iter()
-            .filter(|r| matches!(r, Row::Entry(_)))
-            .count()
-            >= state.limit
+        } else if state.rows.len() >= state.limit
             && state.live.rows.len() + state.persisted.len() > state.limit
         {
             state.limit += TIMELINE_PAGE_SIZE;
@@ -556,7 +508,21 @@ pub(super) fn show(
         state.rebuild();
         ui.ctx().request_repaint();
     }
-    ui.horizontal(|ui| navigation::latest_button(ui, &mut state, "bottom"));
+    let bottom = ui
+        .horizontal(|ui| navigation::end_button(ui, &mut state, navigation::End::Oldest))
+        .inner;
+    if !state.rows.is_empty() {
+        ui.painter().set(
+            rail,
+            egui::Shape::line_segment(
+                [
+                    egui::pos2(top.center().x, top.center().y + 8.0),
+                    egui::pos2(bottom.center().x, bottom.center().y - 8.0),
+                ],
+                egui::Stroke::new(1.5, theme::tab_selected_accent(ui)),
+            ),
+        );
+    }
     action
 }
 
@@ -579,56 +545,25 @@ fn paint_visible(
         return None;
     }
     for index in range {
-        match &state.rows[index] {
-            Row::Date(date) => {
-                let rect = widget_ids::allocate_exact_rect(
-                    ui,
-                    egui::vec2(ui.available_width(), ROW_HEIGHT),
-                );
-                style::text(
-                    ui,
-                    rect.shrink2(egui::vec2(8.0, 0.0)),
-                    date,
-                    11.5,
-                    theme::text_muted(ui),
-                );
-                let response = widget_ids::interact(
-                    ui,
-                    rect,
-                    egui::Id::unique(("history.timeline.date", date, index)),
-                    egui::Sense::hover(),
-                    "timeline-date",
-                );
-                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, date));
-            }
-            Row::Entry(row) => {
-                let row = row.clone();
-                let selected = state.selected.as_ref() == Some(&row.id());
-                let closed = state
-                    .source
-                    .as_ref()
-                    .is_none_or(|s| s.opened.binary_search(&row.cursor.document).is_err());
-                let previous = index.checked_sub(1).and_then(|i| state.rows.get(i));
-                let visuals = RowState {
-                    selected,
-                    closed,
-                    current: now == Some(&row.id()),
-                    previous_time: match previous {
-                        Some(Row::Entry(r)) => Some(r.timestamp),
-                        _ => None,
-                    },
-                    above: matches!(previous, Some(Row::Entry(_))),
-                    below: matches!(state.rows.get(index + 1), Some(Row::Entry(_))),
-                };
-                if let Some(inspect) = paint_row(ui, &row, &visuals) {
-                    state.selected = Some(row.id());
-                    action = Some(Action {
-                        document: row.cursor.document.clone(),
-                        node: if inspect { None } else { row.node() },
-                        inspect,
-                    });
-                }
-            }
+        let row = &state.rows[index];
+        let visuals = RowState {
+            selected: state.selected.as_ref() == Some(&row.id()),
+            closed: state
+                .source
+                .as_ref()
+                .is_none_or(|s| s.opened.binary_search(&row.cursor.document).is_err()),
+            current: now == Some(&row.id()),
+            previous_time: index.checked_sub(1).map(|i| state.rows[i].timestamp),
+        };
+        if let Some(inspect) = paint_row(ui, row, &visuals) {
+            state.selected = Some(row.id());
+            action = Some(Action {
+                document: row.cursor.document.clone(),
+                node: if inspect { None } else { row.node() },
+                inspect,
+            });
+            state.jump_end = None;
+            state.reveal_now = None;
         }
     }
     action

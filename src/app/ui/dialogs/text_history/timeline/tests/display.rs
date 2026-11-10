@@ -60,7 +60,7 @@ fn rows_show_filename_and_contextual_time_with_full_path_on_hover() {
 }
 
 #[test]
-fn rail_uses_hollow_activity_dots_and_breaks_at_date_boundaries() {
+fn rail_uses_accent_color_and_continues_through_activity_rows() {
     let root = tempfile::tempdir().unwrap();
     let app = app(root.path());
     let event = crate::app::services::session_store::activity::ActivityEvent::new(
@@ -70,15 +70,14 @@ fn rail_uses_hollow_activity_dots_and_breaks_at_date_boundaries() {
     let mut h = egui_kittest::Harness::builder()
         .allow_missing_glyphs()
         .build_ui_state(
-            |ui, (row, state)| {
+            |ui, (row, state, accent)| {
+                *accent = theme::tab_selected_accent(ui);
                 paint_row(ui, row, state);
             },
             (
                 event.timeline_row(),
-                RowState {
-                    below: true,
-                    ..RowState::default()
-                },
+                RowState::default(),
+                egui::Color32::TRANSPARENT,
             ),
         );
     h.run_steps(3);
@@ -92,16 +91,20 @@ fn rail_uses_hollow_activity_dots_and_breaks_at_date_boundaries() {
         })
         .unwrap();
     assert_eq!(circle.fill, h.ctx.global_style().visuals.panel_fill);
+    assert_eq!(circle.stroke.color, h.state().2);
     let line = h
         .output()
         .shapes
         .iter()
         .find_map(|s| match &s.shape {
-            egui::Shape::LineSegment { points, .. } => Some(points),
+            egui::Shape::LineSegment { points, stroke } => {
+                assert_eq!(stroke.color, h.state().2);
+                Some(points)
+            }
             _ => None,
         })
         .unwrap();
-    assert_eq!(line[0].y, circle.center.y);
+    assert!(line[0].y < circle.center.y);
     assert!(line[1].y > circle.center.y);
     h.get_by_label("Opened · note.txt").click();
     h.run_steps(3);

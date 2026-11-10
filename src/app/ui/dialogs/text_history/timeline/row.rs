@@ -1,4 +1,6 @@
-use super::{ROW_HEIGHT, TimelineKind, TimelineRow, egui, presentation, style, theme, widget_ids};
+use super::{
+    RAIL_X, ROW_HEIGHT, TimelineKind, TimelineRow, egui, presentation, style, theme, widget_ids,
+};
 
 #[derive(Default)]
 pub(super) struct RowState {
@@ -6,8 +8,6 @@ pub(super) struct RowState {
     pub closed: bool,
     pub current: bool,
     pub previous_time: Option<u64>,
-    pub above: bool,
-    pub below: bool,
 }
 
 pub(super) fn paint_row(ui: &mut egui::Ui, row: &TimelineRow, state: &RowState) -> Option<bool> {
@@ -178,13 +178,13 @@ fn paint_labels(ui: &egui::Ui, row: &TimelineRow, response: &egui::Response, sta
 }
 
 fn paint_rail(ui: &egui::Ui, rect: egui::Rect, edit: bool, state: &RowState) {
-    let center = egui::pos2(rect.left() + 11.0, rect.top() + 12.5);
-    let neutral = theme::text_muted(ui).gamma_multiply(0.65);
-    let top = if state.above { rect.top() } else { center.y };
-    let bottom = if state.below { rect.bottom() } else { center.y };
+    let center = egui::pos2(rect.left() + RAIL_X, rect.top() + 12.5);
+    let accent = theme::tab_selected_accent(ui);
+    let top = rect.top();
+    let bottom = rect.bottom();
     ui.painter().line_segment(
         [egui::pos2(center.x, top), egui::pos2(center.x, bottom)],
-        egui::Stroke::new(1.5, neutral),
+        egui::Stroke::new(1.5, accent),
     );
     if state.current || state.selected {
         ui.painter().circle(
@@ -198,11 +198,11 @@ fn paint_rail(ui: &egui::Ui, rect: egui::Rect, edit: bool, state: &RowState) {
             center,
             3.0,
             if edit {
-                neutral
+                accent
             } else {
                 ui.visuals().panel_fill
             },
-            egui::Stroke::new(1.5, neutral),
+            egui::Stroke::new(1.5, accent),
         );
     }
 }

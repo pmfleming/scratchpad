@@ -11,6 +11,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Timeline uses the same blue rail as This file, without date headings. Connected up/down controls jump to the newest and oldest events without changing the document.
+
 - Timeline now shows an event rail and the active file’s Now position, with scroll-only controls for Now and the latest event. Rows show filenames, with full paths on hover, and share This file’s time-label rules.
 
 - Timeline edit actions now share the scrubber and This file icons, colors, compact text previews and whitespace badges, including retained closed-file edits.
