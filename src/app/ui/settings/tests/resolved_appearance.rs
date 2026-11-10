@@ -201,3 +201,52 @@ fn large_settings_fonts_fit_narrow_and_wide_layouts() {
         }
     }
 }
+
+#[test]
+fn dropdown_popups_stay_near_their_controls_instead_of_filling_the_window() {
+    for (width, size) in [
+        (360.0, 16.0),
+        (1100.0, 32.0),
+        (2000.0, 16.0),
+        (1100.0, 72.0),
+    ] {
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(width, 900.0))
+            .with_context_setup(setup)
+            .build_ui_state(
+                |ui, app| {
+                    SettingsUi::apply_appearance(ui, &app.state.app_settings);
+                    SettingsUi::apply_controls(ui);
+                    ui.set_width(300.0);
+                    widgets::inner_select_row(ui, "Size", None, |ui| {
+                        let mut value = app.state.app_settings.editor.font_size as u32;
+                        widgets::dropdown(
+                            ui,
+                            "Size",
+                            &mut value,
+                            &FONT_SIZE_OPTIONS,
+                            |size| size.to_string(),
+                            96.0,
+                            "pt",
+                        );
+                        app.state.app_settings.editor.font_size = value as f32;
+                    });
+                },
+                custom_app(size, false),
+            );
+        h.run_steps(3);
+        let control = h.get_by_role_and_label(egui::Role::ComboBox, "Size").rect();
+        h.get_by_role_and_label(egui::Role::ComboBox, "Size")
+            .click_accesskit();
+        h.run_steps(3);
+        let option = h.get_by_label("11").rect();
+        assert!(
+            option.width() <= control.width() + 20.0,
+            "Popup stretches beyond its control at {width}/{size}: {option:?} vs {control:?}"
+        );
+        assert!(option.left() >= 0.0 && option.right() <= width);
+        h.get_by_label("11").click_accesskit();
+        h.run_steps(3);
+        assert_eq!(h.state().state.app_settings.font_size(), 11.0);
+    }
+}

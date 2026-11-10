@@ -316,7 +316,6 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
                     .popup_style(popup_style.into())
                     .show_ui(ui, |ui| {
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                        ui.set_max_width((ui.ctx().content_rect().width() - 32.0).max(40.0));
                         for &option in options {
                             let text =
                                 egui::RichText::new(label(option)).color(if *value == option {

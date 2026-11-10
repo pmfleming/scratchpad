@@ -80,6 +80,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Keep Settings dropdown menus sized to their controls instead of stretching across the window.
+
 - Keep the editor visible when History or the scrubber navigates to an off-screen edit without returning keyboard focus to the editor.
 
 - Preserve each view's caret and selection when reopening a closed file or restoring a session.
