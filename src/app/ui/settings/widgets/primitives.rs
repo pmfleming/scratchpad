@@ -55,7 +55,7 @@ pub(super) fn toggle_switch(
         egui::pos2(thumb_x, rect.center().y),
         radius - 3.0,
         if *value {
-            ui.visuals().selection.stroke.color
+            crate::app::color_contrast::optimal_text_color(track_fill)
         } else {
             super::text_primary(ui)
         },

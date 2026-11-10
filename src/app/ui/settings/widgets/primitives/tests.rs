@@ -62,6 +62,22 @@ fn keyboard_focus_is_painted_for_on_and_off_switches_in_both_themes() {
                     (initial, true, egui::Color32::TRANSPARENT),
                 );
             harness.run();
+            if initial {
+                let thumb = harness
+                    .output()
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Circle(circle) => Some(circle.fill),
+                        _ => None,
+                    })
+                    .expect("Switch thumb");
+                assert_ne!(
+                    thumb,
+                    harness.state().2,
+                    "Thumb must contrast with its accent track, custom={custom}, dark={dark}"
+                );
+            }
             let target = harness.get_by_role(egui::Role::Switch).rect();
             assert!(target.height() >= 36.0);
             let ring =
