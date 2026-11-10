@@ -151,6 +151,9 @@ fn font_size_slider(ui: &mut egui::Ui, size: &mut f32) -> bool {
     )
     .inner;
     record_settings_control_box("slider.Size", response.rect);
+    if response.is_pointer_button_down_on() {
+        SettingsUi::hold_font_slider_layout(ui);
+    }
     let changed = response.changed();
     response
         .accessible_name("Size")

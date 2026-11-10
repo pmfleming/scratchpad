@@ -803,3 +803,68 @@ fn exact_value_inputs_and_recommended_limits_keep_slider_values_in_sync() {
         harness.state().state.app_settings.history.budget
     );
 }
+
+#[test]
+fn font_size_drag_keeps_its_track_stable_until_release() {
+    for width in [600.0, 1100.0] {
+        let mut state = app();
+        state.state.app_settings.editor.appearance_source = EditorAppearanceSource::App;
+        state.state.app_settings.editor.font_size = 14.0;
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(width, 12000.0))
+            .with_context_setup(setup)
+            .build_ui_state(
+                move |ui, app| {
+                    reset_settings_layout_measurements();
+                    render_page_body(ui, app, width);
+                },
+                state,
+            );
+        h.run();
+        let slider_rect = || {
+            settings_control_measurements()
+                .into_iter()
+                .find(|m| m.label == "slider.Size")
+                .unwrap()
+                .rect
+        };
+        let initial = slider_rect();
+        let mut pos = initial.left_center() + egui::vec2(1.0, 0.0);
+        h.event(egui::Event::PointerMoved(pos));
+        h.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(2);
+        let mut previous = h.state().state.app_settings.font_size();
+        for fraction in [0.25, 0.5, 0.75, 0.99] {
+            pos.x = initial.left() + initial.width() * fraction;
+            h.event(egui::Event::PointerMoved(pos));
+            h.run_steps(2);
+            let size = h.state().state.app_settings.font_size();
+            assert!(size > previous, "Drag stopped at {size} at width {width}");
+            assert_eq!(
+                slider_rect(),
+                initial,
+                "Track moved during drag at width {width}"
+            );
+            previous = size;
+        }
+        assert_eq!(previous, 72.0);
+        h.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(2);
+        assert_ne!(
+            slider_rect(),
+            initial,
+            "Layout should adopt the new font on release"
+        );
+        assert_eq!(h.state().state.app_settings.font_size(), 72.0);
+    }
+}

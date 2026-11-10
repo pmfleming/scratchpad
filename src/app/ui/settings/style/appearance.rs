@@ -13,7 +13,7 @@ impl SettingsUi {
         let background = settings.editor_background_color();
         let accent = settings.editor_text_highlight_color();
         let font = egui::FontId::new(
-            settings.font_size(),
+            Self::layout_font_size(ui, settings.font_size()),
             egui::FontFamily::Name(EDITOR_FONT_FAMILY.into()),
         );
         let style = ui.style_mut();
@@ -43,6 +43,33 @@ impl SettingsUi {
         visuals.selection.bg_fill = accent;
         visuals.selection.stroke.color = settings.editor_text_highlight_text_color();
         visuals.hyperlink_color = accent;
+    }
+
+    /// Changing the base font also changes every control's geometry. Keep the
+    /// Settings layout at its starting size until a font-slider gesture ends.
+    pub(in crate::app::ui::settings) fn hold_font_slider_layout(ui: &egui::Ui) {
+        let size = ui.style().override_font_id.as_ref().map(|font| font.size);
+        ui.data_mut(|data| {
+            let id = egui::Id::unique("settings.font_size.drag_layout");
+            if data.get_temp::<f32>(id).is_none() {
+                if let Some(size) = size {
+                    data.insert_temp(id, size);
+                }
+            }
+        });
+    }
+
+    fn layout_font_size(ui: &egui::Ui, configured: f32) -> f32 {
+        let dragging = ui.input(|input| input.pointer.primary_down());
+        ui.data_mut(|data| {
+            let id = egui::Id::unique("settings.font_size.drag_layout");
+            if dragging {
+                data.get_temp::<f32>(id).unwrap_or(configured)
+            } else {
+                data.remove::<f32>(id);
+                configured
+            }
+        })
     }
 
     pub(in crate::app::ui::settings) fn scale(ui: &egui::Ui) -> f32 {
