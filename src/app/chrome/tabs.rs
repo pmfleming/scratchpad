@@ -102,6 +102,13 @@ pub fn tab_label_font_id(editor_font_size: f32) -> egui::FontId {
     )
 }
 
+/// Scale the label budget with the font while keeping action buttons compact.
+#[must_use]
+pub fn tab_button_width(font_size: f32) -> f32 {
+    const CHROME_WIDTH: f32 = 36.0;
+    CHROME_WIDTH + (TAB_BUTTON_WIDTH - CHROME_WIDTH) * (font_size / 14.0).max(1.0)
+}
+
 /// Reserve the actual font line height plus room for the rename field.
 #[must_use]
 pub fn tab_row_height(ctx: &egui::Context, font_size: f32) -> f32 {

@@ -1,9 +1,6 @@
 use super::state::{TabDragState, TabDropAxis, TabDropZone};
 use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
-use crate::app::theme::{
-    TAB_BUTTON_WIDTH, TAB_HEIGHT, border_for_visuals, tab_active_bg_for_visuals,
-    text_primary_for_visuals,
-};
+use crate::app::theme::{border_for_visuals, tab_active_bg_for_visuals, text_primary_for_visuals};
 use crate::app::ui::widget_ids;
 use eframe::egui;
 use std::collections::HashMap;
@@ -32,7 +29,7 @@ pub(super) fn paint_dragged_tab_ghost(
     let rect = egui::Rect::from_center_size(
         drag_state.current_pos,
         egui::vec2(
-            TAB_BUTTON_WIDTH,
+            crate::app::chrome::tab_button_width(app.state.app_settings.font_size()),
             crate::app::chrome::tab_row_height(ctx, app.state.app_settings.font_size()),
         ),
     )
@@ -174,7 +171,7 @@ fn paint_horizontal_reorder_marker(
     let marker_x = reorder_marker_position(zone, drop_slot, first_rect, last_rect, last_index);
     let marker_rect = egui::Rect::from_center_size(
         egui::pos2(marker_x, (first_rect.top() + last_rect.bottom()) * 0.5),
-        egui::vec2(3.0, TAB_HEIGHT - 6.0),
+        egui::vec2(3.0, (first_rect.height() - 6.0).max(1.0)),
     );
     painter.rect_filled(marker_rect, 2.0, TAB_REORDER_MARKER_COLOR);
 }
@@ -261,4 +258,41 @@ fn surrounding_entry_rects(zone: &TabDropZone, drop_slot: usize) -> (egui::Rect,
     }
 
     (previous_rect, target_rect)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn horizontal_reorder_marker_spans_the_actual_tab_height() {
+        for height in [30.0, 96.0] {
+            let ctx = egui::Context::default();
+            let rect = egui::Rect::from_min_size(egui::pos2(20.0, 10.0), egui::vec2(400.0, height));
+            let zone = TabDropZone {
+                axis: TabDropAxis::Horizontal,
+                entries: vec![super::super::TabRectEntry {
+                    index: 0,
+                    rect,
+                    combine_enabled: true,
+                }],
+            };
+            let mut output = ctx.run_ui(egui::RawInput::default(), |_ui| {
+                paint_tab_reorder_marker(&ctx, &zone, 0);
+            });
+            output.textures_delta.clear();
+            let marker = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(shape) if shape.fill == TAB_REORDER_MARKER_COLOR => {
+                        Some(shape.rect)
+                    }
+                    _ => None,
+                })
+                .expect("Reorder marker");
+            assert_eq!(marker.height(), height - 6.0);
+            assert_eq!(marker.center().y, rect.center().y);
+        }
+    }
 }

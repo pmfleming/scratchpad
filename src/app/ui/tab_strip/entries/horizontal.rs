@@ -6,7 +6,7 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
-use crate::app::theme::{BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, action_hover_bg};
+use crate::app::theme::{BUTTON_SIZE, action_bg, action_hover_bg};
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone, TabRectEntry};
 use crate::app::ui::tab_overflow;
 use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
@@ -144,7 +144,7 @@ fn collect_tab_entries(
         ui,
         context.app,
         context.duplicate_name_counts,
-        TAB_BUTTON_WIDTH,
+        crate::app::chrome::tab_button_width(context.app.state.app_settings.font_size()),
         context.spacing,
         TabDropAxis::Horizontal,
     );

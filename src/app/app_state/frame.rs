@@ -241,7 +241,8 @@ fn apply_deferred_layout_settings(app: &mut ScratchpadApp, ctx: &egui::Context) 
 pub(crate) fn estimated_tab_strip_width(app: &ScratchpadApp, spacing: f32) -> f32 {
     let tab_count = crate::app::app_state::workspace::display_tabs::total_tab_slots(app);
     if tab_count > 0 {
-        (tab_count as f32 * crate::app::theme::TAB_BUTTON_WIDTH)
+        (tab_count as f32
+            * crate::app::chrome::tab_button_width(app.state.app_settings.font_size()))
             + ((tab_count.saturating_sub(1)) as f32 * spacing)
     } else {
         0.0

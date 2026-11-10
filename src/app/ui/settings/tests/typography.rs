@@ -126,7 +126,7 @@ fn large_tab_labels_fit_in_each_tab_list_position() {
             0,
         );
         let mut h = Harness::builder()
-            .with_size(egui::vec2(1100.0, 900.0))
+            .with_size(egui::vec2(3000.0, 900.0))
             .build_ui_state(
                 |ui, app| {
                     crate::app::app_state::prepare_context_before_first_frame(app, ui.ctx());
@@ -163,5 +163,44 @@ fn large_tab_labels_fit_in_each_tab_list_position() {
             }
         }
         assert_eq!(count, 3, "{position:?}");
+    }
+}
+
+#[test]
+fn horizontal_tab_width_keeps_typical_names_readable_at_large_sizes() {
+    for size in [14.0, 48.0, 72.0] {
+        let ctx = egui::Context::default();
+        setup(&ctx);
+        let mut truncated = true;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(2000.0, 500.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                truncated = crate::app::chrome::tab_button_with_actions(
+                    ui,
+                    "large-tab",
+                    "Notes.txt",
+                    true,
+                    false,
+                    crate::app::chrome::TabButtonOptions::new(
+                        crate::app::chrome::tab_button_width(size),
+                    )
+                    .with_label_font_id(crate::app::chrome::tab_label_font_id(size)),
+                )
+                .3;
+            },
+        );
+        output.textures_delta.clear();
+        assert!(!truncated, "Typical name truncated at {size}pt");
+        assert!(
+            output.shapes.iter().any(
+                |s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "Notes.txt")
+            )
+        );
     }
 }

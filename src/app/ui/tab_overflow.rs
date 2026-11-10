@@ -2,8 +2,8 @@ use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::chrome::{TabButtonOptions, tab_button_with_actions, tab_label_font_id};
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::{
-    BUTTON_SIZE, TAB_BUTTON_WIDTH, TAB_HEIGHT, TAB_LIST_SCROLLBAR_GUTTER, action_bg, border,
-    tab_active_bg, tab_list_scroll_style, text_primary,
+    BUTTON_SIZE, TAB_HEIGHT, TAB_LIST_SCROLLBAR_GUTTER, action_bg, border, tab_active_bg,
+    tab_list_scroll_style, text_primary,
 };
 use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
@@ -143,7 +143,9 @@ fn show_overflow_popup(
     }
 
     let active_drag_sources = tab_drag::active_drag_sources_for_context(ctx);
-    let row_width = TAB_BUTTON_WIDTH;
+    let row_width =
+        crate::app::chrome::tab_button_width(request.app.state.app_settings.font_size())
+            .min((ctx.content_rect().width() - TAB_LIST_SCROLLBAR_GUTTER - 16.0).max(0.0));
     let popup_width = row_width + TAB_LIST_SCROLLBAR_GUTTER;
     let popup_max_height = overflow_popup_max_height(ctx, request.anchor, request.pivot);
     let visible_row_count = overflow_row_count(request.app, request.visible_tab_indices);
