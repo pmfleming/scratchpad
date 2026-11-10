@@ -283,3 +283,53 @@ fn keyboard_focus_uses_the_accent_without_changing_selected_text_color() {
         }
     }
 }
+
+#[test]
+fn selected_search_text_uses_highlight_foreground_in_the_rendered_glyphs() {
+    for light in [false, true] {
+        let mut app = custom_app(14.0, light);
+        app.state.app_settings.editor.editor_text_highlight_color = "#fff36d".into();
+        let foreground = app.state.app_settings.editor_text_highlight_text_color();
+        let background = app.state.app_settings.editor_text_highlight_color();
+        let mut h = Harness::builder().with_context_setup(setup).build_ui_state(
+            |ui, app| {
+                SettingsUi::apply_appearance(ui, &app.state.app_settings);
+                SettingsUi::apply_controls(ui);
+                let mut query = String::from("size");
+                widgets::search_field(ui, &mut query);
+            },
+            app,
+        );
+        h.run();
+        h.get_by_label("Search settings").focus();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run_steps(2);
+        let galley = h
+            .output()
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "size" => Some(&text.galley),
+                _ => None,
+            })
+            .expect("Search field text");
+        // Selection recolors mesh vertices, not the original layout job.
+        // Check what is painted instead of assuming the base text color survives.
+        let mut glyph_vertices = 0;
+        for row in &galley.rows {
+            let visuals = &row.visuals;
+            for vertex in &visuals.mesh.vertices[visuals.glyph_vertex_range.clone()] {
+                assert_eq!(vertex.color, foreground);
+                glyph_vertices += 1;
+            }
+            assert!(
+                visuals
+                    .mesh
+                    .vertices
+                    .iter()
+                    .any(|vertex| vertex.color == background)
+            );
+        }
+        assert!(glyph_vertices > 0);
+    }
+}
