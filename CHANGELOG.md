@@ -78,6 +78,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Keep the editor visible when History or the scrubber navigates to an off-screen edit without returning keyboard focus to the editor.
+
 - Preserve each view's caret and selection when reopening a closed file or restoring a session.
 
 - Preserve replayability after recovery for replacements that delete multiple piece-tree spans. Their fingerprints now follow persisted payload boundaries.

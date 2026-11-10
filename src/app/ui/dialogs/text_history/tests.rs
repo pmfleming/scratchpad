@@ -1,3 +1,5 @@
+mod redraw;
+
 use super::*;
 use crate::app::{
     app_state::test_support::test_app,

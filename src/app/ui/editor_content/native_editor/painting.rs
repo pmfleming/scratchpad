@@ -74,6 +74,7 @@ struct ImePreeditPaintContext<'a> {
 
 struct CursorPaintContext<'a> {
     ui: &'a mut egui::Ui,
+    focused: bool,
     editor_rect: egui::Rect,
     cursor_rect_screen: egui::Rect,
     cursor_rect_content: egui::Rect,
@@ -150,7 +151,10 @@ pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> Curso
         request.cursor_range.as_ref(),
     );
 
-    if !request.focused {
+    // History owns keyboard focus while its target still needs to be revealed.
+    // Layout already follows that target, so skipping the scroll can leave the
+    // visible viewport outside the rendered text slice.
+    if !request.focused && request.cursor_reveal_mode.is_none() {
         request.caret_animation.reset();
         return CursorPaintOutcome::default();
     }
@@ -177,6 +181,7 @@ pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> Curso
         let cursor_rect_content = cursor_rect.translate(-request.rect.min.to_vec2());
         return paint_cursor_effects(CursorPaintContext {
             ui,
+            focused: request.focused,
             editor_rect: request.rect,
             cursor_rect_screen: cursor_rect,
             cursor_rect_content,
@@ -684,17 +689,21 @@ pub(super) fn galley_screen_offset(galley: &egui::Galley, galley_pos: egui::Pos2
 }
 
 fn paint_cursor_effects(context: CursorPaintContext<'_>) -> CursorPaintOutcome {
-    let now = context.ui.input(|input| input.time);
-    let animation = context.animation.update(
-        context.logical_cursor,
-        context.cursor_rect_screen,
-        now,
-        context.animate_transition,
-        context.force_snap,
-    );
-    paint_cursor(context.ui, context.editor_rect, animation.rect);
-    if animation.active {
-        context.ui.ctx().request_repaint();
+    if context.focused {
+        let now = context.ui.input(|input| input.time);
+        let animation = context.animation.update(
+            context.logical_cursor,
+            context.cursor_rect_screen,
+            now,
+            context.animate_transition,
+            context.force_snap,
+        );
+        paint_cursor(context.ui, context.editor_rect, animation.rect);
+        if animation.active {
+            context.ui.ctx().request_repaint();
+        }
+    } else {
+        context.animation.reset();
     }
     let reveal_intent = context.reveal_mode.map(|mode| {
         let align_y = match mode {
@@ -723,7 +732,9 @@ fn paint_cursor_effects(context: CursorPaintContext<'_>) -> CursorPaintOutcome {
     CursorPaintOutcome {
         reveal_attempted: context.reveal_mode.is_some(),
         reveal_intent,
-        ime_geometry: Some((context.editor_rect, context.cursor_rect_screen)),
+        ime_geometry: context
+            .focused
+            .then_some((context.editor_rect, context.cursor_rect_screen)),
     }
 }
 
@@ -776,6 +787,56 @@ pub(super) fn consume_cursor_reveal(view: &mut EditorViewState, reveal_attempted
 mod tests {
     use super::replacement_preview_rect;
     use eframe::egui;
+
+    #[test]
+    fn unfocused_reveal_scrolls_without_painting_a_caret_or_publishing_ime() {
+        for focused in [false, true] {
+            let ctx = egui::Context::default();
+            let mut animation = super::CaretAnimationState::default();
+            let mut outcome = None;
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                outcome = Some(super::paint_cursor_effects(super::CursorPaintContext {
+                    ui,
+                    focused,
+                    editor_rect: egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 800.0),
+                    ),
+                    cursor_rect_screen: egui::Rect::from_min_size(
+                        egui::pos2(20.0, 600.0),
+                        egui::vec2(1.0, 16.0),
+                    ),
+                    cursor_rect_content: egui::Rect::from_min_size(
+                        egui::pos2(20.0, 600.0),
+                        egui::vec2(1.0, 16.0),
+                    ),
+                    logical_cursor: super::CharCursor::new(100),
+                    reveal_mode: Some(super::CursorRevealMode::Center),
+                    animate_transition: false,
+                    force_snap: true,
+                    animation: &mut animation,
+                }));
+            });
+            let outcome = outcome.unwrap();
+            assert!(outcome.reveal_attempted);
+            assert!(matches!(
+                outcome.reveal_intent,
+                Some(super::ScrollIntent::Reveal {
+                    align_y: Some(super::ScrollAlign::Center),
+                    ..
+                })
+            ));
+            assert_eq!(outcome.ime_geometry.is_some(), focused);
+            assert_eq!(
+                output
+                    .shapes
+                    .iter()
+                    .any(|s| matches!(s.shape, egui::Shape::LineSegment { .. })),
+                focused
+            );
+            output.textures_delta.clear();
+        }
+    }
 
     #[test]
     fn replacement_preview_rect_covers_original_match_when_label_is_shorter() {
