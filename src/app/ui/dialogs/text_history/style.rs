@@ -64,7 +64,7 @@ pub(super) fn text_right(
     );
 }
 
-pub(super) fn apply(ui: &mut egui::Ui) {
+pub(in crate::app::ui::dialogs) fn apply(ui: &mut egui::Ui) {
     let accent = theme::tab_selected_accent(ui);
     let selected = theme::tab_selected_bg(ui);
     let danger = theme::diff_del(ui);
@@ -87,7 +87,7 @@ pub(super) fn apply(ui: &mut egui::Ui) {
     }
 }
 
-pub(super) fn icon_button(
+pub(in crate::app::ui::dialogs) fn icon_button(
     ui: &mut egui::Ui,
     key: impl Hash,
     icon: &str,

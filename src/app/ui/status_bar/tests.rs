@@ -7,7 +7,7 @@ use crate::app::domain::EditorViewState;
 use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 
 #[test]
-fn zoom_status_is_read_only_tracks_the_active_pane_and_is_hidden_in_settings() {
+fn zoom_status_opens_scrubber_tracks_the_active_pane_and_is_hidden_in_settings() {
     use crate::app::{
         app_state::test_support::test_app,
         domain::{BufferState, SplitAxis, WorkspaceTab},
@@ -41,6 +41,7 @@ fn zoom_status_is_read_only_tracks_the_active_pane_and_is_hidden_in_settings() {
         .click();
     harness.run();
     assert!(!harness.state().state.chrome.showing_settings());
+    assert_eq!(harness.state().state.dialogs.zoom_scrubber, Some(first));
     assert_eq!(
         harness
             .state()

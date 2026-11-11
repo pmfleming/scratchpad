@@ -103,7 +103,9 @@ fn handle_view_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         (ShortcutAction::DecreaseFontSize, ZoomChange::Out),
         (ShortcutAction::ResetZoom, ZoomChange::Reset),
     ] {
-        if consume_app_shortcut(app, ctx, shortcut) && zoom::active_view(app, change) {
+        if consume_app_shortcut(app, ctx, shortcut) {
+            zoom::active_view(app, change);
+            crate::app::ui::dialogs::zoom_scrubber::open(app);
             ctx.request_repaint();
         }
     }

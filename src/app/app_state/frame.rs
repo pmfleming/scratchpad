@@ -99,6 +99,7 @@ pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
         app.state.window.overflow_popup_open = false;
     }
     handle_dropped_files(app, ctx);
+    dialogs::zoom_scrubber::handle_input(ctx, app);
     dialogs::handle_text_history_navigation(ctx, app);
     settings_state::apply_theme_to_context(app, ctx);
     crate::app::ui::widget_ids::configure_debug_options(ctx);
@@ -138,6 +139,7 @@ pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egu
     dialogs::show_pending_action_modal(ctx, app);
     dialogs::show_encoding_window(ctx, app);
     dialogs::show_text_history_window(ctx, app);
+    dialogs::zoom_scrubber::show(ctx, app);
     dialogs::show_status_history_window(ctx, app);
     record_frame_phase(FramePhase::Dialogs, dialogs_started_at.elapsed());
     let shortcuts_started_at = Instant::now();

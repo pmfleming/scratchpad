@@ -6,6 +6,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Added
 
+- Ctrl+/Ctrl− and the status bar zoom percentage open a live zoom scrubber for the active pane, with drag, step, reset, and keyboard controls matching the undo/redo scrubber.
 - Timeline records explicit document creation, successful opens, and completed final-view closes as informational rows. Restoring a session adds no synthetic lifecycle events, and closing a never-edited blank untitled document removes its activity.
 - File edit trees with an empty starting point, explicit Now, preserved branches, and recently edited file discovery, including closed files.
 

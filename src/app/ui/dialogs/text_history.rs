@@ -6,7 +6,7 @@ mod presentation;
 mod recent;
 mod scrubber;
 mod selection;
-mod style;
+pub(super) mod style;
 #[cfg(test)]
 mod tests;
 mod timeline;
@@ -220,6 +220,7 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
         }
         match event {
             Some(TextHistoryEvent::Replay) if !app.state.dialogs.text_history.is_open() => {
+                app.state.dialogs.zoom_scrubber = None;
                 app.state.dialogs.history_scrubber.open();
             }
             Some(TextHistoryEvent::Edit) => app.state.dialogs.history_scrubber.close(),
@@ -378,8 +379,8 @@ fn history_focus(
     }
 }
 
-fn resume_editor_input(ctx: &egui::Context, app: &mut ScratchpadApp) -> bool {
-    let resume = ctx.input(|i| {
+pub(super) fn editor_input_requested(ctx: &egui::Context) -> bool {
+    ctx.input(|i| {
         i.events.iter().any(|event| match event {
             egui::Event::Text(text)
             | egui::Event::Paste(text)
@@ -400,7 +401,11 @@ fn resume_editor_input(ctx: &egui::Context, app: &mut ScratchpadApp) -> bool {
             }
             _ => false,
         })
-    });
+    })
+}
+
+fn resume_editor_input(ctx: &egui::Context, app: &mut ScratchpadApp) -> bool {
+    let resume = editor_input_requested(ctx);
     if resume {
         ctx.memory_mut(|m| {
             m.surrender_focus(focus_id());

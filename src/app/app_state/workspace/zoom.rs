@@ -6,6 +6,7 @@ pub(crate) enum ZoomChange {
     Out,
     Reset,
     Scale(f32),
+    Factor(f32),
     FontPoints(f32),
 }
 
@@ -41,6 +42,7 @@ pub(crate) fn apply(app: &mut ScratchpadApp, view_id: ViewId, change: ZoomChange
         ZoomChange::Out => factor - 0.1,
         ZoomChange::Reset => 1.0,
         ZoomChange::Scale(scale) => factor * scale,
+        ZoomChange::Factor(factor) => factor,
         ZoomChange::FontPoints(points) => factor + points / base_size,
     };
     if !next.is_finite() || !view.set_zoom_factor(next) {

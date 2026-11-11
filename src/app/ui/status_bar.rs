@@ -31,6 +31,7 @@ struct StatusBarActions {
     toggle_control_chars: bool,
     open_status_history: bool,
     open_text_history: bool,
+    open_zoom_scrubber: bool,
     open_encoding_dialog: bool,
     open_settings: bool,
 }
@@ -443,6 +444,11 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
         app.tab_manager.mark_session_dirty();
     }
 
+    if actions.open_zoom_scrubber {
+        crate::app::ui::dialogs::zoom_scrubber::open(app);
+        crate::app::app_state::workspace::accessors::request_focus_for_active_view(app);
+    }
+
     if actions.open_encoding_dialog {
         frame::open_encoding_dialog(app);
     }
@@ -490,13 +496,20 @@ fn render_status_item(
         ),
         StatusBarItemKind::Zoom => {
             ui.separator();
-            widget_ids::surface_response(ui, "status_zoom", widget_ids::WidgetRole::Label, |ui| {
-                ui.add(egui::Label::new(&details.zoom_label).sense(egui::Sense::hover()))
-            })
+            let response = widget_ids::surface_response(
+                ui,
+                "status_zoom",
+                widget_ids::WidgetRole::Label,
+                |ui| ui.add(egui::Label::new(&details.zoom_label).sense(egui::Sense::click())),
+            )
             .on_hover_text(format!(
-                "Zoom for this pane\n{}",
+                "Click to adjust zoom for this pane\n{}",
                 shortcut_tooltips::action(ui.ctx(), ShortcutAction::ResetZoom, "Reset zoom",)
-            ));
+            ))
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if response.clicked() {
+                actions.open_zoom_scrubber = true;
+            }
         }
         StatusBarItemKind::ControlChars => show_control_char_toggle(ui, details, actions),
         StatusBarItemKind::TextHistory => show_text_history_button(ui, actions),
