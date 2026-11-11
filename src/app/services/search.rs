@@ -344,86 +344,65 @@ mod tests {
 
     #[test]
     fn matcher_matrix_preserves_ranges_limits_and_compiled_search() {
-        use SearchMode::{PlainText as Plain, Regex};
-        for (text, query, mode, match_case, whole_word, expected) in [
-            ("abc ABC abc", "abc", Plain, true, false, vec![0..3, 8..11]),
-            (
-                "aA_aa",
-                "a",
-                Plain,
-                false,
-                false,
-                vec![0..1, 1..2, 3..4, 4..5],
-            ),
+        let folded = SearchOptions::default();
+        let exact = SearchOptions {
+            match_case: true,
+            ..folded
+        };
+        let folded_word = SearchOptions {
+            whole_word: true,
+            ..folded
+        };
+        let exact_word = SearchOptions {
+            whole_word: true,
+            ..exact
+        };
+        let regex = SearchOptions {
+            mode: SearchMode::Regex,
+            ..exact
+        };
+        let regex_word = SearchOptions {
+            whole_word: true,
+            ..regex
+        };
+        for (text, query, options, expected) in [
+            ("abc ABC abc", "abc", exact, vec![0..3, 8..11]),
+            ("aA_aa", "a", folded, vec![0..1, 1..2, 3..4, 4..5]),
             (
                 "foo FOO food _foo foo_",
                 "foo",
-                Plain,
-                false,
-                true,
+                folded_word,
                 vec![0..3, 4..7],
             ),
             (
                 "Needle needle NEEDLE hay",
                 "needle",
-                Plain,
-                false,
-                false,
+                folded,
                 vec![0..6, 7..13, 14..20],
             ),
-            ("12 12 1", "12", Plain, false, false, vec![0..2, 3..5]),
-            ("1 11", "1", Plain, false, false, vec![0..1, 2..3, 3..4]),
+            ("12 12 1", "12", folded, vec![0..2, 3..5]),
+            ("1 11", "1", folded, vec![0..1, 2..3, 3..4]),
             (
                 "café needle 東京 needle",
                 "needle",
-                Plain,
-                true,
-                false,
+                exact,
                 vec![5..11, 15..21],
             ),
-            ("a café café", "café", Plain, true, false, vec![2..6, 7..11]),
-            ("α beta αbeta α", "α", Plain, true, true, vec![0..1, 13..14]),
-            ("α β βx xβ β", "β", Plain, true, true, vec![2..3, 10..11]),
-            (
-                "éÉéÉ",
-                "é",
-                Plain,
-                false,
-                false,
-                vec![0..1, 1..2, 2..3, 3..4],
-            ),
-            (
-                "ab12 xx ab99",
-                r"ab[0-9]{2}",
-                Regex,
-                true,
-                false,
-                vec![0..4, 8..12],
-            ),
+            ("a café café", "café", exact, vec![2..6, 7..11]),
+            ("α beta αbeta α", "α", exact_word, vec![0..1, 13..14]),
+            ("α β βx xβ β", "β", exact_word, vec![2..3, 10..11]),
+            ("éÉéÉ", "é", folded, vec![0..1, 1..2, 2..3, 3..4]),
+            ("ab12 xx ab99", r"ab[0-9]{2}", regex, vec![0..4, 8..12]),
             (
                 "α café42 東京9 café",
                 r"café[0-9]{2}|東京[0-9]",
-                Regex,
-                true,
-                false,
+                regex,
                 vec![2..8, 9..12],
             ),
-            ("a aa a", "a", Regex, true, true, vec![0..1, 5..6]),
-            (
-                "aaaa",
-                "a?",
-                Regex,
-                true,
-                false,
-                vec![0..1, 1..2, 2..3, 3..4],
-            ),
-            ("fo fof f", "foo", Plain, false, false, vec![]),
+            ("a aa a", "a", regex_word, vec![0..1, 5..6]),
+            ("aaaa", "a?", regex, vec![0..1, 1..2, 2..3, 3..4]),
+            ("fo fof f", "foo", folded, vec![]),
         ] {
-            let options = SearchOptions {
-                mode,
-                match_case,
-                whole_word,
-            };
             assert_eq!(
                 find_matches(text, query, options),
                 expected,
