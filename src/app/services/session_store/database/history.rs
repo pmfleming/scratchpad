@@ -9,6 +9,7 @@ use crate::app::domain::buffer::{
 };
 use crate::app::domain::{CharCursor, CursorRange, TextDocument};
 use crate::app::services::session_store::model::SessionTab;
+use std::sync::Arc;
 use std::{
     collections::{BTreeMap, HashMap},
     io,
@@ -56,10 +57,8 @@ fn hash_entry(entry: &PieceHistoryEntry) -> HistoryFingerprint {
     }
     for edit in &entry.edits {
         hash.update(&edit.start_char().to_le_bytes());
-        for (role, spans) in [
-            (0, edit.deleted_spans().to_vec()),
-            (1, edit.inserted_span().into_iter().collect()),
-        ] {
+        let inserted = edit.inserted_span();
+        for (role, spans) in [(0, edit.deleted_spans()), (1, inserted.as_slice())] {
             hash.update(&(role as u64).to_le_bytes());
             hash.update(&(spans.len() as u64).to_le_bytes());
             for span in spans {
@@ -79,9 +78,36 @@ fn hash_entry(entry: &PieceHistoryEntry) -> HistoryFingerprint {
         digest: hash.finalize(),
     }
 }
-pub(super) fn fingerprints(rows: &HistoryRows) -> Vec<HistoryFingerprint> {
-    (0..rows.len())
-        .map(|i| hash_entry(rows.0.reference_entry(i)))
+pub(super) fn fingerprints(
+    rows: &HistoryRows,
+    previous: Option<(
+        &crate::app::domain::buffer::PersistentVector<PieceHistoryEntry>,
+        &Arc<[HistoryFingerprint]>,
+    )>,
+) -> Arc<[HistoryFingerprint]> {
+    let entries = rows.0.reference_entries();
+    if let Some((old, keys)) = previous
+        && entries.shares_storage(old)
+    {
+        return keys.clone();
+    }
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            // A changed leaf is copied by the persistent vector. Shared leaves are
+            // immutable, so their complete metadata fingerprint remains valid.
+            if let Some((old, keys)) = previous
+                && old
+                    .get(index)
+                    .is_some_and(|old_entry| std::ptr::eq(entry, old_entry))
+                && let Some(key) = keys.get(index)
+            {
+                key.clone()
+            } else {
+                hash_entry(entry)
+            }
+        })
         .collect()
 }
 
@@ -170,11 +196,13 @@ impl Database {
             } else {
                 Vec::new()
             };
-            self.history_cache.insert(id.clone(), entries);
+            self.history_inputs.remove(&id);
+            self.history_cache.insert(id.clone(), entries.into());
             self.history_positions.insert(id, positions);
         }
         for id in ids.iter().filter(|id| !known.contains(*id)) {
-            self.history_cache.insert(id.clone(), Vec::new());
+            self.history_inputs.remove(id);
+            self.history_cache.insert(id.clone(), Arc::from([]));
             self.history_positions.insert(id.clone(), (0, 0, 0, 0));
         }
         Ok(())
@@ -183,12 +211,15 @@ impl Database {
         &self,
         id: &str,
         rows: &HistoryRows,
-        keys: &[HistoryFingerprint],
+        keys: &Arc<[HistoryFingerprint]>,
     ) -> io::Result<Vec<PreparedHistoryEntry>> {
         let old = self
             .history_cache
             .get(id)
             .ok_or_else(|| invalid("history cache not primed"))?;
+        if Arc::ptr_eq(old, keys) {
+            return Ok(Vec::new());
+        }
         let mut changed = Vec::new();
         for (index, key) in keys.iter().enumerate() {
             if old
@@ -201,11 +232,9 @@ impl Database {
             let entry = rows.0.reference_entry(index).clone();
             let mut spans = Vec::new();
             for (edit_index, edit) in entry.edits.iter().enumerate() {
-                for (role, parts) in [
-                    (0, edit.deleted_spans().to_vec()),
-                    (1, edit.inserted_span().into_iter().collect()),
-                ] {
-                    for (part, span) in parts.into_iter().enumerate() {
+                let inserted = edit.inserted_span();
+                for (role, parts) in [(0, edit.deleted_spans()), (1, inserted.as_slice())] {
+                    for (part, span) in parts.iter().copied().enumerate() {
                         let measured = rows.0.piece_tree().span_char_len(span)?;
                         if measured != span.char_len {
                             return Err(invalid("history character length mismatch"));
@@ -462,7 +491,10 @@ impl Database {
         changed: &[PreparedHistoryEntry],
     ) -> io::Result<()> {
         if self.document_cache.contains_key(id)
-            && self.history_cache.get(id).is_some_and(|old| old == keys)
+            && self
+                .history_cache
+                .get(id)
+                .is_some_and(|old| old.as_ref() == keys)
         {
             return self.write_history_position(id, rows.positions()).await;
         }
@@ -486,7 +518,7 @@ impl Database {
         }
         self.write_history_position(id, rows.positions()).await?;
         if let Some(old) = self.history_cache.get(id) {
-            for key in old {
+            for key in old.iter() {
                 if keys.binary_search_by_key(&key.id, |e| e.id).is_err() {
                     self.execute_cached(
                         "DELETE FROM history WHERE temp_id=? AND seq=?",

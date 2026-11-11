@@ -28,6 +28,10 @@ impl<T> Default for PersistentVector<T> {
     }
 }
 impl<T> PersistentVector<T> {
+    /// Equal roots are immutable until copy-on-write; no entry can change in place.
+    pub(crate) fn shares_storage(&self, other: &Self) -> bool {
+        self.len == other.len && Arc::ptr_eq(&self.root, &other.root)
+    }
     #[must_use]
     pub fn len(&self) -> usize {
         self.len

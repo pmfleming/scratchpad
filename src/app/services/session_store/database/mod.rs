@@ -137,7 +137,11 @@ pub(super) struct Database {
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
     tail_cache: HashMap<String, content::TailCheckpoint>,
     history_positions: HashMap<String, (u64, u64, u64, u64)>,
-    history_cache: HashMap<String, Vec<history::HistoryFingerprint>>,
+    history_cache: HashMap<String, std::sync::Arc<[history::HistoryFingerprint]>>,
+    history_inputs: HashMap<
+        String,
+        crate::app::domain::buffer::PersistentVector<crate::app::domain::buffer::PieceHistoryEntry>,
+    >,
     document_cache: HashMap<String, document_rows::DocumentRow>,
     // Complete committed IDs, including cold/quarantined content; revisions alone
     // only describe snapshots written by this process. None requires a fresh scan.
@@ -218,6 +222,7 @@ impl Database {
             tail_cache: HashMap::new(),
             history_positions: HashMap::new(),
             history_cache: HashMap::new(),
+            history_inputs: HashMap::new(),
             document_cache: HashMap::new(),
             inventory: None,
             latest_request: 0,
@@ -378,6 +383,7 @@ impl Database {
             self.tail_cache.clear();
             self.history_positions.clear();
             self.history_cache.clear();
+            self.history_inputs.clear();
             self.document_cache.clear();
             self.inventory = None;
             // SQLITE_FULL and rollback triggers can already end the transaction.

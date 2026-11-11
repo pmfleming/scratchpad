@@ -16,7 +16,7 @@ struct RecoveryBuffer {
     metadata: super::document_rows::DocumentRow,
     // None means cold or quarantined: preserve the committed history.
     history: Option<HistoryRows>,
-    history_fingerprints: Option<Vec<super::history::HistoryFingerprint>>,
+    history_fingerprints: Option<std::sync::Arc<[super::history::HistoryFingerprint]>>,
     changed_history: Vec<super::history::PreparedHistoryEntry>,
 }
 
@@ -149,7 +149,7 @@ impl Prepared {
             let policy = RecoveryBuffer {
                 metadata: super::document_rows::DocumentRow::capture(buffer)?,
                 changed_history: Vec::new(),
-                history_fingerprints: history.as_ref().map(super::history::fingerprints),
+                history_fingerprints: None,
                 history,
             };
             if self
@@ -370,6 +370,7 @@ impl Database {
             self.inventory = None;
             self.tail_cache.clear();
             self.history_cache.clear();
+            self.history_inputs.clear();
             self.history_positions.clear();
         }
         if self.inventory.is_none() {
@@ -439,12 +440,15 @@ impl Database {
             }
         }
         for (id, buffer) in &mut prepared.buffers {
-            if let (Some(history), Some(keys)) = (&buffer.history, &buffer.history_fingerprints) {
+            if let Some(history) = &buffer.history {
+                let previous = self.history_inputs.get(id).zip(self.history_cache.get(id));
+                let keys = super::history::fingerprints(history, previous);
                 if !self.history_positions.contains_key(id) {
                     self.history_positions
                         .insert(id.clone(), self.read_history_positions(id).await?);
                 }
-                buffer.changed_history = self.prepare_history(id, history, keys)?;
+                buffer.changed_history = self.prepare_history(id, history, &keys)?;
+                buffer.history_fingerprints = Some(keys);
             }
         }
         Ok(())
@@ -493,6 +497,7 @@ impl Database {
             self.revisions.remove(id);
             self.tail_cache.remove(id);
             self.history_cache.remove(id);
+            self.history_inputs.remove(id);
             self.history_positions.remove(id);
             self.document_cache.remove(id);
         }
@@ -506,6 +511,12 @@ impl Database {
             .retain(|id, _| prepared.buffers.contains_key(id));
         self.history_cache
             .retain(|id, _| prepared.buffers.contains_key(id));
+        self.history_inputs.retain(|id, _| {
+            prepared
+                .buffers
+                .get(id)
+                .is_some_and(|b| b.history.is_some())
+        });
         self.document_cache
             .retain(|id, _| prepared.buffers.contains_key(id));
         for (id, content) in prepared.contents {
@@ -519,6 +530,8 @@ impl Database {
             if let Some(history) = &buffer.history {
                 self.history_positions
                     .insert(id.clone(), history.positions());
+                self.history_inputs
+                    .insert(id.clone(), history.0.reference_entries().clone());
             }
         }
         self.revisions.extend(

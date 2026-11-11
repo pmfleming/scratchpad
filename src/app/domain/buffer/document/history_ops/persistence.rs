@@ -105,6 +105,11 @@ impl HistorySnapshot {
         crate::app::domain::DocumentSnapshot::from_shared(self.tree.clone())
     }
 
+    pub(crate) fn reference_entries(
+        &self,
+    ) -> &crate::app::domain::buffer::PersistentVector<PieceHistoryEntry> {
+        &self.entries
+    }
     pub(crate) fn reference_entry(&self, index: usize) -> &PieceHistoryEntry {
         &self.entries[index]
     }
