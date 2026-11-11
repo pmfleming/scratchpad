@@ -30,9 +30,30 @@ pub struct SearchHighlightState {
     pub active_range_index: Option<usize>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SearchReplacementPreview {
-    pub entries: Vec<SearchReplacementPreviewEntry>,
+    entries: std::sync::Arc<[SearchReplacementPreviewEntry]>,
+    signature: u64,
+}
+
+impl SearchReplacementPreview {
+    pub fn new(mut entries: Vec<SearchReplacementPreviewEntry>) -> Self {
+        use std::hash::{Hash, Hasher};
+        entries.sort_by_key(|entry| entry.range.start);
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        entries.hash(&mut hash);
+        Self {
+            entries: entries.into(),
+            signature: hash.finish(),
+        }
+    }
+
+    pub fn entries(&self) -> &[SearchReplacementPreviewEntry] {
+        &self.entries
+    }
+    pub fn signature(&self) -> u64 {
+        self.signature
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -370,7 +391,10 @@ impl EditorViewState {
         buffer: &mut crate::app::domain::BufferState,
         highlights: SearchHighlightState,
     ) {
-        if self.search_highlights == highlights {
+        if self.search_highlights.ranges == highlights.ranges
+            && self.anchors.resolved_search_token == Some(buffer.document().history_token())
+        {
+            self.search_highlights.active_range_index = highlights.active_range_index;
             return;
         }
         release_anchors(
@@ -402,7 +426,7 @@ impl EditorViewState {
         }
         self.search_highlights = highlights;
         self.anchors.search_highlight_anchors = highlight_anchors;
-        self.anchors.resolved_search_token = None;
+        self.anchors.resolved_search_token = Some(buffer.document().history_token());
     }
 
     pub fn clear_search_highlights_for_release(&mut self) -> Vec<AnchorId> {
@@ -413,9 +437,6 @@ impl EditorViewState {
     }
 
     pub fn set_search_replacement_preview(&mut self, preview: Option<SearchReplacementPreview>) {
-        if self.search_replacement_preview == preview {
-            return;
-        }
         self.search_replacement_preview = preview;
     }
 

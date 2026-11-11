@@ -8,8 +8,6 @@ use crate::app::services::settings_store::TabDisplayMode;
 use crate::app::ui::editor_content::extent;
 use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::io;
 use std::sync::Arc;
 
@@ -199,12 +197,7 @@ fn layout_cache_key(input: LayoutCacheKeyInput<'_>) -> LayoutCacheKey {
 }
 
 fn replacement_preview_signature(preview: Option<&SearchReplacementPreview>) -> u64 {
-    let Some(preview) = preview else {
-        return 0;
-    };
-    let mut hasher = DefaultHasher::new();
-    preview.hash(&mut hasher);
-    hasher.finish()
+    preview.map_or(0, SearchReplacementPreview::signature)
 }
 
 fn viewport_text_slice(

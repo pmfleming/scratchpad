@@ -522,12 +522,12 @@ fn visible_preview_entries<'a>(
     slice_range: &Range<usize>,
 ) -> impl Iterator<Item = &'a crate::app::domain::SearchReplacementPreviewEntry> {
     let start_index = preview
-        .entries
+        .entries()
         .partition_point(|entry| entry.range.end <= slice_range.start);
     let end_index = preview
-        .entries
+        .entries()
         .partition_point(|entry| entry.range.start < slice_range.end);
-    preview.entries[start_index..end_index].iter()
+    preview.entries()[start_index..end_index].iter()
 }
 
 fn paint_replacement_preview(

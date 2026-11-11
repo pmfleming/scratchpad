@@ -152,7 +152,7 @@ pub(super) fn preview_text_slice<'a>(
     slice_range: std::ops::Range<usize>,
     preview: Option<&SearchReplacementPreview>,
 ) -> PreviewTextSlice<'a> {
-    let Some(preview) = preview.filter(|preview| !preview.entries.is_empty()) else {
+    let Some(preview) = preview.filter(|preview| !preview.entries().is_empty()) else {
         return PreviewTextSlice {
             text: Cow::Borrowed(text),
             map: None,
@@ -249,12 +249,12 @@ fn visible_preview_entries<'a>(
     slice_range: &std::ops::Range<usize>,
 ) -> Vec<&'a crate::app::domain::SearchReplacementPreviewEntry> {
     let start_index = preview
-        .entries
+        .entries()
         .partition_point(|entry| entry.range.end <= slice_range.start);
     let end_index = preview
-        .entries
+        .entries()
         .partition_point(|entry| entry.range.start < slice_range.end);
-    preview.entries[start_index..end_index].iter().collect()
+    preview.entries()[start_index..end_index].iter().collect()
 }
 
 fn copy_original_chars(

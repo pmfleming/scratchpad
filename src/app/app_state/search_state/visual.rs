@@ -157,68 +157,112 @@ fn apply_search_highlights(app: &mut ScratchpadApp) {
     }
 }
 
+#[derive(Default)]
+pub(super) struct ReplacementPreviewCache {
+    key: Option<(
+        u64,
+        String,
+        String,
+        crate::app::services::search::SearchOptions,
+    )>,
+    program: Option<SearchProgram>,
+    buffers: std::collections::HashMap<
+        BufferId,
+        (
+            crate::app::domain::buffer::HistoryToken,
+            SearchReplacementPreview,
+        ),
+    >,
+}
+
 fn search_replacement_previews_for_tab(
-    app: &ScratchpadApp,
+    app: &mut ScratchpadApp,
     tab_index: usize,
 ) -> Vec<(ViewId, SearchReplacementPreview)> {
-    if !app.state.search_state.panel.replace_open
-        || app.state.search_state.runtime.status != SearchStatus::Ready
-    {
+    let state = &mut app.state.search_state;
+    let options = state.search_options();
+    let cache = &mut state.replacement_previews;
+    if !state.panel.replace_open || state.runtime.status != SearchStatus::Ready {
+        *cache = ReplacementPreviewCache::default();
         return Vec::new();
     }
-    let Ok(program) = SearchProgram::compile(
-        &app.state.search_state.query.query,
-        app.state.search_state.search_options(),
-    ) else {
+    let current =
+        cache
+            .key
+            .as_ref()
+            .is_some_and(|(generation, query, replacement, cached_options)| {
+                *generation == state.runtime.applied_generation
+                    && *query == state.query.query
+                    && *replacement == state.query.replacement
+                    && *cached_options == options
+            });
+    if !current {
+        cache.key = Some((
+            state.runtime.applied_generation,
+            state.query.query.clone(),
+            state.query.replacement.clone(),
+            options,
+        ));
+        cache.program = SearchProgram::compile(&state.query.query, options).ok();
+        cache.buffers.clear();
+    }
+    let Some(program) = cache.program.as_ref() else {
         return Vec::new();
     };
-
-    app.tab_manager
-        .tabs
-        .as_slice()
-        .get(tab_index)
-        .map(|tab| {
-            tab.layout
-                .views()
+    let Some(tab) = app.tab_manager.tabs.get(tab_index) else {
+        return Vec::new();
+    };
+    let mut previews = Vec::new();
+    for view in tab.layout.views() {
+        let Some(buffer) = tab.buffer_by_id(view.buffer_id) else {
+            continue;
+        };
+        let token = buffer.document().history_token();
+        if !cache
+            .buffers
+            .get(&buffer.id)
+            .is_some_and(|(cached, _)| *cached == token)
+        {
+            let entries = state
+                .results
+                .matches
                 .iter()
-                .filter_map(|view| {
-                    let buffer = tab.buffer_by_id(view.buffer_id)?;
-                    let mut entries = app
-                        .state
-                        .search_state
-                        .results
-                        .matches
-                        .iter()
-                        .filter(|search_match| {
-                            matches_buffer(search_match, tab_index, view.buffer_id)
-                                && search_match.target_revision == buffer.document_revision()
-                        })
-                        .map(|search_match| {
-                            let matched_text =
-                                search_match.matched_text.clone().unwrap_or_else(|| {
-                                    buffer
-                                        .document()
-                                        .piece_tree()
-                                        .extract_range(search_match.range.clone())
-                                });
-                            program
-                                .expand_replacement(
-                                    &matched_text,
-                                    &app.state.search_state.query.replacement,
-                                )
-                                .map(|replacement| SearchReplacementPreviewEntry {
-                                    range: search_match.range.clone(),
-                                    replacement,
-                                })
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                        .ok()?;
-                    entries.sort_by_key(|entry| entry.range.start);
-                    (!entries.is_empty()).then_some((view.id, SearchReplacementPreview { entries }))
+                .filter(|matched| {
+                    matches_buffer(matched, tab_index, buffer.id)
+                        && matched.target_revision == buffer.document_revision()
                 })
-                .collect()
-        })
-        .unwrap_or_default()
+                .map(|matched| {
+                    let replacement =
+                        if options.mode == crate::app::services::search::SearchMode::PlainText {
+                            state.query.replacement.clone()
+                        } else {
+                            let text = matched.matched_text.clone().unwrap_or_else(|| {
+                                buffer
+                                    .document()
+                                    .piece_tree()
+                                    .extract_range(matched.range.clone())
+                            });
+                            program.expand_replacement(&text, &state.query.replacement)?
+                        };
+                    Ok(SearchReplacementPreviewEntry {
+                        range: matched.range.clone(),
+                        replacement,
+                    })
+                })
+                .collect::<Result<Vec<_>, crate::app::services::search::SearchError>>();
+            let Ok(entries) = entries else {
+                continue;
+            };
+            cache
+                .buffers
+                .insert(buffer.id, (token, SearchReplacementPreview::new(entries)));
+        }
+        let preview = &cache.buffers[&buffer.id].1;
+        if !preview.entries().is_empty() {
+            previews.push((view.id, preview.clone()));
+        }
+    }
+    previews
 }
 
 fn search_highlights_for_tab(
@@ -250,6 +294,7 @@ fn search_highlights_for_tab(
 }
 
 pub(super) fn clear_search_highlights(app: &mut ScratchpadApp) {
+    app.state.search_state.replacement_previews = ReplacementPreviewCache::default();
     for tab_index in 0..app.tab_manager.tabs.as_slice().len() {
         clear_search_highlights_for_tab(app, tab_index);
     }

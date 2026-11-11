@@ -288,11 +288,11 @@ fn replacement_typing_updates_preview_without_mutating_buffer() {
     assert_eq!(active_buffer_text(&app), "foo foo");
     assert_eq!(active_buffer_revision(&app), before_revision);
     let preview = active_view_replacement_preview(&app).expect("replacement preview");
-    assert_eq!(preview.entries.len(), 2);
-    assert_eq!(preview.entries[0].range, 0..3);
-    assert_eq!(preview.entries[0].replacement, "bar");
-    assert_eq!(preview.entries[1].range, 4..7);
-    assert_eq!(preview.entries[1].replacement, "bar");
+    assert_eq!(preview.entries().len(), 2);
+    assert_eq!(preview.entries()[0].range, 0..3);
+    assert_eq!(preview.entries()[0].replacement, "bar");
+    assert_eq!(preview.entries()[1].range, 4..7);
+    assert_eq!(preview.entries()[1].replacement, "bar");
 }
 
 #[test]
@@ -465,4 +465,103 @@ fn wait_for_search_results(app: &mut ScratchpadApp) {
         std::thread::sleep(Duration::from_millis(5));
     }
     panic!("search results did not settle");
+}
+
+#[test]
+#[ignore = "manual performance measurement"]
+fn replacement_navigation_performance() {
+    for count in [1_000, 16_000] {
+        let mut app = app_with_search_text(&"foo ".repeat(count));
+        let tab = app.tab_manager.active_tab_mut().unwrap();
+        for _ in 0..3 {
+            tab.split_active_view(crate::app::domain::SplitAxis::Horizontal);
+        }
+        seed_search_matches(&mut app, "foo");
+        app.state.search_state.panel.replace_open = true;
+        app.state.search_state.query.replacement = "replacement".into();
+        super::visual::set_active_search_index(&mut app, Some(0));
+        let mut samples = Vec::new();
+        for index in 1..=7 {
+            let start = Instant::now();
+            super::visual::set_active_search_index(&mut app, Some(index));
+            samples.push(start.elapsed().as_nanos());
+        }
+        samples.sort_unstable();
+        println!(
+            "replacement_navigation matches={count} views=4 median_ns={} range={}-{}",
+            samples[3], samples[0], samples[6]
+        );
+    }
+}
+
+#[test]
+fn replacement_previews_share_storage_and_invalidate_on_edits_and_options() {
+    let mut app = app_with_search_text("foo foo");
+    app.tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .split_active_view(crate::app::domain::SplitAxis::Horizontal);
+    seed_search_matches(&mut app, "foo");
+    app.state.search_state.panel.replace_open = true;
+    app.state.search_state.query.replacement = "bar".into();
+    super::visual::set_active_search_index(&mut app, Some(0));
+    let initial = active_view_replacement_preview(&app).unwrap().clone();
+    for view in app.tab_manager.active_tab().unwrap().layout.views() {
+        assert_eq!(
+            view.search_replacement_preview
+                .as_ref()
+                .unwrap()
+                .entries()
+                .as_ptr(),
+            initial.entries().as_ptr()
+        );
+    }
+    let ranges = app
+        .tab_manager
+        .active_tab()
+        .unwrap()
+        .layout
+        .active_view()
+        .unwrap()
+        .search_highlights
+        .ranges
+        .as_ptr();
+    super::visual::set_active_search_index(&mut app, Some(1));
+    assert_eq!(
+        active_view_replacement_preview(&app)
+            .unwrap()
+            .entries()
+            .as_ptr(),
+        initial.entries().as_ptr()
+    );
+    assert_eq!(
+        app.tab_manager
+            .active_tab()
+            .unwrap()
+            .layout
+            .active_view()
+            .unwrap()
+            .search_highlights
+            .ranges
+            .as_ptr(),
+        ranges
+    );
+    app.state.search_state.query.replacement = "baz".into();
+    super::visual::refresh_search_visual_state(&mut app);
+    let replacement = active_view_replacement_preview(&app).unwrap().clone();
+    assert_eq!(replacement.entries()[0].replacement, "baz");
+    assert_ne!(replacement.entries().as_ptr(), initial.entries().as_ptr());
+    app.tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut()
+        .document_mut()
+        .insert_direct(0, " ");
+    seed_search_matches(&mut app, "foo");
+    super::visual::refresh_search_visual_state(&mut app);
+    let edited = active_view_replacement_preview(&app).unwrap();
+    assert_eq!(edited.entries()[0].range, 1..4);
+    assert_ne!(edited.entries().as_ptr(), replacement.entries().as_ptr());
+    app.toggle_search();
+    assert!(active_view_replacement_preview(&app).is_none());
 }

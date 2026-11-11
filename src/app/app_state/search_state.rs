@@ -69,6 +69,7 @@ pub(crate) struct SearchState {
     pub(crate) runtime: SearchRuntimeState,
     pub(crate) replace: SearchReplaceState,
     preview: SearchPreviewCacheState,
+    replacement_previews: visual::ReplacementPreviewCache,
 }
 
 #[derive(Default)]

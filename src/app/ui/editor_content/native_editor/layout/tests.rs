@@ -99,18 +99,16 @@ fn preview_text_slice_can_project_deletion() {
 
 #[test]
 fn preview_text_slice_projects_adjacent_replacements() {
-    let preview = SearchReplacementPreview {
-        entries: vec![
-            SearchReplacementPreviewEntry {
-                range: 0..3,
-                replacement: "bar".to_owned(),
-            },
-            SearchReplacementPreviewEntry {
-                range: 3..6,
-                replacement: "bazooka".to_owned(),
-            },
-        ],
-    };
+    let preview = SearchReplacementPreview::new(vec![
+        SearchReplacementPreviewEntry {
+            range: 0..3,
+            replacement: "bar".to_owned(),
+        },
+        SearchReplacementPreviewEntry {
+            range: 3..6,
+            replacement: "bazooka".to_owned(),
+        },
+    ]);
 
     let slice = preview_text_slice("fooqux!", 0..7, Some(&preview));
     let map = slice.map.as_ref().expect("preview map");
@@ -177,12 +175,10 @@ fn replacement_preview(
     range: std::ops::Range<usize>,
     replacement: &str,
 ) -> SearchReplacementPreview {
-    SearchReplacementPreview {
-        entries: vec![SearchReplacementPreviewEntry {
-            range,
-            replacement: replacement.to_owned(),
-        }],
-    }
+    SearchReplacementPreview::new(vec![SearchReplacementPreviewEntry {
+        range,
+        replacement: replacement.to_owned(),
+    }])
 }
 
 fn numbered_lines(count: usize) -> String {
