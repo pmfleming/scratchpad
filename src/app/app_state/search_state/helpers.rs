@@ -1,93 +1,10 @@
-use super::worker::{SearchFileIdentity, SearchResult, SearchTargetSnapshot};
-use super::{ReplacementTargetPlan, SearchMatch, SearchResultGroup, SearchStatus};
+use super::worker::{SearchFileIdentity, SearchTargetSnapshot};
+use super::{ReplacementTargetPlan, SearchMatch};
 use crate::app::domain::{BufferId, EditorViewState, SearchHighlightState, ViewId, WorkspaceTab};
 use crate::app::services::search::SearchError;
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-
-#[derive(Default, Clone)]
-pub(super) struct SearchResultAccumulator {
-    matches: Vec<SearchMatch>,
-    result_groups: Vec<SearchResultGroup>,
-    group_lookup: HashMap<(usize, BufferId), usize>,
-}
-
-impl SearchResultAccumulator {
-    pub(super) fn push_target_matches(
-        &mut self,
-        target: &SearchTargetSnapshot,
-        ranges: &[Range<usize>],
-    ) {
-        let buffer_label: std::sync::Arc<str> = target.buffer_label.as_str().into();
-        let start_index = self.matches.len();
-        self.matches
-            .extend(ranges.iter().cloned().map(|range| SearchMatch {
-                tab_index: target.tab_index,
-                view_id: target.view_id,
-                buffer_id: target.buffer_id,
-                buffer_label: buffer_label.clone(),
-                target_revision: target.document_snapshot.revision(),
-                matched_text: None,
-                range,
-            }));
-
-        let group_index =
-            if let Some(index) = self.group_lookup.get(&(target.tab_index, target.buffer_id)) {
-                *index
-            } else {
-                let index = self.result_groups.len();
-                self.result_groups.push(SearchResultGroup {
-                    tab_index: target.tab_index,
-                    buffer_id: target.buffer_id,
-                    buffer_label: target.buffer_label.clone(),
-                    tab_label: target.tab_label.clone(),
-                    first_match_index: start_index,
-                    total_match_count: 0,
-                    active: false,
-                });
-                self.group_lookup
-                    .insert((target.tab_index, target.buffer_id), index);
-                index
-            };
-
-        let group = &mut self.result_groups[group_index];
-        group.total_match_count += ranges.len();
-    }
-
-    pub(super) fn finish(self, generation: u64) -> SearchResult {
-        let displayed_match_count = self.match_count();
-        SearchResult {
-            generation,
-            matches: self.matches,
-            result_groups: self.result_groups,
-            displayed_match_count,
-            status: SearchStatus::NoMatches,
-        }
-    }
-
-    pub(super) fn partial_snapshot(
-        &self,
-        generation: u64,
-        scanned_targets: usize,
-        total_targets: usize,
-    ) -> SearchResult {
-        SearchResult {
-            generation,
-            matches: self.matches.clone(),
-            result_groups: self.result_groups.clone(),
-            displayed_match_count: self.match_count(),
-            status: SearchStatus::Searching {
-                scanned_targets,
-                total_targets,
-            },
-        }
-    }
-
-    pub(super) fn match_count(&self) -> usize {
-        self.matches.len()
-    }
-}
 
 pub(super) fn cursor_range_from_char_range(range: Range<usize>) -> CursorRange {
     CursorRange::two(range.start, range.end)
@@ -128,44 +45,25 @@ pub(super) fn build_replacement_targets(
     mut replacement_for_match: impl FnMut(&SearchMatch) -> Result<(String, String), SearchError>,
 ) -> Result<Vec<ReplacementTargetPlan>, SearchError> {
     let mut targets = Vec::new();
-    let mut start = 0;
-    while start < matches.len() {
-        let current_match = &matches[start];
-        let mut end = start + 1;
-        while end < matches.len() && same_replacement_target(&matches[end], current_match) {
-            end += 1;
+    for group in matches.chunk_by(same_replacement_target) {
+        // slice::chunk_by yields only nonempty groups.
+        let current = &group[0];
+        let mut replacements = Vec::with_capacity(group.len());
+        let mut expected_matches = Vec::with_capacity(group.len());
+        for matched in group.iter().rev() {
+            let (replacement, expected) = replacement_for_match(matched)?;
+            replacements.push((matched.range.clone(), replacement));
+            expected_matches.push((matched.range.clone(), expected));
         }
-
-        let replacements_and_expected = matches[start..end]
-            .iter()
-            .rev()
-            .map(&mut replacement_for_match)
-            .collect::<Result<Vec<_>, _>>()?;
-        let replacements = matches[start..end]
-            .iter()
-            .rev()
-            .zip(replacements_and_expected.iter())
-            .map(|(search_match, (replacement, _))| {
-                (search_match.range.clone(), replacement.clone())
-            })
-            .collect();
-        let expected_matches = matches[start..end]
-            .iter()
-            .rev()
-            .zip(replacements_and_expected)
-            .map(|(search_match, (_, expected))| (search_match.range.clone(), expected))
-            .collect();
-
         targets.push(ReplacementTargetPlan {
-            tab_index: current_match.tab_index,
-            view_id: current_match.view_id,
-            buffer_id: current_match.buffer_id,
-            buffer_label: current_match.buffer_label.to_string(),
-            target_revision: current_match.target_revision,
+            tab_index: current.tab_index,
+            view_id: current.view_id,
+            buffer_id: current.buffer_id,
+            buffer_label: current.buffer_label.to_string(),
+            target_revision: current.target_revision,
             expected_matches,
             replacements,
         });
-        start = end;
     }
     Ok(targets)
 }
@@ -313,31 +211,9 @@ fn file_identity_for_buffer(buffer: &crate::app::domain::BufferState) -> SearchF
 
 #[cfg(test)]
 mod tests {
-    use super::{SearchResultAccumulator, build_search_target, collect_search_targets_for_views};
+    use super::collect_search_targets_for_views;
     use crate::app::domain::{BufferState, SplitAxis, WorkspaceTab};
     use std::path::PathBuf;
-
-    #[test]
-    fn accumulator_groups_all_matches_without_eager_preview_entries() {
-        let text = (0..280).map(|_| "plan").collect::<Vec<_>>().join("\n");
-        let ranges = text
-            .match_indices("plan")
-            .map(|(start, value)| start..start + value.len())
-            .collect::<Vec<_>>();
-        let tab = WorkspaceTab::new(BufferState::new("many.md".to_owned(), text, None));
-        let target = build_search_target(0, &tab, tab.layout.active_view_id, "many.md", None)
-            .expect("target");
-        let mut accumulator = SearchResultAccumulator::default();
-
-        accumulator.push_target_matches(&target, &ranges);
-        let result = accumulator.finish(1);
-
-        assert_eq!(result.matches.len(), 280);
-        assert_eq!(result.displayed_match_count, 280);
-        assert_eq!(result.result_groups.len(), 1);
-        assert_eq!(result.result_groups[0].first_match_index, 0);
-        assert_eq!(result.result_groups[0].total_match_count, 280);
-    }
 
     #[test]
     fn target_collection_searches_one_file_once_across_many_views() {

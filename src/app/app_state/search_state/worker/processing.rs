@@ -1,14 +1,14 @@
+use super::results::SearchResultAccumulator;
 use super::{SearchRequest, SearchResult, SearchTargetSnapshot};
 use crate::app::app_state::search_state::SearchStatus;
 use crate::app::app_state::search_state::fragments::{
     intra_buffer_parallelism, search_target_ranges,
 };
-use crate::app::app_state::search_state::helpers::SearchResultAccumulator;
 use crate::app::services::search::SearchProgram;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use std::thread;
 
 use crate::app::app_state::search_state::SEARCH_RESULT_LIMIT_MESSAGE;
@@ -76,8 +76,7 @@ pub(crate) fn process_search_request_with_partials(
     }
     processed?;
 
-    (latest_generation.load(Ordering::Relaxed) == generation)
-        .then(|| final_search_result(results, generation))
+    (latest_generation.load(Ordering::Relaxed) == generation).then(|| results.finish(generation))
 }
 
 fn process_search_targets_serial(
@@ -112,7 +111,7 @@ fn process_search_targets_serial(
         if !program.reserve_result_matches(ranges.len()) {
             return Some(());
         }
-        push_target_matches(results, &target, &ranges);
+        results.push_target_matches(&target, &ranges);
 
         if let Some(emit) = partial_emit.as_deref_mut()
             && index + 1 < target_count
@@ -141,10 +140,8 @@ fn process_search_targets_parallel(
     } = request;
     let target_count = targets.len();
     let worker_count = search_target_parallelism(target_count);
-    let indexed_targets = targets.into_iter().enumerate().collect::<Vec<_>>();
-    let program = Arc::new(program.clone());
-    let chunk_size = indexed_targets.len().div_ceil(worker_count);
-    let mut indexed_iter = indexed_targets.into_iter();
+    let chunk_size = target_count.div_ceil(worker_count);
+    let mut indexed_iter = targets.into_iter().enumerate();
     let (outcome_tx, outcome_rx) = mpsc::channel::<TargetSearchOutcome>();
     let stale = AtomicBool::new(false);
     let mut last_emitted_match_count = 0usize;
@@ -155,7 +152,6 @@ fn process_search_targets_parallel(
             if chunk.is_empty() {
                 break;
             }
-            let program = program.clone();
             let tx = outcome_tx.clone();
             let stale_ref = &stale;
             scope.spawn(move || {
@@ -184,7 +180,7 @@ fn process_search_targets_parallel(
 
 fn search_target_chunk(
     chunk: Vec<(usize, SearchTargetSnapshot)>,
-    program: Arc<SearchProgram>,
+    program: &SearchProgram,
     latest_generation: &AtomicU64,
     generation: u64,
     stale: &AtomicBool,
@@ -201,7 +197,7 @@ fn search_target_chunk(
         let Some(ranges) = search_target_ranges(
             &target.document_snapshot,
             target.search_range.clone(),
-            &program,
+            program,
             generation,
             latest_generation,
             1,
@@ -239,7 +235,7 @@ fn collect_parallel_outcomes(
     while let Ok(outcome) = outcome_rx.recv() {
         pending.insert(outcome.target_index, outcome);
         while let Some(outcome) = pending.remove(&next_index) {
-            push_target_matches(results, &outcome.target, &outcome.ranges);
+            results.push_target_matches(&outcome.target, &outcome.ranges);
             next_index += 1;
             if let Some(emit) = partial_emit.as_deref_mut()
                 && next_index < target_count
@@ -256,16 +252,6 @@ fn collect_parallel_outcomes(
     }
 }
 
-fn push_target_matches(
-    results: &mut SearchResultAccumulator,
-    target: &SearchTargetSnapshot,
-    ranges: &[Range<usize>],
-) {
-    if !ranges.is_empty() {
-        results.push_target_matches(target, ranges);
-    }
-}
-
 fn invalid_query_result(generation: u64, message: &str) -> SearchResult {
     SearchResult {
         generation,
@@ -274,16 +260,6 @@ fn invalid_query_result(generation: u64, message: &str) -> SearchResult {
         displayed_match_count: 0,
         status: SearchStatus::InvalidQuery(message.to_owned()),
     }
-}
-
-fn final_search_result(results: SearchResultAccumulator, generation: u64) -> SearchResult {
-    let mut result = results.finish(generation);
-    result.status = if result.matches.is_empty() {
-        SearchStatus::NoMatches
-    } else {
-        SearchStatus::Ready
-    };
-    result
 }
 
 fn should_publish_partial(

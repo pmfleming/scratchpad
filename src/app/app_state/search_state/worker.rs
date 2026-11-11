@@ -11,6 +11,7 @@ use std::thread;
 use std::time::Instant;
 
 mod processing;
+mod results;
 
 pub(super) use processing::{process_search_request, process_search_request_with_partials};
 
