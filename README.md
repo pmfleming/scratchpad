@@ -102,12 +102,9 @@ path remains nonblocking and compositor-paced. See the
 [WGPU recovery investigation](docs/wgpu-recovery-investigation.md) and
 [Wayland startup validation](docs/wayland-startup.md) for the fixes and native probe.
 
-The host's shutdown service applies [a 4 GiB Cargo cache budget](docs/BUILD-CACHE.md).
-Development-shell entry does not trim caches. Run
-`python3 scripts/trim-build-cache.py --dry-run` for a manual preview. Incremental
-and coverage caches go first; debug/release artifacts may also be removed.
-Reports and review checkouts are preserved. `scripts/trim-target.sh` and
-`SCRATCHPAD_TARGET_MAX_GIB` remain compatible manual-command aliases.
+The host's Rust storage daemon manages [development cache cleanup](docs/BUILD-CACHE.md).
+Use `shelllist storage` to inspect usage and clean eligible caches.
+Development-shell entry does not trim caches.
 
 UI inspection support is optional:
 
