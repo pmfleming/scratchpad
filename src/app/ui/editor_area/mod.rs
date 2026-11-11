@@ -2,14 +2,12 @@ pub mod divider;
 pub mod tile;
 
 use crate::app::app_state::ScratchpadApp;
-use crate::app::app_state::SearchStatus;
 use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::domain::{PaneBranch, PaneNode, ViewId};
 use crate::app::ui::search_replace;
 use crate::app::ui::tile_header::{self, SplitPreviewOverlay, TileAction};
 use crate::app::ui::widget_ids;
 use eframe::egui;
-use std::time::Duration;
 
 pub use divider::{render_split_divider, split_rect};
 use tile::{TileRenderRequest, TileRenderState};
@@ -51,13 +49,6 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 if !crate::app::ui::dialogs::history_scrubbing(ui.ctx(), app) {
                     crate::app::app_state::search_runtime::refresh_search_state(app);
                 }
-                request_search_repaint(
-                    ui.ctx(),
-                    matches!(
-                        app.state.search_state.progress().status,
-                        SearchStatus::Searching { .. }
-                    ),
-                );
             });
         });
 }
@@ -235,12 +226,6 @@ fn apply_tile_actions(app: &mut ScratchpadApp, actions: Vec<TileAction>) {
             }),
         };
         crate::app::commands::handle_command(app, command);
-    }
-}
-
-fn request_search_repaint(ctx: &egui::Context, searching: bool) {
-    if searching {
-        ctx.request_repaint_after(Duration::from_millis(16));
     }
 }
 

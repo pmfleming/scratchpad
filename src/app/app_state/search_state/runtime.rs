@@ -91,9 +91,15 @@ fn submit_search_request(app: &mut ScratchpadApp) {
 
 fn poll_search_results(app: &mut ScratchpadApp) {
     let mut latest_result = None;
-    while let Ok(result) = app.state.search_state.runtime.result_rx.try_recv() {
+    for index in 0..64 {
+        let Ok(result) = app.state.search_state.runtime.result_rx.try_recv() else {
+            break;
+        };
         if result.generation == app.state.search_state.runtime.requested_generation {
             latest_result = Some(result);
+        }
+        if index == 63 {
+            app.state.search_state.runtime.repaint.notify();
         }
     }
     if let Some(result) = latest_result {

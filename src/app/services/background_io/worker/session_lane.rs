@@ -1,8 +1,8 @@
 use super::{LaneEndpoints, LaneOutcome, spawn_lane};
 use crate::app::capacity_metrics::BackgroundIoLane;
 use crate::app::services::background_io::types::{BackgroundIoRequest, BackgroundIoResult};
+use crate::app::services::repaint::WakeSender as Sender;
 use crate::app::services::session_store::{ColdSessionTab, SessionStore};
-use std::sync::mpsc::Sender;
 
 pub(in crate::app::services::background_io) fn spawn_session_lane(endpoints: LaneEndpoints) {
     spawn_lane(

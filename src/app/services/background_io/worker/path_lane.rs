@@ -5,9 +5,10 @@ use crate::app::services::background_io::types::{
     BackgroundIoRequest, BackgroundIoResult, ColdFileShellResult, LoadedPathResult, PathLoadRequest,
 };
 use crate::app::services::file_service::{FileContent, FileService};
+use crate::app::services::repaint::WakeSender as Sender;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc;
 use std::thread;
 
 pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEndpoints) {
@@ -460,6 +461,7 @@ mod tests {
                 })
                 .collect();
             let (tx, rx) = std::sync::mpsc::channel();
+            let tx = super::Sender::new(tx, Default::default());
             assert!(!stream_cold_file_shells(42, paths.clone(), &store, &tx));
             let BackgroundIoResult::PathsLoaded {
                 request_id,

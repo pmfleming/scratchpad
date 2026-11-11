@@ -1,6 +1,7 @@
 use super::{SearchMatch, SearchResultGroup, SearchStatus};
 use crate::app::capacity_metrics;
 use crate::app::domain::{BufferId, DocumentSnapshot, ViewId};
+use crate::app::services::repaint::{RepaintSignal, WakeSender};
 use crate::app::services::search::SearchOptions;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -48,9 +49,11 @@ pub(super) enum SearchFileIdentity {
 
 pub(super) fn spawn_search_worker(
     latest_generation: Arc<AtomicU64>,
+    repaint: RepaintSignal,
 ) -> (Sender<SearchRequest>, Receiver<SearchResult>) {
     let (request_tx, request_rx) = mpsc::channel::<SearchRequest>();
     let (result_tx, result_rx) = mpsc::channel::<SearchResult>();
+    let result_tx = WakeSender::new(result_tx, repaint);
     thread::spawn(move || {
         for request in &request_rx {
             let (request, coalesced_queue_depth) = request_rx

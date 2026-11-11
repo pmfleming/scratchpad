@@ -9,8 +9,9 @@ pub(super) use session_lane::spawn_session_lane;
 use super::dispatcher::LaneDepths;
 use super::types::{BackgroundIoRequest, BackgroundIoResult};
 use crate::app::capacity_metrics::{self, BackgroundIoLane};
+use crate::app::services::repaint::WakeSender as Sender;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::Instant;
 

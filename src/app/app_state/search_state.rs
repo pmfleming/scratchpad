@@ -1,4 +1,5 @@
 use super::ScratchpadApp;
+use crate::app::services::repaint::RepaintSignal;
 use crate::app::services::search::{SearchMode, SearchOptions};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{
@@ -127,6 +128,7 @@ impl Default for SearchResultsState {
 }
 
 pub(crate) struct SearchRuntimeState {
+    pub(crate) repaint: RepaintSignal,
     pub(crate) dirty: bool,
     pub(crate) requested_generation: u64,
     pub(crate) applied_generation: u64,
@@ -141,7 +143,9 @@ pub(crate) struct SearchRuntimeState {
 impl Default for SearchRuntimeState {
     fn default() -> Self {
         let latest_generation = Arc::new(AtomicU64::new(0));
-        let (request_tx, result_rx) = spawn_search_worker(latest_generation.clone());
+        let repaint = RepaintSignal::default();
+        let (request_tx, result_rx) =
+            spawn_search_worker(latest_generation.clone(), repaint.clone());
         Self {
             dirty: false,
             requested_generation: 0,
@@ -150,6 +154,7 @@ impl Default for SearchRuntimeState {
             status: SearchStatus::Idle,
             freshness: SearchFreshness::Fresh,
             latest_generation,
+            repaint,
             request_tx,
             result_rx,
         }

@@ -31,3 +31,33 @@ fn batched_search_labels_preserve_duplicate_names_and_active_first_order() {
         assert_eq!(target.tab_label, search_tab_label(&app, target.tab_index));
     }
 }
+
+#[test]
+fn result_bursts_keep_the_terminal_result_and_ignore_stale_generations() {
+    use super::{SearchResult, SearchStatus, poll_search_results};
+    let root = tempfile::tempdir().unwrap();
+    let mut app = crate::app::app_state::test_support::test_app(root.path());
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.state.search_state.runtime.result_rx = rx;
+    app.state.search_state.runtime.requested_generation = 2;
+    for generation in std::iter::repeat_n(1, 130).chain([2]) {
+        tx.send(SearchResult {
+            generation,
+            matches: Vec::new(),
+            displayed_match_count: 0,
+            result_groups: Vec::new(),
+            status: SearchStatus::Ready,
+        })
+        .unwrap();
+    }
+    poll_search_results(&mut app);
+    assert_ne!(app.state.search_state.runtime.applied_generation, 2);
+    poll_search_results(&mut app);
+    assert_ne!(app.state.search_state.runtime.applied_generation, 2);
+    poll_search_results(&mut app);
+    assert_eq!(app.state.search_state.runtime.applied_generation, 2);
+    assert!(matches!(
+        app.state.search_state.runtime.status,
+        SearchStatus::Ready
+    ));
+}

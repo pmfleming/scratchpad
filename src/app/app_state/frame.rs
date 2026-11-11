@@ -39,6 +39,7 @@ pub(super) fn handle_pending_close_request(app: &mut ScratchpadApp, ctx: &egui::
 /// Keep lifecycle work independent of UI delivery. eframe calls this path even
 /// when minimized/occluded, without consuming the last visible frame's UI input.
 pub(super) fn update_logic(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    app.state.search_state.runtime.repaint.bind(ctx);
     crate::app::services::session_manager::poll_session_reset(app);
     crate::app::services::session_manager::poll_storage_health(app);
     app.state.window.lifecycle.update(ctx);

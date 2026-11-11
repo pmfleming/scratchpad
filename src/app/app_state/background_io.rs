@@ -146,6 +146,7 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn poll_background_io(&mut self, ctx: &egui::Context) {
+        self.state.background_io.tx.bind_repaint(ctx);
         self.queue_restored_source_checks();
         self.drain_background_io_results();
         if let Some(store) = self.state.persistence.session_store.opened_chunk_store()
@@ -164,18 +165,28 @@ impl ScratchpadApp {
         }
 
         session_manager::poll_close_intents(self);
-        if self.state.background_io.has_pending_background_actions()
-            || !self.state.persistence.close_queue.is_empty()
-            || self.state.background_io.preparations_pending
-        {
+        if self.state.background_io.preparations_pending {
             ctx.request_repaint_after(BACKGROUND_IO_POLL_INTERVAL);
+        }
+        if !self.state.persistence.close_queue.is_empty()
+            && !self.state.persistence.close_in_flight
+            && !self.state.background_io.has_pending_persist()
+        {
+            ctx.request_repaint();
         }
     }
 
-    pub fn drain_background_io_results(&mut self) {
-        while let Ok(result) = self.state.background_io.rx.try_recv() {
+    /// Returns true when another batch may be queued.
+    pub fn drain_background_io_results(&mut self) -> bool {
+        for _ in 0..64 {
+            let Ok(result) = self.state.background_io.rx.try_recv() else {
+                return false;
+            };
             self.apply_background_io_result(result);
         }
+        // Continue a burst next frame so input gets a turn between batches.
+        self.state.background_io.tx.notify_repaint();
+        true
     }
 
     /// Best-effort wait for callers that only need to give background work a turn.
@@ -189,7 +200,7 @@ impl ScratchpadApp {
     pub fn wait_for_background_io_idle_timeout(&mut self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
-            self.drain_background_io_results();
+            let batch_exhausted = self.drain_background_io_results();
             session_manager::poll_close_intents(self);
             self.queue_restored_source_checks();
             if self.state.background_io.preparations_pending
@@ -209,6 +220,9 @@ impl ScratchpadApp {
             }
             if Instant::now() >= deadline {
                 return false;
+            }
+            if batch_exhausted {
+                continue;
             }
             std::thread::sleep(
                 deadline
@@ -832,3 +846,38 @@ fn record_background_send_error(error: &BackgroundIoSendError) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod polling_profile {
+    use super::*;
+    #[test]
+    #[ignore = "manual performance measurement"]
+    fn pending_io_repaint_schedule() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::app::app_state::test_support::test_app(root.path());
+        assert!(app.wait_for_background_io_idle_timeout(Duration::from_secs(10)));
+        app.state
+            .background_io
+            .pending_background_actions
+            .insert(u64::MAX, PendingBackgroundAction::PrepareText);
+        let ctx = egui::Context::default();
+        let mut short_delays = 0;
+        let mut final_delay = Duration::ZERO;
+        for index in 0..8 {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                app.poll_background_io(ui.ctx())
+            });
+            final_delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            if index >= 2 && final_delay <= Duration::from_millis(16) {
+                short_delays += 1;
+            }
+        }
+        println!(
+            "pending_io_schedule observed_passes=6 polling_requests={short_delays} final_delay={final_delay:?}"
+        );
+        app.state
+            .background_io
+            .pending_background_actions
+            .remove(&u64::MAX);
+    }
+}

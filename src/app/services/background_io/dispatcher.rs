@@ -1,6 +1,7 @@
 use super::types::{BackgroundIoRequest, BackgroundIoResult};
 use super::worker::{LaneEndpoints, spawn_analysis_lane, spawn_path_lane, spawn_session_lane};
 use crate::app::capacity_metrics::{self, BackgroundIoLane};
+use crate::app::services::repaint::{RepaintSignal, WakeSender};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
@@ -14,6 +15,7 @@ pub(crate) struct BackgroundIoDispatcher {
     session_tx: SyncSender<BackgroundIoRequest>,
     analysis_tx: SyncSender<BackgroundIoRequest>,
     lane_depths: Arc<LaneDepths>,
+    repaint: RepaintSignal,
 }
 
 #[derive(Default)]
@@ -85,6 +87,12 @@ impl BackgroundIoSendError {
 }
 
 impl BackgroundIoDispatcher {
+    pub(crate) fn bind_repaint(&self, ctx: &eframe::egui::Context) {
+        self.repaint.bind(ctx);
+    }
+    pub(crate) fn notify_repaint(&self) {
+        self.repaint.notify();
+    }
     pub(crate) fn send(&self, request: BackgroundIoRequest) -> Result<(), BackgroundIoSendError> {
         // Increment BEFORE try_send so the receiving worker can never observe
         // a decrement before the corresponding increment (and underflow the
@@ -112,6 +120,8 @@ impl BackgroundIoDispatcher {
 pub(crate) fn spawn_background_io_worker() -> (BackgroundIoDispatcher, Receiver<BackgroundIoResult>)
 {
     let (result_tx, result_rx) = mpsc::channel::<BackgroundIoResult>();
+    let repaint = RepaintSignal::default();
+    let result_tx = WakeSender::new(result_tx, repaint.clone());
     let (path_tx, path_rx) = mpsc::sync_channel::<BackgroundIoRequest>(PATH_LANE_QUEUE_BOUND);
     let (session_tx, session_rx) =
         mpsc::sync_channel::<BackgroundIoRequest>(SESSION_LANE_QUEUE_BOUND);
@@ -141,6 +151,7 @@ pub(crate) fn spawn_background_io_worker() -> (BackgroundIoDispatcher, Receiver<
             session_tx,
             analysis_tx,
             lane_depths,
+            repaint,
         },
         result_rx,
     )
@@ -181,6 +192,7 @@ mod tests {
                 session_tx,
                 analysis_tx,
                 lane_depths: Arc::new(LaneDepths::default()),
+                repaint: Default::default(),
             },
             path_rx,
             session_rx,

@@ -10,3 +10,5 @@ pub mod session_manager;
 pub mod session_store;
 pub mod settings_store;
 pub mod store_io;
+
+pub(crate) mod repaint;
