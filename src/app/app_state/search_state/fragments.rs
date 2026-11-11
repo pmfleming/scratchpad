@@ -180,38 +180,29 @@ fn process_chunks_concurrent(
     process: impl Fn(&DocumentChunk) -> Option<Vec<Range<usize>>> + Sync,
 ) -> Option<Vec<Range<usize>>> {
     let stale = AtomicBool::new(false);
-    if !generation_is_current(generation, latest_generation, &stale) {
+    let current = || generation_is_current(generation, latest_generation, &stale);
+    if !current() {
         return None;
     }
-    let mut chunks = next_chunk_batch(&mut input);
-    if chunks.is_empty() {
-        return Some(Vec::new());
-    }
+    let chunks = next_chunk_batch(&mut input);
     let workers = intra_parallelism.min(chunks.len()).max(1);
     if workers == 1 || chunks.len() < INTRA_BUFFER_PARALLELISM_MIN_CHUNKS {
-        let mut matches = Vec::new();
-        loop {
-            for mut found in
-                process_chunk_batch(&chunks, generation, latest_generation, &stale, &process)?
-            {
-                found.truncate(max_matches.saturating_add(1).saturating_sub(matches.len()));
-                matches.append(&mut found);
-                if matches.len() > max_matches {
-                    return Some(matches);
-                }
-            }
-            if !generation_is_current(generation, latest_generation, &stale) {
-                return None;
-            }
-            chunks = next_chunk_batch(&mut input);
-            if chunks.is_empty() {
-                return Some(matches);
-            }
-        }
+        return collect_chunk_batches(input, chunks, current, |chunks, matches| {
+            append_match_batches(
+                matches,
+                max_matches,
+                std::iter::once(process_chunk_batch(
+                    chunks,
+                    generation,
+                    latest_generation,
+                    &stale,
+                    &process,
+                )),
+            )
+        });
     }
     capacity_metrics::record_search_intra_buffer_workers(workers);
-    // Reuse one scoped cohort for the whole target instead of spawning another
-    // cohort per eight windows. Each worker has at most one outstanding batch.
+    // One cohort per target; at most eight windows are outstanding at a time.
     thread::scope(|scope| {
         let mut channels = Vec::with_capacity(workers);
         let mut handles = Vec::with_capacity(workers);
@@ -232,37 +223,21 @@ fn process_chunks_concurrent(
             }));
             channels.push((send, completed));
         }
-        let result = (|| {
-            let mut matches = Vec::new();
-            loop {
-                if !generation_is_current(generation, latest_generation, &stale) {
-                    return None;
-                }
-                let chunk_size = chunks.len().div_ceil(workers);
-                let batches = chunks.chunks(chunk_size);
-                let used = batches.len();
-                for ((send, _), batch) in channels.iter().zip(batches) {
-                    send.send(batch.to_vec()).ok()?;
-                }
-                // Receive in input order, regardless of worker completion order.
-                for (_, completed) in &channels[..used] {
-                    for mut found in completed.recv().ok()?? {
-                        found.truncate(max_matches.saturating_add(1).saturating_sub(matches.len()));
-                        matches.append(&mut found);
-                        if matches.len() > max_matches {
-                            return Some(matches);
-                        }
-                    }
-                }
-                if !generation_is_current(generation, latest_generation, &stale) {
-                    return None;
-                }
-                chunks = next_chunk_batch(&mut input);
-                if chunks.is_empty() {
-                    return Some(matches);
-                }
+        let result = collect_chunk_batches(input, chunks, current, |chunks, matches| {
+            let batches = chunks.chunks(chunks.len().div_ceil(workers));
+            let used = batches.len();
+            for ((send, _), batch) in channels.iter().zip(batches) {
+                send.send(batch.to_vec()).ok()?;
             }
-        })();
+            // Receive in input order, regardless of completion order.
+            append_match_batches(
+                matches,
+                max_matches,
+                channels[..used]
+                    .iter()
+                    .map(|(_, completed)| completed.recv().ok().flatten()),
+            )
+        });
         // Release both sides before joining, including cancellation, read failure
         // and panic paths; no worker can remain blocked sending a result.
         drop(channels);
@@ -272,6 +247,43 @@ fn process_chunks_concurrent(
         }
         result.filter(|_| joined)
     })
+}
+
+fn collect_chunk_batches(
+    mut input: impl Iterator<Item = DocumentChunk>,
+    mut chunks: Vec<DocumentChunk>,
+    current: impl Fn() -> bool,
+    mut process: impl FnMut(&[DocumentChunk], &mut Vec<Range<usize>>) -> Option<bool>,
+) -> Option<Vec<Range<usize>>> {
+    let mut matches = Vec::new();
+    while !chunks.is_empty() {
+        if !current() {
+            return None;
+        }
+        if process(&chunks, &mut matches)? {
+            return Some(matches);
+        }
+        chunks = next_chunk_batch(&mut input);
+    }
+    current().then_some(matches)
+}
+
+// true preserves one overflow sentinel so the caller can reject incomplete results.
+fn append_match_batches(
+    matches: &mut Vec<Range<usize>>,
+    max_matches: usize,
+    batches: impl IntoIterator<Item = Option<Vec<Vec<Range<usize>>>>>,
+) -> Option<bool> {
+    for batch in batches {
+        for mut found in batch? {
+            found.truncate(max_matches.saturating_add(1).saturating_sub(matches.len()));
+            matches.append(&mut found);
+            if matches.len() > max_matches {
+                return Some(true);
+            }
+        }
+    }
+    Some(false)
 }
 
 fn process_chunk_batch(
@@ -305,7 +317,10 @@ fn generation_is_current(
 
 #[cfg(test)]
 mod batching_tests {
-    use super::*;
+    use super::{DocumentChunk, process_chunks_concurrent, search_target_ranges};
+    use crate::app::services::search::{self, SearchMode, SearchProgram};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::thread;
 
     fn chunks(count: usize) -> impl Iterator<Item = DocumentChunk> {
         (0..count).map(|index| DocumentChunk {
@@ -331,6 +346,28 @@ mod batching_tests {
             (0..37).map(|index| index..index + 1).collect::<Vec<_>>()
         );
         assert_eq!(threads.into_inner().unwrap().len(), 3);
+        for workers in [1, 4] {
+            for count in [0usize, 1, 3, 8, 9, 37] {
+                for limit in [0usize, 1, 8, usize::MAX] {
+                    let found = process_chunks_concurrent(
+                        chunks(count),
+                        workers,
+                        1,
+                        &generation,
+                        limit,
+                        |chunk| Some(vec![chunk.core_range.clone()]),
+                    )
+                    .unwrap();
+                    let expected = (0..count.min(limit.saturating_add(1)))
+                        .map(|index| index..index + 1)
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        found, expected,
+                        "workers={workers}, count={count}, limit={limit}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -366,7 +403,6 @@ mod batching_tests {
 
     #[test]
     fn bounded_planning_preserves_unicode_regex_and_nonoverlapping_plain_matches() {
-        use super::*;
         use crate::app::domain::TextDocument;
         use crate::app::services::search::SearchOptions;
         let text = format!("{}\n{}", "aaéaaa 東京\n".repeat(200_000), "aaaaa");
