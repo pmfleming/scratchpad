@@ -70,6 +70,7 @@ pub(crate) struct SearchState {
     pub(crate) replace: SearchReplaceState,
     preview: SearchPreviewCacheState,
     replacement_previews: visual::ReplacementPreviewCache,
+    highlighted_tab: Option<(u64, usize)>,
 }
 
 #[derive(Default)]

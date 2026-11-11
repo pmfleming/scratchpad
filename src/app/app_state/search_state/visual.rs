@@ -294,6 +294,9 @@ fn search_highlights_for_tab(
 }
 
 pub(super) fn clear_search_highlights(app: &mut ScratchpadApp) {
+    if app.state.search_state.highlighted_tab.take().is_none() {
+        return;
+    }
     app.state.search_state.replacement_previews = ReplacementPreviewCache::default();
     for tab_index in 0..app.tab_manager.tabs.as_slice().len() {
         clear_search_highlights_for_tab(app, tab_index);
@@ -301,6 +304,11 @@ pub(super) fn clear_search_highlights(app: &mut ScratchpadApp) {
 }
 
 fn clear_search_highlights_outside_tab(app: &mut ScratchpadApp, active_tab_index: usize) {
+    let key = (app.tab_manager.path_index_generation, active_tab_index);
+    if app.state.search_state.highlighted_tab == Some(key) {
+        return;
+    }
+    app.state.search_state.highlighted_tab = Some(key);
     for tab_index in 0..app.tab_manager.tabs.as_slice().len() {
         if tab_index != active_tab_index {
             clear_search_highlights_for_tab(app, tab_index);

@@ -31,6 +31,7 @@ pub struct TabManager {
     pub(crate) session_dirty: bool,
     pub(crate) pending_scroll_to_active: bool,
     pub(crate) path_index_generation: u64,
+    inactive_cleanup_key: Option<(u64, usize)>,
     pub(crate) buffer_tab_index: HashMap<BufferId, usize>,
     pub(crate) path_tab_index: HashMap<CanonicalPathKey, (BufferId, usize, ViewId)>,
     pub(crate) cold_session_tabs: HashMap<usize, ColdSessionTab>,
@@ -45,6 +46,7 @@ impl Default for TabManager {
             session_dirty: false,
             pending_scroll_to_active: true,
             path_index_generation: 0,
+            inactive_cleanup_key: None,
             buffer_tab_index: HashMap::new(),
             path_tab_index: HashMap::new(),
             cold_session_tabs: HashMap::new(),
@@ -69,6 +71,7 @@ impl TabManager {
             session_dirty: false,
             pending_scroll_to_active: false,
             path_index_generation: 0,
+            inactive_cleanup_key: None,
             buffer_tab_index: HashMap::new(),
             path_tab_index: HashMap::new(),
             cold_session_tabs: HashMap::new(),
@@ -87,7 +90,11 @@ impl TabManager {
     }
 
     pub(crate) fn set_active_tab_index_clamped(&mut self, index: usize) {
-        self.active_tab_index = index.min(self.tabs.len().saturating_sub(1));
+        let index = index.min(self.tabs.len().saturating_sub(1));
+        if self.active_tab_index != index {
+            self.inactive_cleanup_key = None;
+        }
+        self.active_tab_index = index;
     }
 
     pub fn mark_session_dirty(&mut self) {
@@ -99,6 +106,13 @@ impl TabManager {
     }
 
     pub fn evict_inactive_tab_state(&mut self) {
+        // Restores, imports, transfers and buffer/path changes rebuild this index.
+        // Only the active tab acquires render state between these events.
+        let key = (self.path_index_generation, self.active_tab_index);
+        if self.inactive_cleanup_key == Some(key) {
+            return;
+        }
+        self.inactive_cleanup_key = Some(key);
         let active_index = self.active_tab_index;
         for (index, tab) in self.tabs.iter_mut().enumerate() {
             if index != active_index {
@@ -278,5 +292,62 @@ impl TabManager {
     #[must_use]
     pub fn describe_active_tab(&self) -> String {
         self.describe_tab_at(self.active_tab_index)
+    }
+}
+
+#[cfg(test)]
+mod inactive_cleanup_tests {
+    use super::*;
+    #[test]
+    fn activation_and_background_installation_evict_inactive_views() {
+        let mut manager =
+            TabManager::for_test_tabs(vec![WorkspaceTab::untitled(), WorkspaceTab::untitled()]);
+        manager.tabs[0]
+            .layout
+            .views_mut()
+            .first_mut()
+            .unwrap()
+            .search_highlights
+            .ranges = vec![0..1];
+        manager.evict_inactive_tab_state();
+        assert!(
+            !manager.tabs[0]
+                .layout
+                .active_view()
+                .unwrap()
+                .search_highlights
+                .ranges
+                .is_empty()
+        );
+        manager.active_tab_index = 1;
+        manager.evict_inactive_tab_state();
+        assert!(
+            manager.tabs[0]
+                .layout
+                .active_view()
+                .unwrap()
+                .search_highlights
+                .ranges
+                .is_empty()
+        );
+        let mut restored = WorkspaceTab::untitled();
+        restored
+            .layout
+            .views_mut()
+            .first_mut()
+            .unwrap()
+            .search_highlights
+            .ranges = vec![0..1];
+        assert!(manager.replace_restored_tab(0, restored));
+        manager.evict_inactive_tab_state();
+        assert!(
+            manager.tabs[0]
+                .layout
+                .active_view()
+                .unwrap()
+                .search_highlights
+                .ranges
+                .is_empty()
+        );
     }
 }
