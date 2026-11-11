@@ -337,8 +337,9 @@ pub fn previous_match_index(total_matches: usize, current: Option<usize>) -> Opt
 #[cfg(test)]
 mod tests {
     use super::{
-        SearchError, SearchMode, SearchOptions, SearchProgram, find_matches, search_program,
-        search_program_interruptible, search_text, search_text_interruptible,
+        SearchError, SearchMode, SearchOptions, SearchProgram, find_matches,
+        find_matches_interruptible, search_program, search_program_interruptible, search_text,
+        search_text_interruptible, validate_search_query,
     };
 
     #[test]
@@ -430,8 +431,8 @@ mod tests {
             );
             let program = SearchProgram::compile(query, options).unwrap();
             assert_eq!(
-                search_text(text, query, options).matches,
-                search_program(text, &program).matches
+                find_matches_interruptible(text, query, options, || true),
+                Some(expected.clone())
             );
             assert!(search_text_interruptible(text, query, options, || false).is_none());
             for limit in [0, 1, expected.len(), usize::MAX] {
@@ -497,14 +498,14 @@ mod tests {
             match_case: true,
             whole_word: false,
         };
-        assert!(matches!(
-            SearchProgram::compile("a*", options),
-            Err(SearchError::UnsupportedRegex(_))
-        ));
-        assert!(matches!(
-            SearchProgram::compile("[", options),
-            Err(SearchError::UnsupportedRegex(_))
-        ));
+        for query in ["a*", "["] {
+            let error = validate_search_query(query, options).unwrap();
+            assert!(matches!(error, SearchError::UnsupportedRegex(_)));
+            assert!(!error.message().is_empty());
+            let outcome = search_text("a", query, options);
+            assert!(outcome.matches.is_empty());
+            assert_eq!(outcome.error, Some(error));
+        }
         let program = SearchProgram::compile(r"([a-z]{1,8})-([0-9]{1,4})", options).unwrap();
         assert_eq!(
             program.expand_replacement("item-42", "$2:$1").unwrap(),
