@@ -389,3 +389,44 @@ fn partial_ascii_reference_capture_needs_no_body_read() {
     assert_eq!(spans[0].char_len, 9);
     assert!(tree.try_spans_for_range(6..15).next().unwrap().is_err());
 }
+
+#[test]
+fn anchor_lookup_survives_merging_leaves_with_interleaved_ids() {
+    let mut tree = PieceTreeLite::from_string("x".repeat(800_000));
+    let offsets = [700_000, 1_000, 500_000, 200_000, 600_000, 300_000];
+    let anchors: Vec<_> = offsets
+        .iter()
+        .map(|&offset| tree.create_anchor(offset, AnchorBias::Left))
+        .collect();
+    tree.remove_char_range(100_000..650_000);
+    for (&id, offset) in anchors.iter().zip(offsets) {
+        let expected = if offset <= 100_000 {
+            offset
+        } else if offset >= 650_000 {
+            offset - 550_000
+        } else {
+            100_000
+        };
+        assert_eq!(tree.anchor_position(id), Some(expected));
+    }
+    tree.insert_with_source(50_000, "λ", PieceSource::Edit);
+    for &id in &anchors {
+        assert!(tree.anchor_position(id).is_some());
+        tree.release_anchor(id);
+        assert_eq!(tree.anchor_position(id), None);
+    }
+}
+
+#[test]
+fn batch_anchor_release_keeps_other_views_and_tolerates_duplicates() {
+    let mut tree = PieceTreeLite::from_string("hello".repeat(100_000));
+    let ids: Vec<_> = (0..40)
+        .map(|i| tree.create_anchor(i * 10_000, AnchorBias::Left))
+        .collect();
+    let mut release: Vec<_> = ids.iter().step_by(2).copied().collect();
+    release.push(ids[0]);
+    tree.release_anchors(&release);
+    for (i, id) in ids.into_iter().enumerate() {
+        assert_eq!(tree.anchor_position(id), (i % 2 == 1).then_some(i * 10_000));
+    }
+}

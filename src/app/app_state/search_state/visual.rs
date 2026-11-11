@@ -267,18 +267,21 @@ fn clear_search_highlights_for_tab(app: &mut ScratchpadApp, tab_index: usize) {
     let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(tab_index) else {
         return;
     };
-    let mut anchors_to_release = Vec::new();
+    let mut anchors_to_release = std::collections::HashMap::<_, Vec<_>>::new();
     for view in tab.layout.views_mut() {
         for anchor in view.clear_search_highlights_for_release() {
-            anchors_to_release.push((view.buffer_id, anchor));
+            anchors_to_release
+                .entry(view.buffer_id)
+                .or_default()
+                .push(anchor);
         }
     }
-    for (buffer_id, anchor) in anchors_to_release {
+    for (buffer_id, anchors) in anchors_to_release {
         if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
             buffer
                 .document_mut()
                 .piece_tree_mut()
-                .release_anchor(anchor);
+                .release_anchors(&anchors);
         }
     }
 }

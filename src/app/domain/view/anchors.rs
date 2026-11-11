@@ -121,10 +121,10 @@ pub(super) fn release_anchors(
     buffer: &mut crate::app::domain::BufferState,
     anchors: Vec<AnchorId>,
 ) {
-    for anchor in anchors {
+    if !anchors.is_empty() {
         buffer
             .document_mut()
             .piece_tree_mut()
-            .release_anchor(anchor);
+            .release_anchors(&anchors);
     }
 }

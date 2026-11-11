@@ -10,22 +10,25 @@ struct ViewPresentationState {
 
 impl WorkspaceTab {
     pub fn clear_transient_view_state(&mut self) {
-        let mut anchors_to_release = Vec::new();
+        let mut anchors_to_release = std::collections::HashMap::<_, Vec<_>>::new();
         for view in self.layout.views_mut() {
             view.editor_has_focus = false;
             view.latest_display_snapshot = None;
             view.latest_display_snapshot_revision = None;
             for anchor in view.take_runtime_anchors_for_release() {
-                anchors_to_release.push((view.buffer_id, anchor));
+                anchors_to_release
+                    .entry(view.buffer_id)
+                    .or_default()
+                    .push(anchor);
             }
         }
 
-        for (buffer_id, anchor) in anchors_to_release {
+        for (buffer_id, anchors) in anchors_to_release {
             if let Some(buffer) = self.buffer_by_id_mut(buffer_id) {
                 buffer
                     .document_mut()
                     .piece_tree_mut()
-                    .release_anchor(anchor);
+                    .release_anchors(&anchors);
             }
         }
     }

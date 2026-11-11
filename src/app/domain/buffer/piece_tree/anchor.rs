@@ -318,8 +318,40 @@ impl PieceTreeLite {
     pub fn anchor_position(&self, id: AnchorId) -> Option<usize> {
         let entry = self.anchor_state.entry(id)?;
         let (address, leaf) = self.find_leaf_by_id(entry.leaf_id)?;
-        let leaf_anchor = leaf.anchors.iter().find(|anchor| anchor.id == id)?;
+        let index = leaf
+            .anchors
+            .binary_search_by_key(&id.raw(), |anchor| anchor.id.raw())
+            .ok()?;
+        let leaf_anchor = &leaf.anchors[index];
         Some(address.leaf_start_char + leaf_anchor.local_offset.min(leaf.metrics.chars))
+    }
+
+    /// Remove a view's endpoints with one retain pass per affected leaf.
+    pub(crate) fn release_anchors(&mut self, ids: &[AnchorId]) {
+        if ids.len() <= 8 {
+            for &id in ids {
+                self.release_anchor(id);
+            }
+            return;
+        }
+        let mut leaves: HashMap<(usize, usize), std::collections::HashSet<AnchorId>> =
+            HashMap::new();
+        for &id in ids {
+            if let Some(entry) = self.anchor_state.release(id)
+                && let Some(address) = self.find_leaf_indices_by_id(entry.leaf_id)
+            {
+                leaves.entry(address).or_default().insert(id);
+            }
+        }
+        for ((node_index, leaf_index), removed) in leaves {
+            let node = &mut self.root.nodes[node_index];
+            let leaf = &mut node.leaves[leaf_index];
+            let before = leaf.anchors.len();
+            leaf.anchors.retain(|anchor| !removed.contains(&anchor.id));
+            let count = before - leaf.anchors.len();
+            node.anchor_count -= count;
+            self.root.anchor_count -= count;
+        }
     }
 
     #[must_use]
@@ -357,7 +389,11 @@ impl PieceTreeLite {
         if self.root.nodes.is_empty() {
             self.root.nodes.push(PieceTreeInternalNode::default());
         }
-        self.assign_missing_leaf_ids();
+        // Structural edits maintain this index while anchors exist. The first
+        // anchor after construction (or an anchor-free edit) initializes it.
+        if self.anchor_state.leaf_indices_by_id.is_empty() {
+            self.assign_missing_leaf_ids();
+        }
     }
 
     pub(super) fn assign_missing_leaf_ids(&mut self) {
@@ -491,6 +527,10 @@ impl PieceTreeLite {
                 id: anchor.id,
                 local_offset: leaf_local_offset.min(leaves[leaf_index].metrics.chars),
             });
+        }
+        // Combining leaves can interleave allocation order. Keep lookup logarithmic.
+        for leaf in leaves {
+            leaf.anchors.sort_unstable_by_key(|anchor| anchor.id.raw());
         }
     }
 }

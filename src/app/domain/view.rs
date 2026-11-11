@@ -127,6 +127,7 @@ struct EditorViewAnchorState {
     cursor_anchor_range: Option<AnchoredCursorRange>,
     pending_cursor_anchor_range: Option<AnchoredCursorRange>,
     search_highlight_anchors: Vec<AnchoredSearchRange>,
+    resolved_search_token: Option<crate::app::domain::buffer::HistoryToken>,
 }
 
 impl EditorViewState {
@@ -401,6 +402,7 @@ impl EditorViewState {
         }
         self.search_highlights = highlights;
         self.anchors.search_highlight_anchors = highlight_anchors;
+        self.anchors.resolved_search_token = None;
     }
 
     pub fn clear_search_highlights_for_release(&mut self) -> Vec<AnchorId> {
