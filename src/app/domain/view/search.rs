@@ -47,7 +47,7 @@ mod tests {
         view.set_search_highlights_anchored(
             &mut buffer,
             SearchHighlightState {
-                ranges: vec![6..10],
+                ranges: std::iter::once(6..10).collect::<Vec<_>>(),
                 active_range_index: Some(0),
             },
         );
@@ -65,11 +65,14 @@ mod tests {
         view.set_search_highlights_anchored(
             &mut buffer,
             SearchHighlightState {
-                ranges: vec![1..6],
+                ranges: std::iter::once(1..6).collect::<Vec<_>>(),
                 active_range_index: None,
             },
         );
         view.resolve_anchored_ranges(&buffer);
-        assert_eq!(view.search_highlights.ranges, vec![1..6]);
+        assert_eq!(
+            view.search_highlights.ranges,
+            std::iter::once(1..6).collect::<Vec<_>>()
+        );
     }
 }

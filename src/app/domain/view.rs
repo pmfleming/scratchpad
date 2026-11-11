@@ -37,6 +37,7 @@ pub struct SearchReplacementPreview {
 }
 
 impl SearchReplacementPreview {
+    #[must_use]
     pub fn new(mut entries: Vec<SearchReplacementPreviewEntry>) -> Self {
         use std::hash::{Hash, Hasher};
         entries.sort_by_key(|entry| entry.range.start);
@@ -48,9 +49,11 @@ impl SearchReplacementPreview {
         }
     }
 
+    #[must_use]
     pub fn entries(&self) -> &[SearchReplacementPreviewEntry] {
         &self.entries
     }
+    #[must_use]
     pub fn signature(&self) -> u64 {
         self.signature
     }

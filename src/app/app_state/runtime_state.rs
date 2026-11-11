@@ -176,7 +176,7 @@ pub(crate) struct FileWatchState {
 impl Default for FileWatchState {
     fn default() -> Self {
         Self {
-            directories: Default::default(),
+            directories: super::file_watch::WatchDirectories::default(),
             file_watch_service: FileWatchService::new(),
             pending_file_watch_rescans: HashMap::new(),
         }

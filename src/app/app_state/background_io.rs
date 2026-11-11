@@ -865,7 +865,7 @@ mod polling_profile {
         let mut final_delay = Duration::ZERO;
         for index in 0..8 {
             let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                app.poll_background_io(ui.ctx())
+                app.poll_background_io(ui.ctx());
             });
             final_delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
             if index >= 2 && final_delay <= Duration::from_millis(16) {

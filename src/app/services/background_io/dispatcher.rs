@@ -192,7 +192,7 @@ mod tests {
                 session_tx,
                 analysis_tx,
                 lane_depths: Arc::new(LaneDepths::default()),
-                repaint: Default::default(),
+                repaint: super::RepaintSignal::default(),
             },
             path_rx,
             session_rx,

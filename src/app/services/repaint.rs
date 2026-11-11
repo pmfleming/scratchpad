@@ -71,7 +71,7 @@ mod tests {
         let signal = RepaintSignal::default();
         signal.bind(&ctx);
         for _ in 0..3 {
-            let _ = ctx.run_ui(Default::default(), |_| {});
+            let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         }
         callbacks.store(0, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel();

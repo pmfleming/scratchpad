@@ -308,7 +308,7 @@ mod inactive_cleanup_tests {
             .first_mut()
             .unwrap()
             .search_highlights
-            .ranges = vec![0..1];
+            .ranges = std::iter::once(0..1).collect::<Vec<_>>();
         manager.evict_inactive_tab_state();
         assert!(
             !manager.tabs[0]
@@ -337,7 +337,7 @@ mod inactive_cleanup_tests {
             .first_mut()
             .unwrap()
             .search_highlights
-            .ranges = vec![0..1];
+            .ranges = std::iter::once(0..1).collect::<Vec<_>>();
         assert!(manager.replace_restored_tab(0, restored));
         manager.evict_inactive_tab_state();
         assert!(

@@ -461,7 +461,8 @@ mod tests {
                 })
                 .collect();
             let (tx, rx) = std::sync::mpsc::channel();
-            let tx = super::Sender::new(tx, Default::default());
+            let tx =
+                super::Sender::new(tx, crate::app::services::repaint::RepaintSignal::default());
             assert!(!stream_cold_file_shells(42, paths.clone(), &store, &tx));
             let BackgroundIoResult::PathsLoaded {
                 request_id,
