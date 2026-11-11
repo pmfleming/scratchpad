@@ -1,7 +1,7 @@
 mod ascii;
 mod word_boundary;
 
-use super::{SearchOptions, finalize_matches};
+use super::SearchOptions;
 use ascii::{
     find_ascii_case_insensitive_multi_byte_matches,
     find_ascii_case_insensitive_single_byte_matches, find_ascii_case_sensitive_matches,
@@ -16,7 +16,6 @@ pub(super) fn plain_text_matches<F>(
     text: &str,
     query: &str,
     options: SearchOptions,
-    interruptible: bool,
     limit: usize,
     should_continue: &mut F,
 ) -> Option<Vec<Range<usize>>>
@@ -28,7 +27,6 @@ where
             text,
             query,
             options.whole_word,
-            interruptible,
             limit,
             should_continue,
         );
@@ -38,7 +36,6 @@ where
             text.as_bytes(),
             query.as_bytes(),
             options.whole_word,
-            interruptible,
             limit,
             should_continue,
         );
@@ -47,7 +44,6 @@ where
         text,
         query,
         options.whole_word,
-        interruptible,
         limit,
         should_continue,
     )
@@ -57,49 +53,63 @@ pub(super) fn collect_regex_matches<F>(
     text: &str,
     regex: &regex::Regex,
     whole_word: bool,
-    interruptible: bool,
     limit: usize,
     should_continue: &mut F,
 ) -> Option<Vec<Range<usize>>>
 where
     F: FnMut() -> bool,
 {
-    let mut interrupt_check = InterruptCheck::new(interruptible);
     let ascii = text.is_ascii();
     let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
     let mut char_cursor = ByteToCharCursor::default();
-    let mut matches = Vec::new();
+    collect_matches(
+        regex.find_iter(text),
+        |matched| {
+            let (start, end) = if ascii {
+                (matched.start(), matched.end())
+            } else {
+                char_cursor.byte_range(text, matched.start(), matched.end())
+            };
+            let allowed = if ascii {
+                whole_word_allows(
+                    true,
+                    text.as_bytes(),
+                    &whole_word_matcher,
+                    whole_word,
+                    start,
+                    end,
+                )
+            } else {
+                whole_word_matcher.allows_byte_range(matched.start(), matched.end())
+            };
+            allowed.then_some(start..end)
+        },
+        limit,
+        should_continue,
+    )
+}
 
-    for search_match in regex.find_iter(text) {
-        if interrupt_check.should_abort(should_continue) {
+// All matcher paths share cancellation cadence and the limit+1 overflow sentinel.
+fn collect_matches<T>(
+    candidates: impl IntoIterator<Item = T>,
+    mut match_range: impl FnMut(T) -> Option<Range<usize>>,
+    limit: usize,
+    should_continue: &mut impl FnMut() -> bool,
+) -> Option<Vec<Range<usize>>> {
+    let mut interrupt = InterruptCheck::default();
+    let mut matches = Vec::new();
+    for candidate in candidates {
+        if interrupt.should_abort(should_continue) {
             return None;
         }
-        let (start, end) = if ascii {
-            (search_match.start(), search_match.end())
-        } else {
-            char_cursor.match_range(text, &search_match)
-        };
-        let whole_word_allowed = if ascii {
-            whole_word_allows(
-                true,
-                text.as_bytes(),
-                &whole_word_matcher,
-                whole_word,
-                start,
-                end,
-            )
-        } else {
-            whole_word_matcher.allows_byte_range(search_match.start(), search_match.end())
-        };
-        if whole_word_allowed {
-            matches.push(start..end);
+        if let Some(range) = match_range(candidate) {
+            matches.push(range);
             if matches.len() > limit {
                 return Some(matches);
             }
         }
     }
-
-    finalize_matches(matches, interruptible, should_continue)
+    should_continue().then_some(matches)
 }
 
 #[derive(Default)]
@@ -109,10 +119,6 @@ struct ByteToCharCursor {
 }
 
 impl ByteToCharCursor {
-    fn match_range(&mut self, text: &str, search_match: &regex::Match<'_>) -> (usize, usize) {
-        self.byte_range(text, search_match.start(), search_match.end())
-    }
-
     fn byte_range(&mut self, text: &str, start_byte: usize, end_byte: usize) -> (usize, usize) {
         let start = self.advance_to(text, start_byte);
         let end = self.advance_to(text, end_byte);
@@ -127,27 +133,17 @@ impl ByteToCharCursor {
     }
 }
 
+#[derive(Default)]
 struct InterruptCheck {
-    enabled: bool,
     steps_until_check: u16,
 }
 
 impl InterruptCheck {
-    fn new(interruptible: bool) -> Self {
-        Self {
-            enabled: interruptible,
-            steps_until_check: 0,
-        }
-    }
-
     #[inline(always)]
     fn should_abort<F>(&mut self, should_continue: &mut F) -> bool
     where
         F: FnMut() -> bool,
     {
-        if !self.enabled {
-            return false;
-        }
         if self.steps_until_check == 0 {
             self.steps_until_check = INTERRUPT_CHECK_INTERVAL - 1;
             return !should_continue();
@@ -162,7 +158,6 @@ fn find_matches_case_sensitive_impl<F>(
     text: &str,
     query: &str,
     whole_word: bool,
-    interruptible: bool,
     limit: usize,
     mut should_continue: F,
 ) -> Option<Vec<Range<usize>>>
@@ -178,46 +173,36 @@ where
             text.as_bytes(),
             query.as_bytes(),
             whole_word,
-            interruptible,
             limit,
             &mut should_continue,
         );
     }
 
-    let mut interrupt_check = InterruptCheck::new(interruptible);
     let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
     let finder = memmem::Finder::new(query.as_bytes());
     let mut char_cursor = ByteToCharCursor::default();
-    let mut matches = Vec::new();
-
-    for start_byte in finder.find_iter(text.as_bytes()) {
-        if interrupt_check.should_abort(&mut should_continue) {
-            return None;
-        }
-
-        let end_byte = start_byte + query.len();
-        if !text.is_char_boundary(start_byte) || !text.is_char_boundary(end_byte) {
-            continue;
-        }
-        if !whole_word_matcher.allows_byte_range(start_byte, end_byte) {
-            continue;
-        }
-
-        let (start, end) = char_cursor.byte_range(text, start_byte, end_byte);
-        matches.push(start..end);
-        if matches.len() > limit {
-            return Some(matches);
-        }
-    }
-
-    finalize_matches(matches, interruptible, &mut should_continue)
+    collect_matches(
+        finder.find_iter(text.as_bytes()),
+        |start_byte| {
+            let end_byte = start_byte + query.len();
+            if !text.is_char_boundary(start_byte)
+                || !text.is_char_boundary(end_byte)
+                || !whole_word_matcher.allows_byte_range(start_byte, end_byte)
+            {
+                return None;
+            }
+            let (start, end) = char_cursor.byte_range(text, start_byte, end_byte);
+            Some(start..end)
+        },
+        limit,
+        &mut should_continue,
+    )
 }
 
 fn find_matches_ascii_case_insensitive_impl<F>(
     text_bytes: &[u8],
     query_bytes: &[u8],
     whole_word: bool,
-    interruptible: bool,
     limit: usize,
     mut should_continue: F,
 ) -> Option<Vec<Range<usize>>>
@@ -233,7 +218,6 @@ where
             text_bytes,
             query_bytes[0].to_ascii_lowercase(),
             whole_word,
-            interruptible,
             limit,
             &mut should_continue,
         );
@@ -247,7 +231,6 @@ where
         text_bytes,
         &query_lower,
         whole_word,
-        interruptible,
         limit,
         &mut should_continue,
     )
@@ -257,7 +240,6 @@ fn find_matches_unicode_case_insensitive_impl<F>(
     text: &str,
     query: &str,
     whole_word: bool,
-    interruptible: bool,
     limit: usize,
     mut should_continue: F,
 ) -> Option<Vec<Range<usize>>>
@@ -272,30 +254,19 @@ where
     }
 
     let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
-    let mut interrupt_check = InterruptCheck::new(interruptible);
-    let mut matches = Vec::new();
-
-    for start in 0..=char_count - query_char_len {
-        if interrupt_check.should_abort(&mut should_continue) {
-            return None;
-        }
-
-        let end = start + query_char_len;
-        let start_byte = char_to_byte[start];
-        let end_byte = char_to_byte[end];
-        let candidate = &text[start_byte..end_byte];
-        if !matches_unicode_case_insensitive(candidate, query)
-            || !whole_word_matcher.allows_byte_range(start_byte, end_byte)
-        {
-            continue;
-        }
-        matches.push(start..end);
-        if matches.len() > limit {
-            return Some(matches);
-        }
-    }
-
-    finalize_matches(matches, interruptible, &mut should_continue)
+    collect_matches(
+        0..=char_count - query_char_len,
+        |start| {
+            let end = start + query_char_len;
+            let start_byte = char_to_byte[start];
+            let end_byte = char_to_byte[end];
+            (matches_unicode_case_insensitive(&text[start_byte..end_byte], query)
+                && whole_word_matcher.allows_byte_range(start_byte, end_byte))
+            .then_some(start..end)
+        },
+        limit,
+        &mut should_continue,
+    )
 }
 
 fn char_to_byte_map(text: &str) -> Vec<usize> {

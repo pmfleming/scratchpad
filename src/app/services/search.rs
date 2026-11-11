@@ -295,7 +295,6 @@ where
             text,
             program.query(),
             program.options,
-            true,
             limit,
             &mut should_continue,
         )
@@ -305,7 +304,6 @@ where
                 text,
                 regex,
                 program.options.whole_word,
-                true,
                 limit,
                 &mut should_continue,
             )
@@ -336,95 +334,182 @@ pub fn previous_match_index(total_matches: usize, current: Option<usize>) -> Opt
     })
 }
 
-fn finalize_matches<F>(
-    matches: Vec<Range<usize>>,
-    interruptible: bool,
-    should_continue: &mut F,
-) -> Option<Vec<Range<usize>>>
-where
-    F: FnMut() -> bool,
-{
-    if interruptible && !should_continue() {
-        None
-    } else {
-        Some(matches)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         SearchError, SearchMode, SearchOptions, SearchProgram, find_matches, search_program,
-        search_text, search_text_interruptible,
+        search_program_interruptible, search_text, search_text_interruptible,
     };
 
-    fn plain_options() -> SearchOptions {
-        SearchOptions {
-            mode: SearchMode::PlainText,
-            match_case: true,
-            whole_word: false,
+    #[test]
+    fn matcher_matrix_preserves_ranges_limits_and_compiled_search() {
+        use SearchMode::{PlainText as Plain, Regex};
+        for (text, query, mode, match_case, whole_word, expected) in [
+            ("abc ABC abc", "abc", Plain, true, false, vec![0..3, 8..11]),
+            (
+                "aA_aa",
+                "a",
+                Plain,
+                false,
+                false,
+                vec![0..1, 1..2, 3..4, 4..5],
+            ),
+            (
+                "foo FOO food _foo foo_",
+                "foo",
+                Plain,
+                false,
+                true,
+                vec![0..3, 4..7],
+            ),
+            (
+                "Needle needle NEEDLE hay",
+                "needle",
+                Plain,
+                false,
+                false,
+                vec![0..6, 7..13, 14..20],
+            ),
+            ("12 12 1", "12", Plain, false, false, vec![0..2, 3..5]),
+            ("1 11", "1", Plain, false, false, vec![0..1, 2..3, 3..4]),
+            (
+                "café needle 東京 needle",
+                "needle",
+                Plain,
+                true,
+                false,
+                vec![5..11, 15..21],
+            ),
+            ("a café café", "café", Plain, true, false, vec![2..6, 7..11]),
+            ("α beta αbeta α", "α", Plain, true, true, vec![0..1, 13..14]),
+            ("α β βx xβ β", "β", Plain, true, true, vec![2..3, 10..11]),
+            (
+                "éÉéÉ",
+                "é",
+                Plain,
+                false,
+                false,
+                vec![0..1, 1..2, 2..3, 3..4],
+            ),
+            (
+                "ab12 xx ab99",
+                r"ab[0-9]{2}",
+                Regex,
+                true,
+                false,
+                vec![0..4, 8..12],
+            ),
+            (
+                "α café42 東京9 café",
+                r"café[0-9]{2}|東京[0-9]",
+                Regex,
+                true,
+                false,
+                vec![2..8, 9..12],
+            ),
+            ("a aa a", "a", Regex, true, true, vec![0..1, 5..6]),
+            (
+                "aaaa",
+                "a?",
+                Regex,
+                true,
+                false,
+                vec![0..1, 1..2, 2..3, 3..4],
+            ),
+            ("fo fof f", "foo", Plain, false, false, vec![]),
+        ] {
+            let options = SearchOptions {
+                mode,
+                match_case,
+                whole_word,
+            };
+            assert_eq!(
+                find_matches(text, query, options),
+                expected,
+                "{query} in {text}"
+            );
+            let program = SearchProgram::compile(query, options).unwrap();
+            assert_eq!(
+                search_text(text, query, options).matches,
+                search_program(text, &program).matches
+            );
+            assert!(search_text_interruptible(text, query, options, || false).is_none());
+            for limit in [0, 1, expected.len(), usize::MAX] {
+                let bounded = program.clone().with_result_limit(limit);
+                let result = search_program_interruptible(text, &bounded, || true);
+                assert_eq!(bounded.result_limit_exceeded(), expected.len() > limit);
+                if expected.len() > limit {
+                    assert!(result.is_none());
+                } else {
+                    assert_eq!(result.unwrap().matches, expected, "limit={limit}");
+                }
+            }
+        }
+        for (text, query) in [("a", "long"), ("é", "東京"), ("", "a")] {
+            for match_case in [true, false] {
+                let options = SearchOptions {
+                    match_case,
+                    ..SearchOptions::default()
+                };
+                assert!(search_text(text, query, options).matches.is_empty());
+                let program = SearchProgram::compile(query, options).unwrap();
+                assert!(search_program(text, &program).matches.is_empty());
+            }
         }
     }
 
-    fn regex_options() -> SearchOptions {
-        SearchOptions {
+    #[test]
+    fn cancellation_is_checked_during_scans_and_before_publication() {
+        for (text, query, mode, match_case) in [
+            ("a".repeat(128 * 1024), "a", SearchMode::PlainText, true),
+            ("A".repeat(128 * 1024), "a", SearchMode::PlainText, false),
+            ("Ab".repeat(64 * 1024), "ab", SearchMode::PlainText, false),
+            ("é".repeat(128 * 1024), "é", SearchMode::PlainText, true),
+            ("É".repeat(128 * 1024), "é", SearchMode::PlainText, false),
+            ("é".repeat(128 * 1024), "é", SearchMode::Regex, true),
+            ("a".to_owned(), "a", SearchMode::PlainText, true),
+        ] {
+            let mut calls = 0;
+            assert!(
+                search_text_interruptible(
+                    &text,
+                    query,
+                    SearchOptions {
+                        mode,
+                        match_case,
+                        whole_word: false
+                    },
+                    || {
+                        calls += 1;
+                        calls < 2
+                    }
+                )
+                .is_none()
+            );
+            assert_eq!(calls, 2);
+        }
+    }
+
+    #[test]
+    fn regex_compilation_and_replacement_fail_without_partial_edits() {
+        let options = SearchOptions {
             mode: SearchMode::Regex,
             match_case: true,
             whole_word: false,
-        }
-    }
-
-    #[test]
-    fn compiled_program_matches_plain_search() {
-        let options = plain_options();
-        let program = SearchProgram::compile("needle", options).unwrap();
-        let text = "needle hay needle";
-
-        assert_eq!(
-            search_text(text, "needle", options).matches,
-            search_program(text, &program).matches
-        );
-    }
-
-    #[test]
-    fn regex_program_rejects_unbounded_matches() {
-        let error = SearchProgram::compile("a*", regex_options()).unwrap_err();
-
-        assert!(matches!(error, SearchError::UnsupportedRegex(_)));
-    }
-
-    #[test]
-    fn regex_program_matches_bounded_query() {
-        let program = SearchProgram::compile(r"ab[0-9]{2}", regex_options()).unwrap();
-        let matches = search_program("ab12 xx ab99", &program).matches;
-
-        assert_eq!(matches, vec![0..4, 8..12]);
-    }
-
-    #[test]
-    fn regex_program_reports_utf8_char_ranges() {
-        let program = SearchProgram::compile(r"café[0-9]{2}|東京[0-9]", regex_options()).unwrap();
-        let matches = search_program("α café42 東京9 café", &program).matches;
-
-        assert_eq!(matches, vec![2..8, 9..12]);
-    }
-
-    #[test]
-    fn regex_program_expands_capture_replacements() {
-        let program =
-            SearchProgram::compile(r"([a-z]{1,8})-([0-9]{1,4})", regex_options()).unwrap();
-
+        };
+        assert!(matches!(
+            SearchProgram::compile("a*", options),
+            Err(SearchError::UnsupportedRegex(_))
+        ));
+        assert!(matches!(
+            SearchProgram::compile("[", options),
+            Err(SearchError::UnsupportedRegex(_))
+        ));
+        let program = SearchProgram::compile(r"([a-z]{1,8})-([0-9]{1,4})", options).unwrap();
         assert_eq!(
             program.expand_replacement("item-42", "$2:$1").unwrap(),
             "42:item"
         );
-    }
-
-    #[test]
-    fn regex_program_rejects_replacement_for_non_matching_text() {
-        let program =
-            SearchProgram::compile(r"([a-z]{1,8})-([0-9]{1,4})", regex_options()).unwrap();
-
         assert!(matches!(
             program.expand_replacement("stale", "$2:$1"),
             Err(SearchError::ReplacementMismatch(_))
@@ -432,113 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn whole_word_unicode_does_not_allocate_full_char_vector_contract() {
-        let options = SearchOptions {
-            mode: SearchMode::PlainText,
-            match_case: true,
-            whole_word: true,
-        };
-
-        assert_eq!(
-            find_matches("α beta αbeta α", "α", options),
-            vec![0..1, 13..14]
-        );
-    }
-
-    #[test]
-    fn case_sensitive_search_reports_char_ranges_in_utf8_text() {
-        let options = SearchOptions {
-            mode: SearchMode::PlainText,
-            match_case: true,
-            whole_word: false,
-        };
-
-        assert_eq!(
-            find_matches("café needle 東京 needle", "needle", options),
-            vec![5..11, 15..21]
-        );
-        assert_eq!(
-            find_matches("a café café", "café", options),
-            vec![2..6, 7..11]
-        );
-    }
-
-    #[test]
-    fn whole_word_case_sensitive_search_checks_unicode_boundaries() {
-        let options = SearchOptions {
-            mode: SearchMode::PlainText,
-            match_case: true,
-            whole_word: true,
-        };
-
-        assert_eq!(
-            find_matches("α β βx xβ β", "β", options),
-            vec![2..3, 10..11]
-        );
-    }
-
-    #[test]
-    fn ascii_case_insensitive_search_uses_same_ranges() {
-        let options = SearchOptions {
-            mode: SearchMode::PlainText,
-            match_case: false,
-            whole_word: false,
-        };
-
-        assert_eq!(
-            find_matches("Needle needle NEEDLE hay", "needle", options),
-            vec![0..6, 7..13, 14..20]
-        );
-    }
-
-    #[test]
-    fn interruptible_search_can_cancel_large_scan() {
-        let text = "a".repeat(128 * 1024);
-        let mut calls = 0usize;
-        let result = search_text_interruptible(&text, "a", plain_options(), || {
-            calls += 1;
-            calls < 2
-        });
-
-        assert!(result.is_none());
-    }
-}
-
-#[cfg(test)]
-mod result_budget_tests {
-    use super::*;
-
-    #[test]
-    fn bounded_collection_covers_ascii_unicode_whole_word_and_regex() {
-        for (text, query, mode, match_case, whole_word) in [
-            ("aaaa", "a", SearchMode::PlainText, true, false),
-            ("aAaA", "a", SearchMode::PlainText, false, false),
-            ("ABabABab", "ab", SearchMode::PlainText, false, false),
-            ("éééé", "é", SearchMode::PlainText, true, false),
-            ("éÉéÉ", "é", SearchMode::PlainText, false, false),
-            ("a a a a", "a", SearchMode::PlainText, false, true),
-            ("aaaa", "a?", SearchMode::Regex, true, false),
-        ] {
-            let program = SearchProgram::compile(
-                query,
-                SearchOptions {
-                    mode,
-                    match_case,
-                    whole_word,
-                },
-            )
-            .unwrap()
-            .with_result_limit(3);
-            assert!(
-                search_program_interruptible(text, &program, || true).is_none(),
-                "{query} in {text}"
-            );
-            assert!(program.result_limit_exceeded());
-        }
-    }
-
-    #[test]
-    fn complete_results_at_the_limit_and_shared_target_budget_are_exact() {
+    fn shared_result_budget_accepts_the_exact_limit() {
         let program = SearchProgram::compile("a", SearchOptions::default())
             .unwrap()
             .with_result_limit(3);
