@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Instant;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HighlightKind {
     Selection,
     SearchActive,
@@ -138,38 +138,48 @@ fn append_highlighted_segments(
     highlights: &[TextHighlightRange],
     style: &HighlightLayoutStyle<'_>,
 ) {
-    for window in highlight_boundaries(highlights, char_to_byte.char_len()).array_windows::<2>() {
-        append_highlight_window(job, text, char_to_byte, highlights, style, window);
-    }
+    visit_highlight_segments(highlights, char_to_byte.char_len(), |segment, kind| {
+        let bytes = char_to_byte.byte_offset(segment.start)..char_to_byte.byte_offset(segment.end);
+        let (text_color, background) = segment_colors(kind, style);
+        append_job_segment(job, &text[bytes], style.font_id, text_color, background);
+    });
 }
 
-fn append_highlight_window(
-    job: &mut egui::text::LayoutJob,
-    text: &str,
-    char_to_byte: &CharByteMap,
+fn visit_highlight_segments(
     highlights: &[TextHighlightRange],
-    style: &HighlightLayoutStyle<'_>,
-    window: &[usize; 2],
+    len: usize,
+    mut visit: impl FnMut(Range<usize>, Option<HighlightKind>),
 ) {
-    let segment = window[0]..window[1];
-    if segment.is_empty() || segment.end > char_to_byte.char_len() {
-        return;
-    }
-    let bytes = char_to_byte.byte_offset(segment.start)..char_to_byte.byte_offset(segment.end);
-    let kind = highlight_kind_for_segment(highlights, segment.start);
-    let (text_color, background) = segment_colors(kind, style);
-    append_job_segment(job, &text[bytes], style.font_id, text_color, background);
-}
-
-fn highlight_boundaries(highlights: &[TextHighlightRange], text_char_len: usize) -> Vec<usize> {
-    let mut boundaries = vec![0, text_char_len];
+    let mut events = Vec::with_capacity(highlights.len() * 2);
     for highlight in highlights {
-        boundaries.push(highlight.range.start);
-        boundaries.push(highlight.range.end);
+        if valid_highlight_range(&highlight.range, len) {
+            events.push((highlight.range.start, highlight.kind as usize, 1_i32));
+            events.push((highlight.range.end, highlight.kind as usize, -1_i32));
+        }
     }
-    boundaries.sort_unstable();
-    boundaries.dedup();
-    boundaries
+    events.sort_unstable_by_key(|event| event.0);
+    let mut active = [0_i32; 3];
+    let mut position = 0;
+    let mut index = 0;
+    while position < len {
+        while index < events.len() && events[index].0 == position {
+            let (_, kind, delta) = events[index];
+            active[kind] += delta;
+            index += 1;
+        }
+        let end = events.get(index).map_or(len, |event| event.0);
+        let kind = if active[0] > 0 {
+            Some(HighlightKind::Selection)
+        } else if active[1] > 0 {
+            Some(HighlightKind::SearchActive)
+        } else if active[2] > 0 {
+            Some(HighlightKind::SearchPassive)
+        } else {
+            None
+        };
+        visit(position..end, kind);
+        position = end;
+    }
 }
 
 fn segment_colors(
@@ -240,6 +250,7 @@ fn search_highlight_kind(search_highlights: &SearchHighlightState, index: usize)
     }
 }
 
+#[cfg(test)]
 fn highlight_kind_for_segment(
     highlights: &[TextHighlightRange],
     segment_start: usize,
@@ -257,11 +268,13 @@ fn highlight_kind_for_segment(
     best
 }
 
+#[cfg(test)]
 enum HighlightPromotion {
     Done(HighlightKind),
     Continue(Option<HighlightKind>),
 }
 
+#[cfg(test)]
 fn promote_highlight_kind(
     current: Option<HighlightKind>,
     candidate: HighlightKind,
@@ -330,5 +343,62 @@ impl CharByteMap {
             CharByteMap::Ascii { .. } => char_index,
             CharByteMap::Map(offsets) => offsets[char_index],
         }
+    }
+}
+
+#[cfg(test)]
+mod sweep_tests {
+    use super::*;
+
+    #[test]
+    fn sweep_matches_priority_for_overlapping_unsorted_ranges() {
+        for seed in 0..32 {
+            let mut ranges = Vec::new();
+            for i in 0..50 {
+                let start = (i * 17 + seed * 13) % 80;
+                ranges.push(TextHighlightRange {
+                    range: start..(start + 1 + (i * 7 % 20)).min(100),
+                    kind: [
+                        HighlightKind::Selection,
+                        HighlightKind::SearchActive,
+                        HighlightKind::SearchPassive,
+                    ][(i + seed) % 3],
+                });
+            }
+            let mut covered = 0;
+            visit_highlight_segments(&ranges, 100, |segment, kind| {
+                assert_eq!(segment.start, covered);
+                for offset in segment.clone() {
+                    assert_eq!(kind, highlight_kind_for_segment(&ranges, offset));
+                }
+                covered = segment.end;
+            });
+            assert_eq!(covered, 100);
+        }
+    }
+
+    #[test]
+    fn sweep_preserves_unicode_byte_boundaries_and_ignores_empty_ranges() {
+        let text = "é東京🦀x";
+        let map = CharByteMap::build(text);
+        let ranges = vec![
+            TextHighlightRange {
+                range: 1..3,
+                kind: HighlightKind::SearchPassive,
+            },
+            TextHighlightRange {
+                range: 2..4,
+                kind: HighlightKind::SearchActive,
+            },
+            TextHighlightRange {
+                range: 2..2,
+                kind: HighlightKind::Selection,
+            },
+        ];
+        let mut reconstructed = String::new();
+        visit_highlight_segments(&ranges, map.char_len(), |range, _| {
+            reconstructed.push_str(&text[map.byte_offset(range.start)..map.byte_offset(range.end)]);
+        });
+        assert_eq!(reconstructed, text);
     }
 }
