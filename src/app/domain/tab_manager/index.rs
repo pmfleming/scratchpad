@@ -4,6 +4,12 @@ use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
 use crate::app::services::session_store::ColdSessionTab;
 use std::collections::HashSet;
 
+fn next_path_index_generation() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
 impl TabManager {
     pub(crate) fn set_cold_session_tab(&mut self, index: usize, tab: ColdSessionTab) {
         if index < self.tabs.len() {
@@ -48,6 +54,7 @@ impl TabManager {
     }
 
     pub fn rebuild_buffer_tab_index(&mut self) {
+        self.path_index_generation = next_path_index_generation();
         self.buffer_tab_index.clear();
         self.path_tab_index.clear();
         for (tab_index, tab) in self.tabs.iter().enumerate() {
@@ -66,6 +73,7 @@ impl TabManager {
     }
 
     pub(super) fn index_tab_buffers(&mut self, tab_index: usize) {
+        self.path_index_generation = next_path_index_generation();
         if let Some(tab) = self.tabs.get(tab_index) {
             for buffer in tab.buffers() {
                 self.buffer_tab_index.insert(buffer.id, tab_index);
@@ -83,6 +91,7 @@ impl TabManager {
     }
 
     pub(super) fn remove_tab_buffers(&mut self, tab: &WorkspaceTab) {
+        self.path_index_generation = next_path_index_generation();
         for buffer in tab.buffers() {
             self.buffer_tab_index.remove(&buffer.id);
             if let Some(key) = buffer.path_key.as_ref() {

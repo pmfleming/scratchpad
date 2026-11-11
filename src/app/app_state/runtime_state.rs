@@ -168,6 +168,7 @@ impl BackgroundIoState {
 }
 
 pub(crate) struct FileWatchState {
+    pub(super) directories: super::file_watch::WatchDirectories,
     pub(crate) file_watch_service: FileWatchService,
     pub(crate) pending_file_watch_rescans: HashMap<PathBuf, Instant>,
 }
@@ -175,6 +176,7 @@ pub(crate) struct FileWatchState {
 impl Default for FileWatchState {
     fn default() -> Self {
         Self {
+            directories: Default::default(),
             file_watch_service: FileWatchService::new(),
             pending_file_watch_rescans: HashMap::new(),
         }
@@ -193,6 +195,7 @@ impl FileWatchState {
                     self.pending_file_watch_rescans.insert(dir, due_at);
                 }
                 FileWatchEvent::WatchError { path, message } => {
+                    self.directories.invalidate();
                     diagnostics::record_warning(
                         "file_watch_unavailable",
                         path.as_deref(),
