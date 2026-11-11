@@ -169,12 +169,22 @@ pub fn run_ui_render_frame_profile(bytes: usize, iterations: usize) -> u128 {
 }
 
 pub fn ui_render_frame_metrics(bytes: usize, iterations: usize) -> CapacityMetricsSnapshot {
-    let _ = run_ui_render_frame_profile(bytes, iterations);
+    let mut harness = UiRenderFrameHarness::new(bytes);
+    for _ in 0..30 {
+        let _ = harness.run_frame();
+    }
+    reset_capacity_metrics();
+    for _ in 0..iterations {
+        let _ = harness.run_frame();
+    }
     capacity_metrics_snapshot()
 }
 
 pub fn ui_scroll_frame_metrics(bytes: usize, iterations: usize) -> CapacityMetricsSnapshot {
     let mut harness = UiRenderFrameHarness::new(bytes);
+    for _ in 0..30 {
+        let _ = harness.run_scroll_frame();
+    }
     reset_capacity_metrics();
     for _ in 0..iterations {
         let _ = harness.run_scroll_frame();

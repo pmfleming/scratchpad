@@ -2,8 +2,7 @@
 
 use scratchpad::app::capacity_metrics::{CapacityMetricsSnapshot, FramePhase};
 use scratchpad::profile::{
-    MB, RECOMMENDED_UI_RENDER_FRAME_BYTES, RECOMMENDED_UI_RENDER_FRAME_ITERATIONS,
-    ui_render_frame_metrics, ui_scroll_frame_metrics,
+    MB, RECOMMENDED_UI_RENDER_FRAME_BYTES, ui_render_frame_metrics, ui_scroll_frame_metrics,
 };
 use serde::Serialize;
 
@@ -33,6 +32,7 @@ struct FrameMetricsMeta {
     generated_from: &'static str,
     bytes: usize,
     iterations: usize,
+    warmup_frames: usize,
 }
 
 #[derive(Serialize)]
@@ -68,7 +68,8 @@ struct FramePhaseMetric {
 
 fn main() {
     let bytes = RECOMMENDED_UI_RENDER_FRAME_BYTES;
-    let iterations = RECOMMENDED_UI_RENDER_FRAME_ITERATIONS;
+    // At least twenty tail observations for p99, after steady-state warm-up.
+    let iterations = 2_000;
     let scenarios = vec![
         frame_scenario(
             &ui_render_frame_metrics(bytes, iterations),
@@ -94,6 +95,7 @@ fn main() {
             generated_from: "src/bin/frame_metrics.rs",
             bytes,
             iterations,
+            warmup_frames: 30,
         },
         scenarios,
     };
