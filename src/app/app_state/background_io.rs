@@ -864,10 +864,11 @@ mod polling_profile {
         let mut short_delays = 0;
         let mut final_delay = Duration::ZERO;
         for index in 0..8 {
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 app.poll_background_io(ui.ctx());
             });
             final_delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            output.textures_delta.clear();
             if index >= 2 && final_delay <= Duration::from_millis(16) {
                 short_delays += 1;
             }
