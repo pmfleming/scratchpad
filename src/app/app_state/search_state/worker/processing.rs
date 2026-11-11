@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
 
+use crate::app::app_state::search_state::SEARCH_RESULT_LIMIT_MESSAGE;
+
 const SEARCH_TARGET_PARALLELISM_CAP: usize = 8;
 const SEARCH_TARGET_PARALLELISM_MIN_TARGETS: usize = 4;
 
@@ -35,13 +37,13 @@ pub(crate) fn process_search_request_with_partials(
     let generation = request.generation;
     let total_targets = request.targets.len();
     let program = match SearchProgram::compile(&request.query, request.options) {
-        Ok(program) => program,
+        Ok(program) => program.with_result_limit(request.result_limit),
         Err(error) => return Some(invalid_query_result(generation, error.message())),
     };
 
     let target_count = request.targets.len();
     let mut results = SearchResultAccumulator::default();
-    if search_target_parallelism(target_count) <= 1 {
+    let processed = if search_target_parallelism(target_count) <= 1 {
         process_search_targets_serial(
             request,
             &program,
@@ -49,17 +51,30 @@ pub(crate) fn process_search_request_with_partials(
             &mut results,
             total_targets,
             partial_emit,
-        )?;
+        )
     } else {
         process_search_targets_parallel(
             request,
-            program,
+            &program,
             latest_generation,
             &mut results,
             total_targets,
             &mut partial_emit,
-        )?;
+        )
+    };
+    if latest_generation.load(Ordering::Relaxed) != generation {
+        return None;
     }
+    if program.result_limit_exceeded() {
+        return Some(SearchResult {
+            generation,
+            matches: Vec::new(),
+            result_groups: Vec::new(),
+            displayed_match_count: 0,
+            status: SearchStatus::Error(SEARCH_RESULT_LIMIT_MESSAGE.into()),
+        });
+    }
+    processed?;
 
     (latest_generation.load(Ordering::Relaxed) == generation)
         .then(|| final_search_result(results, generation))
@@ -94,6 +109,9 @@ fn process_search_targets_serial(
             latest_generation,
             intra_parallelism,
         )?;
+        if !program.reserve_result_matches(ranges.len()) {
+            return Some(());
+        }
         push_target_matches(results, &target, &ranges);
 
         if let Some(emit) = partial_emit.as_deref_mut()
@@ -110,7 +128,7 @@ fn process_search_targets_serial(
 
 fn process_search_targets_parallel(
     request: SearchRequest,
-    program: SearchProgram,
+    program: &SearchProgram,
     latest_generation: &AtomicU64,
     results: &mut SearchResultAccumulator,
     total_targets: usize,
@@ -124,7 +142,7 @@ fn process_search_targets_parallel(
     let target_count = targets.len();
     let worker_count = search_target_parallelism(target_count);
     let indexed_targets = targets.into_iter().enumerate().collect::<Vec<_>>();
-    let program = Arc::new(program);
+    let program = Arc::new(program.clone());
     let chunk_size = indexed_targets.len().div_ceil(worker_count);
     let mut indexed_iter = indexed_targets.into_iter();
     let (outcome_tx, outcome_rx) = mpsc::channel::<TargetSearchOutcome>();
@@ -173,7 +191,7 @@ fn search_target_chunk(
     outcome_tx: mpsc::Sender<TargetSearchOutcome>,
 ) {
     for (target_index, target) in chunk {
-        if stale.load(Ordering::Relaxed) {
+        if stale.load(Ordering::Relaxed) || program.result_limit_exceeded() {
             return;
         }
         if latest_generation.load(Ordering::Relaxed) != generation {
@@ -191,6 +209,9 @@ fn search_target_chunk(
             stale.store(true, Ordering::Relaxed);
             return;
         };
+        if !program.reserve_result_matches(ranges.len()) {
+            return;
+        }
         if outcome_tx
             .send(TargetSearchOutcome {
                 target_index,
@@ -303,6 +324,7 @@ mod partial_tests {
         let text = TextDocument::new("needle ".repeat(50)).snapshot();
         let empty = TextDocument::new("no matches".into()).snapshot();
         SearchRequest {
+            result_limit: crate::app::app_state::search_state::MAX_SEARCH_RESULTS,
             generation: 1,
             query: "needle".into(),
             options: SearchOptions::default(),
@@ -377,5 +399,62 @@ mod partial_tests {
             )
             .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    use crate::app::app_state::search_state::worker::SearchFileIdentity;
+    use crate::app::domain::TextDocument;
+    use crate::app::services::search::SearchOptions;
+
+    #[test]
+    fn recommended_limit_rejects_partial_results_and_unlimited_preserves_all_matches() {
+        use crate::app::app_state::search_state::MAX_SEARCH_RESULTS;
+        for (count, limit) in [
+            (1, MAX_SEARCH_RESULTS),
+            (4, MAX_SEARCH_RESULTS),
+            (1, usize::MAX),
+            (4, usize::MAX),
+        ] {
+            let document =
+                TextDocument::new("needle ".repeat(MAX_SEARCH_RESULTS / count + 1)).snapshot();
+            let request = SearchRequest {
+                result_limit: limit,
+                generation: 1,
+                query: "needle".into(),
+                options: SearchOptions::default(),
+                targets: (0..count)
+                    .map(|index| SearchTargetSnapshot {
+                        file_identity: SearchFileIdentity::Untitled(index as u64),
+                        tab_index: index,
+                        view_id: index as u64,
+                        buffer_id: index as u64,
+                        tab_label: "tab".into(),
+                        buffer_label: "buffer".into(),
+                        document_snapshot: document.clone(),
+                        search_range: None,
+                    })
+                    .collect(),
+            };
+            let result = process_search_request_with_partials(
+                request,
+                &AtomicU64::new(1),
+                Some(&mut |partial| assert!(partial.matches.len() <= limit)),
+            )
+            .unwrap();
+            if limit == usize::MAX {
+                assert!(matches!(result.status, SearchStatus::Ready));
+                assert_eq!(
+                    result.matches.len(),
+                    (MAX_SEARCH_RESULTS / count + 1) * count
+                );
+            } else {
+                assert!(matches!(result.status, SearchStatus::Error(_)));
+                assert!(result.matches.is_empty());
+                assert!(result.result_groups.is_empty());
+            }
+        }
     }
 }

@@ -379,3 +379,16 @@ pub(crate) fn reset_history_cache_to_recommended(app: &mut ScratchpadApp) {
     app.state.app_settings.reset_history_budget_to_auto();
     apply_setting_effects(app, true, SettingEffects::HISTORY_BUDGET);
 }
+
+pub(crate) fn set_search_result_limit(
+    app: &mut ScratchpadApp,
+    value: crate::app::services::settings_store::SearchResultLimit,
+) {
+    if app.state.app_settings.editor.search_result_limit == value {
+        return;
+    }
+    app.state.app_settings.editor.search_result_limit = value;
+    crate::app::app_state::search_state::runtime::mark_search_dirty(app);
+    crate::app::app_state::search_state::runtime::refresh_search_state(app);
+    persist_settings_or_error(app);
+}

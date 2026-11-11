@@ -18,8 +18,8 @@ pub use model::{
     EditorSettings, FileOpenDisposition, HistorySettings, IndentationStyle,
     LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
     LIGHT_EDITOR_TEXT_COLOR, MIN_WINDOW_INNER_SIZE, NewTabPlacement, PlatformSettings,
-    ShortcutSettings, StartupSessionBehavior, TabDisplayMode, TabListPosition, TabOrderDirection,
-    TabOrderMode, UiSettings, WindowState, WorkspaceSettings,
+    SearchResultLimit, ShortcutSettings, StartupSessionBehavior, TabDisplayMode, TabListPosition,
+    TabOrderDirection, TabOrderMode, UiSettings, WindowState, WorkspaceSettings,
 };
 pub(crate) use model::{color_from_hex, color_to_hex};
 

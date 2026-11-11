@@ -281,7 +281,7 @@ impl ScratchpadApp {
         let entry = SearchResultEntry {
             match_index,
             buffer_id: search_match.buffer_id,
-            buffer_label: search_match.buffer_label,
+            buffer_label: search_match.buffer_label.to_string(),
             line_number,
             column_number,
             preview,

@@ -4,7 +4,7 @@ use super::helpers::cursor_range_from_char_range;
 use super::{runtime, visual};
 use crate::app::app_state::StatusDomain;
 use crate::app::domain::{BufferId, CursorRevealMode, ViewId};
-use crate::app::services::search::{SearchError, SearchProgram, search_program};
+use crate::app::services::search::{SearchError, SearchProgram};
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::ops::Range;
 
@@ -265,12 +265,44 @@ pub(super) fn rebuild_active_buffer_search_matches(
     let buffer_id = buffer.id;
     let buffer_label = buffer.display_name();
     let target_revision = buffer.document_revision();
-    let text = buffer.text();
+    let other_matches = app
+        .state
+        .search_state
+        .results
+        .matches
+        .iter()
+        .filter(|matched| matched.tab_index != active_tab_index || matched.buffer_id != buffer_id)
+        .count();
+    let configured_limit = app
+        .state
+        .app_settings
+        .editor
+        .search_result_limit
+        .max_matches();
     let program = SearchProgram::compile(
         &app.state.search_state.query.query,
         app.state.search_state.search_options(),
-    )?;
-    let ranges = search_program(&text, &program).matches;
+    )?
+    .with_result_limit(if configured_limit == usize::MAX {
+        usize::MAX
+    } else {
+        configured_limit.saturating_sub(other_matches)
+    });
+    let ranges = super::fragments::search_target_ranges(
+        &buffer.document_snapshot(),
+        None,
+        &program,
+        1,
+        &std::sync::atomic::AtomicU64::new(1),
+        1,
+    )
+    .ok_or_else(|| {
+        if program.result_limit_exceeded() {
+            SearchError::ResultLimitExceeded(super::SEARCH_RESULT_LIMIT_MESSAGE.into())
+        } else {
+            stale_replacement_match_error()
+        }
+    })?;
 
     let insertion_index = app
         .state
@@ -290,6 +322,7 @@ pub(super) fn rebuild_active_buffer_search_matches(
             search_match.tab_index != active_tab_index || search_match.buffer_id != buffer_id
         });
 
+    let buffer_label: std::sync::Arc<str> = buffer_label.into();
     let new_matches = ranges.into_iter().map(|range| super::SearchMatch {
         tab_index: active_tab_index,
         view_id: active_view_id,

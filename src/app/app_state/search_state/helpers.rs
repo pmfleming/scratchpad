@@ -19,13 +19,14 @@ impl SearchResultAccumulator {
         target: &SearchTargetSnapshot,
         ranges: &[Range<usize>],
     ) {
+        let buffer_label: std::sync::Arc<str> = target.buffer_label.as_str().into();
         let start_index = self.matches.len();
         self.matches
             .extend(ranges.iter().cloned().map(|range| SearchMatch {
                 tab_index: target.tab_index,
                 view_id: target.view_id,
                 buffer_id: target.buffer_id,
-                buffer_label: target.buffer_label.clone(),
+                buffer_label: buffer_label.clone(),
                 target_revision: target.document_snapshot.revision(),
                 matched_text: None,
                 range,
@@ -159,7 +160,7 @@ pub(super) fn build_replacement_targets(
             tab_index: current_match.tab_index,
             view_id: current_match.view_id,
             buffer_id: current_match.buffer_id,
-            buffer_label: current_match.buffer_label.clone(),
+            buffer_label: current_match.buffer_label.to_string(),
             target_revision: current_match.target_revision,
             expected_matches,
             replacements,

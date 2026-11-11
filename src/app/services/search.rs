@@ -17,6 +17,7 @@ pub enum SearchError {
     InvalidRegex(String),
     UnsupportedRegex(String),
     ReplacementMismatch(String),
+    ResultLimitExceeded(String),
 }
 
 impl SearchError {
@@ -25,6 +26,7 @@ impl SearchError {
         match self {
             Self::InvalidRegex(message)
             | Self::UnsupportedRegex(message)
+            | Self::ResultLimitExceeded(message)
             | Self::ReplacementMismatch(message) => message,
         }
     }
@@ -65,9 +67,79 @@ pub struct SearchProgram {
     options: SearchOptions,
     regex: Option<regex::Regex>,
     max_match_chars: usize,
+    result_budget: Option<std::sync::Arc<SearchResultBudget>>,
+}
+
+#[derive(Debug)]
+struct SearchResultBudget {
+    limit: usize,
+    used: std::sync::atomic::AtomicUsize,
+    exceeded: std::sync::atomic::AtomicBool,
 }
 
 impl SearchProgram {
+    pub(crate) fn with_result_limit(mut self, limit: usize) -> Self {
+        if limit == usize::MAX {
+            return self;
+        }
+        self.result_budget = Some(std::sync::Arc::new(SearchResultBudget {
+            limit,
+            used: std::sync::atomic::AtomicUsize::new(0),
+            exceeded: std::sync::atomic::AtomicBool::new(false),
+        }));
+        self
+    }
+
+    pub(crate) fn result_limit(&self) -> usize {
+        self.result_budget
+            .as_ref()
+            .map_or(usize::MAX, |budget| budget.limit)
+    }
+
+    pub(crate) fn result_limit_exceeded(&self) -> bool {
+        self.result_budget
+            .as_ref()
+            .is_some_and(|budget| budget.exceeded.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    pub(crate) fn accept_match_count(&self, count: usize) -> bool {
+        self.accept_window_match_count(count, self.result_limit())
+    }
+
+    fn accept_window_match_count(&self, count: usize, limit: usize) -> bool {
+        if count <= limit {
+            return true;
+        }
+        self.result_budget
+            .as_ref()
+            .unwrap()
+            .exceeded
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        false
+    }
+
+    // Reserve once per completed target, not once per match. Shared by all workers.
+    pub(crate) fn reserve_result_matches(&self, count: usize) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(budget) = &self.result_budget else {
+            return true;
+        };
+        if budget.exceeded.load(Relaxed) {
+            return false;
+        }
+        let reserved = budget
+            .used
+            .fetch_update(Relaxed, Relaxed, |used| {
+                used.checked_add(count)
+                    .filter(|total| *total <= budget.limit)
+            })
+            .is_ok();
+        if !reserved {
+            budget.exceeded.store(true, Relaxed);
+        }
+        reserved
+    }
+
     pub fn compile(query: &str, options: SearchOptions) -> Result<Self, SearchError> {
         let max_match_chars = match options.mode {
             SearchMode::PlainText => query.chars().count(),
@@ -86,6 +158,7 @@ impl SearchProgram {
             options,
             regex,
             max_match_chars: max_match_chars.max(1),
+            result_budget: None,
         })
     }
 
@@ -197,17 +270,33 @@ pub fn search_program(text: &str, program: &SearchProgram) -> SearchOutcome {
 pub fn search_program_interruptible<F>(
     text: &str,
     program: &SearchProgram,
+    should_continue: F,
+) -> Option<SearchOutcome>
+where
+    F: FnMut() -> bool,
+{
+    search_program_window_interruptible(text, program, 0, should_continue)
+}
+
+/// Allow temporary overlap hits; the fragment collector budgets only core hits.
+pub(crate) fn search_program_window_interruptible<F>(
+    text: &str,
+    program: &SearchProgram,
+    overlap_chars: usize,
     mut should_continue: F,
 ) -> Option<SearchOutcome>
 where
     F: FnMut() -> bool,
 {
-    match program.options.mode {
+    let limit = program.result_limit().saturating_add(overlap_chars);
+    let mut should_continue = || !program.result_limit_exceeded() && should_continue();
+    let outcome = match program.options.mode {
         SearchMode::PlainText => plain_text_matches(
             text,
             program.query(),
             program.options,
             true,
+            limit,
             &mut should_continue,
         )
         .map(SearchOutcome::with_matches),
@@ -217,11 +306,13 @@ where
                 regex,
                 program.options.whole_word,
                 true,
+                limit,
                 &mut should_continue,
             )
             .map(SearchOutcome::with_matches)
         }),
-    }
+    };
+    outcome.filter(|outcome| program.accept_window_match_count(outcome.matches.len(), limit))
 }
 
 fn compile_regex(query: &str, options: SearchOptions) -> Result<regex::Regex, SearchError> {
@@ -410,5 +501,59 @@ mod tests {
         });
 
         assert!(result.is_none());
+    }
+}
+
+#[cfg(test)]
+mod result_budget_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_collection_covers_ascii_unicode_whole_word_and_regex() {
+        for (text, query, mode, match_case, whole_word) in [
+            ("aaaa", "a", SearchMode::PlainText, true, false),
+            ("aAaA", "a", SearchMode::PlainText, false, false),
+            ("ABabABab", "ab", SearchMode::PlainText, false, false),
+            ("éééé", "é", SearchMode::PlainText, true, false),
+            ("éÉéÉ", "é", SearchMode::PlainText, false, false),
+            ("a a a a", "a", SearchMode::PlainText, false, true),
+            ("aaaa", "a?", SearchMode::Regex, true, false),
+        ] {
+            let program = SearchProgram::compile(
+                query,
+                SearchOptions {
+                    mode,
+                    match_case,
+                    whole_word,
+                },
+            )
+            .unwrap()
+            .with_result_limit(3);
+            assert!(
+                search_program_interruptible(text, &program, || true).is_none(),
+                "{query} in {text}"
+            );
+            assert!(program.result_limit_exceeded());
+        }
+    }
+
+    #[test]
+    fn complete_results_at_the_limit_and_shared_target_budget_are_exact() {
+        let program = SearchProgram::compile("a", SearchOptions::default())
+            .unwrap()
+            .with_result_limit(3);
+        assert_eq!(
+            search_program_interruptible("aaa", &program, || true)
+                .unwrap()
+                .matches
+                .len(),
+            3
+        );
+        assert!(!program.result_limit_exceeded());
+        assert!(program.reserve_result_matches(2));
+        let clone = program.clone();
+        assert!(clone.reserve_result_matches(1));
+        assert!(!clone.reserve_result_matches(1));
+        assert!(program.result_limit_exceeded());
     }
 }

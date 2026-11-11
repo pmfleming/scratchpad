@@ -48,6 +48,11 @@ pub(crate) fn profile_snapshot_search_controlled(
     )
 }
 
+#[cfg(test)]
+pub(super) const MAX_SEARCH_RESULTS: usize =
+    crate::app::services::settings_store::SearchResultLimit::RECOMMENDED_MATCHES;
+pub(super) const SEARCH_RESULT_LIMIT_MESSAGE: &str = "Search result memory limit reached (100,000 matches). Narrow the query or choose Unlimited in Settings → Editors.";
+
 const SEARCH_PREVIEW_CACHE_LIMIT: usize = 1024;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -386,8 +391,14 @@ impl SearchState {
         }
     }
 
-    fn build_request(&self, generation: u64, targets: Vec<SearchTargetSnapshot>) -> SearchRequest {
+    fn build_request(
+        &self,
+        generation: u64,
+        targets: Vec<SearchTargetSnapshot>,
+        result_limit: usize,
+    ) -> SearchRequest {
         SearchRequest {
+            result_limit,
             generation,
             query: self.query.query.clone(),
             options: self.search_options(),

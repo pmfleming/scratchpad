@@ -83,7 +83,7 @@ pub(crate) struct SearchMatch {
     pub(crate) tab_index: usize,
     pub(crate) view_id: ViewId,
     pub(crate) buffer_id: BufferId,
-    pub(crate) buffer_label: String,
+    pub(crate) buffer_label: std::sync::Arc<str>,
     pub(crate) target_revision: u64,
     pub(crate) range: Range<usize>,
     pub(crate) matched_text: Option<String>,

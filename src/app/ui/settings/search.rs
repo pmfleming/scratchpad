@@ -22,6 +22,11 @@ const SETTINGS: &[(&str, &str, &str)] = &[
         "Search highlight",
         "search highlight colour color",
     ),
+    (
+        "editors",
+        "Search result limit",
+        "search matches memory budget recommended unlimited",
+    ),
     ("editors", "Word wrap", "wrapping lines"),
     ("editors", "Editor padding", "gutter margins"),
     ("editors", "Indent with", "indentation spaces tabs"),

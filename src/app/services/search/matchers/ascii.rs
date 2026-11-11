@@ -9,6 +9,7 @@ pub(super) fn find_ascii_case_sensitive_matches<F>(
     query_bytes: &[u8],
     whole_word: bool,
     interruptible: bool,
+    limit: usize,
     should_continue: &mut F,
 ) -> Option<Vec<Range<usize>>>
 where
@@ -24,6 +25,9 @@ where
         let end = start + query_bytes.len();
         if ascii_whole_word_allows(text_bytes, whole_word, start, end) {
             matches.push(start..end);
+            if matches.len() > limit {
+                return Some(matches);
+            }
         }
     }
     finalize_matches(matches, interruptible, should_continue)
@@ -34,6 +38,7 @@ pub(super) fn find_ascii_case_insensitive_single_byte_matches<F>(
     query_byte: u8,
     whole_word: bool,
     interruptible: bool,
+    limit: usize,
     should_continue: &mut F,
 ) -> Option<Vec<Range<usize>>>
 where
@@ -50,6 +55,9 @@ where
         let end = start + 1;
         if ascii_whole_word_allows(text_bytes, whole_word, start, end) {
             matches.push(start..end);
+            if matches.len() > limit {
+                return Some(matches);
+            }
         }
     }
     finalize_matches(matches, interruptible, should_continue)
@@ -60,6 +68,7 @@ pub(super) fn find_ascii_case_insensitive_multi_byte_matches<F>(
     query_lower: &[u8],
     whole_word: bool,
     interruptible: bool,
+    limit: usize,
     should_continue: &mut F,
 ) -> Option<Vec<Range<usize>>>
 where
@@ -87,6 +96,9 @@ where
             && ascii_whole_word_allows(text_bytes, whole_word, start, end)
         {
             matches.push(start..end);
+            if matches.len() > limit {
+                return Some(matches);
+            }
         }
     }
     finalize_matches(matches, interruptible, should_continue)
@@ -134,6 +146,7 @@ mod tests {
             b"abc",
             false,
             false,
+            usize::MAX,
             &mut should_continue,
         )
         .unwrap();
@@ -150,6 +163,7 @@ mod tests {
             b'a',
             false,
             false,
+            usize::MAX,
             &mut should_continue,
         )
         .unwrap();
@@ -166,6 +180,7 @@ mod tests {
             b"foo",
             true,
             false,
+            usize::MAX,
             &mut should_continue,
         )
         .unwrap();
@@ -186,6 +201,7 @@ mod tests {
             b'a',
             false,
             true,
+            usize::MAX,
             &mut should_continue,
         );
 

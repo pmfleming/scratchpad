@@ -70,7 +70,15 @@ fn submit_search_request(app: &mut ScratchpadApp) {
         .saturating_add(1);
     crate::app::app_state::search_visual::clear_search_highlights(app);
     let targets = collect_search_targets(app, app.state.search_state.query.scope);
-    let request = app.state.search_state.build_request(generation, targets);
+    let request = app.state.search_state.build_request(
+        generation,
+        targets,
+        app.state
+            .app_settings
+            .editor
+            .search_result_limit
+            .max_matches(),
+    );
     app.state.search_state.begin_request(generation);
 
     if let Err(error) = app.state.search_state.runtime.request_tx.send(request) {
@@ -135,6 +143,12 @@ pub fn profile_build_search_request(app: &ScratchpadApp, scope: SearchScope, que
         .saturating_add(1);
     let targets = collect_search_targets(app, scope);
     let request = SearchRequest {
+        result_limit: app
+            .state
+            .app_settings
+            .editor
+            .search_result_limit
+            .max_matches(),
         generation,
         query: query.to_owned(),
         options: app.state.search_state.search_options(),

@@ -239,6 +239,8 @@ pub struct WindowState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EditorSettings {
     #[serde(default)]
+    pub search_result_limit: SearchResultLimit,
+    #[serde(default)]
     pub appearance_source: EditorAppearanceSource,
     #[serde(default = "default_font_size")]
     pub font_size: f32,
@@ -273,6 +275,7 @@ pub struct EditorSettings {
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
+            search_result_limit: SearchResultLimit::default(),
             appearance_source: EditorAppearanceSource::default(),
             font_size: default_font_size(),
             word_wrap: default_word_wrap(),
@@ -474,5 +477,55 @@ mod tests {
             default_editor_text_highlight_text_color(),
             DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR
         );
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchResultLimit {
+    #[default]
+    Recommended,
+    Unlimited,
+}
+
+impl SearchResultLimit {
+    pub const RECOMMENDED_MATCHES: usize = 100_000;
+    pub const ALL: [Self; 2] = [Self::Recommended, Self::Unlimited];
+
+    #[must_use]
+    pub fn max_matches(self) -> usize {
+        match self {
+            Self::Recommended => Self::RECOMMENDED_MATCHES,
+            Self::Unlimited => usize::MAX,
+        }
+    }
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Recommended => "Recommended (100,000)",
+            Self::Unlimited => "Unlimited",
+        }
+    }
+}
+
+#[cfg(test)]
+mod search_limit_tests {
+    use super::*;
+    #[test]
+    fn search_limit_defaults_and_persistence_preserve_the_user_choice() {
+        let defaults: AppSettings = toml::from_str("").unwrap();
+        assert_eq!(
+            defaults.editor.search_result_limit,
+            SearchResultLimit::Recommended
+        );
+        for limit in SearchResultLimit::ALL {
+            let mut settings = AppSettings::default();
+            settings.editor.search_result_limit = limit;
+            let text = toml::to_string(&settings).unwrap();
+            let restored: AppSettings = toml::from_str(&text).unwrap();
+            assert_eq!(restored.editor.search_result_limit, limit);
+        }
+        assert_eq!(SearchResultLimit::Unlimited.max_matches(), usize::MAX);
     }
 }

@@ -16,6 +16,7 @@ fn highlighting_requires_a_selective_query_and_matches_labels_and_aliases() {
     for (query, expected) in [
         ("FONT size", "Size"),
         ("gutter", "Editor padding"),
+        ("unlimited", "Search result limit"),
         ("memory per file", "Memory per file"),
         ("colour background", "Background"),
         ("OS", "Use appearance from"),

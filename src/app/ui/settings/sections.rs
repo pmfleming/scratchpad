@@ -24,7 +24,7 @@ const CATEGORIES: [Category; 5] = [
         key: "editors",
         title: "Editors",
         subtitle: "Writing and indentation",
-        search: "word wrap padding gutter indent width spaces tabs characters guides preview",
+        search: "word wrap padding gutter indent width spaces tabs characters guides preview search result limit recommended unlimited memory",
         render: super::text_formatting::render_editing,
     },
     Category {

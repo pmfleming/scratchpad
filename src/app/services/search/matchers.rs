@@ -17,6 +17,7 @@ pub(super) fn plain_text_matches<F>(
     query: &str,
     options: SearchOptions,
     interruptible: bool,
+    limit: usize,
     should_continue: &mut F,
 ) -> Option<Vec<Range<usize>>>
 where
@@ -28,6 +29,7 @@ where
             query,
             options.whole_word,
             interruptible,
+            limit,
             should_continue,
         );
     }
@@ -37,6 +39,7 @@ where
             query.as_bytes(),
             options.whole_word,
             interruptible,
+            limit,
             should_continue,
         );
     }
@@ -45,6 +48,7 @@ where
         query,
         options.whole_word,
         interruptible,
+        limit,
         should_continue,
     )
 }
@@ -54,6 +58,7 @@ pub(super) fn collect_regex_matches<F>(
     regex: &regex::Regex,
     whole_word: bool,
     interruptible: bool,
+    limit: usize,
     should_continue: &mut F,
 ) -> Option<Vec<Range<usize>>>
 where
@@ -88,6 +93,9 @@ where
         };
         if whole_word_allowed {
             matches.push(start..end);
+            if matches.len() > limit {
+                return Some(matches);
+            }
         }
     }
 
@@ -155,6 +163,7 @@ fn find_matches_case_sensitive_impl<F>(
     query: &str,
     whole_word: bool,
     interruptible: bool,
+    limit: usize,
     mut should_continue: F,
 ) -> Option<Vec<Range<usize>>>
 where
@@ -170,6 +179,7 @@ where
             query.as_bytes(),
             whole_word,
             interruptible,
+            limit,
             &mut should_continue,
         );
     }
@@ -195,6 +205,9 @@ where
 
         let (start, end) = char_cursor.byte_range(text, start_byte, end_byte);
         matches.push(start..end);
+        if matches.len() > limit {
+            return Some(matches);
+        }
     }
 
     finalize_matches(matches, interruptible, &mut should_continue)
@@ -205,6 +218,7 @@ fn find_matches_ascii_case_insensitive_impl<F>(
     query_bytes: &[u8],
     whole_word: bool,
     interruptible: bool,
+    limit: usize,
     mut should_continue: F,
 ) -> Option<Vec<Range<usize>>>
 where
@@ -220,6 +234,7 @@ where
             query_bytes[0].to_ascii_lowercase(),
             whole_word,
             interruptible,
+            limit,
             &mut should_continue,
         );
     }
@@ -233,6 +248,7 @@ where
         &query_lower,
         whole_word,
         interruptible,
+        limit,
         &mut should_continue,
     )
 }
@@ -242,6 +258,7 @@ fn find_matches_unicode_case_insensitive_impl<F>(
     query: &str,
     whole_word: bool,
     interruptible: bool,
+    limit: usize,
     mut should_continue: F,
 ) -> Option<Vec<Range<usize>>>
 where
@@ -273,6 +290,9 @@ where
             continue;
         }
         matches.push(start..end);
+        if matches.len() > limit {
+            return Some(matches);
+        }
     }
 
     finalize_matches(matches, interruptible, &mut should_continue)

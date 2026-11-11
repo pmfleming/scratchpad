@@ -14,6 +14,7 @@ mod processing;
 pub(super) use processing::{process_search_request, process_search_request_with_partials};
 
 pub(super) struct SearchRequest {
+    pub(super) result_limit: usize,
     pub(super) generation: u64,
     pub(super) query: String,
     pub(super) options: SearchOptions,

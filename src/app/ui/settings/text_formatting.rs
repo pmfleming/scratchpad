@@ -191,6 +191,26 @@ fn color_row(
 }
 
 pub(super) fn render_editing(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    use crate::app::services::settings_store::SearchResultLimit;
+    let mut result_limit = app.state.app_settings.editor.search_result_limit;
+    inner_select_row(
+        ui,
+        "Search result limit",
+        Some("Recommended bounds memory used by dense searches."),
+        |ui| {
+            if dropdown(
+                ui,
+                "Search result limit",
+                &mut result_limit,
+                &SearchResultLimit::ALL,
+                |value| value.label().into(),
+                240.0 * SettingsUi::scale(ui).max(1.0),
+                "",
+            ) {
+                settings::set_search_result_limit(app, result_limit);
+            }
+        },
+    );
     toggle_select_row(
         ui,
         "Word wrap",

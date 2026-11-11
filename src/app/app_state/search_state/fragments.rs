@@ -128,14 +128,19 @@ fn search_fragmented(
         context.intra_parallelism,
         context.generation,
         context.latest_generation,
+        context.program.result_limit(),
         |chunk| {
             let (window_text, window_offset) = context
                 .snapshot
                 .try_search_text(Some(chunk.window_range.clone()))
                 .ok()?;
-            let outcome = search::search_program_interruptible(
+            let outcome = search::search_program_window_interruptible(
                 window_text.as_ref(),
                 context.program,
+                chunk
+                    .window_range
+                    .len()
+                    .saturating_sub(chunk.core_range.len()),
                 || context.latest_generation.load(Ordering::Relaxed) == context.generation,
             )?;
             debug_assert!(outcome.error.is_none());
@@ -156,6 +161,7 @@ fn search_fragmented(
             )
         },
     )
+    .filter(|matches| context.program.accept_match_count(matches.len()))
 }
 
 fn next_chunk_batch(chunks: &mut impl Iterator<Item = DocumentChunk>) -> Vec<DocumentChunk> {
@@ -170,6 +176,7 @@ fn process_chunks_concurrent(
     intra_parallelism: usize,
     generation: u64,
     latest_generation: &AtomicU64,
+    max_matches: usize,
     process: impl Fn(&DocumentChunk) -> Option<Vec<Range<usize>>> + Sync,
 ) -> Option<Vec<Range<usize>>> {
     let stale = AtomicBool::new(false);
@@ -187,7 +194,11 @@ fn process_chunks_concurrent(
             for mut found in
                 process_chunk_batch(&chunks, generation, latest_generation, &stale, &process)?
             {
+                found.truncate(max_matches.saturating_add(1).saturating_sub(matches.len()));
                 matches.append(&mut found);
+                if matches.len() > max_matches {
+                    return Some(matches);
+                }
             }
             if !generation_is_current(generation, latest_generation, &stale) {
                 return None;
@@ -236,7 +247,11 @@ fn process_chunks_concurrent(
                 // Receive in input order, regardless of worker completion order.
                 for (_, completed) in &channels[..used] {
                     for mut found in completed.recv().ok()?? {
+                        found.truncate(max_matches.saturating_add(1).saturating_sub(matches.len()));
                         matches.append(&mut found);
+                        if matches.len() > max_matches {
+                            return Some(matches);
+                        }
                     }
                 }
                 if !generation_is_current(generation, latest_generation, &stale) {
@@ -303,7 +318,7 @@ mod batching_tests {
     fn one_worker_cohort_preserves_order_across_many_bounded_batches() {
         let threads = std::sync::Mutex::new(std::collections::HashSet::new());
         let generation = AtomicU64::new(1);
-        let found = process_chunks_concurrent(chunks(37), 3, 1, &generation, |chunk| {
+        let found = process_chunks_concurrent(chunks(37), 3, 1, &generation, usize::MAX, |chunk| {
             threads.lock().unwrap().insert(thread::current().id());
             if chunk.core_range.start.is_multiple_of(8) {
                 thread::sleep(std::time::Duration::from_millis(1));
@@ -323,17 +338,15 @@ mod batching_tests {
         for failed_index in [0, 11, 36] {
             let generation = AtomicU64::new(1);
             assert!(
-                process_chunks_concurrent(chunks(37), 4, 1, &generation, |chunk| (chunk
-                    .core_range
-                    .start
-                    != failed_index)
-                    .then(|| vec![chunk.core_range.clone()]))
+                process_chunks_concurrent(chunks(37), 4, 1, &generation, usize::MAX, |chunk| {
+                    (chunk.core_range.start != failed_index).then(|| vec![chunk.core_range.clone()])
+                })
                 .is_none()
             );
         }
         let generation = AtomicU64::new(1);
         assert!(
-            process_chunks_concurrent(chunks(37), 4, 1, &generation, |chunk| {
+            process_chunks_concurrent(chunks(37), 4, 1, &generation, usize::MAX, |chunk| {
                 if chunk.core_range.start == 11 {
                     generation.store(2, Ordering::Relaxed);
                 }
@@ -343,7 +356,7 @@ mod batching_tests {
         );
         generation.store(1, Ordering::Relaxed);
         assert!(
-            process_chunks_concurrent(chunks(37), 4, 1, &generation, |chunk| {
+            process_chunks_concurrent(chunks(37), 4, 1, &generation, usize::MAX, |chunk| {
                 assert_ne!(chunk.core_range.start, 11, "injected worker panic");
                 Some(vec![chunk.core_range.clone()])
             })

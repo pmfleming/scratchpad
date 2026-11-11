@@ -186,3 +186,30 @@ fn test_tab(name: &str) -> WorkspaceTab {
 fn selected_slots(app: &ScratchpadApp) -> Vec<usize> {
     app.state.workspace_selection.selected_slots().collect()
 }
+
+#[test]
+fn search_limit_changes_persist_and_restart_an_open_query() {
+    use crate::app::services::settings_store::SearchResultLimit;
+    let mut app = test_app(["one.txt"]);
+    app.open_search();
+    app.set_search_query("needle");
+    let generation = app.state.search_state.runtime.requested_generation;
+    settings_controller::set_search_result_limit(&mut app, SearchResultLimit::Unlimited);
+    assert!(app.state.search_state.runtime.requested_generation > generation);
+    let stored = app
+        .state
+        .persistence
+        .settings_store
+        .load()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        stored.editor.search_result_limit,
+        SearchResultLimit::Unlimited
+    );
+    settings_controller::reset_settings_to_defaults(&mut app);
+    assert_eq!(
+        app.state.app_settings.editor.search_result_limit,
+        SearchResultLimit::Recommended
+    );
+}
