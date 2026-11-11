@@ -1,0 +1,3286 @@
+{
+  "schema_version": 1,
+  "scope": "Shipping search implementation and its existing tests. Project-wide aggregates include unchanged tests and tooling.",
+  "quality": {
+    "before": {
+      "all": {
+        "functions": 5490,
+        "cognitive": 8797,
+        "cyclomatic": 14479,
+        "effort": 62113220,
+        "sloc": 94357
+      },
+      "editedAll": {
+        "functions": 114,
+        "cognitive": 261,
+        "cyclomatic": 293,
+        "effort": 1270441,
+        "sloc": 2003
+      },
+      "editedProduction": {
+        "functions": 84,
+        "cognitive": 243,
+        "cyclomatic": 252,
+        "effort": 1013810,
+        "sloc": 1509
+      },
+      "editedTests": {
+        "functions": 30,
+        "cognitive": 18,
+        "cyclomatic": 41,
+        "effort": 256630,
+        "sloc": 494
+      },
+      "testCount": 881,
+      "source": {
+        "ast_record_count": 37,
+        "duplicated_line_count": 7643,
+        "duplication_model_version": 2,
+        "duplication_percent": 7.01,
+        "record_count": 563,
+        "source_nonblank_line_count": 108988,
+        "token_record_count": 509
+      },
+      "coverage": {
+        "branches": {
+          "available": false,
+          "count": 0,
+          "covered": 0,
+          "percent": null
+        },
+        "file_count": 410,
+        "functions": {
+          "available": true,
+          "count": 7487,
+          "covered": 5970,
+          "percent": 79.74
+        },
+        "lines": {
+          "available": true,
+          "count": 69568,
+          "covered": 54298,
+          "percent": 78.05
+        },
+        "regions": {
+          "available": true,
+          "count": 99969,
+          "covered": 77923,
+          "percent": 77.95
+        }
+      },
+      "editedCoverage": {
+        "count": 1790,
+        "covered": 1685,
+        "percent": 94.1340782122905
+      },
+      "editedProductionCoverage": {
+        "count": 1020,
+        "covered": 944,
+        "percent": 92.54901960784314
+      },
+      "coverageFiles": [
+        {
+          "path": "src/app/app_state/search_state/fragments.rs",
+          "lines": {
+            "available": true,
+            "count": 326,
+            "covered": 314,
+            "percent": 96.32
+          }
+        },
+        {
+          "path": "src/app/app_state/search_state/helpers.rs",
+          "lines": {
+            "available": true,
+            "count": 311,
+            "covered": 303,
+            "percent": 97.43
+          }
+        },
+        {
+          "path": "src/app/app_state/search_state/worker.rs",
+          "lines": {
+            "available": true,
+            "count": 34,
+            "covered": 33,
+            "percent": 97.06
+          }
+        },
+        {
+          "path": "src/app/app_state/search_state/worker/processing.rs",
+          "lines": {
+            "available": true,
+            "count": 351,
+            "covered": 327,
+            "percent": 93.16
+          }
+        },
+        {
+          "path": "src/app/services/search.rs",
+          "lines": {
+            "available": true,
+            "count": 384,
+            "covered": 347,
+            "percent": 90.36
+          }
+        },
+        {
+          "path": "src/app/services/search/matchers.rs",
+          "lines": {
+            "available": true,
+            "count": 237,
+            "covered": 224,
+            "percent": 94.51
+          }
+        },
+        {
+          "path": "src/app/services/search/matchers/ascii.rs",
+          "lines": {
+            "available": true,
+            "count": 147,
+            "covered": 137,
+            "percent": 93.2
+          }
+        }
+      ],
+      "escapeHatches": {
+        "asm_macro": 0,
+        "clippy_suppression": 3,
+        "container_ref_return": 0,
+        "deref_impl": 1,
+        "deref_mut_impl": 0,
+        "extern_block": 1,
+        "extern_fn": 4,
+        "glob_import": 59,
+        "linkage_escape": 0,
+        "lint_suppression": 2,
+        "maybe_uninit": 0,
+        "raw_borrow": 0,
+        "repr_escape": 0,
+        "static_mut": 0,
+        "transmute": 0,
+        "union": 0,
+        "unsafe_block": 8,
+        "unsafe_fn": 4,
+        "unsafe_impl": 1,
+        "unsafe_trait": 0
+      },
+      "leverage": [
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 374,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 30,
+          "module_id": "scratchpad::shared::app::app_state::search_state::fragments",
+          "module_key": "app::app_state::search_state::fragments",
+          "outbound_dependencies": 7,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/fragments.rs",
+          "pressure_score": 45.5,
+          "public_surface": 0,
+          "reach": 3,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 7.5,
+              "raw": 3,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -21,
+              "raw": 7,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 342,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 60,
+          "module_id": "scratchpad::shared::app::app_state::search_state::helpers",
+          "module_key": "app::app_state::search_state::helpers",
+          "outbound_dependencies": 14,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/helpers.rs",
+          "pressure_score": 59,
+          "public_surface": 0,
+          "reach": 6,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 15,
+              "raw": 6,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -42,
+              "raw": 14,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 75,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 50,
+          "module_id": "scratchpad::shared::app::app_state::search_state::worker",
+          "module_key": "app::app_state::search_state::worker",
+          "outbound_dependencies": 10,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/worker.rs",
+          "pressure_score": 49.5,
+          "public_surface": 0,
+          "reach": 5,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 12.5,
+              "raw": 5,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -30,
+              "raw": 10,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 430,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 20,
+          "module_id": "scratchpad::shared::app::app_state::search_state::worker::processing",
+          "module_key": "app::app_state::search_state::worker::processing",
+          "outbound_dependencies": 10,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/worker/processing.rs",
+          "pressure_score": 57,
+          "public_surface": 0,
+          "reach": 2,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 5,
+              "raw": 2,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -30,
+              "raw": 10,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 492,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 100,
+          "module_id": "scratchpad::shared::app::services::search",
+          "module_key": "app::services::search",
+          "outbound_dependencies": 1,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search.rs",
+          "pressure_score": 10,
+          "public_surface": 15,
+          "reach": 10,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 25,
+              "raw": 10,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -3,
+              "raw": 1,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 284,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 10,
+          "module_id": "scratchpad::shared::app::services::search::matchers",
+          "module_key": "app::services::search::matchers",
+          "outbound_dependencies": 0,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search/matchers.rs",
+          "pressure_score": 29.5,
+          "public_surface": 0,
+          "reach": 1,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 2.5,
+              "raw": 1,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 192,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 0,
+          "module_id": "scratchpad::shared::app::services::search::matchers::ascii",
+          "module_key": "app::services::search::matchers::ascii",
+          "outbound_dependencies": 0,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search/matchers/ascii.rs",
+          "pressure_score": 32,
+          "public_surface": 0,
+          "reach": 0,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "no observed consumers"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        }
+      ],
+      "locality": [
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 3,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 6,
+          "locality_score": 94,
+          "module_id": "scratchpad::shared::app::app_state::search_state::fragments",
+          "module_key": "app::app_state::search_state::fragments",
+          "outbound_dependencies": 7,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/fragments.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 6,
+              "raw": 2,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "dependency spread"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 6,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 27,
+          "locality_score": 73,
+          "module_id": "scratchpad::shared::app::app_state::search_state::helpers",
+          "module_key": "app::app_state::search_state::helpers",
+          "outbound_dependencies": 14,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/helpers.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 27,
+              "raw": 9,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "dependency spread"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 5,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 15,
+          "locality_score": 85,
+          "module_id": "scratchpad::shared::app::app_state::search_state::worker",
+          "module_key": "app::app_state::search_state::worker",
+          "outbound_dependencies": 10,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/worker.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 15,
+              "raw": 5,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "dependency spread"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 2,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 15,
+          "locality_score": 85,
+          "module_id": "scratchpad::shared::app::app_state::search_state::worker::processing",
+          "module_key": "app::app_state::search_state::worker::processing",
+          "outbound_dependencies": 10,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/worker/processing.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 15,
+              "raw": 5,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "dependency spread"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 10,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 0,
+          "locality_score": 100,
+          "module_id": "scratchpad::shared::app::services::search",
+          "module_key": "app::services::search",
+          "outbound_dependencies": 1,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "stable"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 1,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 0,
+          "locality_score": 100,
+          "module_id": "scratchpad::shared::app::services::search::matchers",
+          "module_key": "app::services::search::matchers",
+          "outbound_dependencies": 0,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search/matchers.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "stable"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 0,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 0,
+          "locality_score": 100,
+          "module_id": "scratchpad::shared::app::services::search::matchers::ascii",
+          "module_key": "app::services::search::matchers::ascii",
+          "outbound_dependencies": 0,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search/matchers/ascii.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "stable"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        }
+      ]
+    },
+    "after": {
+      "all": {
+        "functions": 5471,
+        "cognitive": 8728,
+        "cyclomatic": 14435,
+        "effort": 62077175,
+        "sloc": 94193
+      },
+      "editedAll": {
+        "functions": 95,
+        "cognitive": 192,
+        "cyclomatic": 249,
+        "effort": 1234395,
+        "sloc": 1839
+      },
+      "editedProduction": {
+        "functions": 80,
+        "cognitive": 157,
+        "cyclomatic": 214,
+        "effort": 821771,
+        "sloc": 1381
+      },
+      "editedTests": {
+        "functions": 15,
+        "cognitive": 35,
+        "cyclomatic": 35,
+        "effort": 412624,
+        "sloc": 458
+      },
+      "testCount": 868,
+      "source": {
+        "ast_record_count": 35,
+        "duplicated_line_count": 7556,
+        "duplication_model_version": 2,
+        "duplication_percent": 6.94,
+        "record_count": 553,
+        "source_nonblank_line_count": 108843,
+        "token_record_count": 503
+      },
+      "coverage": {
+        "branches": {
+          "available": false,
+          "count": 0,
+          "covered": 0,
+          "percent": null
+        },
+        "file_count": 411,
+        "functions": {
+          "available": true,
+          "count": 7477,
+          "covered": 5964,
+          "percent": 79.76
+        },
+        "lines": {
+          "available": true,
+          "count": 69455,
+          "covered": 54243,
+          "percent": 78.1
+        },
+        "regions": {
+          "available": true,
+          "count": 99831,
+          "covered": 77850,
+          "percent": 77.98
+        }
+      },
+      "editedCoverage": {
+        "count": 1677,
+        "covered": 1629,
+        "percent": 97.13774597495528
+      },
+      "editedProductionCoverage": {
+        "count": 936,
+        "covered": 898,
+        "percent": 95.94017094017094
+      },
+      "coverageFiles": [
+        {
+          "path": "src/app/app_state/search_state/fragments.rs",
+          "lines": {
+            "available": true,
+            "count": 357,
+            "covered": 351,
+            "percent": 98.32
+          }
+        },
+        {
+          "path": "src/app/app_state/search_state/helpers.rs",
+          "lines": {
+            "available": true,
+            "count": 205,
+            "covered": 198,
+            "percent": 96.59
+          }
+        },
+        {
+          "path": "src/app/app_state/search_state/worker.rs",
+          "lines": {
+            "available": true,
+            "count": 34,
+            "covered": 33,
+            "percent": 97.06
+          }
+        },
+        {
+          "path": "src/app/app_state/search_state/worker/processing.rs",
+          "lines": {
+            "available": true,
+            "count": 331,
+            "covered": 308,
+            "percent": 93.05
+          }
+        },
+        {
+          "path": "src/app/app_state/search_state/worker/results.rs",
+          "lines": {
+            "available": true,
+            "count": 96,
+            "covered": 95,
+            "percent": 98.96
+          }
+        },
+        {
+          "path": "src/app/services/search.rs",
+          "lines": {
+            "available": true,
+            "count": 379,
+            "covered": 370,
+            "percent": 97.63
+          }
+        },
+        {
+          "path": "src/app/services/search/matchers.rs",
+          "lines": {
+            "available": true,
+            "count": 216,
+            "covered": 215,
+            "percent": 99.54
+          }
+        },
+        {
+          "path": "src/app/services/search/matchers/ascii.rs",
+          "lines": {
+            "available": true,
+            "count": 59,
+            "covered": 59,
+            "percent": 100
+          }
+        }
+      ],
+      "escapeHatches": {
+        "asm_macro": 0,
+        "clippy_suppression": 3,
+        "container_ref_return": 0,
+        "deref_impl": 1,
+        "deref_mut_impl": 0,
+        "extern_block": 1,
+        "extern_fn": 4,
+        "glob_import": 56,
+        "linkage_escape": 0,
+        "lint_suppression": 2,
+        "maybe_uninit": 0,
+        "raw_borrow": 0,
+        "repr_escape": 0,
+        "static_mut": 0,
+        "transmute": 0,
+        "union": 0,
+        "unsafe_block": 8,
+        "unsafe_fn": 4,
+        "unsafe_impl": 1,
+        "unsafe_trait": 0
+      },
+      "leverage": [
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 408,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 30,
+          "module_id": "scratchpad::shared::app::app_state::search_state::fragments",
+          "module_key": "app::app_state::search_state::fragments",
+          "outbound_dependencies": 7,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/fragments.rs",
+          "pressure_score": 45.5,
+          "public_surface": 0,
+          "reach": 3,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 7.5,
+              "raw": 3,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -21,
+              "raw": 7,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 229,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 60,
+          "module_id": "scratchpad::shared::app::app_state::search_state::helpers",
+          "module_key": "app::app_state::search_state::helpers",
+          "outbound_dependencies": 14,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/helpers.rs",
+          "pressure_score": 59,
+          "public_surface": 0,
+          "reach": 6,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 15,
+              "raw": 6,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -42,
+              "raw": 14,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 76,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 60,
+          "module_id": "scratchpad::shared::app::app_state::search_state::worker",
+          "module_key": "app::app_state::search_state::worker",
+          "outbound_dependencies": 10,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/worker.rs",
+          "pressure_score": 47,
+          "public_surface": 0,
+          "reach": 6,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 15,
+              "raw": 6,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -30,
+              "raw": 10,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 408,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 20,
+          "module_id": "scratchpad::shared::app::app_state::search_state::worker::processing",
+          "module_key": "app::app_state::search_state::worker::processing",
+          "outbound_dependencies": 10,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/worker/processing.rs",
+          "pressure_score": 57,
+          "public_surface": 0,
+          "reach": 2,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 5,
+              "raw": 2,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -30,
+              "raw": 10,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 119,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 10,
+          "module_id": "scratchpad::shared::app::app_state::search_state::worker::results",
+          "module_key": "app::app_state::search_state::worker::results",
+          "outbound_dependencies": 7,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/worker/results.rs",
+          "pressure_score": 50.5,
+          "public_surface": 0,
+          "reach": 1,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 2.5,
+              "raw": 1,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -21,
+              "raw": 7,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 475,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 100,
+          "module_id": "scratchpad::shared::app::services::search",
+          "module_key": "app::services::search",
+          "outbound_dependencies": 1,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search.rs",
+          "pressure_score": 10,
+          "public_surface": 15,
+          "reach": 10,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 25,
+              "raw": 10,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": -3,
+              "raw": 1,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 264,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 10,
+          "module_id": "scratchpad::shared::app::services::search::matchers",
+          "module_key": "app::services::search::matchers",
+          "outbound_dependencies": 0,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search/matchers.rs",
+          "pressure_score": 29.5,
+          "public_surface": 0,
+          "reach": 1,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 2.5,
+              "raw": 1,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "observed reuse"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "calibration": "uncalibrated-advisory",
+          "dependency_identity_backends": [],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "implementation_lines": 65,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "leverage_model": "observed-reuse-v2",
+          "leverage_score": 0,
+          "module_id": "scratchpad::shared::app::services::search::matchers::ascii",
+          "module_key": "app::services::search::matchers::ascii",
+          "outbound_dependencies": 0,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search/matchers/ascii.rs",
+          "pressure_score": 32,
+          "public_surface": 0,
+          "reach": 0,
+          "risk_calibration": "leverage",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 68,
+              "raw": 68,
+              "signal": "base"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_reach"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "outbound_pressure"
+            }
+          ],
+          "score_components_scope": "legacy pressure complement; not observed reuse",
+          "signals": [
+            "no observed consumers"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        }
+      ],
+      "locality": [
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 3,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 6,
+          "locality_score": 94,
+          "module_id": "scratchpad::shared::app::app_state::search_state::fragments",
+          "module_key": "app::app_state::search_state::fragments",
+          "outbound_dependencies": 7,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/fragments.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 6,
+              "raw": 2,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "dependency spread"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 6,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 27,
+          "locality_score": 73,
+          "module_id": "scratchpad::shared::app::app_state::search_state::helpers",
+          "module_key": "app::app_state::search_state::helpers",
+          "outbound_dependencies": 14,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/helpers.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 27,
+              "raw": 9,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "dependency spread"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 6,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 15,
+          "locality_score": 85,
+          "module_id": "scratchpad::shared::app::app_state::search_state::worker",
+          "module_key": "app::app_state::search_state::worker",
+          "outbound_dependencies": 10,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/worker.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 15,
+              "raw": 5,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "dependency spread"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 2,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 15,
+          "locality_score": 85,
+          "module_id": "scratchpad::shared::app::app_state::search_state::worker::processing",
+          "module_key": "app::app_state::search_state::worker::processing",
+          "outbound_dependencies": 10,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/worker/processing.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 15,
+              "raw": 5,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "dependency spread"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 1,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 6,
+          "locality_score": 94,
+          "module_id": "scratchpad::shared::app::app_state::search_state::worker::results",
+          "module_key": "app::app_state::search_state::worker::results",
+          "outbound_dependencies": 7,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/app_state/search_state/worker/results.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 6,
+              "raw": 2,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "dependency spread"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [
+            "rust_analyzer"
+          ],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 10,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 0,
+          "locality_score": 100,
+          "module_id": "scratchpad::shared::app::services::search",
+          "module_key": "app::services::search",
+          "outbound_dependencies": 1,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "stable"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 1,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 0,
+          "locality_score": 100,
+          "module_id": "scratchpad::shared::app::services::search::matchers",
+          "module_key": "app::services::search::matchers",
+          "outbound_dependencies": 0,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search/matchers.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "stable"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        },
+        {
+          "dependency_identity_backends": [],
+          "entrypoint_kind": null,
+          "identity_backend": "cargo_metadata",
+          "inbound_dependencies": 0,
+          "is_entrypoint": false,
+          "layer": "Application",
+          "locality_risk": 0,
+          "locality_score": 100,
+          "module_id": "scratchpad::shared::app::services::search::matchers::ascii",
+          "module_key": "app::services::search::matchers::ascii",
+          "outbound_dependencies": 0,
+          "package_name": "scratchpad",
+          "path": "/home/laufan/Projects/scratchpad/src/app/services/search/matchers/ascii.rs",
+          "risk_calibration": "locality",
+          "risk_model_id": "rqlens.architecture_risk",
+          "risk_model_version": 4,
+          "score_components": [
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "outbound_over_allowance"
+            },
+            {
+              "contribution": 0,
+              "raw": 0,
+              "signal": "inbound_over_12"
+            }
+          ],
+          "signals": [
+            "stable"
+          ],
+          "target_kind": "module",
+          "target_name": "shared"
+        }
+      ]
+    }
+  },
+  "source_counts": {
+    "7e9533d": {
+      "clone_calls": 21,
+      "cloned_calls": 1,
+      "production_physical_lines": 1822,
+      "test_module_nonblank_lines": 537
+    },
+    "8891a2c": {
+      "clone_calls": 18,
+      "cloned_calls": 1,
+      "production_physical_lines": 1695,
+      "test_module_nonblank_lines": 526
+    },
+    "eaada2d": {
+      "clone_calls": 18,
+      "cloned_calls": 1,
+      "production_physical_lines": 1695,
+      "test_module_nonblank_lines": 506
+    }
+  },
+  "performance": {
+    "before": {
+      "workflows": [
+        {
+          "name": "search_workflow_active_dispatch/1",
+          "median_ms": 0.009974,
+          "max_ms": 0.016982,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_first_result/1",
+          "median_ms": 0.6681815,
+          "max_ms": 1.215817,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_first_render/1",
+          "median_ms": 3.630449,
+          "max_ms": 5.00784,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_completion/1",
+          "median_ms": 3.633004,
+          "max_ms": 5.010285,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_dispatch/32",
+          "median_ms": 0.043702000000000005,
+          "max_ms": 0.067637,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_first_result/32",
+          "median_ms": 0.46241,
+          "max_ms": 0.785688,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_first_render/32",
+          "median_ms": 3.991098,
+          "max_ms": 4.669734,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_completion/32",
+          "median_ms": 3.992736,
+          "max_ms": 4.671217,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_dispatch/10000",
+          "median_ms": 10.1809215,
+          "max_ms": 11.049595,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_first_result/10000",
+          "median_ms": 11.13699,
+          "max_ms": 13.266215,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_first_render/10000",
+          "median_ms": 19.803172,
+          "max_ms": 20.868707,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_completion/10000",
+          "median_ms": 22.605373,
+          "max_ms": 25.882408,
+          "budget_status": "pass"
+        }
+      ],
+      "resources": [
+        {
+          "name": "search_app_result_tracking",
+          "max_allocated_bytes": 18862346,
+          "max_peak_live_bytes": 26532631,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 1.889705,
+              "median_ns_per_unit": 14763.3203125,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 128
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 10.014148,
+              "median_ns_per_unit": 10014.148,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 1000
+            }
+          ]
+        },
+        {
+          "name": "search_file_size_resource_tracking",
+          "max_allocated_bytes": 536870958,
+          "max_peak_live_bytes": 536872730,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 33.50167,
+              "median_ns_per_unit": 0.4992137849330902,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 67108864
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 125.821122,
+              "median_ns_per_unit": 0.4687202051281929,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 268435456
+            }
+          ]
+        },
+        {
+          "name": "search_target_resource_tracking",
+          "max_allocated_bytes": 648212,
+          "max_peak_live_bytes": 10040,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 0.276119,
+              "median_ns_per_unit": 276.119,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 1000
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 2.297963,
+              "median_ns_per_unit": 229.7963,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 10000
+            }
+          ]
+        }
+      ]
+    },
+    "matchers": {
+      "workflows": [
+        {
+          "name": "search_workflow_active_dispatch/1",
+          "median_ms": 0.009443,
+          "max_ms": 0.018926,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_first_result/1",
+          "median_ms": 0.5698114999999999,
+          "max_ms": 1.137861,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_first_render/1",
+          "median_ms": 3.4104945,
+          "max_ms": 4.725088,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_completion/1",
+          "median_ms": 3.4127895,
+          "max_ms": 4.727833,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_dispatch/32",
+          "median_ms": 0.043547,
+          "max_ms": 0.051427,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_first_result/32",
+          "median_ms": 0.508256,
+          "max_ms": 0.679949,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_first_render/32",
+          "median_ms": 3.8313515,
+          "max_ms": 4.298635,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_completion/32",
+          "median_ms": 3.8331455,
+          "max_ms": 4.300328,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_dispatch/10000",
+          "median_ms": 10.4324735,
+          "max_ms": 11.477849,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_first_result/10000",
+          "median_ms": 11.4656565,
+          "max_ms": 12.838319,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_first_render/10000",
+          "median_ms": 19.9871405,
+          "max_ms": 21.15967,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_completion/10000",
+          "median_ms": 22.959316,
+          "max_ms": 25.380099,
+          "budget_status": "pass"
+        }
+      ],
+      "resources": [
+        {
+          "name": "search_app_result_tracking",
+          "max_allocated_bytes": 18857162,
+          "max_peak_live_bytes": 26525927,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 1.839099,
+              "median_ns_per_unit": 14367.9609375,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 128
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 9.708963,
+              "median_ns_per_unit": 9708.963,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 1000
+            }
+          ]
+        },
+        {
+          "name": "search_file_size_resource_tracking",
+          "max_allocated_bytes": 536870958,
+          "max_peak_live_bytes": 536872730,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 32.683727,
+              "median_ns_per_unit": 0.4870254844427109,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 67108864
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 128.003761,
+              "median_ns_per_unit": 0.4768511690199375,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 268435456
+            }
+          ]
+        },
+        {
+          "name": "search_target_resource_tracking",
+          "max_allocated_bytes": 648212,
+          "max_peak_live_bytes": 10040,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 0.253526,
+              "median_ns_per_unit": 253.526,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 1000
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 2.279888,
+              "median_ns_per_unit": 227.9888,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 10000
+            }
+          ]
+        }
+      ]
+    },
+    "ownership": {
+      "workflows": [
+        {
+          "name": "search_workflow_active_dispatch/1",
+          "median_ms": 0.009623,
+          "max_ms": 0.015239,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_first_result/1",
+          "median_ms": 0.5734490000000001,
+          "max_ms": 1.097595,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_first_render/1",
+          "median_ms": 3.4925740000000003,
+          "max_ms": 4.911889,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_completion/1",
+          "median_ms": 3.4952995,
+          "max_ms": 4.914333,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_dispatch/32",
+          "median_ms": 0.044519,
+          "max_ms": 0.075673,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_first_result/32",
+          "median_ms": 0.5362635,
+          "max_ms": 0.704786,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_first_render/32",
+          "median_ms": 3.914843,
+          "max_ms": 5.512459,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_completion/32",
+          "median_ms": 3.916737,
+          "max_ms": 5.514743,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_dispatch/10000",
+          "median_ms": 9.5666445,
+          "max_ms": 10.823227,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_first_result/10000",
+          "median_ms": 10.514637,
+          "max_ms": 12.283484,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_first_render/10000",
+          "median_ms": 19.1172635,
+          "max_ms": 21.109135,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_completion/10000",
+          "median_ms": 22.3148275,
+          "max_ms": 25.114939,
+          "budget_status": "pass"
+        }
+      ],
+      "resources": [
+        {
+          "name": "search_app_result_tracking",
+          "max_allocated_bytes": 18626132,
+          "max_peak_live_bytes": 26521005,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 2.151227,
+              "median_ns_per_unit": 16806.4609375,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 128
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 9.842614,
+              "median_ns_per_unit": 9842.614,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 1000
+            }
+          ]
+        },
+        {
+          "name": "search_file_size_resource_tracking",
+          "max_allocated_bytes": 536870958,
+          "max_peak_live_bytes": 536872730,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 32.254458,
+              "median_ns_per_unit": 0.4806288778781891,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 67108864
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 127.355486,
+              "median_ns_per_unit": 0.4744361564517021,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 268435456
+            }
+          ]
+        },
+        {
+          "name": "search_target_resource_tracking",
+          "max_allocated_bytes": 648212,
+          "max_peak_live_bytes": 10040,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 0.274887,
+              "median_ns_per_unit": 274.887,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 1000
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 2.464916,
+              "median_ns_per_unit": 246.4916,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 10000
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "workflows": [
+        {
+          "name": "search_workflow_active_dispatch/1",
+          "median_ms": 0.0098485,
+          "max_ms": 0.019597,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_first_result/1",
+          "median_ms": 0.709615,
+          "max_ms": 1.214956,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_first_render/1",
+          "median_ms": 3.6838645,
+          "max_ms": 5.043837,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_active_completion/1",
+          "median_ms": 3.6862785,
+          "max_ms": 5.045981,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_dispatch/32",
+          "median_ms": 0.0482755,
+          "max_ms": 0.072467,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_first_result/32",
+          "median_ms": 0.4959775,
+          "max_ms": 0.636648,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_first_render/32",
+          "median_ms": 4.158682,
+          "max_ms": 4.753982,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_current_completion/32",
+          "median_ms": 4.1606455,
+          "max_ms": 4.756236,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_dispatch/10000",
+          "median_ms": 9.8787455,
+          "max_ms": 16.148483,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_first_result/10000",
+          "median_ms": 10.774235,
+          "max_ms": 16.899957,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_first_render/10000",
+          "median_ms": 19.415834,
+          "max_ms": 25.979815,
+          "budget_status": "pass"
+        },
+        {
+          "name": "search_workflow_all_completion/10000",
+          "median_ms": 22.4110075,
+          "max_ms": 29.410237,
+          "budget_status": "pass"
+        }
+      ],
+      "resources": [
+        {
+          "name": "search_app_result_tracking",
+          "max_allocated_bytes": 18693172,
+          "max_peak_live_bytes": 26521005,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 2.038624,
+              "median_ns_per_unit": 15926.75,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 128
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 9.686269,
+              "median_ns_per_unit": 9686.269,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 1000
+            }
+          ]
+        },
+        {
+          "name": "search_file_size_resource_tracking",
+          "max_allocated_bytes": 536870958,
+          "max_peak_live_bytes": 536872730,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 33.577696,
+              "median_ns_per_unit": 0.5003466606140137,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 67108864
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 124.584218,
+              "median_ns_per_unit": 0.46411237865686417,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 268435456
+            }
+          ]
+        },
+        {
+          "name": "search_target_resource_tracking",
+          "max_allocated_bytes": 648212,
+          "max_peak_live_bytes": 10040,
+          "budget_status": "pass",
+          "points": [
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 0.255801,
+              "median_ns_per_unit": 255.801,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 1000
+            },
+            {
+              "complete_for_observed_trials": true,
+              "median_elapsed_ms": 2.333539,
+              "median_ns_per_unit": 233.3539,
+              "observed_count": 3,
+              "trial_count": 3,
+              "workload_value": 10000
+            }
+          ]
+        }
+      ]
+    },
+    "scanners": {
+      "before": {
+        "ascii-sensitive": 23487.8,
+        "ascii-insensitive": 27319.2,
+        "ascii-single": 229828.2,
+        "ascii-numeric": 149906.3,
+        "ascii-whole": 104790.5,
+        "unicode-sensitive": 78646,
+        "unicode-insensitive": 1417713.7,
+        "regex": 521789.5
+      },
+      "after": {
+        "ascii-sensitive": 22303.5,
+        "ascii-insensitive": 23722.6,
+        "ascii-single": 177042.1,
+        "ascii-numeric": 107524.5,
+        "ascii-whole": 88811.4,
+        "unicode-sensitive": 77524.9,
+        "unicode-insensitive": 1418904,
+        "regex": 456547.1
+      },
+      "rejected": {
+        "ascii-sensitive": 22877.6,
+        "ascii-insensitive": 31801.3,
+        "ascii-single": 182956.4,
+        "ascii-numeric": 116197.7,
+        "ascii-whole": 101844.8,
+        "unicode-sensitive": 78722.8,
+        "unicode-insensitive": 1420166,
+        "regex": 460818.2
+      }
+    }
+  },
+  "performance_source_check": {
+    "performance_revision": "8891a2c",
+    "final_revision": "eaada2d",
+    "changed_files": [
+      "src/app/services/search.rs"
+    ],
+    "production_prefixes_identical": true,
+    "method": "Compare each changed Rust file before its trailing cfg(test) module."
+  },
+  "runs": {
+    "baseline": {
+      "source_revision": "7e9533d21e6c041404b63a5c0848731f24d263c5",
+      "source_blake3_before": "5049649e3e589a703b12e7cda387aea7a2d45632d1cad1c872f76f192a3fda56",
+      "source_blake3_after": "5049649e3e589a703b12e7cda387aea7a2d45632d1cad1c872f76f192a3fda56",
+      "tool_blake3": "e787f452a76ccce3b00f21f7ef5f3619abd0e7ef74ba07b9b346e370dd421b46",
+      "tool_unchanged": true,
+      "commands": {
+        "audit-tool": {
+          "status": "passed"
+        },
+        "cargo": {
+          "status": "passed"
+        },
+        "check": {
+          "exit_code": 1,
+          "status": "failed"
+        },
+        "coverage-tool": {
+          "status": "passed"
+        },
+        "feature-tool": {
+          "status": "passed"
+        },
+        "measure": {
+          "status": "passed"
+        },
+        "rqlens-version": {
+          "status": "passed"
+        },
+        "rustc": {
+          "status": "passed"
+        },
+        "verify": {
+          "status": "passed"
+        }
+      },
+      "strict_gate": {
+        "failed_policies": [
+          "configured-rules",
+          "partial",
+          "reliability-finding",
+          "test-failure"
+        ],
+        "input_failures": [
+          {
+            "artifact": "hotspots.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "clones.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "rust_escape_hatches.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "reliability_findings.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "architecture_rules.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "api_health.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "semantic_api.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "type_health.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "correctness_review.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "test_quality.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "locality_metrics.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "leverage_metrics.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "module_cohesion.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "map.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "correctness_review.json",
+            "policy": "test-failure",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "correctness_review.json",
+            "policy": "test-failure",
+            "reason": "test execution must be observed and all test statuses known",
+            "status": "partial"
+          },
+          {
+            "artifact": "reliability_findings.json",
+            "policy": "reliability-finding",
+            "reason": null,
+            "status": "partial"
+          }
+        ],
+        "passed": false,
+        "policy_rule_evaluations": [
+          {
+            "counting_unit": "unmet-required-human-review-obligation",
+            "evaluation_complete": true,
+            "excess": 3,
+            "excluded": 0,
+            "level": "error",
+            "maximum": 0,
+            "observed": 3,
+            "observed_findings": 3,
+            "reason": null,
+            "rule_id": "rust.design.required-review",
+            "status": "exceeded"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": true,
+            "excess": 0,
+            "excluded": 0,
+            "level": "error",
+            "maximum": 0,
+            "observed": 0,
+            "observed_findings": 0,
+            "reason": null,
+            "rule_id": "rust.project.license",
+            "status": "passed"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": false,
+            "excess": null,
+            "excluded": 61,
+            "level": "error",
+            "maximum": 10,
+            "observed": null,
+            "observed_findings": 24,
+            "reason": "reliability_findings.json: Partial",
+            "rule_id": "rust.reliability.expect",
+            "status": "incomplete"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": false,
+            "excess": null,
+            "excluded": 3,
+            "level": "error",
+            "maximum": 3,
+            "observed": null,
+            "observed_findings": 0,
+            "reason": "reliability_findings.json: Partial",
+            "rule_id": "rust.reliability.panic",
+            "status": "incomplete"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": false,
+            "excess": null,
+            "excluded": 75,
+            "level": "error",
+            "maximum": 0,
+            "observed": null,
+            "observed_findings": 17,
+            "reason": "reliability_findings.json: Partial",
+            "rule_id": "rust.reliability.unwrap",
+            "status": "incomplete"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": false,
+            "excess": null,
+            "excluded": 0,
+            "level": "error",
+            "maximum": 0,
+            "observed": null,
+            "observed_findings": 0,
+            "reason": "reliability_findings.json: Partial",
+            "rule_id": "rust.safety.missing-safety-docs",
+            "status": "incomplete"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": false,
+            "excess": null,
+            "excluded": 0,
+            "level": "error",
+            "maximum": 0,
+            "observed": null,
+            "observed_findings": 0,
+            "reason": "reliability_findings.json: Partial",
+            "rule_id": "rust.safety.undocumented-unsafe",
+            "status": "incomplete"
+          }
+        ],
+        "policy_rule_violations": [
+          {
+            "counting_unit": "unmet-required-human-review-obligation",
+            "evaluation_complete": true,
+            "excess": 3,
+            "excluded": 0,
+            "level": "error",
+            "maximum": 0,
+            "observed": 3,
+            "observed_findings": 3,
+            "reason": null,
+            "rule_id": "rust.design.required-review",
+            "status": "exceeded"
+          }
+        ],
+        "practice_failures": [],
+        "test_failures": [],
+        "threshold_violations": [
+          {
+            "maximum": 600,
+            "module": "scratchpad::capacity_probe::bin::capacity_probe",
+            "score": 896.24
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::resource_probe::bin::resource_probe",
+            "score": 731.82
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app",
+            "score": 624.08
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state",
+            "score": 703.39
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::background_io",
+            "score": 879.03
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::background_io::queue",
+            "score": 636.51
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::background_io::tests",
+            "score": 707.9
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::frame",
+            "score": 1080.02
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state",
+            "score": 809.95
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::api",
+            "score": 636.61
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::fragments",
+            "score": 692.01
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::helpers",
+            "score": 798.76
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::replace",
+            "score": 967.73
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::runtime",
+            "score": 695.08
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::visual",
+            "score": 881.58
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::worker",
+            "score": 649.29
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::worker::processing",
+            "score": 650.04
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::settings_state",
+            "score": 742.4
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::settings_state::mutators",
+            "score": 925.68
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::settings_state::tab_order",
+            "score": 727.35
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::startup_state",
+            "score": 602.28
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::workspace::editing",
+            "score": 608.95
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::workspace::lifecycle",
+            "score": 813.24
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::workspace::mutation",
+            "score": 949.2
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::commands::file",
+            "score": 703.53
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::commands::workspace",
+            "score": 716.78
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::domain::buffer::state",
+            "score": 684.31
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::domain::view",
+            "score": 649.07
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::services::file_controller::open",
+            "score": 611.08
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::services::file_controller::open::tests",
+            "score": 617.58
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::services::session_store",
+            "score": 735.99
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::services::session_store::database::persist",
+            "score": 677.61
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::ui::dialogs::text_history",
+            "score": 621.41
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::ui::editor_content::native_editor",
+            "score": 702.36
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::profile",
+            "score": 694.85
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::profile::render",
+            "score": 612.84
+          }
+        ]
+      },
+      "practices": {
+        "check_count": 28,
+        "conformant": true,
+        "diagnostic_count": 0,
+        "failed_errors": 0,
+        "failed_warnings": 0,
+        "passed": 19,
+        "skipped": 9,
+        "unavailable": 0
+      },
+      "correctness": {
+        "failed": 0,
+        "run_failed": false,
+        "last_run_status": "passed"
+      },
+      "semantic_identity": {
+        "analyzer_version": "rust-analyzer 2026-04-27",
+        "available": true,
+        "backend": "rust_analyzer",
+        "complete": false,
+        "external_definition_count": 7,
+        "local_definition_count": 1762,
+        "mode": "auto",
+        "reason": "7543 dependency references were not resolved",
+        "reference_count": 9312,
+        "resolution_percent": 19,
+        "resolution_scope": "collected_dependency_references_only_not_inventory_completeness",
+        "resolved_count": 1769,
+        "unresolved_by_status": {
+          "error: rust-analyzer request timed out": 1,
+          "timeout": 7539,
+          "unresolved": 3
+        },
+        "unresolved_count": 7543
+      },
+      "coverage_confidence": {
+        "complete": true,
+        "confidence_scope": "dynamic_coverage",
+        "missing_input": [],
+        "observed_inputs": {
+          "cargo_llvm_cov": true,
+          "covered_rust_files": 410
+        },
+        "partial": false,
+        "required_inputs": [
+          "cargo_llvm_cov",
+          "successful_test_run"
+        ],
+        "stale_input": [],
+        "unsupported_pattern": []
+      }
+    },
+    "after": {
+      "source_revision": "eaada2da9f29f597ceac87926ea88694da1a0d07",
+      "source_blake3_before": "0cc4972b92a671bd86aa23a38222e1b8064208dcf8400926d1606ad0dfa82ccb",
+      "source_blake3_after": "0cc4972b92a671bd86aa23a38222e1b8064208dcf8400926d1606ad0dfa82ccb",
+      "tool_blake3": "e787f452a76ccce3b00f21f7ef5f3619abd0e7ef74ba07b9b346e370dd421b46",
+      "tool_unchanged": true,
+      "commands": {
+        "audit-tool": {
+          "status": "passed"
+        },
+        "cargo": {
+          "status": "passed"
+        },
+        "check": {
+          "exit_code": 1,
+          "status": "failed"
+        },
+        "coverage-tool": {
+          "status": "passed"
+        },
+        "feature-tool": {
+          "status": "passed"
+        },
+        "measure": {
+          "status": "passed"
+        },
+        "rqlens-version": {
+          "status": "passed"
+        },
+        "rustc": {
+          "status": "passed"
+        },
+        "verify": {
+          "status": "passed"
+        }
+      },
+      "strict_gate": {
+        "failed_policies": [
+          "configured-rules",
+          "partial",
+          "reliability-finding",
+          "test-failure"
+        ],
+        "input_failures": [
+          {
+            "artifact": "hotspots.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "clones.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "rust_escape_hatches.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "reliability_findings.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "architecture_rules.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "api_health.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "semantic_api.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "type_health.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "correctness_review.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "test_quality.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "locality_metrics.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "leverage_metrics.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "module_cohesion.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "map.json",
+            "policy": "partial",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "correctness_review.json",
+            "policy": "test-failure",
+            "reason": null,
+            "status": "partial"
+          },
+          {
+            "artifact": "correctness_review.json",
+            "policy": "test-failure",
+            "reason": "test execution must be observed and all test statuses known",
+            "status": "partial"
+          },
+          {
+            "artifact": "reliability_findings.json",
+            "policy": "reliability-finding",
+            "reason": null,
+            "status": "partial"
+          }
+        ],
+        "passed": false,
+        "policy_rule_evaluations": [
+          {
+            "counting_unit": "unmet-required-human-review-obligation",
+            "evaluation_complete": true,
+            "excess": 3,
+            "excluded": 0,
+            "level": "error",
+            "maximum": 0,
+            "observed": 3,
+            "observed_findings": 3,
+            "reason": null,
+            "rule_id": "rust.design.required-review",
+            "status": "exceeded"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": true,
+            "excess": 0,
+            "excluded": 0,
+            "level": "error",
+            "maximum": 0,
+            "observed": 0,
+            "observed_findings": 0,
+            "reason": null,
+            "rule_id": "rust.project.license",
+            "status": "passed"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": false,
+            "excess": null,
+            "excluded": 61,
+            "level": "error",
+            "maximum": 10,
+            "observed": null,
+            "observed_findings": 24,
+            "reason": "reliability_findings.json: Partial",
+            "rule_id": "rust.reliability.expect",
+            "status": "incomplete"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": false,
+            "excess": null,
+            "excluded": 3,
+            "level": "error",
+            "maximum": 3,
+            "observed": null,
+            "observed_findings": 0,
+            "reason": "reliability_findings.json: Partial",
+            "rule_id": "rust.reliability.panic",
+            "status": "incomplete"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": false,
+            "excess": null,
+            "excluded": 75,
+            "level": "error",
+            "maximum": 0,
+            "observed": null,
+            "observed_findings": 17,
+            "reason": "reliability_findings.json: Partial",
+            "rule_id": "rust.reliability.unwrap",
+            "status": "incomplete"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": false,
+            "excess": null,
+            "excluded": 0,
+            "level": "error",
+            "maximum": 0,
+            "observed": null,
+            "observed_findings": 0,
+            "reason": "reliability_findings.json: Partial",
+            "rule_id": "rust.safety.missing-safety-docs",
+            "status": "incomplete"
+          },
+          {
+            "counting_unit": null,
+            "evaluation_complete": false,
+            "excess": null,
+            "excluded": 0,
+            "level": "error",
+            "maximum": 0,
+            "observed": null,
+            "observed_findings": 0,
+            "reason": "reliability_findings.json: Partial",
+            "rule_id": "rust.safety.undocumented-unsafe",
+            "status": "incomplete"
+          }
+        ],
+        "policy_rule_violations": [
+          {
+            "counting_unit": "unmet-required-human-review-obligation",
+            "evaluation_complete": true,
+            "excess": 3,
+            "excluded": 0,
+            "level": "error",
+            "maximum": 0,
+            "observed": 3,
+            "observed_findings": 3,
+            "reason": null,
+            "rule_id": "rust.design.required-review",
+            "status": "exceeded"
+          }
+        ],
+        "practice_failures": [],
+        "test_failures": [],
+        "threshold_violations": [
+          {
+            "maximum": 600,
+            "module": "scratchpad::capacity_probe::bin::capacity_probe",
+            "score": 896.24
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::resource_probe::bin::resource_probe",
+            "score": 731.82
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app",
+            "score": 628.58
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state",
+            "score": 704.89
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::background_io",
+            "score": 879.03
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::background_io::queue",
+            "score": 636.51
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::background_io::tests",
+            "score": 707.9
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::frame",
+            "score": 1080.02
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state",
+            "score": 809.95
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::api",
+            "score": 636.61
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::helpers",
+            "score": 740.97
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::replace",
+            "score": 967.73
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::runtime",
+            "score": 695.08
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::visual",
+            "score": 881.58
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::worker",
+            "score": 657.55
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::search_state::worker::processing",
+            "score": 653.65
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::settings_state",
+            "score": 747.9
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::settings_state::mutators",
+            "score": 925.68
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::settings_state::tab_order",
+            "score": 727.35
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::startup_state",
+            "score": 602.28
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::workspace::editing",
+            "score": 608.95
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::workspace::lifecycle",
+            "score": 813.24
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::app_state::workspace::mutation",
+            "score": 949.2
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::commands::file",
+            "score": 703.53
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::commands::workspace",
+            "score": 716.78
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::domain::buffer::state",
+            "score": 691.31
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::domain::view",
+            "score": 649.07
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::services::file_controller::open",
+            "score": 611.08
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::services::file_controller::open::tests",
+            "score": 617.58
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::services::search",
+            "score": 619.93
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::services::session_store",
+            "score": 749.24
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::services::session_store::database::persist",
+            "score": 677.61
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::ui::dialogs::text_history",
+            "score": 621.41
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::app::ui::editor_content::native_editor",
+            "score": 702.36
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::profile",
+            "score": 694.85
+          },
+          {
+            "maximum": 600,
+            "module": "scratchpad::shared::profile::render",
+            "score": 612.84
+          }
+        ]
+      },
+      "practices": {
+        "check_count": 28,
+        "conformant": true,
+        "diagnostic_count": 0,
+        "failed_errors": 0,
+        "failed_warnings": 0,
+        "passed": 19,
+        "skipped": 9,
+        "unavailable": 0
+      },
+      "correctness": {
+        "failed": 0,
+        "run_failed": false,
+        "last_run_status": "passed"
+      },
+      "semantic_identity": {
+        "analyzer_version": "rust-analyzer 2026-04-27",
+        "available": true,
+        "backend": "rust_analyzer",
+        "complete": false,
+        "external_definition_count": 7,
+        "local_definition_count": 1902,
+        "mode": "auto",
+        "reason": "7418 dependency references were not resolved",
+        "reference_count": 9327,
+        "resolution_percent": 20.47,
+        "resolution_scope": "collected_dependency_references_only_not_inventory_completeness",
+        "resolved_count": 1909,
+        "unresolved_by_status": {
+          "error: rust-analyzer request timed out": 1,
+          "timeout": 7414,
+          "unresolved": 3
+        },
+        "unresolved_count": 7418
+      },
+      "coverage_confidence": {
+        "complete": true,
+        "confidence_scope": "dynamic_coverage",
+        "missing_input": [],
+        "observed_inputs": {
+          "cargo_llvm_cov": true,
+          "covered_rust_files": 411
+        },
+        "partial": false,
+        "required_inputs": [
+          "cargo_llvm_cov",
+          "successful_test_run"
+        ],
+        "stale_input": [],
+        "unsupported_pattern": []
+      }
+    }
+  },
+  "validation": {
+    "all_target_clippy": "passed: cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings",
+    "focused_tests": "services::search and search_state passed",
+    "full_quality_commands": "cargo xtask quality /home/laufan/Projects/rust-quality-lens/target/debug/rqlens <fresh absolute output directory>",
+    "policy_configuration_unchanged": true
+  },
+  "limitations": [
+    "Semantic dependency resolution is partial; macro expansion is not fully inventoried.",
+    "Locality scores for existing modules are unchanged; ownership is narrower within the worker.",
+    "Broader test matrices increase test-only cognitive complexity and effort, while production and overall aggregates decrease.",
+    "Focused headless performance checks do not establish that every application promise passes.",
+    "Initial failed coverage, the intermediate run before public-API coverage, and the lint-interrupted run are excluded.",
+    "Strict gate has 36 module-threshold violations on both sides: fragments cleared its threshold, while services/search entered at 619.93 against 600 after scenario consolidation."
+  ],
+  "commits": [
+    {
+      "sha": "7e9533d",
+      "purpose": "Headless repaint test prerequisite included on both sides"
+    },
+    {
+      "sha": "1d2521a",
+      "purpose": "Shared matcher cancellation and limits"
+    },
+    {
+      "sha": "29c178c",
+      "purpose": "Local result ownership and moved replacement strings"
+    },
+    {
+      "sha": "8891a2c",
+      "purpose": "Shared bounded chunk collection"
+    },
+    {
+      "sha": "ccdee90",
+      "purpose": "Public search API coverage"
+    },
+    {
+      "sha": "eaada2d",
+      "purpose": "Named shared options in the scenario matrix"
+    }
+  ]
+}
