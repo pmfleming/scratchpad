@@ -481,30 +481,66 @@ mod tests {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(from = "SearchLimitValue", into = "SearchLimitValue")]
 pub enum SearchResultLimit {
     #[default]
     Recommended,
     Unlimited,
+    Matches(usize),
+}
+
+// Continue accepting the original string choices; finite limits are now numbers.
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum SearchLimitValue {
+    Matches(usize),
+    Choice(SearchLimitChoice),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SearchLimitChoice {
+    Recommended,
+    Unlimited,
+}
+
+impl From<SearchLimitValue> for SearchResultLimit {
+    fn from(value: SearchLimitValue) -> Self {
+        match value {
+            SearchLimitValue::Matches(value) => Self::from_matches(value),
+            SearchLimitValue::Choice(SearchLimitChoice::Recommended) => Self::Recommended,
+            SearchLimitValue::Choice(SearchLimitChoice::Unlimited) => Self::Unlimited,
+        }
+    }
+}
+
+impl From<SearchResultLimit> for SearchLimitValue {
+    fn from(value: SearchResultLimit) -> Self {
+        match value {
+            SearchResultLimit::Unlimited => Self::Choice(SearchLimitChoice::Unlimited),
+            value => Self::Matches(value.max_matches()),
+        }
+    }
 }
 
 impl SearchResultLimit {
+    pub const MIN_MATCHES: usize = 50_000;
     pub const RECOMMENDED_MATCHES: usize = 100_000;
-    pub const ALL: [Self; 2] = [Self::Recommended, Self::Unlimited];
+
+    #[must_use]
+    pub fn from_matches(matches: usize) -> Self {
+        match matches.max(Self::MIN_MATCHES) {
+            Self::RECOMMENDED_MATCHES => Self::Recommended,
+            value => Self::Matches(value),
+        }
+    }
 
     #[must_use]
     pub fn max_matches(self) -> usize {
         match self {
             Self::Recommended => Self::RECOMMENDED_MATCHES,
             Self::Unlimited => usize::MAX,
-        }
-    }
-
-    #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Recommended => "Recommended (100,000)",
-            Self::Unlimited => "Unlimited",
+            Self::Matches(value) => value.max(Self::MIN_MATCHES),
         }
     }
 }
@@ -519,7 +555,13 @@ mod search_limit_tests {
             defaults.editor.search_result_limit,
             SearchResultLimit::Recommended
         );
-        for limit in SearchResultLimit::ALL {
+        for limit in [
+            SearchResultLimit::Recommended,
+            SearchResultLimit::Unlimited,
+            SearchResultLimit::from_matches(50_000),
+            SearchResultLimit::from_matches(300_000),
+            SearchResultLimit::from_matches(10_000_000),
+        ] {
             let mut settings = AppSettings::default();
             settings.editor.search_result_limit = limit;
             let text = toml::to_string(&settings).unwrap();
@@ -527,5 +569,15 @@ mod search_limit_tests {
             assert_eq!(restored.editor.search_result_limit, limit);
         }
         assert_eq!(SearchResultLimit::Unlimited.max_matches(), usize::MAX);
+        for (value, expected) in [
+            ("\"recommended\"", SearchResultLimit::Recommended),
+            ("\"unlimited\"", SearchResultLimit::Unlimited),
+            ("100000", SearchResultLimit::Recommended),
+            ("1", SearchResultLimit::from_matches(50_000)),
+        ] {
+            let restored: AppSettings =
+                toml::from_str(&format!("[editor]\nsearch_result_limit = {value}")).unwrap();
+            assert_eq!(restored.editor.search_result_limit, expected);
+        }
     }
 }

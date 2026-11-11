@@ -2,7 +2,9 @@ use super::{ScratchpadApp, SettingsUi, egui, text_muted, text_primary};
 use crate::app::ui::widget_ids;
 use std::hash::Hash;
 mod numeric;
-pub(super) use numeric::numeric_slider;
+pub(super) use numeric::{
+    NumericFormat, ResetButton, SliderRow, numeric_slider, numeric_slider_row,
+};
 
 mod card;
 mod layout_state;

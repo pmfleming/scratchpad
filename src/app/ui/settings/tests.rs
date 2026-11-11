@@ -51,7 +51,7 @@ fn settings_have_five_independent_categories_without_nested_disclosures() {
     ] {
         harness.get_by_role_and_label(egui::Role::DisclosureTriangle, label);
     }
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 6);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 7);
     for label in ["Memory per file", "Memory across all files"] {
         harness.get_by_role_and_label(egui::Role::Slider, label);
     }
@@ -122,11 +122,11 @@ fn search_reveals_matching_groups_without_losing_collapse_state() {
     assert!(harness.query_by_role(egui::Role::Slider).is_none());
     harness.get_by_label("Expand all").click_accesskit();
     harness.run_steps(2);
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 6);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 7);
 }
 
 #[test]
-fn appearance_controls_share_right_edge_and_all_sliders_share_columns() {
+fn controls_share_right_edge_and_sliders_align_within_their_groups() {
     for width in [1200.0, 900.0, 500.0, 360.0] {
         reset_settings_layout_measurements();
         let ctx = egui::Context::default();
@@ -159,7 +159,22 @@ fn appearance_controls_share_right_edge_and_all_sliders_share_columns() {
             assert!((find("label.Editor padding").center_y - reference.center_y).abs() < 1.0);
             assert!((left(find("label.Editor padding")) - left(find("label.Font"))).abs() < 1.0);
         }
-        for label in ["Indent width", "Memory per file", "Memory across all files"] {
+        let slider = find("slider.Indent width");
+        assert!(
+            (left(reference) - left(slider)).abs() < 1.0,
+            "Indent width at {width}"
+        );
+        assert!(
+            (reference.right_x - slider.right_x).abs() < 1.0,
+            "Indent width at {width}"
+        );
+        assert!((find("number.Indent width").center_y - slider.center_y).abs() < 1.0);
+        let reference = find("slider.Memory per file");
+        for label in [
+            "Memory across all files",
+            "Search result limit",
+            "Memory while not saving",
+        ] {
             let slider = find(&format!("slider.{label}"));
             assert!(
                 (left(reference) - left(slider)).abs() < 1.0,
@@ -169,8 +184,36 @@ fn appearance_controls_share_right_edge_and_all_sliders_share_columns() {
                 (reference.right_x - slider.right_x).abs() < 1.0,
                 "{label} at {width}"
             );
+        }
+        for (label, reset) in [
+            (
+                "Memory across all files",
+                "Reset memory cache to recommended",
+            ),
+            (
+                "Search result limit",
+                "Reset search result limit to recommended",
+            ),
+            (
+                "Memory while not saving",
+                "Reset save-failure memory limit to automatic",
+            ),
+        ] {
+            let button = find(&format!("button.{reset}"));
+            let lane = find(&format!("inner_select_row.{label}"));
             let number = find(&format!("number.{label}"));
-            assert!((number.center_y - slider.center_y).abs() < 1.0);
+            assert!(
+                (button.right_x - lane.right_x).abs() < 1.0,
+                "{reset} at {width}"
+            );
+            assert!(
+                (button.center_y - number.center_y).abs() < 1.0,
+                "{reset} at {width}"
+            );
+            assert!(
+                button.rect.left() > number.right_x,
+                "{reset} overlaps value at {width}"
+            );
         }
         let cards = settings_card_measurements();
         assert_eq!(cards.len(), 5, "no nested cards");
@@ -680,14 +723,18 @@ fn padding_slider_keeps_dragging_while_preview_resize_moves_the_row() {
 #[test]
 fn rendering_byte_budgets_does_not_round_or_clamp_stored_values() {
     let ctx = egui::Context::default();
-    let mut bytes = 64 * 1024 * 1024 + 123;
-    let original = bytes;
+    let mut app = app();
+    app.state.app_settings.history.budget.per_file_byte_budget = 64 * 1024 * 1024 + 123;
+    app.state.app_settings.history.failure_ram.bytes += 123;
+    app.state.app_settings.editor.search_result_limit =
+        crate::app::services::settings_store::SearchResultLimit::from_matches(300_000);
+    let original = app.state.app_settings.clone();
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
         ui.set_width(880.0);
-        sections::byte_budget_row(ui, "Test budget", &mut bytes, 1, 1024);
+        recovery::render_policy(ui, &mut app);
     });
     output.textures_delta.clear();
-    assert_eq!(bytes, original);
+    assert_eq!(app.state.app_settings, original);
 }
 
 #[test]
@@ -779,7 +826,9 @@ fn exact_value_inputs_and_recommended_limits_keep_slider_values_in_sync() {
     let budget = harness.state().state.app_settings.history.budget;
     assert_eq!(budget.per_file_byte_budget, 83 * 1024 * 1024);
     assert_eq!(budget.aggregate_byte_budget, 1024 * 1024 * 1024);
-    harness.get_by_label("Use recommended").click_accesskit();
+    harness
+        .get_by_label("Reset memory cache to recommended")
+        .click_accesskit();
     harness.run_steps(2);
     assert!(
         harness

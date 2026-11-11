@@ -194,7 +194,10 @@ fn search_limit_changes_persist_and_restart_an_open_query() {
     app.open_search();
     app.set_search_query("needle");
     let generation = app.state.search_state.runtime.requested_generation;
-    settings_controller::set_search_result_limit(&mut app, SearchResultLimit::Unlimited);
+    settings_controller::set_search_result_limit(
+        &mut app,
+        SearchResultLimit::from_matches(250_000),
+    );
     assert!(app.state.search_state.runtime.requested_generation > generation);
     let stored = app
         .state
@@ -205,7 +208,7 @@ fn search_limit_changes_persist_and_restart_an_open_query() {
         .unwrap();
     assert_eq!(
         stored.editor.search_result_limit,
-        SearchResultLimit::Unlimited
+        SearchResultLimit::from_matches(250_000)
     );
     settings_controller::reset_settings_to_defaults(&mut app);
     assert_eq!(

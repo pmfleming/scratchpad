@@ -23,7 +23,7 @@ const SETTINGS: &[(&str, &str, &str)] = &[
         "search highlight colour color",
     ),
     (
-        "editors",
+        "history",
         "Search result limit",
         "search matches memory budget recommended unlimited",
     ),
@@ -52,6 +52,11 @@ const SETTINGS: &[(&str, &str, &str)] = &[
         "history",
         "Memory across all files",
         "undo RAM aggregate total budget limits MiB",
+    ),
+    (
+        "history",
+        "Memory while not saving",
+        "session saving fails failure unsaved RAM automatic limit MiB",
     ),
     ("application", "On launch", "startup continue session fresh"),
     (

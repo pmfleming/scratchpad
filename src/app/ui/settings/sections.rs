@@ -1,7 +1,4 @@
-use super::{
-    ScratchpadApp, SettingsUi, egui,
-    widgets::{category, numeric_slider},
-};
+use super::{ScratchpadApp, SettingsUi, egui, widgets::category};
 use egui_phosphor::regular::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL};
 
 struct Category {
@@ -24,7 +21,7 @@ const CATEGORIES: [Category; 5] = [
         key: "editors",
         title: "Editors",
         subtitle: "Writing and indentation",
-        search: "word wrap padding gutter indent width spaces tabs characters guides preview search result limit recommended unlimited memory",
+        search: "word wrap padding gutter indent width spaces tabs characters guides preview",
         render: super::text_formatting::render_editing,
     },
     Category {
@@ -38,7 +35,7 @@ const CATEGORIES: [Category; 5] = [
         key: "history",
         title: "History",
         subtitle: "Recovery and storage",
-        search: "recovery retained documents closed tabs branches Now changes undo memory cache per-file total recommended disk usage payloads database journal settings reusable references",
+        search: "recovery retained documents closed tabs branches Now changes undo memory cache per-file total recommended search result limit matches unlimited saving fails failure automatic disk usage payloads database journal settings reusable references",
         render: super::recovery::render_recovery_category,
     },
     Category {
@@ -132,61 +129,6 @@ fn matches_category(category: &Category, search: &super::search::Search) -> bool
     search.matches_category(category.key, &haystack)
 }
 
-pub(super) fn text_history_budget(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    let original = app.state.app_settings.history.budget;
-    let mut budget = original;
-    byte_budget_row(
-        ui,
-        "Memory per file",
-        &mut budget.per_file_byte_budget,
-        1,
-        1024,
-    );
-    byte_budget_row(
-        ui,
-        "Memory across all files",
-        &mut budget.aggregate_byte_budget,
-        4,
-        4096,
-    );
-    let original_failure = app.state.app_settings.history.failure_ram;
-    let mut failure = original_failure;
-    byte_budget_row(
-        ui,
-        "Memory while session is not saving",
-        &mut failure.bytes,
-        64,
-        (crate::app::services::chunk_store::total_memory() / (1024 * 1024)).max(64),
-    );
-    if failure.bytes != original_failure.bytes {
-        failure.automatic = false;
-    }
-    if ui
-        .button("Reset failure memory limit to automatic")
-        .clicked()
-    {
-        failure = crate::app::services::chunk_store::FailureRamBudget::default();
-    }
-    if failure != original_failure {
-        app.state.app_settings.history.failure_ram = failure;
-        if let Some(store) = app.state.persistence.session_store.opened_chunk_store() {
-            store.set_failure_limit(failure.bytes as usize);
-        }
-        crate::app::app_state::settings_controller::persist_settings_or_error(app);
-    }
-    if budget != original {
-        crate::app::app_state::settings_controller::set_history_budget(app, budget);
-    }
-}
-
-pub(super) fn byte_budget_row(ui: &mut egui::Ui, label: &str, bytes: &mut u64, min: u64, max: u64) {
-    const MIB: u64 = 1024 * 1024;
-    let mut value = *bytes / MIB;
-    if numeric_slider(ui, label, &mut value, min..=max, "MiB") {
-        *bytes = value * MIB;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{CATEGORIES, matches_category};
@@ -197,6 +139,9 @@ mod tests {
             ("auto-hide", "workspace"),
             ("gutter", "editors"),
             ("branches", "history"),
+            ("search result limit", "history"),
+            ("unlimited", "history"),
+            ("failure", "history"),
             ("font size", "appearance"),
             ("toml", "application"),
         ] {

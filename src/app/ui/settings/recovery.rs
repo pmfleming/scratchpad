@@ -2,6 +2,7 @@ use super::{ScratchpadApp, egui, widgets::group_heading};
 use crate::app::services::session_store::StorageUsage;
 use std::time::Duration;
 
+mod memory;
 mod storage;
 #[cfg(test)]
 mod tests;
@@ -41,14 +42,14 @@ pub(super) fn render_recovery_category(ui: &mut egui::Ui, app: &mut ScratchpadAp
 
 pub(super) fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     group_heading(ui, "History memory cache");
-    super::sections::text_history_budget(ui, app);
-    if ui.button("Use recommended").clicked() {
-        crate::app::app_state::settings_controller::reset_history_cache_to_recommended(app);
-    }
+    memory::history_cache(ui, app);
+    memory::search_limit(ui, app);
     ui.add_space(8.0);
     ui.label(
         "All edit branches and closed-file history are retained until you explicitly forget them.",
     );
+    group_heading(ui, "If saving fails");
+    memory::failure_limit(ui, app);
 }
 
 fn render_content(

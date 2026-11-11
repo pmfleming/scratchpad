@@ -8,6 +8,7 @@
 appearance_source = "app"       # app, system
 font_size = 14.0
 word_wrap = true
+search_result_limit = 100000    # minimum 50000; or "unlimited"
 editor_gutter = 0
 editor_tab_width = 4
 indentation_style = "tab_character" # spaces, tab_character
