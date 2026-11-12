@@ -78,34 +78,40 @@ impl Database {
                 "original recovery data is protected",
             ));
         }
-        match async {
-            let phase = Instant::now();
-            self.validate_contents(&manifest, scope).await?;
-            profile.content_validation_ns = phase.elapsed().as_nanos();
-            let phase = Instant::now();
-            let tabs = if matches!(scope, ReadScope::Shells) {
-                let active = manifest.active_tab_index;
-                manifest
-                    .tabs
-                    .get_mut(active)
-                    .map(std::slice::from_mut)
-                    .unwrap_or_default()
-            } else {
-                &mut manifest.tabs
-            };
-            self.read_histories(tabs).await?;
-            profile.history_read_ns = phase.elapsed().as_nanos();
-            Ok(())
-        }
-        .await
-        {
-            Ok(()) => {}
-            Err(cause) => {
-                self.protect_damaged(&cause, &manifest.tabs).await?;
-                if !matches!(scope, ReadScope::Shells) || damaged_id(&cause).is_none() {
-                    return Err(cause);
+        loop {
+            match async {
+                let phase = Instant::now();
+                self.validate_contents(&manifest, scope).await?;
+                profile.content_validation_ns = phase.elapsed().as_nanos();
+                let phase = Instant::now();
+                let tabs = if matches!(scope, ReadScope::Shells) {
+                    let active = manifest.active_tab_index;
+                    manifest
+                        .tabs
+                        .get_mut(active)
+                        .map(std::slice::from_mut)
+                        .unwrap_or_default()
+                } else {
+                    &mut manifest.tabs
+                };
+                self.read_histories(tabs).await?;
+                profile.history_read_ns = phase.elapsed().as_nanos();
+                Ok(())
+            }
+            .await
+            {
+                Ok(()) => break,
+                Err(cause) => {
+                    if self.repair_length_error(&cause).await? {
+                        continue;
+                    }
+                    self.protect_damaged(&cause, &manifest.tabs).await?;
+                    if !matches!(scope, ReadScope::Shells) || damaged_id(&cause).is_none() {
+                        return Err(cause);
+                    }
+                    // Keep a failed active tab cold, with its original recovery payload.
+                    break;
                 }
-                // Keep a failed active tab cold, with its original recovery payload.
             }
         }
         if matches!(scope, ReadScope::Active) {
@@ -243,23 +249,28 @@ impl Database {
 
     pub async fn hydrate(&mut self, mut tab: SessionTab) -> io::Result<SessionTab> {
         self.ensure_healthy()?;
-        let result = match async {
-            self.validate_hydrated_text(&tab).await?;
-            self.read_histories(std::slice::from_mut(&mut tab)).await?;
-            Ok(())
-        }
-        .await
-        {
-            Ok(()) => Ok(()),
-            Err(cause) => {
-                let protected = self.protect_current_buffer(&cause).await;
-                if matches!(&protected, Ok(false)) {
-                    return Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        "cold buffer was closed before hydration",
-                    ));
+        let result = loop {
+            match async {
+                self.validate_hydrated_text(&tab).await?;
+                self.read_histories(std::slice::from_mut(&mut tab)).await?;
+                Ok(())
+            }
+            .await
+            {
+                Ok(()) => break Ok(()),
+                Err(cause) => {
+                    if self.repair_length_error(&cause).await? {
+                        continue;
+                    }
+                    let protected = self.protect_current_buffer(&cause).await;
+                    if matches!(&protected, Ok(false)) {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            "cold buffer was closed before hydration",
+                        ));
+                    }
+                    break protected.and(Err(cause));
                 }
-                protected.and(Err(cause))
             }
         };
         if let Err(error) = &result

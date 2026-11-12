@@ -8,6 +8,7 @@ mod storage;
 mod tests;
 
 pub(super) fn render_recovery_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    crate::app::ui::dialogs::recovery::render(ui, app);
     let store = app.state.persistence.session_store.clone();
     let settings_root = crate::app::app_state::settings_state::settings_path(app)
         .parent()

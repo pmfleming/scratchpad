@@ -36,6 +36,11 @@ pub(super) fn damaged_id(cause: &io::Error) -> Option<&str> {
         .map(|damage| damage.id.as_str())
 }
 
+pub(super) fn length_damage_id(cause: &io::Error) -> Option<&str> {
+    let damage = cause.get_ref()?.downcast_ref::<DamagedBuffer>()?;
+    (damage.cause == "piece text length mismatch").then_some(damage.id.as_str())
+}
+
 impl Database {
     pub(super) async fn load_quarantine(&mut self) -> io::Result<()> {
         let mut rows = self
@@ -139,8 +144,8 @@ impl Database {
             return damaged(
                 &damage.id,
                 format!(
-                    "{}; quarantined, healthy buffers can still be saved",
-                    damage.cause
+                    "{}; {} is quarantined, healthy buffers can still be saved. Open Status → Review recovery to preview text or save a recovered copy",
+                    damage.cause, self.quarantined[&damage.id].name
                 ),
             );
         }

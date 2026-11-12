@@ -5,6 +5,7 @@ mod model;
 mod parallel;
 #[cfg(test)]
 mod parity_tests;
+pub(crate) mod recovery;
 mod recovery_export;
 mod restore;
 pub(crate) mod timeline;
@@ -307,8 +308,12 @@ impl SessionStore {
             Some(RestoreStatus {
                 level: RestoreStatusLevel::Warning,
                 message: format!(
-                    "{prefix}{} damaged recovery buffer(s) quarantined; healthy buffers still save. Original data is retained in session.db.",
-                    stored.quarantined.len()
+                    "{prefix}Recovery needed for {}. Open Status → Review recovery to preview text or save a recovered copy; healthy buffers still save. Original data is retained in session.db.",
+                    self.recovery_items()?
+                        .iter()
+                        .map(|item| item.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
             })
         };

@@ -6,12 +6,15 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Added
 
+- Document recovery in Status and History settings offers verified text or marked partial previews, separate editable copies, safe exports, and comparison with the disk file while preserving protected originals.
 - Ctrl+/Ctrl− and the status bar zoom percentage open a live zoom scrubber for the active pane, with drag, step, reset, and keyboard controls matching the undo/redo scrubber.
 - Timeline records explicit document creation, successful opens, and completed final-view closes as informational rows. Restoring a session adds no synthetic lifecycle events, and closing a never-edited blank untitled document removes its activity.
 - File edit trees with an empty starting point, explicit Now, preserved branches, and recently edited file discovery, including closed files.
 
 ### Changed
 
+- Recovery automatically repairs stale byte counts only after verifying stored text and replaying its history. Repairs retain an audit of the original metadata, including existing quarantine records, and identify the repaired file.
+- Session saves update total text length independently of unchanged piece blocks, preventing false recovery quarantines after edits in later blocks.
 - Tab labels use the configured font size without a separate cap and match the editor at 100% zoom and Settings labels. Tab rows grow to fit, and tab text follows the configured text colour.
 
 - Settings follows the selected System or Scratchpad font, size, text and background palette, including menus and color pickers. Headings scale with the base size and controls wrap or stack in narrow layouts.

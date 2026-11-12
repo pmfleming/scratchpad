@@ -90,10 +90,7 @@ impl Actor {
             }
         };
         health.chunks = Some(chunks.clone());
-        *worker_notices
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            std::mem::take(&mut database.startup_notices);
+        publish_notices(&mut database, &worker_notices);
         let _ = ready_tx.send(Ok(chunks.clone()));
         let mut retry_at = Instant::now();
         let mut backoff = Duration::from_millis(100);
@@ -128,6 +125,7 @@ impl Actor {
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
+            publish_notices(&mut database, &worker_notices);
             if database.blocked.is_some() {
                 chunks.set_health(Health::Unavailable(
                     database.blocked.clone().unwrap_or_default(),
@@ -563,5 +561,14 @@ mod tests {
             })
             .unwrap();
         assert!(chunks.iter().all(|c| c.reference().is_some()));
+    }
+}
+
+fn publish_notices(database: &mut Database, notices: &Mutex<Vec<super::super::RestoreStatus>>) {
+    if !database.startup_notices.is_empty() {
+        notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .append(&mut database.startup_notices);
     }
 }

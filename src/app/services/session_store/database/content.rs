@@ -169,6 +169,13 @@ impl Database {
             }
             self.execute_cached("INSERT INTO document_pieces VALUES(?,?,?,?,?) ON CONFLICT(id,part) DO UPDATE SET bytes=excluded.bytes,digest=excluded.digest,body=excluded.body",params![id,number(part)?,if part==0 {content.bytes}else{0},digest.as_bytes().as_slice(),body.as_slice()]).await?;
         }
+        // The first part's checksum covers only its body, not the total text length.
+        // An edit in a later part can change that length while leaving this body intact.
+        self.execute_cached(
+            "UPDATE document_pieces SET bytes=? WHERE id=? AND part=0 AND bytes<>?",
+            params![content.bytes, id, content.bytes],
+        )
+        .await?;
         if content.old_pieces.len() > content.pieces.len() {
             self.execute_cached(
                 "DELETE FROM document_pieces WHERE id=? AND part>=?",
@@ -382,6 +389,20 @@ pub(super) fn restore_tree(
     blocks: Vec<(i64, StorageBlock)>,
     tail: Option<(usize, String)>,
 ) -> io::Result<PieceTreeLite> {
+    let tree = restore_tree_structure(id, store, pieces, blocks, tail)?;
+    if number(tree.len_bytes())? != bytes {
+        return Err(damaged(id, "piece text length mismatch"));
+    }
+    Ok(tree)
+}
+
+pub(super) fn restore_tree_structure(
+    id: &str,
+    store: crate::app::services::chunk_store::ChunkStoreHandle,
+    pieces: &[u8],
+    blocks: Vec<(i64, StorageBlock)>,
+    tail: Option<(usize, String)>,
+) -> io::Result<PieceTreeLite> {
     let mut positions = [0; 2];
     let blocks = blocks
         .into_iter()
@@ -396,8 +417,5 @@ pub(super) fn restore_tree(
         .collect::<io::Result<Vec<_>>>()?;
     let tree = PieceTreeLite::restore_references(store, blocks, tail, pieces)
         .map_err(|e| damaged(id, e))?;
-    if number(tree.len_bytes())? != bytes {
-        return Err(damaged(id, "piece text length mismatch"));
-    }
     Ok(tree)
 }

@@ -281,7 +281,6 @@ fn missing_cold_content_detected_by_a_save_is_quarantined_after_rollback() {
 fn malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures() {
     block_on(async {
         for sql in [
-            "UPDATE document_pieces SET bytes=bytes+1 WHERE id=?",
             "UPDATE document_pieces SET digest=zeroblob(32) WHERE id=?",
             "UPDATE document_tail SET offset=9 WHERE temp_id=?",
             "DELETE FROM document_pieces WHERE id=?",

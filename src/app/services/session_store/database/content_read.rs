@@ -1,5 +1,7 @@
 //! Indexed, bounded manifest reads. Immutable text bodies remain lazy.
-use super::content::{decode_piece_parts, decode_storage_block, decode_tail, restore_tree};
+use super::content::{
+    decode_piece_parts, decode_storage_block, decode_tail, restore_tree, restore_tree_structure,
+};
 use super::{Database, error, invalid, quarantine::damaged};
 use crate::app::domain::buffer::PieceTreeLite;
 use std::{collections::HashMap, io};
@@ -12,6 +14,19 @@ impl Database {
     pub(super) async fn read_reference_trees(
         &self,
         ids: &[String],
+    ) -> io::Result<HashMap<String, PieceTreeLite>> {
+        self.read_reference_trees_inner(ids, true).await
+    }
+    pub(super) async fn read_recovery_tree(&self, id: &str) -> io::Result<PieceTreeLite> {
+        self.read_reference_trees_inner(&[id.to_owned()], false)
+            .await?
+            .remove(id)
+            .ok_or_else(|| damaged(id, "missing piece metadata"))
+    }
+    async fn read_reference_trees_inner(
+        &self,
+        ids: &[String],
+        check_length: bool,
     ) -> io::Result<HashMap<String, PieceTreeLite>> {
         let encoded = serde_json::to_string(ids).map_err(invalid)?;
         let store = self.chunk_store()?;
@@ -76,14 +91,12 @@ impl Database {
                 continue;
             };
             let tail = decode_tail(id, tails.remove(id).unwrap_or_default())?;
-            let tree = restore_tree(
-                id,
-                store.clone(),
-                bytes,
-                &encoded_pieces,
-                blocks.remove(id).unwrap_or_default(),
-                tail,
-            )?;
+            let blocks = blocks.remove(id).unwrap_or_default();
+            let tree = if check_length {
+                restore_tree(id, store.clone(), bytes, &encoded_pieces, blocks, tail)?
+            } else {
+                restore_tree_structure(id, store.clone(), &encoded_pieces, blocks, tail)?
+            };
             trees.insert(id.clone(), tree);
         }
         Ok(trees)

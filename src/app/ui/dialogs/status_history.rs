@@ -100,7 +100,7 @@ fn render_status_history_window(
     filter: StatusFilter,
     next_filter: &mut StatusFilter,
     close_requested: &mut bool,
-    app: &ScratchpadApp,
+    app: &mut ScratchpadApp,
     start_requested: &mut bool,
 ) {
     settings::apply_dialog_typography(ui);
@@ -155,6 +155,7 @@ fn render_status_history_window(
         });
     }
 
+    super::recovery::render(ui, app);
     ui.add_space(4.0);
     history_dialog_card(ui, STATUS_CARD_CORNER_RADIUS, |ui| {
         render_filter_controls(ui, filter, next_filter);

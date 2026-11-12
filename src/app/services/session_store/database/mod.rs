@@ -37,6 +37,10 @@ mod quarantine_tests;
 #[cfg(test)]
 mod range_tests;
 mod read;
+mod recovery;
+#[cfg(test)]
+mod recovery_tests;
+mod recovery_text;
 mod reset;
 mod rows;
 pub(super) use reset::start_new_session;
@@ -186,6 +190,7 @@ impl Database {
         db.chunks = Some(crate::app::services::chunk_store::ChunkStoreHandle::open(
             &root.join("session.db"),
         )?);
+        db.repair_quarantined_lengths().await?;
         Ok(db)
     }
     async fn connect(root: &Path, ownership: File) -> io::Result<Self> {

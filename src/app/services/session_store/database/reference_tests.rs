@@ -13,6 +13,75 @@ fn capture(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
 }
 
 #[test]
+fn later_piece_deletion_and_undo_update_total_bytes_without_rewriting_first_part() {
+    block_on(async {
+        let (root, mut db) = database().await;
+        let mut tabs = vec![tab(&"a".repeat(800))];
+        for index in 0..800 {
+            insert(&mut tabs[0], index * 2, "x");
+        }
+        tabs[0]
+            .active_buffer_mut()
+            .document_mut()
+            .seal_history_group();
+        let original = "xa".repeat(800);
+        let id = tabs[0].active_buffer().temp_id.clone();
+        db.persist(capture(&tabs), 1).await.unwrap();
+        assert!(
+            db.integer("SELECT count(*) FROM document_pieces")
+                .await
+                .unwrap()
+                > 1
+        );
+        // Updating the independent byte count must not rewrite unchanged body data.
+        db.conn.execute_batch("CREATE TRIGGER unchanged_first_part BEFORE UPDATE OF body,digest ON document_pieces WHEN old.part=0 BEGIN SELECT RAISE(ABORT,'first piece part rewritten'); END;").await.unwrap();
+        tabs[0]
+            .active_buffer_mut()
+            .document_mut()
+            .replace_char_ranges_with_undo(
+                &[(1412..1600, String::new())],
+                CursorRange::default(),
+                CursorRange::default(),
+            )
+            .unwrap();
+        db.persist(capture(&tabs), 2).await.unwrap();
+        drop(db);
+        let mut db = Database::open(root.path()).await.unwrap();
+        let restored = db.load(ReadScope::All).await.unwrap().unwrap();
+        assert_eq!(restored.text_contents()[&id], original[..1412]);
+        let mut document = restored
+            .manifest
+            .tabs
+            .into_iter()
+            .next()
+            .unwrap()
+            .buffers
+            .remove(0)
+            .history_document
+            .unwrap();
+        document.undo_last_operation().unwrap();
+        assert_eq!(document.try_extract_text().unwrap(), original);
+        // Undo grows the document using existing storage, leaving the first part intact too.
+        tabs[0]
+            .active_buffer_mut()
+            .document_mut()
+            .undo_last_operation()
+            .unwrap();
+        db.persist(capture(&tabs), 1).await.unwrap();
+        drop(db);
+        let mut db = Database::open(root.path()).await.unwrap();
+        assert_eq!(
+            db.load(ReadScope::All)
+                .await
+                .unwrap()
+                .unwrap()
+                .text_contents()[&id],
+            original
+        );
+    });
+}
+
+#[test]
 fn batched_layouts_rollback_then_preserve_splits_and_reopened_reordering() {
     block_on(async {
         let (root, mut db) = database().await;

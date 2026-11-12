@@ -303,7 +303,10 @@ impl Database {
             .map(hash_entry)
             .collect())
     }
-    async fn read_reference_entries(&self, id: &str) -> io::Result<Vec<PieceHistoryEntry>> {
+    pub(super) async fn read_reference_entries(
+        &self,
+        id: &str,
+    ) -> io::Result<Vec<PieceHistoryEntry>> {
         Ok(self
             .read_reference_entries_batch(&[id.to_owned()])
             .await?
