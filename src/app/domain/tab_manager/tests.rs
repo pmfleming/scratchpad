@@ -13,6 +13,63 @@ fn disk_tab(path: &std::path::Path, text: &str) -> WorkspaceTab {
     ))
 }
 
+#[test]
+fn path_owner_rechecks_hard_links_after_replacement() {
+    let root = tempfile::tempdir().unwrap();
+    let original = root.path().join("original");
+    let alias = root.path().join("alias");
+    std::fs::write(&original, "original").unwrap();
+    std::fs::hard_link(&original, &alias).unwrap();
+    let mut manager = TabManager::new();
+    manager.set_tabs(vec![disk_tab(&original, "original")], 0);
+    assert!(manager.find_tab_by_path(&alias).is_some());
+    std::fs::remove_file(&original).unwrap();
+    std::fs::write(&original, "replacement").unwrap();
+    assert!(manager.find_tab_by_path(&alias).is_none());
+    assert!(manager.find_tab_by_path(&original).is_some());
+}
+
+#[test]
+fn restored_aliases_keep_independent_edits_as_recovered_copies() {
+    let root = tempfile::tempdir().unwrap();
+    let a = root.path().join("a");
+    let b = root.path().join("b");
+    std::fs::write(&a, "disk").unwrap();
+    std::fs::hard_link(&a, &b).unwrap();
+    let mut manager = TabManager::new();
+    manager.set_tabs(
+        vec![disk_tab(&a, "first edits"), disk_tab(&b, "second edits")],
+        0,
+    );
+    assert_eq!(manager.tabs.len(), 2);
+    assert_eq!(manager.tabs[0].active_buffer().text(), "first edits");
+    let recovered = manager.tabs[1].active_buffer();
+    assert_eq!(recovered.text(), "second edits");
+    assert!(recovered.path.is_none());
+    assert!(recovered.is_dirty);
+    assert_eq!(manager.find_tab_by_path(&b).unwrap().0, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn path_owner_does_not_trust_a_retargeted_symlink_cache() {
+    let root = tempfile::tempdir().unwrap();
+    let a = root.path().join("a");
+    let b = root.path().join("b");
+    let link = root.path().join("link");
+    std::fs::write(&a, "a").unwrap();
+    std::fs::write(&b, "b").unwrap();
+    std::os::unix::fs::symlink(&a, &link).unwrap();
+    let mut manager = TabManager::new();
+    manager.set_tabs(vec![disk_tab(&link, "a")], 0);
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(&b, &link).unwrap();
+    assert!(manager.find_tab_by_path(&a).is_none());
+    assert!(manager.find_tab_by_path(&b).is_some());
+    manager.append_tab(disk_tab(&a, "a"));
+    assert_eq!(manager.find_tab_by_path(&a).unwrap().0, 1);
+}
+
 fn assert_buffer_slots(manager: &TabManager, expected: &[Vec<BufferId>]) {
     for (index, ids) in expected.iter().enumerate() {
         for id in ids {

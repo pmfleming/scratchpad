@@ -319,11 +319,11 @@ impl FileController {
             .flat_map(|tab| tab.buffers())
             .map(|buffer| buffer.temp_id.clone())
             .collect();
-        let mut queued_paths = std::collections::HashSet::new();
+        let mut queued_paths = std::collections::HashSet::<crate::app::CanonicalPathKey>::new();
         for shell in shells {
             Self::release_pending_open_path(app, &shell.path);
             let path_key = crate::app::CanonicalPathKey::from_path(&shell.path);
-            if queued_paths.contains(&path_key)
+            if queued_paths.iter().any(|queued| queued.matches(&path_key))
                 || app.tab_manager.find_tab_by_path(&shell.path).is_some()
             {
                 summary.record_outcome(OpenPathOutcome::AlreadyOpen);

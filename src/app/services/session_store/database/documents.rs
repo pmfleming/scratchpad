@@ -13,8 +13,28 @@ impl Database {
         id: &str,
         key: &str,
     ) -> io::Result<Vec<String>> {
-        let document_pieces = self.query_collect("SELECT id FROM documents WHERE path_key=?1 AND id<>?2 AND id NOT IN (SELECT id FROM quarantine) AND id NOT IN (SELECT id FROM document_pieces WHERE part=0)",turso::params![key,id],|r|r.get::<String>(0).map_err(error)).await?;
-        self.execute_cached("UPDATE documents SET path=NULL,path_key=NULL,name=name||' (recovered)',search_text=lower(name||' (recovered)'),is_dirty=1,disk_content_digest=NULL,observed_digest=NULL,observed_missing=0,disk_len=NULL,disk_modified_millis=NULL WHERE path_key=?1 AND id<>?2 AND id NOT IN (SELECT id FROM quarantine)",turso::params![key,id]).await?;
+        let target = crate::app::CanonicalPathKey::from_path(
+            &crate::app::path_identity::encoding::decode(key)?,
+        );
+        let candidates = self.query_collect(
+            "SELECT id,path,EXISTS(SELECT 1 FROM document_pieces p WHERE p.id=documents.id AND p.part=0) FROM documents WHERE path IS NOT NULL AND id<>? AND id NOT IN (SELECT id FROM quarantine)",
+            [id], |row| Ok((row.get::<String>(0).map_err(error)?, row.get::<String>(1).map_err(error)?, row.get::<i64>(2).map_err(error)? != 0))
+        ).await?;
+        let mut document_pieces = Vec::new();
+        for (previous, path, has_content) in candidates {
+            let previous_key = crate::app::CanonicalPathKey::from_path(
+                &crate::app::path_identity::encoding::decode(&path)?,
+            );
+            // Saving a pathname can replace its inode. Other hard-link names
+            // still own their old file and must retain their association.
+            if previous_key.compare(&target) != crate::app::PathMatch::SameLocation {
+                continue;
+            }
+            self.execute_cached("UPDATE documents SET path=NULL,path_key=NULL,name=name||' (recovered)',search_text=lower(name||' (recovered)'),is_dirty=1,disk_content_digest=NULL,observed_digest=NULL,observed_missing=0,disk_len=NULL,disk_modified_millis=NULL WHERE id=?", [previous.as_str()]).await?;
+            if !has_content {
+                document_pieces.push(previous);
+            }
+        }
         for previous in &document_pieces {
             let snapshot = crate::app::domain::TextDocument::new(String::new()).snapshot();
             self.write_content(
@@ -40,7 +60,7 @@ impl Database {
     }
     pub(in crate::app::services::session_store) async fn load_retained_path(
         &mut self,
-        path_key: &str,
+        path_key: &crate::app::CanonicalPathKey,
     ) -> io::Result<Option<SessionTab>> {
         let Some(mut tab) = self.retained_tab_by_path(path_key).await? else {
             return Ok(None);
@@ -52,18 +72,23 @@ impl Database {
 
     pub(in crate::app::services::session_store) async fn retained_tab_by_path(
         &self,
-        path_key: &str,
+        path_key: &crate::app::CanonicalPathKey,
     ) -> io::Result<Option<SessionTab>> {
         self.ensure_healthy()?;
-        let Some(id) = self
-            .query_collect(
-                "SELECT id FROM documents WHERE path_key=? ORDER BY rowid DESC LIMIT 1",
-                [path_key],
-                |row| row.get::<String>(0).map_err(error),
-            )
-            .await?
-            .pop()
-        else {
+        // Stored keys are only lookup hints: legacy Windows keys were folded,
+        // and symlinks can change between saves. Verify original paths afresh.
+        let hint = crate::app::path_identity::encoding::encode(path_key.as_path());
+        let candidates = self.query_collect(
+            "SELECT id,path FROM documents WHERE path IS NOT NULL ORDER BY (path_key=?1) DESC,rowid DESC",
+            [hint], |row| Ok((row.get::<String>(0).map_err(error)?, row.get::<String>(1).map_err(error)?))
+        ).await?;
+        let id = candidates.into_iter().find_map(|(id, stored)| {
+            let path = crate::app::path_identity::encoding::decode(&stored).ok()?;
+            crate::app::CanonicalPathKey::from_path(&path)
+                .matches(path_key)
+                .then_some(id)
+        });
+        let Some(id) = id else {
             return Ok(None);
         };
         if let Some(payload) = self.query_collect("SELECT c.layout_id FROM closed_tabs c JOIN layout_documents r ON c.layout_id=r.layout_id WHERE r.document_id=? ORDER BY c.sequence DESC LIMIT 1", [id.as_str()], |row| super::document_rows::unsigned(row.get(0).map_err(error)?)).await?.pop() {

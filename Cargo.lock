@@ -4231,6 +4231,7 @@ dependencies = [
  "tempfile",
  "toml",
  "turso",
+ "windows-sys 0.61.2",
  "windows_file_watch",
 ]
 

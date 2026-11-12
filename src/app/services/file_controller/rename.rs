@@ -210,14 +210,20 @@ fn finish_rename(
     app.tab_manager.rebuild_buffer_tab_index();
     if let Some(old_key) = old_key {
         debug_assert_ne!(
-            app.tab_manager.path_owner(&old_key).map(|owner| owner.0),
+            app.tab_manager
+                .path_tab_index
+                .get(&old_key)
+                .map(|owner| owner.0),
             Some(buffer_id),
             "old rename path key was not removed"
         );
     }
     if let Some(new_key) = new_key {
         debug_assert_eq!(
-            app.tab_manager.path_owner(&new_key).map(|owner| owner.0),
+            app.tab_manager
+                .path_tab_index
+                .get(&new_key)
+                .map(|owner| owner.0),
             Some(buffer_id),
             "new rename path key was not inserted exactly once"
         );

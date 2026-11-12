@@ -53,7 +53,7 @@ fn restore_reopened_with_context(
             continue;
         };
         let key = CanonicalPathKey::from_path(&path);
-        if claimed.contains(&key) {
+        if claimed.iter().any(|claimed| claimed.matches(&key)) {
             buffer.recover_as_untitled("recovered");
             continue;
         }
@@ -150,7 +150,7 @@ impl SessionStore {
         &self,
         path: &Path,
     ) -> io::Result<Option<(WorkspaceTab, super::ColdSessionTab)>> {
-        let key = CanonicalPathKey::from_path(path).as_str().to_owned();
+        let key = CanonicalPathKey::from_path(path);
         let tab = self
             .worker()?
             .call(move |db| block_on(db.retained_tab_by_path(&key)))?;
@@ -182,7 +182,7 @@ impl SessionStore {
         claimed: &[CanonicalPathKey],
         context: &crate::app::services::chunk_store::ImportContext,
     ) -> io::Result<Option<WorkspaceTab>> {
-        let key = CanonicalPathKey::from_path(path).as_str().to_owned();
+        let key = CanonicalPathKey::from_path(path);
         let retained = self
             .worker()?
             .call(move |db| block_on(db.load_retained_path(&key)))?;

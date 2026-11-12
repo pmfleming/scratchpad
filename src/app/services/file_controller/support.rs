@@ -114,12 +114,18 @@ impl FileController {
 
     pub(super) fn release_pending_open_path(app: &mut ScratchpadApp, path: &Path) {
         let key = CanonicalPathKey::from_path(path);
-        app.state.pending_open_file_paths.remove(&key);
+        app.state.pending_open_file_paths.retain(|pending| {
+            pending.requested_path().as_os_str() != key.requested_path().as_os_str()
+        });
     }
 
     fn is_open_or_pending_path(app: &ScratchpadApp, key: &CanonicalPathKey) -> bool {
         app.tab_manager.find_tab_by_path_key(key).is_some()
-            || app.state.pending_open_file_paths.contains(key)
+            || app
+                .state
+                .pending_open_file_paths
+                .iter()
+                .any(|pending| pending.matches(key))
     }
 
     pub(super) fn handle_open_dialog(app: &mut ScratchpadApp, dialog_kind: OpenFileDialogKind) {

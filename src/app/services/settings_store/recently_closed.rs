@@ -4,6 +4,7 @@ use std::path::PathBuf;
 /// File-only fallback for a closed tab. Older settings stored just the path.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct RecentlyClosedFile {
+    #[serde(with = "crate::app::path_identity::encoding::required")]
     pub path: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed_at_unix_seconds: Option<i64>,
@@ -15,6 +16,7 @@ impl<'de> Deserialize<'de> for RecentlyClosedFile {
         #[serde(untagged)]
         enum Stored {
             Record {
+                #[serde(with = "crate::app::path_identity::encoding::required")]
                 path: PathBuf,
                 closed_at_unix_seconds: Option<i64>,
             },
@@ -39,6 +41,22 @@ impl<'de> Deserialize<'de> for RecentlyClosedFile {
 #[cfg(test)]
 mod tests {
     use super::super::AppSettings;
+
+    #[cfg(unix)]
+    #[test]
+    fn native_recent_filename_round_trips_through_settings() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+        let mut settings = AppSettings::default();
+        settings
+            .workspace
+            .recently_closed_files
+            .push(super::RecentlyClosedFile {
+                path: OsString::from_vec(b"/tmp/file-\xff".to_vec()).into(),
+                closed_at_unix_seconds: Some(123),
+            });
+        let restored: AppSettings = toml::from_str(&toml::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(settings, restored);
+    }
 
     #[test]
     fn legacy_paths_and_timestamped_records_round_trip() {

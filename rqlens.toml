@@ -53,14 +53,14 @@ manifest = ".config/rqlens-design-reviews.json"
 [[design_review.requirements]]
 id = "path-key-newtype-v1"
 topic = "newtypes"
-sources = ["src/app/mod.rs"]
+sources = ["src/app/mod.rs", "src/app/path_identity.rs", "src/app/path_identity/encoding.rs", "src/app/platform/file_identity.rs"]
 required = true
 max_age_days = 90
 
 [[design_review.requirements]]
 id = "path-key-documentation-v1"
 topic = "documentation-usefulness"
-sources = ["src/app/mod.rs"]
+sources = ["src/app/mod.rs", "src/app/path_identity.rs", "src/app/path_identity/encoding.rs", "src/app/platform/file_identity.rs"]
 required = true
 max_age_days = 90
 

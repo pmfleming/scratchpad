@@ -48,6 +48,39 @@ fn open_selected_paths_async_deduplicates_pending_path() {
 }
 
 #[test]
+fn opening_hard_link_aliases_reserves_only_one_document() {
+    let root = tempfile::tempdir().unwrap();
+    let original = root.path().join("original");
+    let alias = root.path().join("alias");
+    std::fs::write(&original, "shared").unwrap();
+    std::fs::hard_link(&original, &alias).unwrap();
+    let mut app = test_app(root.path(), vec![WorkspaceTab::untitled()]);
+    FileController::open_selected_paths_async(&mut app, vec![original.clone(), alias]);
+    wait_for_background_io(&mut app);
+    assert_eq!(open_path_count(&app, &original), 1);
+    assert!(app.state.pending_open_file_paths.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn pending_reservation_releases_original_spelling_after_symlink_change() {
+    let root = tempfile::tempdir().unwrap();
+    let a = root.path().join("a");
+    let b = root.path().join("b");
+    let link = root.path().join("link");
+    std::fs::write(&a, "a").unwrap();
+    std::fs::write(&b, "b").unwrap();
+    std::os::unix::fs::symlink(&a, &link).unwrap();
+    let mut app = test_app(root.path(), vec![WorkspaceTab::untitled()]);
+    assert!(FileController::reserve_pending_open_path(&mut app, &link));
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(&b, &link).unwrap();
+    FileController::release_pending_open_path(&mut app, &link);
+    assert!(app.state.pending_open_file_paths.is_empty());
+    assert!(FileController::reserve_pending_open_path(&mut app, &link));
+}
+
+#[test]
 fn large_file_stages_first_visible_window_before_background_hydration() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("large.txt");

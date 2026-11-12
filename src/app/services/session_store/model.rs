@@ -107,6 +107,7 @@ impl SessionTabParts {
 pub(crate) struct SessionBuffer {
     pub id: u64,
     pub name: String,
+    #[serde(with = "crate::app::path_identity::encoding")]
     pub path: Option<PathBuf>,
     pub is_dirty: bool,
     pub text_is_empty: bool,

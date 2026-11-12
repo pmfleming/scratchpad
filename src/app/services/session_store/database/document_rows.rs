@@ -78,27 +78,19 @@ impl DocumentRow {
             name: b.name.clone(),
             path: b
                 .path
-                .as_ref()
-                .map(|p| {
-                    p.to_str()
-                        .map(str::to_owned)
-                        .ok_or_else(|| invalid("document path is not UTF-8"))
-                })
-                .transpose()?,
+                .as_deref()
+                .map(crate::app::path_identity::encoding::encode),
             path_key: b
                 .path
                 .as_deref()
                 .map(crate::app::CanonicalPathKey::from_path)
-                .map(|p| p.as_str().to_owned()),
+                .map(|key| crate::app::path_identity::encoding::encode(key.as_path())),
             search_text: format!(
                 "{}\n{}",
                 b.name,
                 b.path
                     .as_deref()
-                    .map(|p| p
-                        .to_str()
-                        .ok_or_else(|| invalid("document path is not UTF-8")))
-                    .transpose()?
+                    .map(|p| p.to_string_lossy())
                     .unwrap_or_default()
             )
             .to_lowercase(),
@@ -174,7 +166,11 @@ impl DocumentRow {
             id: self.buffer_id,
             temp_id: self.id,
             name: self.name,
-            path: self.path.map(Into::into),
+            path: self
+                .path
+                .as_deref()
+                .map(crate::app::path_identity::encoding::decode)
+                .transpose()?,
             is_dirty: self.is_dirty,
             text_is_empty: self.text_is_empty,
             has_recorded_edits: self.has_recorded_edits,

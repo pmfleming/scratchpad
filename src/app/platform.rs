@@ -1,3 +1,5 @@
+pub(crate) mod file_identity;
+
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 

@@ -5,6 +5,79 @@ use super::{
 use crate::app::{domain::SplitAxis, services::session_store::CapturedClosedTab};
 use futures_lite::future::block_on;
 
+#[cfg(unix)]
+#[test]
+fn native_path_documents_round_trip_without_collisions() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    block_on(async {
+        let (root, mut db) = database().await;
+        let paths = [
+            root.path().join(OsString::from_vec(vec![0xff])),
+            root.path().join(OsString::from_vec(vec![0xfe])),
+        ];
+        let mut tabs = vec![tab("first"), tab("second")];
+        for (tab, path) in tabs.iter_mut().zip(&paths) {
+            std::fs::write(path, tab.active_buffer().text()).unwrap();
+            tab.active_buffer_mut().set_path(Some(path.clone()));
+        }
+        let ids: Vec<_> = tabs
+            .iter()
+            .map(|t| t.active_buffer().temp_id.clone())
+            .collect();
+        db.persist(request(&tabs), 1).await.unwrap();
+        drop(db);
+        let db = Database::open(root.path()).await.unwrap();
+        for ((path, id), text) in paths.iter().zip(&ids).zip(["first", "second"]) {
+            let buffer = db.read_document(id).await.unwrap();
+            assert_eq!(buffer.path.as_deref(), Some(path.as_path()));
+            let json = serde_json::to_string(&buffer).unwrap();
+            let restored: crate::app::services::session_store::model::SessionBuffer =
+                serde_json::from_str(&json).unwrap();
+            assert_eq!(restored.path, buffer.path);
+            let found = db
+                .retained_tab_by_path(&crate::app::CanonicalPathKey::from_path(path))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(&found.buffers[0].temp_id, id);
+            assert_eq!(db.read_all_contents().await.unwrap()[id], text);
+        }
+    });
+}
+
+#[test]
+fn retained_lookup_verifies_legacy_key_hints_and_finds_hard_links() {
+    block_on(async {
+        let (root, mut db) = database().await;
+        let a = root.path().join("first");
+        let b = root.path().join("second");
+        let alias = root.path().join("alias");
+        std::fs::write(&a, "first").unwrap();
+        std::fs::write(&b, "second").unwrap();
+        std::fs::hard_link(&a, &alias).unwrap();
+        let mut first = tab("first");
+        let mut second = tab("second");
+        first.active_buffer_mut().set_path(Some(a.clone()));
+        second.active_buffer_mut().set_path(Some(b));
+        let id = first.active_buffer().temp_id.clone();
+        db.persist(request(&[first, second]), 1).await.unwrap();
+        let key = crate::app::CanonicalPathKey::from_path(&a);
+        let hint = crate::app::path_identity::encoding::encode(key.as_path());
+        db.conn
+            .execute("UPDATE documents SET path_key=?", [hint])
+            .await
+            .unwrap();
+        for path in [&a, &alias] {
+            let found = db
+                .retained_tab_by_path(&crate::app::CanonicalPathKey::from_path(path))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(found.buffers[0].temp_id, id);
+        }
+    });
+}
+
 #[test]
 fn documents_and_branches_survive_loss_of_every_workspace_reference() {
     block_on(async {
@@ -206,7 +279,7 @@ fn save_as_over_a_retained_path_transfers_lookup_without_reusing_the_replaced_tr
         db.persist(request(&[source]), 3).await.unwrap();
         let key = crate::app::CanonicalPathKey::from_path(&path);
         assert_eq!(
-            db.retained_tab_by_path(key.as_str())
+            db.retained_tab_by_path(&key)
                 .await
                 .unwrap()
                 .unwrap()

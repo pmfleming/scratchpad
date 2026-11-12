@@ -34,7 +34,7 @@ impl Database {
             |row| {
                 let source: String = row.get(4).map_err(error)?;
                 let source = serde_json::from_value(serde_json::Value::String(source)).map_err(invalid)?;
-                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:row.get::<i64>(2).map_err(error)? as u64},timestamp:row.get::<i64>(3).map_err(error)? as u64,kind:TimelineKind::Edit(source),summary:row.get(5).map_err(error)?,name:row.get(6).map_err(error)?,path:row.get(7).map_err(error)?,preview:None})
+                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:row.get::<i64>(2).map_err(error)? as u64},timestamp:row.get::<i64>(3).map_err(error)? as u64,kind:TimelineKind::Edit(source),summary:row.get(5).map_err(error)?,name:row.get(6).map_err(error)?,path:row.get::<Option<String>>(7).map_err(error)?.as_deref().map(crate::app::path_identity::encoding::decode).transpose()?.map(|p| p.to_string_lossy().into_owned()),preview:None})
             },
         ).await?;
         // The engine's UNION plan sorts both full sources. Limit each source

@@ -66,7 +66,7 @@ impl TabManager {
                 debug_assert!(
                     previous.is_none() || previous == Some(owner),
                     "duplicate CanonicalPathKey indexed for {}",
-                    key.as_str()
+                    key.as_path().display()
                 );
             }
         }
@@ -84,7 +84,7 @@ impl TabManager {
                 debug_assert!(
                     previous.is_none() || previous == Some(owner),
                     "duplicate CanonicalPathKey indexed for {}",
-                    key.as_str()
+                    key.as_path().display()
                 );
             }
         }
@@ -160,19 +160,23 @@ impl TabManager {
 
     #[must_use]
     pub(crate) fn path_owner(&self, key: &CanonicalPathKey) -> Option<(BufferId, usize, ViewId)> {
-        self.path_tab_index.get(key).copied()
-    }
-
-    #[cfg(debug_assertions)]
-    pub(crate) fn scan_tab_by_path_key(&self, key: &CanonicalPathKey) -> Option<(usize, ViewId)> {
-        self.tabs.iter().enumerate().find_map(|(tab_index, tab)| {
-            tab.layout.views().iter().find_map(|view| {
-                tab.buffer_by_id(view.buffer_id)
-                    .and_then(|buffer| buffer.path_key.as_ref())
-                    .is_some_and(|path_key| path_key == key)
-                    .then_some((tab_index, view.id))
+        let confirms = |owner: &(BufferId, usize, ViewId)| {
+            self.tabs
+                .get(owner.1)
+                .and_then(|tab| tab.buffer_by_id(owner.0))
+                .and_then(|buffer| buffer.path_key.as_ref())
+                .is_some_and(|stored| stored.matches(key))
+        };
+        self.path_tab_index
+            .get(key)
+            .filter(|owner| confirms(owner))
+            .copied()
+            .or_else(|| {
+                self.path_tab_index
+                    .values()
+                    .find(|owner| confirms(owner))
+                    .copied()
             })
-        })
     }
 
     pub(crate) fn dedupe_duplicate_path_owners(&mut self) {

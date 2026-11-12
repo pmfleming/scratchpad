@@ -13,6 +13,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- File matching preserves native filenames and Windows case, verifies hard-link aliases, and rechecks changed symlinks before redirecting opens, Save As, or renames. Existing session aliases retain independent edits as recovered copies. Sessions and recent-file settings round-trip non-UTF-8 filenames; missing paths retain explicit resolution failures and use conservative exact-path matching.
 - Recovery automatically repairs stale byte counts only after verifying stored text and replaying its history. Repairs retain an audit of the original metadata, including existing quarantine records, and identify the repaired file.
 - Session saves update total text length independently of unchanged piece blocks, preventing false recovery quarantines after edits in later blocks.
 - Tab labels use the configured font size without a separate cap and match the editor at 100% zoom and Settings labels. Tab rows grow to fit, and tab text follows the configured text colour.

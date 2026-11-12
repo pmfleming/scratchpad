@@ -256,31 +256,7 @@ impl TabManager {
 
     #[must_use]
     pub(crate) fn find_tab_by_path_key(&self, key: &CanonicalPathKey) -> Option<(usize, ViewId)> {
-        let indexed = self
-            .path_tab_index
-            .get(key)
-            .and_then(|(buffer_id, tab_index, view_id)| {
-                let tab = self.tabs.get(*tab_index)?;
-                let buffer = tab.buffer_by_id(*buffer_id)?;
-                (buffer.path_key.as_ref() == Some(key)
-                    && tab
-                        .layout
-                        .view(*view_id)
-                        .is_some_and(|view| view.buffer_id == *buffer_id))
-                .then_some((*tab_index, *view_id))
-            });
-
-        #[cfg(debug_assertions)]
-        {
-            let scanned = self.scan_tab_by_path_key(key);
-            debug_assert_eq!(indexed, scanned, "path index mismatch for {}", key.as_str());
-            indexed.or(scanned)
-        }
-
-        #[cfg(not(debug_assertions))]
-        {
-            indexed
-        }
+        self.path_owner(key).map(|(_, tab, view)| (tab, view))
     }
 
     pub fn describe_tab_at(&self, index: usize) -> String {

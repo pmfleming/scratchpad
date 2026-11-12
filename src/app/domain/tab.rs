@@ -176,6 +176,20 @@ impl WorkspaceTab {
         &mut self,
         seen: &mut HashSet<CanonicalPathKey>,
     ) -> bool {
+        // An old session may already contain two hard-link or symlink aliases
+        // with independently edited text. Detach the later alias as a recovered
+        // copy instead of discarding it or leaving two writable file owners.
+        let mut exact_seen = seen.clone();
+        for buffer in self.buffers_mut() {
+            let Some(key) = buffer.path_key.clone() else {
+                continue;
+            };
+            if !exact_seen.contains(&key) && exact_seen.iter().any(|other| other.matches(&key)) {
+                buffer.recover_as_untitled("recovered");
+            } else {
+                exact_seen.insert(key);
+            }
+        }
         let duplicate_buffer_ids = self
             .buffers()
             .filter_map(|buffer| {

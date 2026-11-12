@@ -13,7 +13,7 @@ impl Database {
     ) -> io::Result<Vec<RecoveryItem>> {
         self.query_collect("SELECT q.id,d.name,d.path,q.reason FROM quarantine q JOIN documents d ON d.id=q.id ORDER BY d.name,q.id", (), |r| Ok(RecoveryItem {
             id: r.get(0).map_err(error)?, name: r.get(1).map_err(error)?,
-            path: r.get::<Option<String>>(2).map_err(error)?.map(Into::into), reason: r.get(3).map_err(error)?,
+            path: r.get::<Option<String>>(2).map_err(error)?.as_deref().map(crate::app::path_identity::encoding::decode).transpose()?, reason: r.get(3).map_err(error)?,
         })).await
     }
 

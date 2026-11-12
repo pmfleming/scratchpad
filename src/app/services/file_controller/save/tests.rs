@@ -157,6 +157,33 @@ fn save_as_path_assignment_uses_written_disk_state() {
 }
 
 #[test]
+fn save_as_to_own_path_preserves_ownership_after_replacement() {
+    let mut fixture = SavedBufferFixture::dirty("own.txt", "old", "replacement");
+    let id = fixture.app.tab_manager.tabs.as_slice()[0]
+        .active_buffer()
+        .id;
+    assert!(FileController::save_buffer_to_path(
+        &mut fixture.app,
+        0,
+        fixture.path.clone(),
+        true,
+        None
+    ));
+    wait_for_background_io(&mut fixture.app);
+    let key = crate::app::CanonicalPathKey::from_path(&fixture.path);
+    assert_eq!(fixture.app.tab_manager.path_owner(&key).unwrap().0, id);
+    assert_eq!(
+        std::fs::read_to_string(&fixture.path).unwrap(),
+        "replacement"
+    );
+    assert!(
+        !fixture.app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .is_dirty
+    );
+}
+
+#[test]
 fn overlapping_save_as_is_rejected_before_writing_a_second_path() {
     let directory = tempfile::tempdir().unwrap();
     let first_path = directory.path().join("first.txt");
@@ -222,6 +249,36 @@ fn save_as_to_already_open_path_activates_existing_owner() {
         app.tab_manager.tabs.as_slice()[0].active_buffer().path,
         None
     );
+}
+
+#[test]
+fn save_as_and_rename_refuse_another_buffers_hard_link_alias() {
+    let root = tempfile::tempdir().unwrap();
+    let owner = root.path().join("owner.txt");
+    let alias = root.path().join("alias.txt");
+    let source = root.path().join("source.txt");
+    std::fs::write(&owner, "preserve").unwrap();
+    std::fs::hard_link(&owner, &alias).unwrap();
+    std::fs::write(&source, "ours").unwrap();
+    let mut app = app_with_tabs(
+        root.path(),
+        vec![
+            WorkspaceTab::new(saved_buffer("source.txt", "ours", source.clone())),
+            WorkspaceTab::new(saved_buffer("owner.txt", "preserve", owner.clone())),
+        ],
+    );
+    assert!(!FileController::save_buffer_to_path(
+        &mut app,
+        0,
+        alias.clone(),
+        true,
+        None
+    ));
+    assert_eq!(app.tab_manager.active_tab_index, 1);
+    assert!(!FileController::rename_tab(&mut app, 0, "alias.txt"));
+    assert_eq!(std::fs::read_to_string(&owner).unwrap(), "preserve");
+    assert_eq!(std::fs::read_to_string(&alias).unwrap(), "preserve");
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), "ours");
 }
 
 #[test]
