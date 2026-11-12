@@ -25,7 +25,7 @@ mod instance_broker;
 #[cfg(test)]
 mod lifecycle_tests;
 mod runtime_state;
-mod search_state;
+pub(crate) mod search_state;
 pub(crate) mod settings_state;
 mod startup_state;
 #[cfg(test)]

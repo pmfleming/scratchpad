@@ -18,3 +18,5 @@ pub mod tile_header;
 pub mod transition;
 pub(crate) mod visuals;
 pub mod widget_ids;
+
+pub(crate) mod notice;

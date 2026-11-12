@@ -47,8 +47,20 @@ impl Database {
             params![sequence,cursor.document.as_str(),node,search.to_lowercase(),i64::from(first),(TIMELINE_PAGE_SIZE+1) as i64],
             |row| {
                 let kind:String=row.get(3).map_err(error)?;
-                let kind:super::super::activity::ActivityKind=serde_json::from_value(serde_json::Value::String(kind)).map_err(invalid)?;
-                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:0},timestamp:row.get::<i64>(2).map_err(error)? as u64,name:row.get(4).map_err(error)?,path:row.get(5).map_err(error)?,summary:kind.label().into(),kind:TimelineKind::Activity(kind),preview:None})
+                let kind:super::super::activity::ActivityKind=super::super::activity::ActivityKind::from_storage(kind).map_err(invalid)?;
+                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:0},timestamp:row.get::<i64>(2).map_err(error)? as u64,name:row.get(4).map_err(error)?,path:row.get(5).map_err(error)?,summary:kind.summary(),kind:TimelineKind::Activity(kind),preview:None})
+            },
+        ).await?);
+        rows.extend(self.query_collect(
+            "SELECT a.global_seq,a.document_id,a.observed_at,a.payload,a.name,a.path FROM replace_operations a JOIN documents d ON d.id=a.document_id
+             WHERE (?4='' OR instr(a.search_text,?4)>0 OR instr(d.search_text,?4)>0)
+             AND a.global_seq<=?1 AND (?5=1 OR a.global_seq<?1 OR (a.global_seq=?1 AND (a.document_id<?2 OR (a.document_id=?2 AND 0<?3))))
+             ORDER BY a.global_seq DESC,a.document_id DESC LIMIT ?6",
+            params![sequence,cursor.document.as_str(),node,search.to_lowercase(),i64::from(first),(TIMELINE_PAGE_SIZE+1) as i64],
+            |row| {
+                let kind: String = row.get(3).map_err(error)?;
+                let kind = super::super::activity::ActivityKind::from_storage(kind).map_err(invalid)?;
+                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:0},timestamp:row.get::<i64>(2).map_err(error)? as u64,name:row.get(4).map_err(error)?,path:row.get(5).map_err(error)?,summary:kind.summary(),kind:TimelineKind::Activity(kind),preview:None})
             },
         ).await?);
         rows.sort_by(|a, b| b.cursor.cmp(&a.cursor));

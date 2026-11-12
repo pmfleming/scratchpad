@@ -134,7 +134,7 @@ fn category_heading(
     response
 }
 
-pub(super) fn group_heading(ui: &mut egui::Ui, title: &str) {
+pub(crate) fn group_heading(ui: &mut egui::Ui, title: &str) {
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(8.0);

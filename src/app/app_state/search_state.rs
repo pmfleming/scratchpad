@@ -12,8 +12,10 @@ pub(crate) mod api;
 mod api_tests;
 mod fragments;
 mod helpers;
+pub(crate) mod recent;
 pub(crate) mod replace;
 pub(crate) mod runtime;
+pub(crate) mod selection;
 mod types;
 pub(crate) mod visual;
 mod worker;
@@ -52,7 +54,8 @@ pub(crate) fn profile_snapshot_search_controlled(
 #[cfg(test)]
 pub(super) const MAX_SEARCH_RESULTS: usize =
     crate::app::services::settings_store::SearchResultLimit::RECOMMENDED_MATCHES;
-pub(super) const SEARCH_RESULT_LIMIT_MESSAGE: &str = "Search result memory limit reached (100,000 matches). Narrow the query or choose Unlimited in Settings → Editors.";
+pub(crate) const SEARCH_RESULT_LIMIT_MESSAGE: &str =
+    "Search result limit reached. Narrow the query or change the limit in Settings → Search.";
 
 const SEARCH_PREVIEW_CACHE_LIMIT: usize = 1024;
 
@@ -72,6 +75,7 @@ pub(crate) struct SearchState {
     preview: SearchPreviewCacheState,
     replacement_previews: visual::ReplacementPreviewCache,
     highlighted_tab: Option<(u64, usize)>,
+    pub(crate) recent: Vec<recent::RecentSearch>,
 }
 
 #[derive(Default)]
@@ -85,10 +89,13 @@ pub(crate) struct SearchQueryState {
     pub(crate) query: String,
     pub(crate) replacement: String,
     pub(crate) scope: SearchScope,
+    last_non_selection_scope: SearchScope,
     pub(crate) scope_origin: SearchScopeOrigin,
     pub(crate) mode: SearchMode,
     pub(crate) match_case: bool,
     pub(crate) whole_word: bool,
+    pub(crate) preserve_case: bool,
+    pub(crate) selection: Option<selection::LockedSelection>,
 }
 
 impl Default for SearchQueryState {
@@ -97,10 +104,13 @@ impl Default for SearchQueryState {
             query: String::new(),
             replacement: String::new(),
             scope: SearchScope::ActiveBuffer,
+            last_non_selection_scope: SearchScope::ActiveBuffer,
             scope_origin: SearchScopeOrigin::ActiveContextDefault,
             mode: SearchMode::PlainText,
             match_case: false,
             whole_word: false,
+            preserve_case: false,
+            selection: None,
         }
     }
 }
@@ -164,6 +174,12 @@ impl Default for SearchRuntimeState {
 #[derive(Default)]
 pub(crate) struct SearchReplaceState {
     pub(crate) pending_replace_all_confirmation: Option<ReplaceAllConfirmation>,
+    pub(crate) excluded: std::collections::HashSet<usize>,
+    pub(crate) pending: Option<replace::transaction::PendingReplace>,
+    pub(crate) planning: Option<replace::limited::PendingPlan>,
+    pub(crate) outcome: Option<String>,
+    pub(crate) navigate_after: Option<(u64, usize)>,
+    pub(crate) last_operation: Option<(u64, usize)>,
 }
 
 #[derive(Default)]
@@ -270,7 +286,11 @@ impl SearchState {
         if !self.panel.open || self.query.query.is_empty() {
             return SearchReplaceAvailability::Disabled;
         }
-        if self.runtime.searching || self.runtime.freshness == SearchFreshness::Stale {
+        if self.replace.pending.is_some()
+            || self.replace.planning.is_some()
+            || self.runtime.searching
+            || self.runtime.freshness == SearchFreshness::Stale
+        {
             return SearchReplaceAvailability::Disabled;
         }
         match &self.runtime.status {
@@ -308,6 +328,9 @@ impl SearchState {
             return false;
         }
         self.query.scope = scope;
+        if scope != SearchScope::SelectionOnly {
+            self.query.last_non_selection_scope = scope;
+        }
         self.query.scope_origin = origin;
         self.clear_replace_all_confirmation();
         true
@@ -341,6 +364,9 @@ impl SearchState {
     }
 
     fn close(&mut self) {
+        if self.query.scope == SearchScope::SelectionOnly {
+            self.query.scope = self.query.last_non_selection_scope;
+        }
         self.panel.open = false;
         self.panel.replace_open = false;
         self.panel.focus_target = None;
@@ -360,6 +386,7 @@ impl SearchState {
     }
 
     fn clear_replace_all_confirmation(&mut self) {
+        self.replace.planning = None;
         self.replace.pending_replace_all_confirmation = None;
     }
 

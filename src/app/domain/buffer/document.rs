@@ -593,3 +593,13 @@ fn validate_replacements(
 
 #[cfg(test)]
 mod tests;
+
+impl TextDocument {
+    /// One durable sequence joins all per-file edits to their replace activity.
+    pub(crate) fn stamp_search_operation(&mut self, operation: u64) {
+        if let Some(entry) = self.history.entries.last_mut() {
+            entry.global_seq = operation;
+        }
+        self.history.latest_update_at = None;
+    }
+}

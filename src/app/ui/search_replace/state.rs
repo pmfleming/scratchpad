@@ -1,10 +1,9 @@
 use crate::app::app_state::workspace::editing as workspace_editing;
 use crate::app::app_state::{
     ScratchpadApp, SearchFocusTarget, SearchFreshness, SearchProgress, SearchReplaceAvailability,
-    SearchResultGroup, SearchScope, SearchScopeOrigin, SearchStatus, search_runtime,
+    SearchResultGroup, SearchScope, SearchStatus, search_runtime,
 };
 use crate::app::services::search::SearchMode;
-use crate::app::utils::pluralize;
 use eframe::egui;
 use std::sync::Arc;
 
@@ -17,6 +16,11 @@ pub(super) struct SearchStripActions {
     pub(super) redo_requested: bool,
     pub(super) replace_current_requested: bool,
     pub(super) replace_all_requested: bool,
+    pub(super) cancel_review: bool,
+    pub(super) settings_requested: bool,
+    pub(super) undo_all: Option<(u64, usize)>,
+    pub(super) recent_index: Option<usize>,
+    pub(super) recapture_selection: bool,
     pub(super) focused_file_match_index: Option<usize>,
     pub(super) selected_match_index: Option<usize>,
 }
@@ -26,10 +30,11 @@ pub(super) struct SearchStripState {
     pub(super) replacement: String,
     pub(super) replace_open: bool,
     pub(super) scope: SearchScope,
-    pub(super) scope_origin: SearchScopeOrigin,
     pub(super) mode: SearchMode,
     pub(super) match_case: bool,
     pub(super) whole_word: bool,
+    pub(super) preserve_case: bool,
+    pub(super) recent: Vec<crate::app::app_state::search_state::recent::RecentSearch>,
     pub(super) match_count: usize,
     pub(super) active_match_index: Option<usize>,
     pub(super) progress: SearchProgressSnapshot,
@@ -45,8 +50,6 @@ pub(super) struct SearchProgressSnapshot {
     pub(super) searching: bool,
     pub(super) scanned_targets: usize,
     pub(super) target_count: usize,
-    pub(super) displayed_match_count: usize,
-    pub(super) total_match_count: usize,
     pub(super) status: SearchStatus,
     pub(super) freshness: SearchFreshness,
 }
@@ -71,10 +74,11 @@ impl SearchStripState {
             replacement: search_state.replacement().to_owned(),
             replace_open: search_state.replace_open(),
             scope: search_state.scope(),
-            scope_origin: search_state.scope_origin(),
             mode: search_state.mode(),
             match_case: search_state.match_case(),
             whole_word: search_state.whole_word(),
+            preserve_case: search_state.query.preserve_case,
+            recent: search_state.recent.clone(),
             match_count,
             active_match_index: search_state.active_match_index(),
             progress: SearchProgressSnapshot::from_progress(progress),
@@ -103,33 +107,6 @@ impl SearchStripState {
     pub(super) fn target_focus(&self) -> SearchFocusTarget {
         self.retained_focus.unwrap_or(SearchFocusTarget::FindInput)
     }
-
-    pub(super) fn results_summary(&self) -> String {
-        if self.progress.searching || self.progress.freshness == SearchFreshness::Stale {
-            return searching_summary(&self.progress);
-        }
-
-        if self.query.is_empty() {
-            return String::new();
-        }
-
-        if let Some(summary) = status_summary(&self.progress.status) {
-            return summary;
-        }
-
-        if self.progress.displayed_match_count < self.progress.total_match_count {
-            return format!(
-                "{} previews of {} matches",
-                self.progress.displayed_match_count, self.progress.total_match_count
-            );
-        }
-
-        format!(
-            "{} matches in {}",
-            self.match_count,
-            pluralize(self.result_groups.len(), "file")
-        )
-    }
 }
 
 impl SearchProgressSnapshot {
@@ -138,34 +115,9 @@ impl SearchProgressSnapshot {
             searching: matches!(progress.status, SearchStatus::Searching { .. }),
             scanned_targets: progress.scanned_targets,
             target_count: progress.target_count,
-            displayed_match_count: progress.displayed_match_count,
-            total_match_count: progress.total_match_count,
             status: progress.status,
             freshness: progress.freshness,
         }
-    }
-}
-
-fn searching_summary(progress: &SearchProgressSnapshot) -> String {
-    if progress.target_count > 0 {
-        format!(
-            "Searching {} of {}...",
-            progress.scanned_targets.min(progress.target_count),
-            pluralize(progress.target_count, "file")
-        )
-    } else {
-        "Searching\u{2026}".to_owned()
-    }
-}
-
-fn status_summary(status: &SearchStatus) -> Option<String> {
-    match status {
-        SearchStatus::InvalidQuery(_) => Some("Invalid query".to_owned()),
-        SearchStatus::Error(message) => Some(message.clone()),
-        SearchStatus::Idle
-        | SearchStatus::Searching { .. }
-        | SearchStatus::Ready
-        | SearchStatus::NoMatches => None,
     }
 }
 

@@ -44,7 +44,6 @@ pub(super) fn render_recovery_category(ui: &mut egui::Ui, app: &mut ScratchpadAp
 pub(super) fn render_policy(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     group_heading(ui, "History memory cache");
     memory::history_cache(ui, app);
-    memory::search_limit(ui, app);
     ui.add_space(8.0);
     ui.label(
         "All edit branches and closed-file history are retained until you explicitly forget them.",

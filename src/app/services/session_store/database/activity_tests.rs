@@ -360,3 +360,62 @@ fn promoting_an_open_split_pane_does_not_record_another_open() {
         before
     );
 }
+
+#[test]
+fn replace_operation_and_group_members_survive_database_reopen() {
+    block_on(async {
+        let (root, mut db) = database().await;
+        let mut tabs = vec![tab("foo"), tab("foo foo")];
+        db.persist(request(&tabs), 1).await.unwrap();
+        for workspace in &mut tabs {
+            let buffer = workspace.active_buffer_mut();
+            let count = buffer.document().piece_tree().len_chars();
+            buffer
+                .replace_char_ranges_with_undo(
+                    &[(0..count, "bar".into())],
+                    Default::default(),
+                    Default::default(),
+                )
+                .unwrap();
+        }
+        let operation = crate::app::domain::buffer::next_text_history_global_seq();
+        for workspace in &mut tabs {
+            workspace
+                .active_buffer_mut()
+                .document_mut()
+                .stamp_search_operation(operation);
+        }
+        let event = ActivityEvent::new(
+            ActivityKind::ReplaceAll {
+                operation_id: operation,
+                files: 2,
+                matches: 3,
+            },
+            tabs[0].active_buffer(),
+        );
+        let mut save = request(&tabs);
+        save.activity.push(event.clone());
+        db.persist(save, 2).await.unwrap();
+        drop(db);
+        let db = Database::open(root.path()).await.unwrap();
+        let rows = db
+            .timeline_page(None, vec![], String::new())
+            .await
+            .unwrap()
+            .rows;
+        assert!(rows.iter().any(|row| matches!(row.kind, TimelineKind::Activity(ActivityKind::ReplaceAll { operation_id, files: 2, matches: 3 }) if operation_id == operation)));
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.node().is_some() && row.cursor.sequence == operation)
+                .count(),
+            2
+        );
+        assert_eq!(rows[0].summary, "Replace all · 3 matches in 2 files");
+        assert_eq!(
+            db.integer("SELECT count(*) FROM replace_operations")
+                .await
+                .unwrap(),
+            1
+        );
+    });
+}

@@ -85,6 +85,7 @@ pub(crate) struct SearchMatch {
     pub(crate) buffer_id: BufferId,
     pub(crate) buffer_label: std::sync::Arc<str>,
     pub(crate) target_revision: u64,
+    pub(crate) target_identity: crate::app::domain::buffer::SnapshotRevision,
     pub(crate) range: Range<usize>,
     pub(crate) matched_text: Option<String>,
 }
@@ -128,7 +129,7 @@ pub(crate) struct ReplacementTargetPlan {
     pub(crate) buffer_id: BufferId,
     pub(crate) buffer_label: String,
     pub(crate) target_revision: u64,
-    pub(crate) expected_matches: Vec<(Range<usize>, String)>,
+    pub(crate) target_identity: crate::app::domain::buffer::SnapshotRevision,
     pub(crate) replacements: Vec<(Range<usize>, String)>,
 }
 
@@ -143,11 +144,6 @@ impl ReplacementPlan {
     pub(crate) fn affected_buffer_count(&self) -> usize {
         self.targets.len()
     }
-
-    pub(super) fn requires_confirmation(&self) -> bool {
-        const HIGH_REPLACE_ALL_MATCH_COUNT: usize = 100;
-        self.affected_buffer_count() > 1 || self.total_match_count > HIGH_REPLACE_ALL_MATCH_COUNT
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,6 +153,7 @@ pub(crate) struct ReplaceAllConfirmation {
     pub(crate) total_match_count: usize,
     pub(crate) replacement: String,
     requested_generation: u64,
+    pub(crate) plan: ReplacementPlan,
 }
 
 impl ReplaceAllConfirmation {
@@ -166,6 +163,7 @@ impl ReplaceAllConfirmation {
         requested_generation: u64,
     ) -> Self {
         Self {
+            plan: plan.clone(),
             scope: plan.scope,
             affected_buffer_count: plan.affected_buffer_count(),
             total_match_count: plan.total_match_count,
@@ -180,7 +178,8 @@ impl ReplaceAllConfirmation {
         replacement: &str,
         requested_generation: u64,
     ) -> bool {
-        self.scope == plan.scope
+        self.plan == *plan
+            && self.scope == plan.scope
             && self.affected_buffer_count == plan.affected_buffer_count()
             && self.total_match_count == plan.total_match_count
             && self.replacement == replacement

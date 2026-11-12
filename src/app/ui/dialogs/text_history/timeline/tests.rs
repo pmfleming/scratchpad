@@ -184,6 +184,7 @@ fn selecting_a_closed_edit_loads_one_document_then_seeks_without_writing_the_fil
         &egui::Context::default(),
         &mut app,
         Action {
+            operation: None,
             document: id.clone(),
             node: Some(2),
             inspect: false,
@@ -365,6 +366,7 @@ fn edit_presentation_matches_live_closed_and_reopened_history() {
             &ctx,
             &mut app,
             Action {
+                operation: None,
                 document: original.temp_id.clone(),
                 node: Some(node),
                 inspect: false,
@@ -468,4 +470,77 @@ fn action_buffer(
         )
         .unwrap();
     buffer
+}
+
+#[test]
+fn replacement_group_expands_its_edits_and_undo_reverts_both_files() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app(root.path());
+    app.tab_manager.set_tabs(
+        vec![
+            WorkspaceTab::new(BufferState::new("first".into(), "foo".into(), None)),
+            WorkspaceTab::new(BufferState::new("second".into(), "foo".into(), None)),
+        ],
+        0,
+    );
+    app.open_search_and_replace();
+    app.set_search_scope(crate::app::app_state::SearchScope::AllOpenTabs);
+    app.set_search_query("foo");
+    app.set_search_replacement("bar");
+    for _ in 0..500 {
+        app.poll_search();
+        if !app.state.search_state.runtime.searching {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(!app.replace_all_search_matches());
+    assert!(app.replace_all_search_matches());
+    let (operation, files) = app.state.search_state.replace.last_operation.unwrap();
+    let mut state = State::default();
+    state.live.update(&app, "");
+    for event in &app.state.persistence.pending_activity {
+        let row = event.timeline_row();
+        state.overlay.insert(row.cursor.clone(), row);
+    }
+    state.rebuild();
+    assert!(state.rows.iter().any(|row| matches!(
+        row.kind,
+        TimelineKind::Activity(
+            crate::app::services::session_store::activity::ActivityKind::ReplaceAll { .. }
+        )
+    )));
+    assert!(
+        !state
+            .rows
+            .iter()
+            .any(|row| row.node().is_some() && row.cursor.sequence == operation)
+    );
+    state.expanded_operations.insert(operation);
+    state.rebuild();
+    assert_eq!(
+        state
+            .rows
+            .iter()
+            .filter(|row| row.node().is_some() && row.cursor.sequence == operation)
+            .count(),
+        2
+    );
+    apply(
+        &egui::Context::default(),
+        &mut app,
+        Action {
+            operation: Some((operation, files)),
+            document: String::new(),
+            node: None,
+            inspect: false,
+        },
+    );
+    assert!(
+        app.tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .all(|tab| tab.active_buffer().text() == "foo")
+    );
 }

@@ -141,21 +141,7 @@ fn payload_total(usage: &StorageUsage) -> u64 {
         .fold(0u64, |total, (_, bytes, _)| total.saturating_add(*bytes))
 }
 
-pub(super) fn notice(ui: &mut egui::Ui, glyph: &str, title: &str, detail: &str) {
-    ui.horizontal_top(|ui| {
-        ui.label(
-            egui::RichText::new(glyph)
-                .font(egui_phosphor::font_id(16.0))
-                .color(SettingsUi::icon_color(ui)),
-        );
-        ui.vertical(|ui| {
-            ui.label(title);
-            if !detail.is_empty() {
-                description(ui, detail);
-            }
-        });
-    });
-}
+pub(super) use crate::app::ui::notice::show as notice;
 
 fn description(ui: &mut egui::Ui, text: &str) {
     ui.label(

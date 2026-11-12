@@ -85,6 +85,7 @@ struct State {
     reveal_now: Option<TimelineId>,
     viewport_height: f32,
     jump_end: Option<navigation::End>,
+    expanded_operations: std::collections::HashSet<u64>,
 }
 
 impl Default for State {
@@ -108,6 +109,7 @@ impl Default for State {
             reveal_now: None,
             viewport_height: 0.0,
             jump_end: None,
+            expanded_operations: std::collections::HashSet::default(),
         }
     }
 }
@@ -124,6 +126,7 @@ fn shared(ctx: &egui::Context) -> Arc<Mutex<State>> {
 
 #[derive(Clone)]
 pub(super) struct Action {
+    pub operation: Option<(u64, usize)>,
     pub document: String,
     pub node: Option<u64>,
     pub inspect: bool,
@@ -253,6 +256,24 @@ impl State {
     }
 
     fn rebuild(&mut self) {
+        let operations: std::collections::HashSet<_> = self
+            .overlay
+            .values()
+            .chain(self.persisted.values())
+            .filter_map(|r| {
+                if let TimelineKind::Activity(
+                    crate::app::services::session_store::activity::ActivityKind::ReplaceAll {
+                        operation_id,
+                        ..
+                    },
+                ) = r.kind
+                {
+                    Some(operation_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
         let mut memory = self.live.rows.iter().rev().peekable();
         let mut disk = self.persisted.iter().rev().peekable();
         let mut overlay = self.overlay.iter().rev().peekable();
@@ -291,6 +312,12 @@ impl State {
             let Some(row) = row else {
                 break;
             };
+            if row.node().is_some()
+                && operations.contains(&row.cursor.sequence)
+                && !self.expanded_operations.contains(&row.cursor.sequence)
+            {
+                continue;
+            }
             count += 1;
             anchored |= self.anchor.as_ref().is_some_and(|(id, _)| row.id() == *id);
             if self.next.as_ref().is_some_and(|bound| row.cursor < *bound) {
@@ -298,6 +325,13 @@ impl State {
             }
             rows.push(row.clone());
         }
+        rows.sort_by(|a, b| {
+            b.cursor
+                .sequence
+                .cmp(&a.cursor.sequence)
+                .then_with(|| a.node().is_some().cmp(&b.node().is_some()))
+                .then_with(|| b.cursor.cmp(&a.cursor))
+        });
         self.rows = rows;
         if self.reveal_now.is_none()
             && let Some((id, fraction)) = &self.anchor
@@ -366,6 +400,7 @@ pub(super) fn keyboard(ctx: &egui::Context, app: &ScratchpadApp) -> Option<Actio
     if changed {
         let row = &state.rows[indices[position?]];
         let action = Action {
+            operation: None,
             document: row.cursor.document.clone(),
             node: row.node(),
             inspect: false,
@@ -382,6 +417,11 @@ pub(super) fn keyboard(ctx: &egui::Context, app: &ScratchpadApp) -> Option<Actio
 }
 
 pub(super) fn apply(ctx: &egui::Context, app: &mut ScratchpadApp, action: Action) {
+    if let Some((operation, files)) = action.operation {
+        crate::app::app_state::search_replace::transaction::undo(app, operation, files);
+        ctx.request_repaint();
+        return;
+    }
     let location = app
         .tab_manager
         .tabs
@@ -474,11 +514,23 @@ pub(super) fn show(
                 .show_rows(ui, ROW_HEIGHT, state.rows.len().max(1), |ui, range| {
                     navigation::scroll_target(ui, &state, range.start);
                     near_end = range.end >= state.rows.len();
-                    action =
-                        paint_visible(ui, &mut state, range, history, now.as_ref().map(|p| &p.id));
+                    action = paint_visible(
+                        ui,
+                        &mut state,
+                        range,
+                        history,
+                        now.as_ref().map(|p| &p.id),
+                        app,
+                    );
                 })
         })
         .inner;
+    if ui
+        .data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("history.operations.rebuild")))
+        .unwrap_or(false)
+    {
+        state.rebuild();
+    }
     state.offset = output.state.clamped_offset().y;
     state.viewport_height = output.inner_rect.height();
     navigation::finish_scroll(&mut state);
@@ -532,6 +584,7 @@ fn paint_visible(
     range: std::ops::Range<usize>,
     history: &HistoryUi,
     now: Option<&TimelineId>,
+    app: &ScratchpadApp,
 ) -> Option<Action> {
     let mut action = None;
     if state.rows.is_empty() {
@@ -546,6 +599,59 @@ fn paint_visible(
     }
     for index in range {
         let row = &state.rows[index];
+        if let TimelineKind::Activity(
+            crate::app::services::session_store::activity::ActivityKind::ReplaceAll {
+                operation_id,
+                files,
+                ..
+            },
+        ) = row.kind
+        {
+            let row = row.clone();
+            let mut expanded = state.expanded_operations.contains(&operation_id);
+            let allowed = crate::app::app_state::search_replace::transaction::can_undo(
+                app,
+                operation_id,
+                files,
+            );
+            let undone = app
+                .tab_manager
+                .tabs
+                .as_slice()
+                .iter()
+                .flat_map(|t| t.buffers())
+                .filter_map(|b| {
+                    b.document()
+                        .history_entries()
+                        .iter()
+                        .find(|e| e.global_seq == operation_id)
+                        .map(|e| b.document().history_now() == e.parent_id)
+                })
+                .filter(|v| *v)
+                .count()
+                == files;
+            let mut toggle = false;
+            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), ROW_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                toggle = ui.selectable_label(expanded, format!("{} {}{}", if expanded { "▾" } else { "▸" }, row.summary, if undone { " · Undone" } else { "" })).clicked();
+                if ui.add_enabled(allowed, egui::Button::new("Undo all")).on_hover_text("All affected files must be open and at this edit. Later edits are kept; use per-file History to navigate them first.").clicked() {
+                    action = Some(Action { operation: Some((operation_id, files)), document: row.cursor.document.clone(), node: None, inspect: false });
+                }
+            });
+            if toggle {
+                expanded = !expanded;
+                if expanded {
+                    state.expanded_operations.insert(operation_id);
+                } else {
+                    state.expanded_operations.remove(&operation_id);
+                }
+                ui.ctx().request_repaint();
+                // Rebuild after the visible range has been consumed.
+                ui.data_mut(|d| {
+                    d.insert_temp(egui::Id::unique("history.operations.rebuild"), true)
+                });
+            }
+            continue;
+        }
         let visuals = RowState {
             selected: state.selected.as_ref() == Some(&row.id()),
             closed: state
@@ -558,6 +664,7 @@ fn paint_visible(
         if let Some(inspect) = paint_row(ui, row, &visuals) {
             state.selected = Some(row.id());
             action = Some(Action {
+                operation: None,
                 document: row.cursor.document.clone(),
                 node: if inspect { None } else { row.node() },
                 inspect,

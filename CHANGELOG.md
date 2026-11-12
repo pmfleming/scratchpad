@@ -6,12 +6,17 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Added
 
+- Search settings includes default scope, preserve case, recent searches, result limits, and file/match review thresholds with Unlimited options.
+- Search/replace uses labelled fields, text scope choices, flat file headings, a match-count headline, replacement previews, include/exclude controls, multiline inputs, and inline review. Replace-all operations appear as grouped History timeline entries with Undo all.
+
 - Document recovery in Status and History settings offers verified text or marked partial previews, separate editable copies, safe exports, and comparison with the disk file while preserving protected originals.
 - Ctrl+/Ctrl− and the status bar zoom percentage open a live zoom scrubber for the active pane, with drag, step, reset, and keyboard controls matching the undo/redo scrubber.
 - Timeline records explicit document creation, successful opens, and completed final-view closes as informational rows. Restoring a session adds no synthetic lifecycle events, and closing a never-edited blank untitled document removes its activity.
 - File edit trees with an empty starting point, explicit Now, preserved branches, and recently edited file discovery, including closed files.
 
 ### Changed
+
+- Replacement prepares every target before committing any file, and reports success only after completion. Regex captures keep their surrounding context, selection scope stays locked through navigation and edits, and replacements verify document identity as well as revision. Searches beyond the result limit keep a bounded preview list and offer a complete replacement review.
 
 - File matching preserves native filenames and Windows case, verifies hard-link aliases, and rechecks changed symlinks before redirecting opens, Save As, or renames. Existing session aliases retain independent edits as recovered copies. Sessions and recent-file settings round-trip non-UTF-8 filenames; missing paths retain explicit resolution failures and use conservative exact-path matching.
 - Recovery automatically repairs stale byte counts only after verifying stored text and replaying its history. Repairs retain an audit of the original metadata, including existing quarantine records, and identify the repaired file.

@@ -242,6 +242,7 @@ impl Database {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
         if application == APPLICATION_ID && version == 13 {
+            self.create_schema(activity::REPLACE_SCHEMA).await?;
             return Ok(());
         }
         if version != 0
@@ -260,11 +261,11 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{} {} {SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=13;",
+            "{} {} {SCHEMA} {} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=13;",
             document_rows::SCHEMA,
             layouts::SCHEMA,
             quarantine::SCHEMA,
-            closed::SCHEMA, chunks::SCHEMA
+            closed::SCHEMA, chunks::SCHEMA, activity::REPLACE_SCHEMA
         ))
         .await
     }

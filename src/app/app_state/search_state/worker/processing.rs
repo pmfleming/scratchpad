@@ -41,6 +41,8 @@ pub(crate) fn process_search_request_with_partials(
         Err(error) => return Some(invalid_query_result(generation, error.message())),
     };
 
+    let overflow_targets = (request.result_limit != usize::MAX).then(|| request.targets.clone());
+    let limit = request.result_limit;
     let target_count = request.targets.len();
     let mut results = SearchResultAccumulator::default();
     let processed = if search_target_parallelism(target_count) <= 1 {
@@ -66,13 +68,27 @@ pub(crate) fn process_search_request_with_partials(
         return None;
     }
     if program.result_limit_exceeded() {
-        return Some(SearchResult {
-            generation,
-            matches: Vec::new(),
-            result_groups: Vec::new(),
-            displayed_match_count: 0,
-            status: SearchStatus::Error(SEARCH_RESULT_LIMIT_MESSAGE.into()),
-        });
+        let program = SearchProgram::compile(program.query(), program.options()).ok()?;
+        let mut previews = SearchResultAccumulator::default();
+        let mut remaining = limit;
+        for target in overflow_targets.unwrap_or_default() {
+            if remaining == 0 {
+                break;
+            }
+            let ranges = super::super::fragments::search_target_prefix(
+                &target.document_snapshot,
+                target.search_range.clone(),
+                &program,
+                generation,
+                latest_generation,
+                remaining,
+            )?;
+            remaining -= ranges.len();
+            previews.push_target_matches(&target, &ranges);
+        }
+        let mut result = previews.finish(generation);
+        result.status = SearchStatus::Error(SEARCH_RESULT_LIMIT_MESSAGE.into());
+        return Some(result);
     }
     processed?;
 
@@ -386,7 +402,7 @@ mod budget_tests {
     use crate::app::services::search::SearchOptions;
 
     #[test]
-    fn recommended_limit_rejects_partial_results_and_unlimited_preserves_all_matches() {
+    fn recommended_limit_bounds_previews_and_unlimited_preserves_all_matches() {
         use crate::app::app_state::search_state::MAX_SEARCH_RESULTS;
         for (count, limit) in [
             (1, MAX_SEARCH_RESULTS),
@@ -428,8 +444,8 @@ mod budget_tests {
                 );
             } else {
                 assert!(matches!(result.status, SearchStatus::Error(_)));
-                assert!(result.matches.is_empty());
-                assert!(result.result_groups.is_empty());
+                assert_eq!(result.matches.len(), limit);
+                assert!(!result.result_groups.is_empty());
             }
         }
     }

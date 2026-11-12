@@ -14,12 +14,13 @@ pub use model::{
     DEFAULT_EDITOR_GUTTER, DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR,
     DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_RECENT_FILES_ENABLED,
     DEFAULT_STATUS_BAR_VISIBLE, DEFAULT_TAB_DISPLAY, DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS,
-    DEFAULT_TAB_LIST_WIDTH, DEFAULT_WINDOW_INNER_SIZE, DEFAULT_WORD_WRAP, EditorAppearanceSource,
-    EditorSettings, FileOpenDisposition, HistorySettings, IndentationStyle,
+    DEFAULT_TAB_LIST_WIDTH, DEFAULT_WINDOW_INNER_SIZE, DEFAULT_WORD_WRAP, DefaultSearchScope,
+    EditorAppearanceSource, EditorSettings, FileOpenDisposition, HistorySettings, IndentationStyle,
     LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
     LIGHT_EDITOR_TEXT_COLOR, MIN_WINDOW_INNER_SIZE, NewTabPlacement, PlatformSettings,
-    SearchResultLimit, ShortcutSettings, StartupSessionBehavior, TabDisplayMode, TabListPosition,
-    TabOrderDirection, TabOrderMode, UiSettings, WindowState, WorkspaceSettings,
+    ReviewThreshold, SearchResultLimit, SearchSettings, ShortcutSettings, StartupSessionBehavior,
+    TabDisplayMode, TabListPosition, TabOrderDirection, TabOrderMode, UiSettings, WindowState,
+    WorkspaceSettings,
 };
 pub(crate) use model::{color_from_hex, color_to_hex};
 
@@ -106,6 +107,14 @@ pub(crate) fn parse_toml_settings(raw: &str) -> io::Result<AppSettings> {
 
     let mut settings = AppSettings::default();
     apply_section(&table, "editor", &mut settings.editor)?;
+    apply_section(&table, "search", &mut settings.search)?;
+    if !table
+        .get("search")
+        .and_then(|v| v.as_table())
+        .is_some_and(|t| t.contains_key("result_limit"))
+    {
+        settings.search.result_limit = settings.editor.search_result_limit;
+    }
     apply_section(&table, "workspace", &mut settings.workspace)?;
     apply_section(&table, "ui", &mut settings.ui)?;
     apply_section(&table, "history", &mut settings.history)?;
@@ -155,5 +164,27 @@ mod tests {
 
         assert_eq!(settings.platform.profile, PlatformProfile::Hyprland);
         assert!(primary.path().join("settings.toml").exists());
+    }
+}
+
+#[cfg(test)]
+mod search_migration_tests {
+    use super::*;
+    #[test]
+    fn search_category_migrates_legacy_limit_with_explicit_new_key_winning() {
+        let settings = parse_toml_settings(
+            "[editor]\nsearch_result_limit = \"unlimited\"\n[search]\nrecent_searches = 0",
+        )
+        .unwrap();
+        assert_eq!(settings.search.result_limit, SearchResultLimit::Unlimited);
+        let encoded = toml::to_string(&settings).unwrap();
+        assert!(!encoded.contains("search_result_limit"));
+        assert!(encoded.contains("result_limit = \"unlimited\""));
+        let settings = parse_toml_settings("[editor]\nsearch_result_limit = \"unlimited\"\n[search]\nresult_limit = 50000\nreview_files_above = \"unlimited\"").unwrap();
+        assert_eq!(
+            settings.search.result_limit,
+            SearchResultLimit::from_matches(50_000)
+        );
+        assert!(!settings.search.review_files_above.exceeded(usize::MAX));
     }
 }

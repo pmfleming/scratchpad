@@ -10,12 +10,13 @@ mod appearance;
 mod opening;
 mod recovery;
 mod search;
+mod search_options;
 mod sections;
 mod style;
 #[cfg(test)]
 mod tests;
 mod text_formatting;
-mod widgets;
+pub(crate) mod widgets;
 
 use style::SettingsUi;
 const FONT_SIZE_OPTIONS: [u32; 9] = [11, 12, 14, 16, 18, 20, 24, 28, 32];

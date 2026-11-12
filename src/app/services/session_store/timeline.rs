@@ -65,7 +65,7 @@ impl super::activity::ActivityEvent {
             timestamp: self.timestamp,
             name: self.name.clone(),
             path: self.path.clone(),
-            summary: self.kind.label().into(),
+            summary: self.kind.summary(),
             kind: TimelineKind::Activity(self.kind),
             preview: None,
         }

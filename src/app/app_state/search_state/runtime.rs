@@ -32,6 +32,8 @@ pub(crate) fn request_search_focus(app: &mut ScratchpadApp, target: SearchFocusT
 }
 
 pub(crate) fn refresh_search_state(app: &mut ScratchpadApp) {
+    super::replace::transaction::poll(app);
+    super::replace::limited::poll(app);
     poll_search_results(app);
     if !search_is_active(app) {
         clear_inactive_search_state(app);
@@ -42,7 +44,7 @@ pub(crate) fn refresh_search_state(app: &mut ScratchpadApp) {
     }
 
     if app.state.search_state.query.scope == SearchScope::SelectionOnly
-        && app.active_search_selection_range().is_none()
+        && super::selection::resolve(app).is_none()
     {
         set_selection_only_search_error(app);
         return;
@@ -69,15 +71,13 @@ fn submit_search_request(app: &mut ScratchpadApp) {
         .requested_generation
         .saturating_add(1);
     crate::app::app_state::search_visual::clear_search_highlights(app);
+    app.state.search_state.replace.excluded.clear();
+    app.state.search_state.clear_replace_all_confirmation();
     let targets = collect_search_targets(app, app.state.search_state.query.scope);
     let request = app.state.search_state.build_request(
         generation,
         targets,
-        app.state
-            .app_settings
-            .editor
-            .search_result_limit
-            .max_matches(),
+        app.state.app_settings.search.result_limit.max_matches(),
     );
     app.state.search_state.begin_request(generation);
 
@@ -131,6 +131,7 @@ fn apply_search_result(app: &mut ScratchpadApp, result: SearchResult) {
     app.state.search_state.results.result_groups = Arc::from(result_groups);
     app.state.search_state.runtime.searching = is_partial;
     if !is_partial {
+        app.state.search_state.replace.navigate_after = None;
         app.state.search_state.results.previous_active_match = None;
     }
     app.state.search_state.runtime.applied_generation = generation;
@@ -149,12 +150,7 @@ pub fn profile_build_search_request(app: &ScratchpadApp, scope: SearchScope, que
         .saturating_add(1);
     let targets = collect_search_targets(app, scope);
     let request = SearchRequest {
-        result_limit: app
-            .state
-            .app_settings
-            .editor
-            .search_result_limit
-            .max_matches(),
+        result_limit: app.state.app_settings.search.result_limit.max_matches(),
         generation,
         query: query.to_owned(),
         options: app.state.search_state.search_options(),
@@ -168,13 +164,23 @@ pub fn profile_build_search_request(app: &ScratchpadApp, scope: SearchScope, que
         + request.query.len()
 }
 
-fn collect_search_targets(app: &ScratchpadApp, scope: SearchScope) -> Vec<SearchTargetSnapshot> {
+pub(super) fn collect_search_targets(
+    app: &ScratchpadApp,
+    scope: SearchScope,
+) -> Vec<SearchTargetSnapshot> {
     match scope {
-        SearchScope::SelectionOnly => {
-            active_search_target(app, app.active_search_selection_range())
-                .into_iter()
-                .collect()
-        }
+        SearchScope::SelectionOnly => super::selection::resolve(app)
+            .and_then(|(index, _, view, range)| {
+                build_search_target(
+                    index,
+                    &app.tab_manager.tabs.as_slice()[index],
+                    view,
+                    &search_tab_label(app, index),
+                    Some(range),
+                )
+            })
+            .into_iter()
+            .collect(),
         SearchScope::ActiveBuffer => active_search_target(app, None).into_iter().collect(),
         SearchScope::ActiveWorkspaceTab => collect_active_tab_search_targets(app),
         SearchScope::AllOpenTabs => {
@@ -305,6 +311,13 @@ fn preferred_active_match_index(
 ) -> Option<usize> {
     if matches.is_empty() {
         return None;
+    }
+    if let Some((buffer, offset)) = app.state.search_state.replace.navigate_after {
+        return matches
+            .iter()
+            .position(|m| m.buffer_id == buffer && m.range.start >= offset)
+            .or_else(|| matches.iter().position(|m| m.buffer_id == buffer))
+            .or(Some(0));
     }
     if let Some(previous_active) = previous_active
         && let Some(index) =

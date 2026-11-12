@@ -3,6 +3,7 @@ mod controls;
 mod result_model;
 mod results;
 mod state;
+mod summary;
 
 use crate::app::app_state::{ScratchpadApp, SearchFocusTarget, search_runtime};
 use crate::app::commands::{AppCommand, EditCommand, SearchCommand};
@@ -57,13 +58,59 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                         find_input_id,
                         replace_input_id,
                     );
+                    summary::show(ui, app, &state, &mut actions);
                     results::show_search_results(ui, app, &state, &mut actions);
+                    summary::footer(ui, app, &state, &mut actions);
                 });
                 callout::mark_scroll_blocker_if_hovered(ui.ctx(), &inner.response);
             });
         });
 
     apply_search_inputs(app, &state);
+    if actions.settings_requested {
+        crate::app::app_state::search_controller::close_search(app);
+        crate::app::app_state::settings_controller::open_settings(app);
+        ui.data_mut(|d| {
+            d.insert_temp(
+                egui::Id::unique("settings.search"),
+                "search result limit".to_owned(),
+            )
+        });
+        return;
+    }
+    if actions.recapture_selection {
+        crate::app::app_state::search_state::api::set_search_scope(
+            app,
+            crate::app::app_state::SearchScope::SelectionOnly,
+        );
+    }
+    if actions.cancel_review {
+        app.state
+            .search_state
+            .replace
+            .pending_replace_all_confirmation = None;
+    }
+    if let Some((id, files)) = actions.undo_all {
+        crate::app::app_state::search_state::replace::transaction::undo(app, id, files);
+    }
+    if let Some(index) = actions.recent_index
+        && let Some(recent) = state.recent.get(index)
+    {
+        crate::app::app_state::search_state::api::set_search_query(app, recent.query.clone());
+        crate::app::app_state::search_state::api::set_search_mode(
+            app,
+            if recent.regex {
+                crate::app::services::search::SearchMode::Regex
+            } else {
+                crate::app::services::search::SearchMode::PlainText
+            },
+        );
+        crate::app::app_state::search_state::api::set_search_match_case(app, recent.match_case);
+        crate::app::app_state::search_state::api::set_search_whole_word(app, recent.whole_word);
+    }
+    if actions.next_requested || actions.previous_requested {
+        crate::app::app_state::search_state::recent::commit(app);
+    }
     if actions.close_requested {
         crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Close));
         return;
@@ -73,6 +120,15 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn apply_search_inputs(app: &mut ScratchpadApp, state: &SearchStripState) {
+    if state.preserve_case != app.state.search_state.query.preserve_case {
+        app.state.search_state.query.preserve_case = state.preserve_case;
+        app.state
+            .search_state
+            .replace
+            .pending_replace_all_confirmation = None;
+        app.state.search_state.replace.planning = None;
+        crate::app::app_state::search_state::visual::refresh_search_visual_state(app);
+    }
     if state.query != app.state.search_state.query() {
         crate::app::commands::handle_command(
             app,
@@ -197,4 +253,49 @@ fn render_search_header(ui: &mut egui::Ui) -> bool {
                 .color(callout::text(ui)),
         );
     })
+}
+
+#[cfg(test)]
+mod accessibility_tests {
+    use super::*;
+    use egui_kittest::{Harness, kittest::Queryable};
+    #[test]
+    fn redesigned_fields_and_actions_are_named_and_replace_can_collapse() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::app::app_state::test_support::test_app(root.path());
+        app.open_search_and_replace();
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(1100.0, 1000.0))
+            .with_context_setup(|ctx| {
+                crate::app::fonts::apply_editor_fonts(
+                    ctx,
+                    &crate::app::fonts::EditorFontSelection::scratchpad(
+                        crate::app::fonts::EditorFontPreset::Standard,
+                    ),
+                    4.0,
+                )
+                .unwrap();
+                ctx.options_mut(|o| o.warn_on_id_clash = true);
+            })
+            .build_ui_state(
+                |ui, app| {
+                    app.poll_search();
+                    show_search_strip(ui, app);
+                },
+                app,
+            );
+        harness.run_steps(3);
+        harness.get_by_role_and_label(egui::Role::TextInput, "Find");
+        harness.get_by_role_and_label(egui::Role::TextInput, "Replace with");
+        harness.get_by_role_and_label(egui::Role::Button, "Replace all included matches");
+        harness
+            .get_by_role_and_label(egui::Role::Button, "▾ Replace")
+            .click();
+        harness.run_steps(3);
+        assert!(
+            harness
+                .query_by_role_and_label(egui::Role::TextInput, "Replace with")
+                .is_none()
+        );
+    }
 }

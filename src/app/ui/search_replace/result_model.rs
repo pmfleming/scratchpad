@@ -35,6 +35,14 @@ pub(super) fn match_preview(entry: &SearchResultEntry) -> &str {
 }
 
 pub(super) fn empty_message(state: &SearchStripState) -> Option<&str> {
+    if !state.result_groups.is_empty()
+        && state.progress.status
+            == crate::app::app_state::SearchStatus::Error(
+                crate::app::app_state::search_state::SEARCH_RESULT_LIMIT_MESSAGE.into(),
+            )
+    {
+        return None;
+    }
     empty_message_from_parts(
         state.query.is_empty(),
         state.progress.status.message(),

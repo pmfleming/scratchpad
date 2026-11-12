@@ -25,10 +25,36 @@ fn default_search_scope_and_origin(app: &ScratchpadApp) -> (SearchScope, SearchS
 
 fn open_search_with_focus(app: &mut ScratchpadApp, focus_target: SearchFocusTarget) {
     settings_controller::activate_workspace_surface(app);
+    super::recent::load(app);
     let (default_scope, scope_origin) = default_search_scope_and_origin(app);
     app.state
         .search_state
         .show_with_focus(focus_target, default_scope, scope_origin);
+    if default_scope == SearchScope::SelectionOnly {
+        app.state.search_state.query.scope = default_scope;
+        app.state.search_state.query.scope_origin = scope_origin;
+        super::selection::capture(app);
+    }
+    if app.state.app_settings.search.default_scope
+        != crate::app::services::settings_store::DefaultSearchScope::LastUsed
+        && default_scope != SearchScope::SelectionOnly
+    {
+        app.state.search_state.query.scope = match app.state.app_settings.search.default_scope {
+            crate::app::services::settings_store::DefaultSearchScope::File => {
+                SearchScope::ActiveBuffer
+            }
+            crate::app::services::settings_store::DefaultSearchScope::Tab => {
+                SearchScope::ActiveWorkspaceTab
+            }
+            crate::app::services::settings_store::DefaultSearchScope::AllTabs => {
+                SearchScope::AllOpenTabs
+            }
+            crate::app::services::settings_store::DefaultSearchScope::LastUsed => {
+                app.state.search_state.query.scope
+            }
+        };
+    }
+    app.state.search_state.query.preserve_case = app.state.app_settings.search.preserve_case;
     runtime::mark_search_dirty(app);
     runtime::refresh_search_state(app);
 }
@@ -42,6 +68,7 @@ pub(crate) fn open_search_and_replace(app: &mut ScratchpadApp) {
 }
 
 pub(crate) fn close_search(app: &mut ScratchpadApp) {
+    super::selection::release(app);
     app.state.search_state.close();
     visual::clear_search_highlights(app);
     workspace_accessors::request_focus_for_active_view(app);
@@ -92,7 +119,14 @@ pub(crate) fn set_search_scope_with_origin(
     scope: SearchScope,
     origin: SearchScopeOrigin,
 ) {
-    if app.state.search_state.set_scope_with_origin(scope, origin) {
+    if scope == SearchScope::SelectionOnly {
+        super::selection::capture(app);
+    } else {
+        super::selection::release(app);
+    }
+    if app.state.search_state.set_scope_with_origin(scope, origin)
+        || scope == SearchScope::SelectionOnly
+    {
         after_search_param_change(app);
     }
 }
@@ -167,7 +201,31 @@ pub(super) fn activate_search_match(app: &mut ScratchpadApp, index: usize) -> bo
     true
 }
 
-fn focus_search_match(app: &mut ScratchpadApp, search_match: SearchMatch) -> bool {
+fn focus_search_match(app: &mut ScratchpadApp, mut search_match: SearchMatch) -> bool {
+    let Some((index, view)) =
+        app.tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .enumerate()
+            .find_map(|(index, tab)| {
+                tab.layout
+                    .views()
+                    .iter()
+                    .find(|v| v.buffer_id == search_match.buffer_id && v.id == search_match.view_id)
+                    .or_else(|| {
+                        tab.layout
+                            .views()
+                            .iter()
+                            .find(|v| v.buffer_id == search_match.buffer_id)
+                    })
+                    .map(|v| (index, v.id))
+            })
+    else {
+        return false;
+    };
+    search_match.tab_index = index;
+    search_match.view_id = view;
     let preserve_session_clean = !app.tab_manager.session_dirty;
 
     if search_match.tab_index != app.tab_manager.active_tab_index {
@@ -316,6 +374,12 @@ impl ScratchpadApp {
     }
 
     pub fn replace_all_search_matches(&mut self) -> bool {
+        if self.state.search_state.runtime.status
+            == super::SearchStatus::Error(super::SEARCH_RESULT_LIMIT_MESSAGE.into())
+            && self.state.search_state.runtime.freshness == super::SearchFreshness::Fresh
+        {
+            return replace::limited::start(self);
+        }
         if !self
             .state
             .search_state

@@ -10,6 +10,11 @@ pub(crate) enum ActivityKind {
     Closed,
     DiskConflict,
     Missing,
+    ReplaceAll {
+        operation_id: u64,
+        files: usize,
+        matches: usize,
+    },
 }
 
 impl ActivityKind {
@@ -20,6 +25,7 @@ impl ActivityKind {
             Self::Closed => "closed",
             Self::DiskConflict => "disk_conflict",
             Self::Missing => "missing",
+            Self::ReplaceAll { .. } => "replace_all",
         }
     }
     pub fn label(self) -> &'static str {
@@ -29,6 +35,7 @@ impl ActivityKind {
             Self::Closed => "Closed",
             Self::DiskConflict => "Changed on disk — local work kept",
             Self::Missing => "File missing on disk",
+            Self::ReplaceAll { .. } => "Replace all",
         }
     }
 }
@@ -91,5 +98,29 @@ pub(crate) fn record_installed(app: &mut ScratchpadApp, documents: &[String], ki
             }
         }
         app.tab_manager.mark_session_dirty();
+    }
+}
+
+impl ActivityKind {
+    pub(crate) fn storage_key(self) -> Result<String, serde_json::Error> {
+        match self {
+            Self::ReplaceAll { .. } => serde_json::to_string(&self),
+            _ => Ok(self.key().into()),
+        }
+    }
+    pub(crate) fn from_storage(text: String) -> Result<Self, serde_json::Error> {
+        if text.starts_with('{') {
+            serde_json::from_str(&text)
+        } else {
+            serde_json::from_value(serde_json::Value::String(text))
+        }
+    }
+    pub(crate) fn summary(self) -> String {
+        match self {
+            Self::ReplaceAll { files, matches, .. } => {
+                format!("Replace all · {matches} matches in {files} files")
+            }
+            _ => self.label().into(),
+        }
     }
 }

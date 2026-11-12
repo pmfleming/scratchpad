@@ -340,7 +340,7 @@ pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
         .take(crate::app::app_state::RECENTLY_CLOSED_FILE_LIMIT)
         .cloned()
         .collect();
-    if app.state.app_settings.editor.search_result_limit != settings.editor.search_result_limit {
+    if app.state.app_settings.search.result_limit != settings.search.result_limit {
         crate::app::app_state::search_state::runtime::mark_search_dirty(app);
     }
     app.state.app_settings = settings;

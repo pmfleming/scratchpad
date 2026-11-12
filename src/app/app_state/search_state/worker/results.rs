@@ -27,6 +27,7 @@ impl SearchResultAccumulator {
                 buffer_id: target.buffer_id,
                 buffer_label: buffer_label.clone(),
                 target_revision: target.document_snapshot.revision(),
+                target_identity: target.document_snapshot.revision_key(),
                 matched_text: None,
                 range,
             }));

@@ -207,12 +207,12 @@ fn search_limit_changes_persist_and_restart_an_open_query() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        stored.editor.search_result_limit,
+        stored.search.result_limit,
         SearchResultLimit::from_matches(250_000)
     );
     settings_controller::reset_settings_to_defaults(&mut app);
     assert_eq!(
-        app.state.app_settings.editor.search_result_limit,
+        app.state.app_settings.search.result_limit,
         SearchResultLimit::Recommended
     );
 }

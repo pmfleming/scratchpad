@@ -14,7 +14,6 @@ pub(crate) enum WidgetRole {
     IconButton,
     ActionButton,
     Label,
-    ToggleChip,
     TextEdit,
     ToggleSwitch,
     RadioOption,

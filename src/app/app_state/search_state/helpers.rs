@@ -42,18 +42,16 @@ pub(super) fn search_highlight_state_for_view(
 
 pub(super) fn build_replacement_targets(
     matches: &[SearchMatch],
-    mut replacement_for_match: impl FnMut(&SearchMatch) -> Result<(String, String), SearchError>,
+    mut replacement_for_match: impl FnMut(&SearchMatch) -> Result<String, SearchError>,
 ) -> Result<Vec<ReplacementTargetPlan>, SearchError> {
     let mut targets = Vec::new();
     for group in matches.chunk_by(same_replacement_target) {
         // slice::chunk_by yields only nonempty groups.
         let current = &group[0];
         let mut replacements = Vec::with_capacity(group.len());
-        let mut expected_matches = Vec::with_capacity(group.len());
         for matched in group.iter().rev() {
-            let (replacement, expected) = replacement_for_match(matched)?;
+            let replacement = replacement_for_match(matched)?;
             replacements.push((matched.range.clone(), replacement));
-            expected_matches.push((matched.range.clone(), expected));
         }
         targets.push(ReplacementTargetPlan {
             tab_index: current.tab_index,
@@ -61,7 +59,7 @@ pub(super) fn build_replacement_targets(
             buffer_id: current.buffer_id,
             buffer_label: current.buffer_label.to_string(),
             target_revision: current.target_revision,
-            expected_matches,
+            target_identity: current.target_identity.clone(),
             replacements,
         });
     }

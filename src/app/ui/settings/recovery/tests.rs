@@ -12,7 +12,13 @@ fn history_settings_explain_retention_without_expiry_controls() {
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1000.0, 1000.0))
         .with_context_setup(crate::app::ui::settings::tests::setup)
-        .build_ui_state(render_policy, app);
+        .build_ui_state(
+            |ui, app| {
+                render_policy(ui, app);
+                crate::app::ui::settings::search_options::render(ui, app);
+            },
+            app,
+        );
     harness.run();
     harness.get_by_label(
         "All edit branches and closed-file history are retained until you explicitly forget them.",
@@ -28,12 +34,18 @@ fn inline_resets_affect_only_their_own_limits_and_persist() {
     let mut app = test_app(root.path());
     app.state.app_settings.history.budget.derived_from_memory = false;
     app.state.app_settings.history.failure_ram.automatic = false;
-    app.state.app_settings.editor.search_result_limit = SearchResultLimit::Unlimited;
+    app.state.app_settings.search.result_limit = SearchResultLimit::Unlimited;
     let failure = app.state.app_settings.history.failure_ram;
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1000.0, 1400.0))
         .with_context_setup(crate::app::ui::settings::tests::setup)
-        .build_ui_state(render_policy, app);
+        .build_ui_state(
+            |ui, app| {
+                render_policy(ui, app);
+                crate::app::ui::settings::search_options::render(ui, app);
+            },
+            app,
+        );
     harness.run();
     harness
         .get_by_label("Reset memory cache to recommended")
@@ -53,12 +65,7 @@ fn inline_resets_affect_only_their_own_limits_and_persist() {
         failure
     );
     assert_eq!(
-        harness
-            .state()
-            .state
-            .app_settings
-            .editor
-            .search_result_limit,
+        harness.state().state.app_settings.search.result_limit,
         SearchResultLimit::Unlimited
     );
 
@@ -67,12 +74,7 @@ fn inline_resets_affect_only_their_own_limits_and_persist() {
         .click_accesskit();
     harness.run_steps(2);
     assert_eq!(
-        harness
-            .state()
-            .state
-            .app_settings
-            .editor
-            .search_result_limit,
+        harness.state().state.app_settings.search.result_limit,
         SearchResultLimit::Recommended
     );
     assert_eq!(
@@ -108,10 +110,7 @@ fn inline_resets_affect_only_their_own_limits_and_persist() {
         saved.history.failure_ram,
         harness.state().state.app_settings.history.failure_ram
     );
-    assert_eq!(
-        saved.editor.search_result_limit,
-        SearchResultLimit::Recommended
-    );
+    assert_eq!(saved.search.result_limit, SearchResultLimit::Recommended);
     for label in [
         "Reset memory cache to recommended",
         "Reset search result limit to recommended",
@@ -128,7 +127,10 @@ fn search_slider_applies_finite_and_unlimited_limits() {
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1000.0, 1400.0))
         .with_context_setup(crate::app::ui::settings::tests::setup)
-        .build_ui_state(render_policy, test_app(root.path()));
+        .build_ui_state(
+            crate::app::ui::settings::search_options::render,
+            test_app(root.path()),
+        );
     harness.run();
     for (stop, limit) in [
         (0.0, SearchResultLimit::from_matches(50_000)),
@@ -140,12 +142,7 @@ fn search_slider_applies_finite_and_unlimited_limits() {
             .set_value_accesskit(stop);
         harness.run_steps(2);
         assert_eq!(
-            harness
-                .state()
-                .state
-                .app_settings
-                .editor
-                .search_result_limit,
+            harness.state().state.app_settings.search.result_limit,
             limit
         );
         assert_eq!(
@@ -157,8 +154,8 @@ fn search_slider_applies_finite_and_unlimited_limits() {
                 .load()
                 .unwrap()
                 .unwrap()
-                .editor
-                .search_result_limit,
+                .search
+                .result_limit,
             limit
         );
     }

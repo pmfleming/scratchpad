@@ -84,7 +84,7 @@ fn sync_active_search_cursor(app: &mut ScratchpadApp) {
     }
 }
 
-pub(super) fn refresh_search_visual_state(app: &mut ScratchpadApp) {
+pub(crate) fn refresh_search_visual_state(app: &mut ScratchpadApp) {
     sync_search_result_group_activity(app);
     apply_search_highlights(app);
 }
@@ -100,10 +100,6 @@ pub(crate) fn select_next_active_buffer_match_from(app: &mut ScratchpadApp, mini
         app,
         active_buffer_match_index_at_or_after(app, minimum_start),
     );
-}
-
-pub(super) fn select_first_match_in_active_buffer(app: &mut ScratchpadApp) {
-    set_active_search_index(app, active_buffer_match_index_at_or_after(app, 0));
 }
 
 fn sync_search_result_group_activity(app: &mut ScratchpadApp) {
@@ -164,6 +160,7 @@ pub(super) struct ReplacementPreviewCache {
         String,
         String,
         crate::app::services::search::SearchOptions,
+        bool,
     )>,
     program: Option<SearchProgram>,
     buffers: std::collections::HashMap<
@@ -179,6 +176,7 @@ fn search_replacement_previews_for_tab(
     app: &mut ScratchpadApp,
     tab_index: usize,
 ) -> Vec<(ViewId, SearchReplacementPreview)> {
+    let selection = super::selection::resolve(app);
     let state = &mut app.state.search_state;
     let options = state.search_options();
     let cache = &mut state.replacement_previews;
@@ -186,22 +184,22 @@ fn search_replacement_previews_for_tab(
         *cache = ReplacementPreviewCache::default();
         return Vec::new();
     }
-    let current =
-        cache
-            .key
-            .as_ref()
-            .is_some_and(|(generation, query, replacement, cached_options)| {
-                *generation == state.runtime.applied_generation
-                    && *query == state.query.query
-                    && *replacement == state.query.replacement
-                    && *cached_options == options
-            });
+    let current = cache.key.as_ref().is_some_and(
+        |(generation, query, replacement, cached_options, preserve)| {
+            *generation == state.runtime.applied_generation
+                && *query == state.query.query
+                && *replacement == state.query.replacement
+                && *cached_options == options
+                && *preserve == state.query.preserve_case
+        },
+    );
     if !current {
         cache.key = Some((
             state.runtime.applied_generation,
             state.query.query.clone(),
             state.query.replacement.clone(),
             options,
+            state.query.preserve_case,
         ));
         cache.program = SearchProgram::compile(&state.query.query, options).ok();
         cache.buffers.clear();
@@ -232,18 +230,17 @@ fn search_replacement_previews_for_tab(
                         && matched.target_revision == buffer.document_revision()
                 })
                 .map(|matched| {
-                    let replacement =
-                        if options.mode == crate::app::services::search::SearchMode::PlainText {
-                            state.query.replacement.clone()
-                        } else {
-                            let text = matched.matched_text.clone().unwrap_or_else(|| {
-                                buffer
-                                    .document()
-                                    .piece_tree()
-                                    .extract_range(matched.range.clone())
-                            });
-                            program.expand_replacement(&text, &state.query.replacement)?
-                        };
+                    let replacement = super::replace::expand_for_buffer_in_range(
+                        program,
+                        buffer,
+                        &matched.range,
+                        &state.query.replacement,
+                        state.query.preserve_case,
+                        selection
+                            .as_ref()
+                            .filter(|(_, id, _, _)| *id == buffer.id)
+                            .map(|(_, _, _, r)| r.clone()),
+                    )?;
                     Ok(SearchReplacementPreviewEntry {
                         range: matched.range.clone(),
                         replacement,

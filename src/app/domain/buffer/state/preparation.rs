@@ -359,6 +359,29 @@ impl BufferState {
 }
 
 impl PreparedText {
+    pub(crate) fn transformed_range(&self, range: Range<usize>) -> Range<usize> {
+        let mut start = range.start;
+        let mut end = range.end;
+        for (edit, inserted) in &self.changes {
+            if start >= edit.end && start != edit.start {
+                start = start.saturating_sub(edit.len()).saturating_add(*inserted);
+            } else if start > edit.start {
+                start = edit.start;
+            }
+            if end >= edit.end {
+                end = end.saturating_sub(edit.len()).saturating_add(*inserted);
+            } else if end >= edit.start {
+                end = edit.start + inserted;
+            }
+        }
+        start..end
+    }
+
+    pub(crate) fn rebase_after_preflight(mut self, base: HistoryToken) -> Self {
+        self.base = base;
+        self
+    }
+
     pub(crate) fn transformed_selection(
         &self,
         view: u64,

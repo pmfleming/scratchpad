@@ -16,7 +16,7 @@ pub struct DocumentChunk {
 /// A revision number alone is not an identity: replacing a document resets it.
 /// A shared logical revision survives anchor-only COW; edits and divergent clones
 /// get a fresh identity. Weak ownership prevents address reuse without retaining text.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct SnapshotRevision {
     tree: Weak<()>,
     generation: u64,

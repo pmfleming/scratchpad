@@ -145,9 +145,6 @@ impl SettingsUi {
     pub(super) fn control_bg(ui: &egui::Ui) -> egui::Color32 {
         Self::palette(ui).map_or_else(|| theme::action_hover_bg(ui), |palette| palette.control)
     }
-    pub(super) fn icon_color(ui: &egui::Ui) -> egui::Color32 {
-        super::text_muted(ui)
-    }
     /// Foreground, resting border, and hover fill for destructive actions.
     pub(super) fn destructive_colors(dark: bool) -> [egui::Color32; 3] {
         let colors = if dark {

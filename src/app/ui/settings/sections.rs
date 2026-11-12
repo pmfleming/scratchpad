@@ -9,7 +9,7 @@ struct Category {
     render: fn(&mut egui::Ui, &mut ScratchpadApp),
 }
 
-const CATEGORIES: [Category; 5] = [
+const CATEGORIES: [Category; 6] = [
     Category {
         key: "appearance",
         title: "Appearance",
@@ -25,6 +25,13 @@ const CATEGORIES: [Category; 5] = [
         render: super::text_formatting::render_editing,
     },
     Category {
+        key: "search",
+        title: "Search",
+        subtitle: "Results and replace",
+        search: "search result limit matches unlimited default scope preserve case recent searches review threshold files changed",
+        render: super::search_options::render,
+    },
+    Category {
         key: "workspace",
         title: "Workspace",
         subtitle: "Tabs and files",
@@ -35,7 +42,7 @@ const CATEGORIES: [Category; 5] = [
         key: "history",
         title: "History",
         subtitle: "Recovery and storage",
-        search: "recovery retained documents closed tabs branches Now changes undo memory cache per-file total recommended search result limit matches unlimited saving fails failure automatic disk usage payloads database journal settings reusable references",
+        search: "recovery retained documents closed tabs branches Now changes undo memory cache per-file total recommended saving fails failure automatic disk usage payloads database journal settings reusable references",
         render: super::recovery::render_recovery_category,
     },
     Category {
@@ -139,8 +146,8 @@ mod tests {
             ("auto-hide", "workspace"),
             ("gutter", "editors"),
             ("branches", "history"),
-            ("search result limit", "history"),
-            ("unlimited", "history"),
+            ("search result limit", "search"),
+            ("unlimited", "search"),
             ("failure", "history"),
             ("font size", "appearance"),
             ("toml", "application"),

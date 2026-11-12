@@ -141,6 +141,11 @@ impl SearchProgram {
     }
 
     pub fn compile(query: &str, options: SearchOptions) -> Result<Self, SearchError> {
+        // Compile first so malformed patterns retain their error and position.
+        let regex = match options.mode {
+            SearchMode::PlainText => None,
+            SearchMode::Regex => Some(compile_regex(query, options)?),
+        };
         let max_match_chars = match options.mode {
             SearchMode::PlainText => query.chars().count(),
             SearchMode::Regex => regex_max_match_chars(query).ok_or_else(|| {
@@ -148,10 +153,6 @@ impl SearchProgram {
                     "Regex search requires a bounded maximum match length.".to_owned(),
                 )
             })?,
-        };
-        let regex = match options.mode {
-            SearchMode::PlainText => None,
-            SearchMode::Regex => Some(compile_regex(query, options)?),
         };
         Ok(Self {
             query: query.to_owned(),
@@ -182,14 +183,28 @@ impl SearchProgram {
         matched_text: &str,
         replacement: &str,
     ) -> Result<String, SearchError> {
+        self.expand_replacement_at(matched_text, 0..matched_text.len(), replacement)
+    }
+
+    /// The range is in bytes within the original context. Assertions and
+    /// captures must agree with the exact match that was reviewed.
+    pub fn expand_replacement_at(
+        &self,
+        context: &str,
+        range: Range<usize>,
+        replacement: &str,
+    ) -> Result<String, SearchError> {
         let Some(regex) = &self.regex else {
             return Ok(replacement.to_owned());
         };
-        let Some(captures) = regex.captures(matched_text) else {
-            return Err(SearchError::ReplacementMismatch(
-                "Regex replacement could not be expanded for stale search results.".to_owned(),
-            ));
-        };
+        let captures = regex
+            .captures_at(context, range.start)
+            .filter(|c| c.get(0).is_some_and(|m| m.range() == range))
+            .ok_or_else(|| {
+                SearchError::ReplacementMismatch(
+                    "Search results changed; refresh before replacing.".into(),
+                )
+            })?;
         let mut expanded = String::new();
         captures.expand(replacement, &mut expanded);
         Ok(expanded)
@@ -477,7 +492,7 @@ mod tests {
             match_case: true,
             whole_word: false,
         };
-        for query in ["a*", "["] {
+        for query in ["a*"] {
             let error = validate_search_query(query, options).unwrap();
             assert!(matches!(error, SearchError::UnsupportedRegex(_)));
             assert!(!error.message().is_empty());
@@ -515,4 +530,38 @@ mod tests {
         assert!(!clone.reserve_result_matches(1));
         assert!(program.result_limit_exceeded());
     }
+}
+
+/// Match the source's uniform lower, upper or title case. Mixed case and
+/// uncased text leave the user's replacement unchanged.
+pub(crate) fn preserve_replacement_case(source: &str, replacement: &str) -> String {
+    let letters: Vec<_> = source
+        .chars()
+        .filter(|c| c.is_lowercase() || c.is_uppercase())
+        .collect();
+    if letters.is_empty() {
+        return replacement.to_owned();
+    }
+    if letters.iter().all(|c| c.is_uppercase()) {
+        return replacement.to_uppercase();
+    }
+    if letters.iter().all(|c| c.is_lowercase()) {
+        return replacement.to_lowercase();
+    }
+    if letters[0].is_uppercase() && letters[1..].iter().all(|c| c.is_lowercase()) {
+        let mut first = true;
+        return replacement
+            .to_lowercase()
+            .chars()
+            .flat_map(|c| {
+                if first && (c.is_lowercase() || c.is_uppercase()) {
+                    first = false;
+                    c.to_uppercase().collect::<Vec<_>>()
+                } else {
+                    vec![c]
+                }
+            })
+            .collect();
+    }
+    replacement.to_owned()
 }

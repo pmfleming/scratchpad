@@ -31,6 +31,7 @@ pub(super) struct SearchResult {
     pub(super) status: SearchStatus,
 }
 
+#[derive(Clone)]
 pub(super) struct SearchTargetSnapshot {
     pub(super) file_identity: SearchFileIdentity,
     pub(super) tab_index: usize,

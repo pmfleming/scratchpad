@@ -23,7 +23,7 @@ const SETTINGS: &[(&str, &str, &str)] = &[
         "search highlight colour color",
     ),
     (
-        "history",
+        "search",
         "Search result limit",
         "search matches memory budget recommended unlimited",
     ),

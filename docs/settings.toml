@@ -8,7 +8,6 @@
 appearance_source = "app"       # app, system
 font_size = 14.0
 word_wrap = true
-search_result_limit = 100000    # minimum 50000; or "unlimited"
 editor_gutter = 0
 editor_tab_width = 4
 indentation_style = "tab_character" # spaces, tab_character
@@ -44,6 +43,14 @@ maximized = false
 # Values are bytes. These defaults represent one possible memory-derived
 # budget; use Settings -> History & Recovery -> Undo memory -> Reset to auto to calculate
 # suitable values for the current machine.
+[search]
+default_scope = "last_used"  # last_used, file, tab, all_tabs; selected text uses Selection
+preserve_case = false
+recent_searches = 20         # 0 disables and clears recent queries
+result_limit = 100000        # minimum 50000; or "unlimited"
+review_files_above = 1       # review when exceeded; or "unlimited"
+review_matches_above = 100   # either threshold can trigger review
+
 [history]
 per_file_byte_budget = 67108864
 aggregate_byte_budget = 536870912

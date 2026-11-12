@@ -436,3 +436,54 @@ mod batching_tests {
         }
     }
 }
+
+/// A bounded prefix for display after the normal global budget is exceeded.
+/// Each scan window remains bounded; overlapping chunks never duplicate hits.
+pub(super) fn search_target_prefix(
+    snapshot: &DocumentSnapshot,
+    search_range: Option<Range<usize>>,
+    program: &SearchProgram,
+    generation: u64,
+    latest_generation: &AtomicU64,
+    limit: usize,
+) -> Option<Vec<Range<usize>>> {
+    let range = search_range.unwrap_or(0..snapshot.document_length().chars);
+    let context = FragmentSearchContext {
+        snapshot,
+        program,
+        generation,
+        latest_generation,
+        intra_parallelism: 1,
+    };
+    let plan = fragment_search_plan(&context, range);
+    let mut matches = Vec::new();
+    for chunk in plan.chunks {
+        if latest_generation.load(Ordering::Relaxed) != generation {
+            return None;
+        }
+        let (text, offset) = snapshot
+            .try_search_text(Some(chunk.window_range.clone()))
+            .ok()?;
+        let outcome = search::search_program_interruptible(&text, program, || {
+            latest_generation.load(Ordering::Relaxed) == generation
+        })?;
+        for range in outcome.matches {
+            let range = range.start + offset..range.end + offset;
+            let in_core = chunk.core_range.contains(&range.start)
+                || plan
+                    .final_boundary
+                    .is_some_and(|end| chunk.core_range.end == end && range.start == end);
+            if in_core
+                && matches
+                    .last()
+                    .is_none_or(|previous: &Range<usize>| previous.end <= range.start)
+            {
+                if matches.len() == limit {
+                    return Some(matches);
+                }
+                matches.push(range);
+            }
+        }
+    }
+    Some(matches)
+}

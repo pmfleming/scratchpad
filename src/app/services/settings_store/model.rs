@@ -238,7 +238,7 @@ pub struct WindowState {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EditorSettings {
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub search_result_limit: SearchResultLimit,
     #[serde(default)]
     pub appearance_source: EditorAppearanceSource,
@@ -397,6 +397,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub editor: EditorSettings,
     #[serde(default)]
+    pub search: SearchSettings,
+    #[serde(default)]
     pub workspace: WorkspaceSettings,
     #[serde(default)]
     pub ui: UiSettings,
@@ -551,10 +553,7 @@ mod search_limit_tests {
     #[test]
     fn search_limit_defaults_and_persistence_preserve_the_user_choice() {
         let defaults: AppSettings = toml::from_str("").unwrap();
-        assert_eq!(
-            defaults.editor.search_result_limit,
-            SearchResultLimit::Recommended
-        );
+        assert_eq!(defaults.search.result_limit, SearchResultLimit::Recommended);
         for limit in [
             SearchResultLimit::Recommended,
             SearchResultLimit::Unlimited,
@@ -563,10 +562,10 @@ mod search_limit_tests {
             SearchResultLimit::from_matches(10_000_000),
         ] {
             let mut settings = AppSettings::default();
-            settings.editor.search_result_limit = limit;
+            settings.search.result_limit = limit;
             let text = toml::to_string(&settings).unwrap();
             let restored: AppSettings = toml::from_str(&text).unwrap();
-            assert_eq!(restored.editor.search_result_limit, limit);
+            assert_eq!(restored.search.result_limit, limit);
         }
         assert_eq!(SearchResultLimit::Unlimited.max_matches(), usize::MAX);
         for (value, expected) in [
@@ -578,6 +577,58 @@ mod search_limit_tests {
             let restored: AppSettings =
                 toml::from_str(&format!("[editor]\nsearch_result_limit = {value}")).unwrap();
             assert_eq!(restored.editor.search_result_limit, expected);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultSearchScope {
+    #[default]
+    LastUsed,
+    File,
+    Tab,
+    AllTabs,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ReviewThreshold {
+    Count(usize),
+    Unlimited(UnlimitedThreshold),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnlimitedThreshold {
+    Unlimited,
+}
+impl ReviewThreshold {
+    pub const UNLIMITED: Self = Self::Unlimited(UnlimitedThreshold::Unlimited);
+    #[must_use]
+    pub fn exceeded(self, count: usize) -> bool {
+        matches!(self, Self::Count(limit) if count > limit)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SearchSettings {
+    pub default_scope: DefaultSearchScope,
+    pub preserve_case: bool,
+    pub recent_searches: usize,
+    pub result_limit: SearchResultLimit,
+    pub review_files_above: ReviewThreshold,
+    pub review_matches_above: ReviewThreshold,
+}
+impl Default for SearchSettings {
+    fn default() -> Self {
+        Self {
+            default_scope: DefaultSearchScope::LastUsed,
+            preserve_case: false,
+            recent_searches: 20,
+            result_limit: SearchResultLimit::Recommended,
+            review_files_above: ReviewThreshold::Count(1),
+            review_matches_above: ReviewThreshold::Count(100),
         }
     }
 }

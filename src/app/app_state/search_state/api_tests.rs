@@ -374,6 +374,7 @@ fn seed_matches_for_plan_lines(app: &mut ScratchpadApp, ranges: &[Range<usize>])
             buffer_id: buffer.id,
             buffer_label: buffer.display_name().into(),
             target_revision: buffer.document_revision(),
+            target_identity: buffer.document_snapshot().revision_key(),
             matched_text: None,
             range,
         })
@@ -403,6 +404,7 @@ fn seed_search_matches(app: &mut ScratchpadApp, query: &str) {
             buffer_id: buffer.id,
             buffer_label: buffer.display_name().into(),
             target_revision: buffer.document_revision(),
+            target_identity: buffer.document_snapshot().revision_key(),
             matched_text: None,
             range,
         })
@@ -564,4 +566,262 @@ fn replacement_previews_share_storage_and_invalidate_on_edits_and_options() {
     assert_ne!(edited.entries().as_ptr(), replacement.entries().as_ptr());
     app.toggle_search();
     assert!(active_view_replacement_preview(&app).is_none());
+}
+
+#[test]
+fn context_sensitive_regex_replacements_and_case_preservation() {
+    for (text, pattern, replacement, expected) in [
+        ("foo foo", r"\B(o{2})", "$1!", "foo! foo!"),
+        ("é foo", r"\b(foo)", "${1}x", "é foox"),
+        ("foo\nfoo", r"(?m)^(foo)$", "<$1>", "<foo>\n<foo>"),
+    ] {
+        let mut app = app_with_search_text(text);
+        super::api::open_search_and_replace(&mut app);
+        super::api::set_search_mode(&mut app, crate::app::services::search::SearchMode::Regex);
+        super::api::set_search_query(&mut app, pattern);
+        super::api::set_search_replacement(&mut app, replacement);
+        wait_for_search_results(&mut app);
+        assert!(app.replace_all_search_matches());
+        wait_for_search_results(&mut app);
+        assert_eq!(active_buffer_text(&app), expected, "{pattern}");
+    }
+    let mut app = app_with_search_text("needle Needle NEEDLE nEeDlE");
+    super::api::open_search_and_replace(&mut app);
+    super::api::set_search_query(&mut app, "needle");
+    super::api::set_search_replacement(&mut app, "thread");
+    app.state.search_state.query.preserve_case = true;
+    wait_for_search_results(&mut app);
+    assert!(app.replace_all_search_matches());
+    wait_for_search_results(&mut app);
+    assert_eq!(active_buffer_text(&app), "thread Thread THREAD thread");
+}
+
+#[test]
+fn locked_selection_survives_navigation_and_replacement() {
+    let mut app = app_with_search_text("foo foo foo");
+    let tab = app.tab_manager.active_tab_mut().unwrap();
+    let id = tab.layout.active_view_id();
+    let (buffer, view) = tab.buffer_and_view_mut(id).unwrap();
+    view.set_cursor_range_anchored(buffer, crate::app::domain::CursorRange::two(0, 7));
+    super::api::open_search_and_replace(&mut app);
+    super::api::set_search_query(&mut app, "foo");
+    super::api::set_search_replacement(&mut app, "longer");
+    wait_for_search_results(&mut app);
+    assert_eq!(app.search_match_count(), 2);
+    assert_eq!(super::selection::resolve(&app).unwrap().3, 0..7);
+    assert!(super::replace::replace_current_search_match(&mut app));
+    wait_for_search_results(&mut app);
+    assert_eq!(active_buffer_text(&app), "longer foo foo");
+    assert_eq!(super::selection::resolve(&app).unwrap().3, 0..10);
+    assert_eq!(app.search_match_count(), 1);
+    assert!(app.replace_all_search_matches());
+    wait_for_search_results(&mut app);
+    assert_eq!(active_buffer_text(&app), "longer longer foo");
+    assert_eq!(super::selection::resolve(&app).unwrap().3, 0..13);
+}
+
+#[test]
+fn review_holds_exact_plan_exclusions_and_grouped_undo() {
+    use crate::app::services::session_store::activity::ActivityKind;
+    let mut app = app_with_search_text("foo foo foo");
+    super::api::open_search_and_replace(&mut app);
+    super::api::set_search_query(&mut app, "foo");
+    super::api::set_search_replacement(&mut app, "bar");
+    wait_for_search_results(&mut app);
+    app.state.app_settings.search.review_matches_above =
+        crate::app::services::settings_store::ReviewThreshold::Count(0);
+    app.state.search_state.replace.excluded.insert(1);
+    assert!(!app.replace_all_search_matches());
+    let review = app
+        .state
+        .search_state
+        .replace
+        .pending_replace_all_confirmation
+        .as_ref()
+        .unwrap();
+    assert_eq!(review.total_match_count, 2);
+    assert_eq!(review.plan.targets[0].replacements.len(), 2);
+    assert!(app.replace_all_search_matches());
+    wait_for_search_results(&mut app);
+    assert_eq!(active_buffer_text(&app), "bar foo bar");
+    let (operation, files) = app.state.search_state.replace.last_operation.unwrap();
+    assert_eq!(files, 1);
+    assert!(app.state.persistence.pending_activity.iter().any(|e| matches!(e.kind, ActivityKind::ReplaceAll { operation_id, matches: 2, .. } if operation_id == operation)));
+    assert!(super::replace::transaction::undo(
+        &mut app, operation, files
+    ));
+    assert_eq!(active_buffer_text(&app), "foo foo foo");
+}
+
+#[test]
+fn unlimited_thresholds_skip_review_but_stale_preparation_changes_nothing() {
+    let mut app = app_with_search_text(&"foo ".repeat(400));
+    super::api::open_search_and_replace(&mut app);
+    super::api::set_search_query(&mut app, "foo");
+    super::api::set_search_replacement(&mut app, "bar");
+    app.state.app_settings.search.review_files_above =
+        crate::app::services::settings_store::ReviewThreshold::UNLIMITED;
+    app.state.app_settings.search.review_matches_above =
+        crate::app::services::settings_store::ReviewThreshold::UNLIMITED;
+    wait_for_search_results(&mut app);
+    assert!(app.replace_all_search_matches());
+    assert!(app.state.search_state.replace.pending.is_some());
+    assert!(app.state.search_state.replace.last_operation.is_none());
+    let buffer = &mut app.tab_manager.active_tab_mut().unwrap().buffers.buffer;
+    buffer
+        .replace_char_ranges_with_undo(
+            &[(0..3, "edit".into())],
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+    for _ in 0..500 {
+        super::replace::transaction::poll(&mut app);
+        if app.state.search_state.replace.pending.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(app.state.search_state.replace.pending.is_none());
+    assert!(active_buffer_text(&app).starts_with("edit foo"));
+    assert!(!active_buffer_text(&app).contains("bar"));
+    assert!(app.state.search_state.replace.last_operation.is_none());
+}
+
+#[test]
+fn result_limit_keeps_bounded_previews_and_reviews_every_replacement() {
+    let mut app = app_with_search_text(&"foo ".repeat(50_002));
+    app.state.app_settings.search.result_limit =
+        crate::app::services::settings_store::SearchResultLimit::from_matches(50_000);
+    app.state.app_settings.search.review_files_above =
+        crate::app::services::settings_store::ReviewThreshold::UNLIMITED;
+    app.state.app_settings.search.review_matches_above =
+        crate::app::services::settings_store::ReviewThreshold::UNLIMITED;
+    super::api::open_search_and_replace(&mut app);
+    super::api::set_search_query(&mut app, "foo");
+    super::api::set_search_replacement(&mut app, "bar");
+    wait_for_search_results(&mut app);
+    assert_eq!(app.search_match_count(), 50_000);
+    assert!(matches!(
+        app.state.search_state.runtime.status,
+        super::SearchStatus::Error(_)
+    ));
+    assert!(app.replace_all_search_matches());
+    for _ in 0..30000 {
+        super::replace::limited::poll(&mut app);
+        if app.state.search_state.replace.planning.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(app.state.search_state.replace.planning.is_none());
+    assert_eq!(
+        app.state
+            .search_state
+            .replace
+            .pending_replace_all_confirmation
+            .as_ref()
+            .unwrap()
+            .total_match_count,
+        50_002
+    );
+    assert!(active_buffer_text(&app).starts_with("foo"));
+    assert!(app.replace_all_search_matches());
+    for _ in 0..30000 {
+        super::replace::transaction::poll(&mut app);
+        if app.state.search_state.replace.pending.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(app.state.search_state.replace.pending.is_none());
+    assert_eq!(active_buffer_text(&app), "bar ".repeat(50_002));
+}
+
+#[test]
+fn multi_file_replace_is_atomic_and_undo_refuses_to_discard_later_work() {
+    let mut app = app_with_search_text("foo first");
+    crate::app::app_state::workspace_controller::append_tab(
+        &mut app,
+        WorkspaceTab::new(BufferState::new(
+            "second.txt".into(),
+            "foo second".into(),
+            None,
+        )),
+    );
+    super::api::open_search_and_replace(&mut app);
+    super::api::set_search_scope(&mut app, super::SearchScope::AllOpenTabs);
+    super::api::set_search_query(&mut app, "foo");
+    super::api::set_search_replacement(&mut app, "bar");
+    wait_for_search_results(&mut app);
+    assert!(!app.replace_all_search_matches());
+    assert!(app.replace_all_search_matches());
+    let (operation, files) = app.state.search_state.replace.last_operation.unwrap();
+    assert!(super::replace::transaction::can_undo(
+        &app, operation, files
+    ));
+    assert!(super::replace::transaction::undo(
+        &mut app, operation, files
+    ));
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[0].active_buffer().text(),
+        "foo first"
+    );
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[1].active_buffer().text(),
+        "foo second"
+    );
+    wait_for_search_results(&mut app);
+    assert!(!app.replace_all_search_matches());
+    assert!(app.replace_all_search_matches());
+    let (operation, files) = app.state.search_state.replace.last_operation.unwrap();
+    app.tab_manager.tabs.as_mut_slice()[1]
+        .active_buffer_mut()
+        .replace_char_ranges_with_undo(
+            &[(0..3, "new".into())],
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+    assert!(!super::replace::transaction::undo(
+        &mut app, operation, files
+    ));
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[0].active_buffer().text(),
+        "bar first"
+    );
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[1].active_buffer().text(),
+        "new second"
+    );
+}
+
+#[test]
+fn stale_replacement_preview_rejects_old_identity_and_out_of_scope_ranges() {
+    let mut app = app_with_search_text("foo foo");
+    seed_search_matches(&mut app, "foo");
+    let matched = app.state.search_state.results.matches[0].clone();
+    let buffer = app.tab_manager.active_tab().unwrap().active_buffer();
+    let program = crate::app::services::search::SearchProgram::compile(
+        "foo",
+        app.state.search_state.search_options(),
+    )
+    .unwrap();
+    assert!(
+        super::replace::expand_for_buffer_in_range(
+            &program,
+            buffer,
+            &(0..3),
+            "bar",
+            false,
+            Some(4..7)
+        )
+        .is_err()
+    );
+    app.tab_manager
+        .active_tab_mut()
+        .unwrap()
+        .active_buffer_mut()
+        .replace_text("different".into());
+    assert!(super::replace::replacement_for_match(&app, &matched).is_err());
 }

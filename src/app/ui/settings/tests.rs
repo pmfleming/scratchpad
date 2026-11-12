@@ -25,7 +25,7 @@ pub(super) fn setup(ctx: &egui::Context) {
 }
 
 #[test]
-fn settings_have_five_independent_categories_without_nested_disclosures() {
+fn settings_have_six_independent_categories_without_nested_disclosures() {
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1100.0, 6000.0))
         .with_context_setup(setup)
@@ -40,18 +40,19 @@ fn settings_have_five_independent_categories_without_nested_disclosures() {
         harness
             .get_all_by_role(egui::Role::DisclosureTriangle)
             .count(),
-        5
+        6
     );
     for label in [
         "Appearance",
         "Editors",
+        "Search",
         "Workspace",
         "History",
         "Application",
     ] {
         harness.get_by_role_and_label(egui::Role::DisclosureTriangle, label);
     }
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 7);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 10);
     for label in ["Memory per file", "Memory across all files"] {
         harness.get_by_role_and_label(egui::Role::Slider, label);
     }
@@ -117,12 +118,12 @@ fn search_reveals_matching_groups_without_losing_collapse_state() {
         harness
             .get_all_by_role(egui::Role::DisclosureTriangle)
             .count(),
-        5
+        6
     );
     assert!(harness.query_by_role(egui::Role::Slider).is_none());
     harness.get_by_label("Expand all").click_accesskit();
     harness.run_steps(2);
-    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 7);
+    assert_eq!(harness.get_all_by_role(egui::Role::Slider).count(), 10);
 }
 
 #[test]
@@ -216,7 +217,7 @@ fn controls_share_right_edge_and_sliders_align_within_their_groups() {
             );
         }
         let cards = settings_card_measurements();
-        assert_eq!(cards.len(), 5, "no nested cards");
+        assert_eq!(cards.len(), 6, "no nested cards");
         for card in &cards {
             assert!(
                 card.right_x <= width + 1.0,
@@ -726,7 +727,7 @@ fn rendering_byte_budgets_does_not_round_or_clamp_stored_values() {
     let mut app = app();
     app.state.app_settings.history.budget.per_file_byte_budget = 64 * 1024 * 1024 + 123;
     app.state.app_settings.history.failure_ram.bytes += 123;
-    app.state.app_settings.editor.search_result_limit =
+    app.state.app_settings.search.result_limit =
         crate::app::services::settings_store::SearchResultLimit::from_matches(300_000);
     let original = app.state.app_settings.clone();
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {

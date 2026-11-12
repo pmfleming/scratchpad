@@ -72,6 +72,7 @@ pub(super) fn reopen(ctx: &egui::Context, app: &mut ScratchpadApp, file: Archive
         ctx,
         app,
         super::timeline::Action {
+            operation: None,
             document: file.temp_id,
             node: None,
             inspect: true,

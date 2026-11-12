@@ -42,6 +42,9 @@ pub(super) fn consume_text_input_keys(
     actions: &mut SearchStripActions,
     input_kind: TextInputKind,
 ) {
+    if ui.input(|i| i.modifiers.ctrl && i.modifiers.shift) {
+        return;
+    }
     if consume_key(ui, egui::Modifiers::CTRL, egui::Key::Enter) {
         apply_text_input_shortcut(actions, input_kind, TextInputShortcut::CtrlEnter);
     } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Enter) {
@@ -90,6 +93,9 @@ fn consume_search_option_shortcuts(ui: &mut egui::Ui, state: &mut SearchStripSta
     }
     if consume_key(ui, egui::Modifiers::ALT, egui::Key::C) {
         state.match_case = !state.match_case;
+    }
+    if consume_key(ui, egui::Modifiers::ALT, egui::Key::P) {
+        state.preserve_case = !state.preserve_case;
     }
     if consume_key(ui, egui::Modifiers::ALT, egui::Key::W) {
         state.whole_word = !state.whole_word;
