@@ -13,6 +13,13 @@ enum HighlightKind {
     SearchPassive,
 }
 
+/// Indexed by `HighlightKind as usize`.
+const HIGHLIGHT_PRIORITY: [HighlightKind; 3] = [
+    HighlightKind::Selection,
+    HighlightKind::SearchActive,
+    HighlightKind::SearchPassive,
+];
+
 #[derive(Clone)]
 struct TextHighlightRange {
     range: Range<usize>,
@@ -158,7 +165,7 @@ fn visit_highlight_segments(
         }
     }
     events.sort_unstable_by_key(|event| event.0);
-    let mut active = [0_i32; 3];
+    let mut active = [0_i32; HIGHLIGHT_PRIORITY.len()];
     let mut position = 0;
     let mut index = 0;
     while position < len {
@@ -168,15 +175,11 @@ fn visit_highlight_segments(
             index += 1;
         }
         let end = events.get(index).map_or(len, |event| event.0);
-        let kind = if active[0] > 0 {
-            Some(HighlightKind::Selection)
-        } else if active[1] > 0 {
-            Some(HighlightKind::SearchActive)
-        } else if active[2] > 0 {
-            Some(HighlightKind::SearchPassive)
-        } else {
-            None
-        };
+        // Overlapping highlights resolve in discriminant order: selection first.
+        let kind = active
+            .iter()
+            .position(|count| *count > 0)
+            .map(|index| HIGHLIGHT_PRIORITY[index]);
         visit(position..end, kind);
         position = end;
     }

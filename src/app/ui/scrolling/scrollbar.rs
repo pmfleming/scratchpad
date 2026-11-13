@@ -221,24 +221,18 @@ fn paint_scrollbar(
     } else {
         &visuals.widgets.inactive
     };
-    let track_color = visuals.extreme_bg_color.gamma_multiply(if interactive {
-        SCROLLBAR_ACTIVE_BACKGROUND_OPACITY
+    // Dormant scrollbars hide the track and draw a thin, translucent thumb.
+    let (track_opacity, thumb_opacity, visual_thumb_rect) = if interactive {
+        (SCROLLBAR_ACTIVE_BACKGROUND_OPACITY, 1.0, thumb_rect)
     } else {
-        0.0
-    });
-    let thumb_color = widget_visuals
-        .fg_stroke
-        .color
-        .gamma_multiply(if interactive {
-            1.0
-        } else {
-            SCROLLBAR_DORMANT_HANDLE_OPACITY
-        });
-    let visual_thumb_rect = if interactive {
-        thumb_rect
-    } else {
-        axis.thin_thumb_rect(thumb_rect, SCROLLBAR_DORMANT_THICKNESS)
+        (
+            0.0,
+            SCROLLBAR_DORMANT_HANDLE_OPACITY,
+            axis.thin_thumb_rect(thumb_rect, SCROLLBAR_DORMANT_THICKNESS),
+        )
     };
+    let track_color = visuals.extreme_bg_color.gamma_multiply(track_opacity);
+    let thumb_color = widget_visuals.fg_stroke.color.gamma_multiply(thumb_opacity);
 
     ui.painter().add(Shape::rect_filled(
         bar_rect,
