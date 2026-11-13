@@ -57,68 +57,43 @@ fn persists_split_views_and_active_view() {
 }
 
 #[test]
-fn restore_returns_committed_clean_text_before_background_disk_observation() {
-    let directory = tempfile::tempdir().unwrap();
-    let file_path = directory.path().join("tracked.txt");
-    std::fs::write(&file_path, "session").unwrap();
-    let store = SessionStore::new(directory.path().join("session"));
-    let mut buffer = BufferState::new(
-        "tracked.txt".to_owned(),
-        "session".to_owned(),
-        Some(file_path.clone()),
-    );
-    buffer.sync_to_disk_state(Some(DiskFileState {
-        modified_millis: Some(1),
-        len: 7,
-    }));
-    let identity = buffer.temp_id.clone();
+fn restore_returns_committed_text_before_background_disk_observation() {
+    for dirty in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let file_path = directory.path().join("tracked.txt");
+        std::fs::write(&file_path, "session").unwrap();
+        let store = SessionStore::new(directory.path().join("session"));
+        let mut buffer = BufferState::new(
+            "tracked.txt".to_owned(),
+            "session".to_owned(),
+            Some(file_path.clone()),
+        );
+        buffer.is_dirty = dirty;
+        buffer.sync_to_disk_state(Some(DiskFileState {
+            modified_millis: Some(1),
+            len: 7,
+        }));
+        let identity = buffer.temp_id.clone();
+        store
+            .persist(&[WorkspaceTab::new(buffer)], 0, 14.0, true)
+            .unwrap();
+        std::fs::write(&file_path, "disk").unwrap();
+        let restored = store.load().unwrap().unwrap();
 
-    store
-        .persist(&[WorkspaceTab::new(buffer)], 0, 14.0, true)
-        .unwrap();
-    std::fs::write(&file_path, "disk").unwrap();
-    let restored = store.load().unwrap().unwrap();
-
-    let buffer = &restored.tabs[0].buffers.buffer;
-    assert_eq!(buffer.text(), "session");
-    assert_eq!(buffer.temp_id, identity);
-    assert_eq!(buffer.freshness, BufferFreshness::InSync);
-    assert_eq!(
-        buffer.document().history_entries().last().unwrap().source,
-        scratchpad::app::domain::PieceSource::Load
-    );
-    let mut document = buffer.document().clone();
-    document.undo_last_operation().unwrap();
-    assert_eq!(document.extract_text(), "");
-    assert_eq!(std::fs::read_to_string(file_path).unwrap(), "disk");
-}
-
-#[test]
-fn restore_keeps_dirty_session_text_before_background_disk_observation() {
-    let directory = tempfile::tempdir().unwrap();
-    let file_path = directory.path().join("tracked.txt");
-    std::fs::write(&file_path, "session").unwrap();
-    let store = SessionStore::new(directory.path().join("session"));
-    let mut buffer = BufferState::new(
-        "tracked.txt".to_owned(),
-        "session".to_owned(),
-        Some(file_path.clone()),
-    );
-    buffer.is_dirty = true;
-    buffer.sync_to_disk_state(Some(DiskFileState {
-        modified_millis: Some(1),
-        len: 7,
-    }));
-
-    store
-        .persist(&[WorkspaceTab::new(buffer)], 0, 14.0, true)
-        .unwrap();
-    std::fs::write(&file_path, "disk").unwrap();
-    let restored = store.load().unwrap().unwrap();
-
-    assert_eq!(restored.tabs[0].buffers.buffer.text(), "session");
-    assert_eq!(
-        restored.tabs[0].buffers.buffer.freshness,
-        BufferFreshness::InSync
-    );
+        let buffer = &restored.tabs[0].buffers.buffer;
+        assert_eq!(buffer.text(), "session", "dirty: {dirty}");
+        assert_eq!(buffer.freshness, BufferFreshness::InSync, "dirty: {dirty}");
+        assert_eq!(std::fs::read_to_string(&file_path).unwrap(), "disk");
+        if dirty {
+            continue;
+        }
+        assert_eq!(buffer.temp_id, identity);
+        assert_eq!(
+            buffer.document().history_entries().last().unwrap().source,
+            scratchpad::app::domain::PieceSource::Load
+        );
+        let mut document = buffer.document().clone();
+        document.undo_last_operation().unwrap();
+        assert_eq!(document.extract_text(), "");
+    }
 }
