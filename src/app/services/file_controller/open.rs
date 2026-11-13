@@ -1,5 +1,6 @@
 use super::FileController;
 use super::support::{LoadedFile, OpenPathDecision};
+use crate::app::CanonicalPathKey;
 use crate::app::app_state::{
     PendingBackgroundAction, PendingOpenTabsAction, ScratchpadApp, StatusDomain,
     workspace::accessors as workspace_accessors,
@@ -9,6 +10,8 @@ use crate::app::diagnostics;
 use crate::app::domain::{BufferId, BufferState, WorkspaceTab};
 use crate::app::services::background_io::{ColdFileShellResult, LoadedPathResult};
 use crate::app::services::file_service::FileService;
+use crate::app::services::session_store::activity::{self, ActivityKind};
+use crate::app::services::session_store::{ColdSessionTab, RetainedTarget};
 use crate::app::utils::summarize_open_results;
 use std::path::{Path, PathBuf};
 
@@ -59,6 +62,13 @@ pub(crate) struct OpenBatchSummary {
     pub(crate) failure_count: usize,
     pub(crate) artifact_count: usize,
     pub(crate) last_artifact_warning: Option<String>,
+}
+
+/// Cold tabs accepted from one shell batch, and the identities they claim.
+struct ColdShellBatch {
+    tabs: Vec<(WorkspaceTab, ColdSessionTab)>,
+    known_documents: std::collections::HashSet<String>,
+    queued_paths: Vec<CanonicalPathKey>,
 }
 
 impl OpenBatchSummary {
@@ -310,72 +320,88 @@ impl FileController {
         selected_path: Option<&Path>,
     ) {
         let mut summary = action.accumulator;
-        let mut tabs = Vec::with_capacity(shells.len());
-        let mut known_documents: std::collections::HashSet<_> = app
-            .tab_manager
-            .tabs
-            .as_slice()
-            .iter()
-            .flat_map(|tab| tab.buffers())
-            .map(|buffer| buffer.temp_id.clone())
-            .collect();
-        let mut queued_paths = std::collections::HashSet::<crate::app::CanonicalPathKey>::new();
+        let mut batch = ColdShellBatch {
+            tabs: Vec::with_capacity(shells.len()),
+            known_documents: app
+                .tab_manager
+                .tabs
+                .as_slice()
+                .iter()
+                .flat_map(|tab| tab.buffers())
+                .map(|buffer| buffer.temp_id.clone())
+                .collect(),
+            queued_paths: Vec::new(),
+        };
         for shell in shells {
             Self::release_pending_open_path(app, &shell.path);
-            let path_key = crate::app::CanonicalPathKey::from_path(&shell.path);
-            if queued_paths.iter().any(|queued| queued.matches(&path_key))
-                || app.tab_manager.find_tab_by_path(&shell.path).is_some()
-            {
-                summary.record_outcome(OpenPathOutcome::AlreadyOpen);
-                continue;
-            }
-            match shell.result {
-                Ok((mut tab, mut cold_tab)) => {
-                    if tab
-                        .buffers()
-                        .any(|buffer| known_documents.contains(&buffer.temp_id))
-                    {
-                        if let Some(buffer) = tab.buffers().find(|buffer| {
-                            buffer
-                                .path
-                                .as_ref()
-                                .is_some_and(|path| crate::app::paths_match(path, &shell.path))
-                        }) {
-                            let document = buffer.temp_id.clone();
-                            app.queue_retained_open(
-                                crate::app::services::session_store::RetainedTarget::Document(
-                                    document.clone(),
-                                ),
-                                Some(document),
-                                None,
-                            );
-                        }
-                        continue;
-                    }
-                    Self::recover_claimed_cold_paths(app, &mut tab, &mut cold_tab);
-                    known_documents.extend(tab.buffers().map(|buffer| buffer.temp_id.clone()));
-                    queued_paths.extend(tab.buffers().filter_map(|buffer| buffer.path_key.clone()));
-                    tabs.push((tab, cold_tab));
-                    summary.record_outcome(OpenPathOutcome::Opened {
-                        artifact_warning: None,
-                    });
-                }
-                Err(error) => {
-                    crate::app::services::session_manager::note_file_refusal(
-                        app,
-                        &shell.path,
-                        &error,
-                    );
-                    diagnostics::record_io_error(
-                        "open_file_shell",
-                        Some(&shell.path),
-                        "file_controller::open",
-                        &std::io::Error::other(error),
-                    );
-                    summary.record_outcome(OpenPathOutcome::Failed);
-                }
-            }
+            Self::accept_cold_file_shell(app, &mut batch, &mut summary, shell);
         }
+        Self::install_cold_file_tabs(app, batch.tabs, selected_path);
+        app.apply_current_tab_ordering();
+        Self::finalize_cold_file_shell_open(app, summary);
+    }
+
+    fn accept_cold_file_shell(
+        app: &mut ScratchpadApp,
+        batch: &mut ColdShellBatch,
+        summary: &mut OpenBatchSummary,
+        shell: ColdFileShellResult,
+    ) {
+        let path_key = CanonicalPathKey::from_path(&shell.path);
+        if batch
+            .queued_paths
+            .iter()
+            .any(|queued| queued.matches(&path_key))
+            || app.tab_manager.find_tab_by_path(&shell.path).is_some()
+        {
+            summary.record_outcome(OpenPathOutcome::AlreadyOpen);
+            return;
+        }
+        let (mut tab, mut cold_tab) = match shell.result {
+            Ok(shell_tab) => shell_tab,
+            Err(error) => {
+                Self::record_open_failure(app, summary, "open_file_shell", &shell.path, &error);
+                return;
+            }
+        };
+        if tab
+            .buffers()
+            .any(|buffer| batch.known_documents.contains(&buffer.temp_id))
+        {
+            // The retained document is already open; reopen it through history.
+            if let Some(buffer) = tab.buffers().find(|buffer| {
+                buffer
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| crate::app::paths_match(path, &shell.path))
+            }) {
+                let document = buffer.temp_id.clone();
+                app.queue_retained_open(
+                    RetainedTarget::Document(document.clone()),
+                    Some(document),
+                    None,
+                );
+            }
+            return;
+        }
+        Self::recover_claimed_cold_paths(app, &mut tab, &mut cold_tab);
+        batch
+            .known_documents
+            .extend(tab.buffers().map(|buffer| buffer.temp_id.clone()));
+        batch
+            .queued_paths
+            .extend(tab.buffers().filter_map(|buffer| buffer.path_key.clone()));
+        batch.tabs.push((tab, cold_tab));
+        summary.record_outcome(OpenPathOutcome::Opened {
+            artifact_warning: None,
+        });
+    }
+
+    fn install_cold_file_tabs(
+        app: &mut ScratchpadApp,
+        tabs: Vec<(WorkspaceTab, ColdSessionTab)>,
+        selected_path: Option<&Path>,
+    ) {
         let documents: Vec<_> = tabs
             .iter()
             .flat_map(|(tab, _)| tab.buffers())
@@ -383,34 +409,41 @@ impl FileController {
             .collect();
         let installed = !tabs.is_empty();
         app.tab_manager.append_cold_file_tabs(tabs);
-        crate::app::services::session_store::activity::record_installed(
-            app,
-            &documents,
-            crate::app::services::session_store::activity::ActivityKind::Opened,
-        );
-        if installed {
-            let index = app.tab_manager.tabs.len() - 1;
-            if let Some((selected, _)) =
-                selected_path.and_then(|path| app.tab_manager.find_tab_by_path(path))
-            {
-                // The selected file arrived first. Restore requested order after
-                // installing the inactive batch without loading it a second time.
-                app.tab_manager.reorder_tab(selected, index);
-            }
-            app.tab_manager.set_active_tab_index_clamped(index);
-            if let Some(cold) = app.tab_manager.cold_session_tabs().get(&index).cloned() {
-                app.queue_session_tab_hydration(index, cold, false);
-            }
-            Self::activate_workspace_after_staged_open(app);
+        activity::record_installed(app, &documents, ActivityKind::Opened);
+        if !installed {
+            return;
         }
-        app.apply_current_tab_ordering();
-        Self::finalize_cold_file_shell_open(app, summary);
+        let index = app.tab_manager.tabs.len() - 1;
+        if let Some((selected, _)) =
+            selected_path.and_then(|path| app.tab_manager.find_tab_by_path(path))
+        {
+            // The selected file arrived first. Restore requested order after
+            // installing the inactive batch without loading it a second time.
+            app.tab_manager.reorder_tab(selected, index);
+        }
+        app.tab_manager.set_active_tab_index_clamped(index);
+        if let Some(cold) = app.tab_manager.cold_session_tabs().get(&index).cloned() {
+            app.queue_session_tab_hydration(index, cold, false);
+        }
+        Self::activate_workspace_after_staged_open(app);
+    }
+
+    fn record_open_failure(
+        app: &mut ScratchpadApp,
+        summary: &mut OpenBatchSummary,
+        operation: &'static str,
+        path: &Path,
+        error: &str,
+    ) {
+        crate::app::services::session_manager::note_file_refusal(app, path, error);
+        diagnostics::record_io_error(operation, Some(path), "file_controller::open", &error);
+        summary.record_outcome(OpenPathOutcome::Failed);
     }
 
     fn recover_claimed_cold_paths(
         app: &ScratchpadApp,
         tab: &mut WorkspaceTab,
-        cold: &mut crate::app::services::session_store::ColdSessionTab,
+        cold: &mut ColdSessionTab,
     ) {
         for buffer in tab.buffers_mut() {
             if buffer
@@ -587,14 +620,7 @@ impl FileController {
                 summary.record_outcome(OpenPathOutcome::Opened { artifact_warning });
             }
             Err(error) => {
-                crate::app::services::session_manager::note_file_refusal(app, &loaded.path, &error);
-                diagnostics::record_io_error(
-                    "open_file",
-                    Some(&loaded.path),
-                    "file_controller::open",
-                    &error,
-                );
-                summary.record_outcome(OpenPathOutcome::Failed);
+                Self::record_open_failure(app, summary, "open_file", &loaded.path, &error);
             }
         }
     }
@@ -620,26 +646,15 @@ impl FileController {
                 };
                 let deferred_refresh = Self::deferred_buffer_refresh(buffer);
                 let document = buffer.temp_id.clone();
-                crate::app::services::session_store::activity::record_installed(
-                    app,
-                    &[document],
-                    crate::app::services::session_store::activity::ActivityKind::Opened,
-                );
+                activity::record_installed(app, &[document], ActivityKind::Opened);
                 app.tab_manager.set_active_tab_index_clamped(tab_index);
                 Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
                 crate::app::app_state::search_runtime::mark_search_dirty(app);
                 summary.record_outcome(OpenPathOutcome::Opened { artifact_warning });
             }
             Err(error) => {
-                crate::app::services::session_manager::note_file_refusal(app, &loaded.path, &error);
-                diagnostics::record_io_error(
-                    "open_large_file",
-                    Some(&loaded.path),
-                    "file_controller::open",
-                    &error,
-                );
                 app.tab_manager.close_tab_internal(tab_index);
-                summary.record_outcome(OpenPathOutcome::Failed);
+                Self::record_open_failure(app, summary, "open_large_file", &loaded.path, &error);
             }
         }
     }
