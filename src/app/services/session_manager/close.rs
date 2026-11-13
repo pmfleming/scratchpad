@@ -21,6 +21,9 @@ impl CloseAfterPersist {
                 .collect(),
         }
     }
+    fn position_in(&self, tabs: &[WorkspaceTab]) -> Option<usize> {
+        tabs.iter().position(|tab| tab.layout_id == self.layout)
+    }
     fn matches(&self, tab: &WorkspaceTab) -> bool {
         self.root == tab.layout.root_pane
             && self.revisions.len() == tab.buffers().count()
@@ -71,13 +74,7 @@ pub(crate) fn poll_close_intents(app: &mut ScratchpadApp) {
     let Some(target) = app.state.persistence.close_queue.pop_front() else {
         return;
     };
-    let Some(index) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .position(|t| t.layout_id == target.layout)
-    else {
+    let Some(index) = target.position_in(app.tab_manager.tabs.as_slice()) else {
         return;
     };
     if !target.matches(&app.tab_manager.tabs.as_slice()[index]) {
@@ -100,13 +97,7 @@ pub(crate) fn poll_close_intents(app: &mut ScratchpadApp) {
     app.queue_background_session_close(request, target);
 }
 pub(crate) fn finish_close(app: &mut ScratchpadApp, target: CloseAfterPersist) {
-    let Some(index) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .position(|tab| tab.layout_id == target.layout)
-    else {
+    let Some(index) = target.position_in(app.tab_manager.tabs.as_slice()) else {
         return;
     };
     if !target.matches(&app.tab_manager.tabs.as_slice()[index]) {
@@ -120,13 +111,7 @@ pub(crate) fn finish_close(app: &mut ScratchpadApp, target: CloseAfterPersist) {
     }
 }
 pub(crate) fn finish_unavailable_close(app: &mut ScratchpadApp, target: CloseAfterPersist) {
-    let Some(index) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .position(|tab| tab.layout_id == target.layout)
-    else {
+    let Some(index) = target.position_in(app.tab_manager.tabs.as_slice()) else {
         return;
     };
     if !target.matches(&app.tab_manager.tabs.as_slice()[index]) {
