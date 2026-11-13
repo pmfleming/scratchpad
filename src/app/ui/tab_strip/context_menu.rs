@@ -182,9 +182,12 @@ fn render_close_actions(
     clicked
 }
 
+/// A bulk close run against the clicked slot.
+type CloseSlots = fn(&mut ScratchpadApp, usize);
+
 fn render_close_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot_index: usize) {
     let position = app.state.app_settings.tab_list_position();
-    let actions: [(&str, &str, fn(&mut ScratchpadApp, usize)); 4] = [
+    let actions: [(&str, &str, CloseSlots); 4] = [
         ("Close others", TABS, close::close_other_slots),
         (
             close_direction_label(position),
