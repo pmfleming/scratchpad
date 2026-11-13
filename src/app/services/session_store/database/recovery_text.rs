@@ -279,3 +279,55 @@ impl Database {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{RECOVERY_LIMIT, RecoveredText, byte_span};
+
+    fn recovered(original: &[(usize, &str)]) -> RecoveredText {
+        RecoveredText {
+            text: String::new(),
+            gaps: 0,
+            truncated: false,
+            segments: [
+                original
+                    .iter()
+                    .map(|(at, s)| (*at, (*s).to_owned()))
+                    .collect(),
+                Vec::new(),
+            ],
+        }
+    }
+
+    #[test]
+    fn spans_read_across_segments_and_fragments_mark_missing_regions() {
+        let text = recovered(&[(0, "hello "), (6, "world"), (20, "tail")]);
+        assert_eq!(
+            text.span(byte_span([0, 3, 6, 6])).as_deref(),
+            Some("lo wor")
+        );
+        // Wrong character metrics are not verified text.
+        assert_eq!(text.span(byte_span([0, 3, 6, 5])), None);
+        assert_eq!(text.span(byte_span([1, 0, 1, 1])), None);
+        assert_eq!(
+            text.fragments(byte_span([0, 9, 16, 16])).unwrap(),
+            [Some("ld".to_owned()), None, Some("tail".to_owned()), None]
+        );
+        assert!(
+            text.fragments(byte_span([0, 0, RECOVERY_LIMIT as u64 + 1, 1]))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn appending_marks_each_unknown_run_once_and_truncates_at_the_limit() {
+        let mut text = recovered(&[]);
+        let fragments = vec![Some("a".to_owned()), None, None, Some("b".to_owned()), None];
+        assert!(text.append(fragments, &mut false));
+        assert_eq!(text.gaps, 2);
+        assert!(text.text.starts_with('a') && text.text.contains("]\nb\n"));
+        assert!(!text.append(vec![Some("x".repeat(RECOVERY_LIMIT))], &mut false));
+        assert!(text.truncated);
+        assert_eq!(text.gaps, 3);
+    }
+}

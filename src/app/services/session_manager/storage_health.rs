@@ -218,3 +218,96 @@ pub(crate) fn note_file_refusal(app: &mut ScratchpadApp, path: &std::path::Path,
     ));
     app.state.persistence.storage.new_refusal = true;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        HEALTHY, REFUSED, UNAVAILABLE, deferred_text_bytes, health_kind, pressure_level,
+        refusal_owner_unchanged, storage_warning,
+    };
+    use crate::app::domain::{BufferState, WorkspaceTab};
+    use crate::app::services::chunk_store::Health;
+    use eframe::egui::{Event, ImeEvent};
+
+    #[test]
+    fn pressure_grades_refusals_limits_and_the_warning_threshold() {
+        for (refused, used, limit, expected) in [
+            (true, 0, 100, REFUSED),
+            (false, 100, 100, 2),
+            (false, 80, 100, 1),
+            (false, 79, 100, 0),
+            (false, 0, 0, 2),
+        ] {
+            assert_eq!(
+                pressure_level(refused, used, limit),
+                expected,
+                "{used}/{limit}"
+            );
+        }
+    }
+
+    #[test]
+    fn warnings_describe_failing_and_unavailable_storage_only() {
+        assert!(storage_warning(&Health::Healthy, None, 2, 1, 2).is_none());
+        let failing = Health::Failing("disk full".into());
+        for (pressure, message, red) in [
+            (0, "Session not saving. Text is in memory only.", false),
+            (1, "Session not saving. Memory nearly full.", false),
+            (2, "Session not saving. Memory limit reached.", true),
+        ] {
+            let warning = storage_warning(&failing, None, pressure, 5, 10).unwrap();
+            assert_eq!(warning.message, message);
+            assert_eq!(warning.red, red);
+            assert!(!warning.unavailable);
+            assert!(
+                warning
+                    .detail
+                    .starts_with("disk full\nRAM-only text: 5 bytes; limit: 10 bytes.")
+            );
+        }
+        let refusal = (
+            None,
+            "Could not open big.txt. Memory limit reached.".to_owned(),
+        );
+        let unavailable = Health::Unavailable("writer stopped".into());
+        let warning = storage_warning(&unavailable, Some(&refusal), REFUSED, 0, 1).unwrap();
+        assert_eq!(warning.message, refusal.1);
+        assert!(warning.red && warning.unavailable);
+        assert_eq!(
+            [Health::Healthy, failing, unavailable].map(|health| health_kind(&health)),
+            [HEALTHY, 1, UNAVAILABLE]
+        );
+    }
+
+    #[test]
+    fn only_deferred_text_input_counts_as_ram_bytes() {
+        for (event, bytes) in [
+            (Event::Text("λx".into()), 3),
+            (Event::Paste("paste".into()), 5),
+            (Event::Ime(ImeEvent::Commit("ime".into())), 3),
+            (Event::Copy, 0),
+        ] {
+            assert_eq!(deferred_text_bytes(&event), bytes, "{event:?}");
+        }
+    }
+
+    #[test]
+    fn refusals_stay_only_while_their_buffer_is_unchanged() {
+        assert!(refusal_owner_unchanged(&[], None));
+        let mut tabs = vec![WorkspaceTab::new(BufferState::new(
+            "note".into(),
+            "text".into(),
+            None,
+        ))];
+        assert!(!refusal_owner_unchanged(&tabs, None));
+        let buffer = tabs[0].active_buffer();
+        let owner = (buffer.id, buffer.storage_revision());
+        assert!(refusal_owner_unchanged(&tabs, Some(&owner)));
+        assert!(!refusal_owner_unchanged(
+            &tabs,
+            Some(&(owner.0 + 1, owner.1.clone()))
+        ));
+        tabs[0].active_buffer_mut().replace_text("edited".into());
+        assert!(!refusal_owner_unchanged(&tabs, Some(&owner)));
+    }
+}

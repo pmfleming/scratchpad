@@ -797,3 +797,93 @@ mod batch_plan_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod span_decoding_tests {
+    use super::{PACKED_SPAN_BYTES, Span, decode_spans};
+    use crate::app::domain::buffer::PieceHistoryEdit;
+
+    /// `[edit, role, part, start_char, buffer, start_byte, byte_len, char_len]`.
+    fn span(fields: [u64; 8]) -> Span {
+        Span(fields)
+    }
+
+    #[test]
+    fn spans_round_trip_through_packing_and_reject_partial_records() {
+        let spans = [
+            span([0, 0, 0, 3, 0, 1, 2, 2]),
+            span([0, 1, 0, 3, 1, 0, 4, 1]),
+        ];
+        let packed = Span::pack(&spans);
+        assert_eq!(packed.len(), 2 * PACKED_SPAN_BYTES);
+        let unpacked = Span::unpack(&packed).unwrap();
+        assert_eq!(
+            unpacked.iter().map(|s| s.0).collect::<Vec<_>>(),
+            spans.iter().map(|s| s.0).collect::<Vec<_>>()
+        );
+        assert!(Span::unpack(&packed[..PACKED_SPAN_BYTES - 1]).is_none());
+    }
+
+    #[test]
+    fn decoded_spans_form_inserted_deleted_and_replaced_edits() {
+        let edits = decode_spans(vec![
+            span([0, 1, 0, 0, 1, 0, 3, 3]),
+            span([1, 0, 0, 5, 0, 0, 2, 2]),
+            span([1, 0, 1, 5, 0, 4, 1, 1]),
+            span([2, 0, 0, 9, 0, 6, 1, 1]),
+            span([2, 1, 0, 9, 1, 3, 2, 1]),
+        ])
+        .unwrap();
+        let kinds: Vec<_> = edits
+            .iter()
+            .map(|edit| match edit {
+                PieceHistoryEdit::Inserted { .. } => "inserted",
+                PieceHistoryEdit::Deleted { spans, .. } if spans.len() == 2 => "deleted",
+                PieceHistoryEdit::Replaced { .. } => "replaced",
+                PieceHistoryEdit::Deleted { .. } => "unexpected",
+            })
+            .collect();
+        assert_eq!(kinds, ["inserted", "deleted", "replaced"]);
+    }
+
+    #[test]
+    fn malformed_span_rows_are_rejected() {
+        for (spans, reason) in [
+            (vec![span([0, 2, 0, 0, 0, 0, 1, 1])], "role above 1"),
+            (vec![span([0, 0, 0, 0, 2, 0, 1, 1])], "buffer above 1"),
+            (
+                vec![span([0, 0, 0, 0, 0, 0, 1, 2])],
+                "more chars than bytes",
+            ),
+            (
+                vec![span([0, 0, 0, u64::MAX, 0, 0, 1, 1])],
+                "unsigned overflow",
+            ),
+            (
+                vec![
+                    span([0, 0, 1, 0, 0, 0, 1, 1]),
+                    span([0, 0, 0, 0, 0, 0, 1, 1]),
+                ],
+                "out of order",
+            ),
+            (
+                vec![
+                    span([0, 0, 0, 0, 0, 0, 1, 1]),
+                    span([0, 0, 1, 7, 0, 1, 1, 1]),
+                ],
+                "inconsistent edit start",
+            ),
+            (
+                vec![span([0, 0, 1, 0, 0, 0, 1, 1])],
+                "noncontiguous deleted part",
+            ),
+            (
+                vec![span([0, 1, 1, 0, 1, 0, 1, 1])],
+                "inserted part above 0",
+            ),
+            (vec![span([1, 1, 0, 0, 1, 0, 1, 1])], "noncontiguous edits"),
+        ] {
+            assert!(decode_spans(spans).is_err(), "{reason}");
+        }
+    }
+}
