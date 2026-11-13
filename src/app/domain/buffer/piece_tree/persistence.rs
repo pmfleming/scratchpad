@@ -70,15 +70,7 @@ impl PieceTreeLite {
                 } else if piece.is_ascii {
                     (piece.start_byte + lo - position, hi - lo)
                 } else {
-                    let text = self.storage.try_text_for_span(
-                        ByteSpan {
-                            buffer: piece.buffer,
-                            start_byte: piece.start_byte as u64,
-                            byte_len: piece.byte_len as u64,
-                            char_len: piece.char_len as u64,
-                        },
-                        false,
-                    )?;
+                    let text = self.storage.try_text_for_span(piece.byte_span(), false)?;
                     let boundary = |n| text.char_indices().nth(n).map_or(text.len(), |(b, _)| b);
                     let a = boundary(lo - position);
                     let b = boundary(hi - position);

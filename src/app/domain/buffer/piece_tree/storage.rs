@@ -6,8 +6,10 @@ mod ranges;
 use super::text_cache::{self, ChunkText};
 use super::{ByteSpan, Piece, PieceBuffer, PieceSource, PieceTreeText};
 use crate::app::domain::buffer::PersistentVector;
+use crate::app::services::chunk_store::ChunkStoreHandle;
 pub(crate) use persistence::{StorageBlock, StorageCapture};
 use std::io;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -32,6 +34,50 @@ pub struct TextPin {
 impl TextPin {
     pub(crate) fn extend(&mut self, other: Self) {
         self.bodies.extend(other.bodies);
+    }
+    /// Checks that `range` cuts `body` (stored at logical offset `base`) on
+    /// UTF-8 boundaries, then keeps the body when its residency needs a pin.
+    fn hold(
+        &mut self,
+        text: &ChunkText,
+        body: Arc<String>,
+        base: usize,
+        range: Range<usize>,
+        include_owned: bool,
+    ) -> io::Result<()> {
+        body.get(range.start.saturating_sub(base)..(range.end - base).min(body.len()))
+            .ok_or_else(invalid_span)?;
+        // Owned RAM remains alive through the tree. Retaining its Arc here
+        // would force a full tail copy during the following edit. Stored
+        // bodies need a pin because their resident handle is weak.
+        if include_owned || matches!(text, ChunkText::Stored(_)) {
+            self.bodies.push(body);
+        }
+        Ok(())
+    }
+}
+
+fn checked_span_bounds(span: ByteSpan) -> io::Result<(usize, usize)> {
+    let start = usize::try_from(span.start_byte).map_err(io::Error::other)?;
+    let len = usize::try_from(span.byte_len).map_err(io::Error::other)?;
+    let end = start
+        .checked_add(len)
+        .ok_or_else(|| io::Error::other("text span overflow"))?;
+    Ok((start, end))
+}
+
+fn invalid_span() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "text span exceeds storage or splits UTF-8",
+    )
+}
+
+/// Whether `text` can move to a store of `epoch` without copying its body.
+fn stored_in_epoch(text: &ChunkText, epoch: u64) -> bool {
+    match text {
+        ChunkText::Stored(chunk) => chunk.reference().is_some_and(|r| r.epoch.id == epoch),
+        ChunkText::Inline(_) | ChunkText::Memory(_) | ChunkText::Missing(_) => true,
     }
 }
 
@@ -64,7 +110,7 @@ struct OriginalChunk {
 struct AddTextStorage {
     owner: u64,
     chunks: PersistentVector<AddTextChunk>,
-    store: Option<crate::app::services::chunk_store::ChunkStoreHandle>,
+    store: Option<ChunkStoreHandle>,
     bulk_intake: bool,
     intake_error: Option<String>,
 }
@@ -106,106 +152,95 @@ impl AddTextSpan {
 
 impl PieceTreeStorage {
     pub(super) fn prefetch_span(&self, span: ByteSpan) {
-        if span.buffer == PieceBuffer::Original {
-            if let OriginalTextStorage::Chunked(original) = &self.original {
-                let start = span.start_byte as usize;
-                let end = start.saturating_add(span.byte_len as usize);
-                for chunk in original
-                    .chunks
-                    .iter()
-                    .skip(
-                        original
-                            .chunks
-                            .partition_point(|c| c.logical_start + c.byte_len <= start),
-                    )
-                    .take_while(|c| c.logical_start < end)
-                {
-                    if let ChunkText::Stored(chunk) = &chunk.text {
-                        chunk.prefetch();
-                    }
-                }
-            }
-            return;
-        }
         let start = span.start_byte as usize;
         let end = start.saturating_add(span.byte_len as usize);
-        for chunk in self
-            .add
-            .chunks
-            .iter()
-            .skip(
-                self.add
-                    .chunks
-                    .partition_point(|c| c.start_byte + c.text.len() <= start),
-            )
-            .take_while(|c| c.start_byte < end)
-        {
-            if let ChunkText::Stored(chunk) = &chunk.text {
+        let prefetch = |text: &ChunkText| {
+            if let ChunkText::Stored(chunk) = text {
                 chunk.prefetch();
             }
+        };
+        match (&self.original, span.buffer) {
+            (OriginalTextStorage::Owned(_), PieceBuffer::Original) => {}
+            (OriginalTextStorage::Chunked(original), PieceBuffer::Original) => original
+                .chunks_overlapping(start, end)
+                .for_each(|chunk| prefetch(&chunk.text)),
+            (_, PieceBuffer::Add) => self
+                .add
+                .chunks_overlapping(start, end)
+                .for_each(|chunk| prefetch(&chunk.text)),
         }
     }
-    pub(super) fn bind_store(
-        &mut self,
-        store: crate::app::services::chunk_store::ChunkStoreHandle,
-    ) -> io::Result<()> {
+    pub(super) fn bind_store(&mut self, store: ChunkStoreHandle) -> io::Result<()> {
         if let Some(previous) = &self.add.store {
             if previous.epoch().id == store.epoch().id {
                 return Ok(());
             }
-            let valid = |text: &ChunkText| match text {
-                ChunkText::Stored(chunk) => chunk
-                    .reference()
-                    .is_some_and(|r| r.epoch.id == store.epoch().id),
-                ChunkText::Inline(_) | ChunkText::Memory(_) | ChunkText::Missing(_) => true,
-            };
-            let originals = match &self.original {
-                OriginalTextStorage::Owned(_) => true,
-                OriginalTextStorage::Chunked(original) => {
-                    original.chunks.iter().all(|c| valid(&c.text))
-                }
-            };
-            if !originals || !self.add.chunks.iter().all(|c| valid(&c.text)) {
-                return Err(io::Error::other(
-                    "text belongs to another store epoch; explicit copy/rebind required",
-                ));
-            }
-            let rebind = |text: &mut ChunkText| {
-                if let ChunkText::Stored(chunk) = text {
-                    *chunk = store.restored(
-                        chunk.reference().expect("validated migrated reference"),
-                        self.add.owner,
-                    );
-                }
-            };
-            if let OriginalTextStorage::Chunked(original) = &mut self.original {
-                for chunk in &mut Arc::make_mut(original).chunks {
-                    rebind(&mut chunk.text);
-                }
-            }
-            for index in 0..self.add.chunks.len() {
-                rebind(&mut self.add.chunks[index].text);
-            }
-            self.durable_original = Arc::default();
-            self.add.store = None;
+            self.rebind_stored_text(&store)?;
         }
+        let owner = self.add.owner;
+        let bulk_intake = self.add.bulk_intake;
+        self.for_each_text_mut(|text| {
+            if bulk_intake {
+                let _ = store.wait_for_capacity();
+            }
+            text.bind_store(owner, &store);
+        });
+        self.add.store = Some(store);
+        Ok(())
+    }
+    /// Moves stored references from the previous handle onto `store`. Only text
+    /// already committed to the epoch of `store` can move without a copy.
+    fn rebind_stored_text(&mut self, store: &ChunkStoreHandle) -> io::Result<()> {
+        let epoch = store.epoch().id;
+        if !self.chunk_texts().all(|text| stored_in_epoch(text, epoch)) {
+            return Err(io::Error::other(
+                "text belongs to another store epoch; explicit copy/rebind required",
+            ));
+        }
+        let owner = self.add.owner;
+        self.for_each_text_mut(|text| {
+            if let ChunkText::Stored(chunk) = text {
+                *chunk = store.restored(
+                    chunk.reference().expect("validated migrated reference"),
+                    owner,
+                );
+            }
+        });
+        self.durable_original = Arc::default();
+        self.add.store = None;
+        Ok(())
+    }
+    /// Every original and add chunk body, in address order.
+    fn chunk_texts(&self) -> impl Iterator<Item = &ChunkText> {
+        let original: &[OriginalChunk] = match &self.original {
+            OriginalTextStorage::Owned(_) => &[],
+            OriginalTextStorage::Chunked(original) => &original.chunks,
+        };
+        original
+            .iter()
+            .map(|chunk| &chunk.text)
+            .chain(self.add.chunks.iter().map(|chunk| &chunk.text))
+    }
+    fn for_each_text_mut(&mut self, mut visit: impl FnMut(&mut ChunkText)) {
+        let _ = self.try_for_each_text_mut(|text| {
+            visit(text);
+            Ok(())
+        });
+    }
+    /// Visits every original and add chunk body mutably, in address order,
+    /// stopping at the first error.
+    fn try_for_each_text_mut(
+        &mut self,
+        mut visit: impl FnMut(&mut ChunkText) -> io::Result<()>,
+    ) -> io::Result<()> {
         if let OriginalTextStorage::Chunked(original) = &mut self.original {
             for chunk in &mut Arc::make_mut(original).chunks {
-                if self.add.bulk_intake {
-                    let _ = store.wait_for_capacity();
-                }
-                chunk.text.bind_store(self.add.owner, &store);
+                visit(&mut chunk.text)?;
             }
         }
         for index in 0..self.add.chunks.len() {
-            if self.add.bulk_intake {
-                let _ = store.wait_for_capacity();
-            }
-            self.add.chunks[index]
-                .text
-                .bind_store(self.add.owner, &store);
+            visit(&mut self.add.chunks[index].text)?;
         }
-        self.add.store = Some(store);
         Ok(())
     }
     pub(super) fn ram_tail_bytes(&self) -> usize {
@@ -227,7 +262,7 @@ impl PieceTreeStorage {
                 .sum::<usize>(),
         )
     }
-    pub(super) fn store(&self) -> Option<&crate::app::services::chunk_store::ChunkStoreHandle> {
+    pub(super) fn store(&self) -> Option<&ChunkStoreHandle> {
         self.add.store.as_ref()
     }
     pub(super) fn intake_error(&self) -> Option<String> {
@@ -356,83 +391,45 @@ impl PieceTreeStorage {
         retain: bool,
         include_owned: bool,
     ) -> io::Result<TextPin> {
-        let start = usize::try_from(span.start_byte).map_err(io::Error::other)?;
-        let len = usize::try_from(span.byte_len).map_err(io::Error::other)?;
-        let end = start
-            .checked_add(len)
-            .ok_or_else(|| io::Error::other("text span overflow"))?;
-        let invalid = || {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "text span exceeds storage or splits UTF-8",
-            )
-        };
+        let (start, end) = checked_span_bounds(span)?;
         let mut pin = TextPin::default();
-        match &self.original {
-            OriginalTextStorage::Owned(text) if span.buffer == PieceBuffer::Original => {
-                text.get(start..end).ok_or_else(invalid)?;
-                return Ok(pin);
+        match (&self.original, span.buffer) {
+            (OriginalTextStorage::Owned(text), PieceBuffer::Original) => {
+                text.get(start..end).ok_or_else(invalid_span)?;
             }
-            OriginalTextStorage::Chunked(original) if span.buffer == PieceBuffer::Original => {
+            (OriginalTextStorage::Chunked(original), PieceBuffer::Original) => {
                 if end > original.byte_len {
-                    return Err(invalid());
+                    return Err(invalid_span());
                 }
-                for chunk in original
-                    .chunks
-                    .iter()
-                    .skip(
-                        original
-                            .chunks
-                            .partition_point(|chunk| chunk.logical_start + chunk.byte_len <= start),
-                    )
-                    .take_while(|chunk| chunk.logical_start < end)
-                {
+                for chunk in original.chunks_overlapping(start, end) {
                     let body = chunk.text.try_load_for_scan(retain).map_err(|error| {
                         io::Error::new(
                             error.kind(),
                             format!("{}: {error}", original.path.display()),
                         )
                     })?;
-                    body.get(
-                        start.saturating_sub(chunk.logical_start)
-                            ..(end - chunk.logical_start).min(body.len()),
-                    )
-                    .ok_or_else(invalid)?;
-                    // Owned RAM remains alive through the tree. Retaining its Arc
-                    // here would force a full tail copy during the following edit.
-                    // Stored bodies need a pin because their resident handle is weak.
-                    if include_owned || matches!(chunk.text, ChunkText::Stored(_)) {
-                        pin.bodies.push(body);
-                    }
+                    pin.hold(
+                        &chunk.text,
+                        body,
+                        chunk.logical_start,
+                        start..end,
+                        include_owned,
+                    )?;
                 }
             }
-            _ => {
+            (_, PieceBuffer::Add) => {
                 if end > self.add.len() {
-                    return Err(invalid());
+                    return Err(invalid_span());
                 }
-                for chunk in self
-                    .add
-                    .chunks
-                    .iter()
-                    .skip(
-                        self.add
-                            .chunks
-                            .partition_point(|chunk| chunk.start_byte + chunk.text.len() <= start),
-                    )
-                    .take_while(|chunk| chunk.start_byte < end)
-                {
+                for chunk in self.add.chunks_overlapping(start, end) {
                     let body = chunk.text.try_load_for_scan(retain)?;
-                    body.get(
-                        start.saturating_sub(chunk.start_byte)
-                            ..(end - chunk.start_byte).min(body.len()),
-                    )
-                    .ok_or_else(invalid)?;
-                    // Owned RAM remains alive through the tree. Retaining its Arc
-                    // here would force a full tail copy during the following edit.
-                    // Stored bodies need a pin because their resident handle is weak.
-                    if include_owned || matches!(chunk.text, ChunkText::Stored(_)) {
-                        pin.bodies.push(body);
-                    }
+                    pin.hold(
+                        &chunk.text,
+                        body,
+                        chunk.start_byte,
+                        start..end,
+                        include_owned,
+                    )?;
                 }
             }
         }
@@ -540,47 +537,60 @@ impl AddTextStorage {
         self.chunks.is_empty()
     }
 
+    /// Chunks intersecting the byte range `start..end`, in address order.
+    fn chunks_overlapping(&self, start: usize, end: usize) -> impl Iterator<Item = &AddTextChunk> {
+        let first = self
+            .chunks
+            .partition_point(|chunk| chunk.start_byte + chunk.text.len() <= start);
+        self.chunks
+            .iter()
+            .skip(first)
+            .take_while(move |chunk| chunk.start_byte < end)
+    }
+
+    /// Bytes the mutable inline tail can still take; sealed tails take none.
+    fn tail_capacity(&self) -> usize {
+        match self.chunks.last().map(|tail| &tail.text) {
+            Some(ChunkText::Inline(text)) => ADD_TAIL_BYTES.saturating_sub(text.len()),
+            _ => 0,
+        }
+    }
+
+    /// Seals the current tail so a new one can start. Returns false when bulk
+    /// intake could not store the tail, in which case appending must stop.
+    fn seal_tail(&mut self) -> bool {
+        let Some(tail) = self.chunks.last_mut() else {
+            return true;
+        };
+        if self.bulk_intake
+            && let Some(store) = &self.store
+            && let ChunkText::Inline(body) = &tail.text
+        {
+            match store.seal_bulk(body.clone(), self.owner) {
+                Ok(chunk) => tail.text = ChunkText::Stored(chunk),
+                Err(cause) => {
+                    self.intake_error = Some(cause.to_string());
+                    return false;
+                }
+            }
+        } else {
+            tail.text.seal(self.owner, self.store.as_ref());
+        }
+        true
+    }
+
     fn append(&mut self, text: &str) -> AddTextSpan {
-        let start_byte = self.len();
         let span = AddTextSpan {
-            start_byte,
+            start_byte: self.len(),
             byte_len: text.len(),
             char_len: text.chars().count(),
         };
-        if text.is_empty() {
-            return span;
-        }
-
         let mut remaining = text;
         while !remaining.is_empty() {
-            let capacity = self
-                .chunks
-                .last()
-                .and_then(|tail| match &tail.text {
-                    ChunkText::Inline(text) => Some(ADD_TAIL_BYTES.saturating_sub(text.len())),
-                    ChunkText::Memory(_) | ChunkText::Stored(_) | ChunkText::Missing(_) => None,
-                })
-                .unwrap_or(0);
-            let mut take = remaining.len().min(capacity);
-            while take > 0 && !remaining.is_char_boundary(take) {
-                take -= 1;
-            }
+            let take = remaining.floor_char_boundary(remaining.len().min(self.tail_capacity()));
             if take == 0 {
-                if let Some(tail) = self.chunks.last_mut() {
-                    if self.bulk_intake
-                        && let Some(store) = &self.store
-                        && let ChunkText::Inline(body) = &tail.text
-                    {
-                        match store.seal_bulk(body.clone(), self.owner) {
-                            Ok(chunk) => tail.text = ChunkText::Stored(chunk),
-                            Err(cause) => {
-                                self.intake_error = Some(cause.to_string());
-                                break;
-                            }
-                        }
-                    } else {
-                        tail.text.seal(self.owner, self.store.as_ref());
-                    }
+                if !self.seal_tail() {
+                    break;
                 }
                 let start_byte = self.len();
                 self.chunks.push(AddTextChunk {
@@ -635,6 +645,17 @@ impl AddTextStorage {
 }
 
 impl ChunkedOriginal {
+    /// Chunks intersecting the logical byte range `start..end`, in order.
+    fn chunks_overlapping(&self, start: usize, end: usize) -> impl Iterator<Item = &OriginalChunk> {
+        let first = self
+            .chunks
+            .partition_point(|chunk| chunk.logical_start + chunk.byte_len <= start);
+        self.chunks
+            .iter()
+            .skip(first)
+            .take_while(move |chunk| chunk.logical_start < end)
+    }
+
     fn text_for_range(&self, start_byte: usize, byte_len: usize) -> PieceTreeText<'static> {
         let chunk_index = self
             .chunks
@@ -679,7 +700,7 @@ pub(super) fn add_byte_span(start_byte: usize, byte_len: usize) -> ByteSpan {
 
 #[cfg(test)]
 mod pin_tests {
-    use super::*;
+    use super::{Arc, ByteSpan, ChunkText, PieceBuffer, PieceSource};
     use crate::app::domain::buffer::PieceTreeLite;
 
     #[test]

@@ -104,15 +104,7 @@ impl<'a> PieceTreeCharCursor<'a> {
         let text = self
             .tree
             .storage
-            .try_text_for_span(
-                super::ByteSpan {
-                    buffer: piece.buffer,
-                    start_byte: piece.start_byte as u64,
-                    byte_len: piece.byte_len as u64,
-                    char_len: piece.char_len as u64,
-                },
-                true,
-            )
+            .try_text_for_span(piece.byte_span(), true)
             .ok()?;
         let byte_offset = if piece.is_ascii {
             local_char

@@ -69,15 +69,7 @@ impl PieceTreeLite {
             let end = line + piece.newline_count;
             // Newline-free pieces are skipped by line lookup using metrics.
             if piece.newline_count > 0 && end >= first {
-                pin.extend(self.storage.pin_span(
-                    ByteSpan {
-                        buffer: piece.buffer,
-                        start_byte: piece.start_byte as u64,
-                        byte_len: piece.byte_len as u64,
-                        char_len: piece.char_len as u64,
-                    },
-                    true,
-                )?);
+                pin.extend(self.storage.pin_span(piece.byte_span(), true)?);
             }
             line = end;
         }
@@ -138,12 +130,7 @@ impl<'a> PieceTreeSlice<'a> {
                     text,
                     char_start: piece_start_char,
                     char_len: piece.char_len,
-                    byte_span: ByteSpan {
-                        buffer: piece.buffer,
-                        start_byte: piece.start_byte as u64,
-                        byte_len: piece.byte_len as u64,
-                        char_len: piece.char_len as u64,
-                    },
+                    byte_span: piece.byte_span(),
                 }));
             }
 
@@ -193,17 +180,9 @@ impl<'a> Iterator for TryPieceTreeSlice<'a> {
             return None;
         }
         let retain = self.retain;
-        let result = self.inner.next_with(|tree, piece| {
-            tree.storage.try_text_for_span(
-                ByteSpan {
-                    buffer: piece.buffer,
-                    start_byte: piece.start_byte as u64,
-                    byte_len: piece.byte_len as u64,
-                    char_len: piece.char_len as u64,
-                },
-                retain,
-            )
-        });
+        let result = self
+            .inner
+            .next_with(|tree, piece| tree.storage.try_text_for_span(piece.byte_span(), retain));
         if matches!(result, Some(Err(_))) {
             self.failed = true;
         }
@@ -242,15 +221,7 @@ impl PieceTreeLite {
                 break;
             }
             if end >= range.start {
-                pin.extend(self.storage.pin_span(
-                    ByteSpan {
-                        buffer: piece.buffer,
-                        start_byte: piece.start_byte as u64,
-                        byte_len: piece.byte_len as u64,
-                        char_len: piece.char_len as u64,
-                    },
-                    true,
-                )?);
+                pin.extend(self.storage.pin_span(piece.byte_span(), true)?);
             }
             position = end;
         }
@@ -268,12 +239,7 @@ impl PieceTreeLite {
                 break;
             }
             if position + piece.char_len >= range.start {
-                self.storage.prefetch_span(ByteSpan {
-                    buffer: piece.buffer,
-                    start_byte: piece.start_byte as u64,
-                    byte_len: piece.byte_len as u64,
-                    char_len: piece.char_len as u64,
-                });
+                self.storage.prefetch_span(piece.byte_span());
             }
             position += piece.char_len;
         }
