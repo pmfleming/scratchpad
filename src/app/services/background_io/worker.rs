@@ -39,9 +39,11 @@ impl LaneOutcome {
 
 pub(super) fn spawn_lane(
     lane: BackgroundIoLane,
-    request_rx: Receiver<BackgroundIoRequest>,
-    result_tx: Sender<BackgroundIoResult>,
-    lane_depths: Arc<LaneDepths>,
+    LaneEndpoints {
+        request_rx,
+        result_tx,
+        lane_depths,
+    }: LaneEndpoints,
     handle: impl Fn(BackgroundIoRequest, &Sender<BackgroundIoResult>) -> LaneOutcome + Send + 'static,
 ) {
     thread::spawn(move || {

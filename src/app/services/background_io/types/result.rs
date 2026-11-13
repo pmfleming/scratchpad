@@ -7,6 +7,9 @@ use crate::app::services::session_store::{
 };
 use std::path::PathBuf;
 
+/// A restored workspace tab and the status to report for its restore.
+pub(crate) type RestoredTabResult = Result<(Box<WorkspaceTab>, Option<RestoreStatus>), String>;
+
 pub(crate) enum BackgroundIoResult {
     TextPrepared {
         request_id: u64,
@@ -15,7 +18,7 @@ pub(crate) enum BackgroundIoResult {
     },
     RetainedReopened {
         request_id: u64,
-        result: Result<(Box<WorkspaceTab>, Option<RestoreStatus>), String>,
+        result: RestoredTabResult,
     },
     PathsLoaded {
         request_id: u64,
@@ -56,7 +59,7 @@ pub(crate) enum BackgroundIoResult {
     SessionTabHydrated {
         request_id: u64,
         tab_index: usize,
-        result: Result<(Box<WorkspaceTab>, Option<RestoreStatus>), String>,
+        result: RestoredTabResult,
     },
     SessionPersisted {
         request_id: u64,
@@ -87,4 +90,17 @@ pub(crate) struct LoadedPathResult {
     pub(crate) path: PathBuf,
     pub(crate) disk_state: Option<DiskFileState>,
     pub(crate) result: Result<BufferState, String>,
+}
+
+impl LoadedPathResult {
+    /// A load of `path` that failed before any disk state was observed.
+    pub(crate) fn failed(path: PathBuf, error: &std::io::Error) -> Self {
+        Self {
+            missing: error.kind() == std::io::ErrorKind::NotFound,
+            retained_tab: None,
+            path,
+            disk_state: None,
+            result: Err(error.to_string()),
+        }
+    }
 }
