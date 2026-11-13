@@ -20,85 +20,75 @@ impl SessionStore {
         let (stored, retained, closed) = self
             .worker()?
             .call(|db| futures_lite::future::block_on(db.recovery_metadata()))?;
-        let mut directory = fs::DirBuilder::new();
-        directory.recursive(false);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            directory.mode(0o700);
-        }
-        directory.create(destination)?;
+        create_private_directory(destination)?;
         // All metadata came from one actor job. Immutable handles retain roots
         // while payloads stream, even if a later save changes the live workspace.
-        for buffer in stored
-            .manifest
-            .tabs
-            .iter()
-            .flat_map(|tab| &tab.buffers)
-            .chain(&retained)
-        {
-            write_new(
-                &destination.join(format!("{}.tmp", buffer.temp_id)),
-                |file| {
-                    if let Some(document) = &buffer.history_document {
-                        let snapshot = document.snapshot();
-                        for span in snapshot
-                            .piece_tree()
-                            .try_spans_for_range(0..snapshot.len_chars())
-                        {
-                            file.write_all(span?.text.as_bytes())?;
-                        }
-                    } else if !buffer.text_is_empty {
-                        return Err(io::Error::other(format!(
-                            "Missing text for {}",
-                            buffer.temp_id
-                        )));
-                    }
-                    Ok(())
-                },
-            )?;
+        let manifest = &stored.manifest;
+        let live = manifest.tabs.iter().flat_map(|tab| &tab.buffers);
+        for buffer in live.chain(&retained) {
+            let path = destination.join(format!("{}.tmp", buffer.temp_id));
+            write_new(&path, |file| write_text(file, buffer))?;
         }
         write_new(&destination.join("session.json"), |file| {
-            let metadata = serde_json::json!({"version":stored.manifest.version,"tab_count":stored.manifest.tab_count,"active_tab_index":stored.manifest.active_tab_index,"active_surface":stored.manifest.active_surface,"history_fingerprint":"blake3-u64-le-v1"});
+            let metadata = serde_json::json!({"version":manifest.version,"tab_count":manifest.tab_count,"active_tab_index":manifest.active_tab_index,"active_surface":manifest.active_surface,"history_fingerprint":"blake3-u64-le-v1"});
             write_prefix(file, &metadata)?;
-            file.write_all(b",\"tabs\":[")?;
-            for (index, tab) in stored.manifest.tabs.iter().enumerate() {
-                if index > 0 {
-                    file.write_all(b",")?;
-                }
-                write_tab(file, tab)?;
-            }
-            file.write_all(b"],\"retained_documents\":[")?;
-            for (index, buffer) in retained.iter().enumerate() {
-                if index > 0 {
-                    file.write_all(b",")?;
-                }
-                write_buffer(file, buffer)?;
-            }
-            file.write_all(b"],\"closed_tabs\":[")?;
-            for (index, (token, closed_at, tab)) in closed.iter().enumerate() {
-                if index > 0 {
-                    file.write_all(b",")?;
-                }
-                serde_json::to_writer(
-                    &mut *file,
-                    &serde_json::json!({"token":token,"closed_at":closed_at,"layout":tab}),
-                )
-                .map_err(io::Error::other)?;
-            }
-            file.write_all(b"]}")
+            file.write_all(b",\"tabs\":")?;
+            write_array(file, &manifest.tabs, write_tab)?;
+            file.write_all(b",\"retained_documents\":")?;
+            write_array(file, &retained, write_buffer)?;
+            file.write_all(b",\"closed_tabs\":")?;
+            write_array(file, &closed, |file, (token, closed_at, tab)| {
+                let closed = serde_json::json!({"token":token,"closed_at":closed_at,"layout":tab});
+                serde_json::to_writer(file, &closed).map_err(io::Error::other)
+            })?;
+            file.write_all(b"}")
         })?;
         #[cfg(unix)]
-        {
-            File::open(destination)?.sync_all()?;
-            let parent = destination
-                .parent()
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or(Path::new("."));
-            File::open(parent)?.sync_all()?;
-        }
+        sync_directory_and_parent(destination)?;
         Ok(())
     }
+}
+
+fn create_private_directory(path: &Path) -> io::Result<()> {
+    let mut directory = fs::DirBuilder::new();
+    directory.recursive(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        directory.mode(0o700);
+    }
+    directory.create(path)
+}
+
+#[cfg(unix)]
+fn sync_directory_and_parent(path: &Path) -> io::Result<()> {
+    File::open(path)?.sync_all()?;
+    let parent = path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    File::open(parent)?.sync_all()
+}
+
+/// Streams a document's current text; only an empty document may have none.
+fn write_text(file: &mut impl Write, buffer: &SessionBuffer) -> io::Result<()> {
+    let Some(document) = &buffer.history_document else {
+        if buffer.text_is_empty {
+            return Ok(());
+        }
+        return Err(io::Error::other(format!(
+            "Missing text for {}",
+            buffer.temp_id
+        )));
+    };
+    let snapshot = document.snapshot();
+    for span in snapshot
+        .piece_tree()
+        .try_spans_for_range(0..snapshot.len_chars())
+    {
+        file.write_all(span?.text.as_bytes())?;
+    }
+    Ok(())
 }
 
 fn write_new(
@@ -118,33 +108,47 @@ fn write_new(
     file.get_ref().sync_all()
 }
 
+fn write_array<W: Write, T>(
+    writer: &mut W,
+    items: &[T],
+    mut write_item: impl FnMut(&mut W, &T) -> io::Result<()>,
+) -> io::Result<()> {
+    writer.write_all(b"[")?;
+    for (index, item) in items.iter().enumerate() {
+        if index > 0 {
+            writer.write_all(b",")?;
+        }
+        write_item(writer, item)?;
+    }
+    writer.write_all(b"]")
+}
+
+/// Writes a JSON object without its closing brace so streamed fields can follow.
 fn write_prefix(writer: &mut impl Write, value: &serde_json::Value) -> io::Result<()> {
     let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
     writer.write_all(&bytes[..bytes.len() - 1])
 }
+/// Writes `value` serialized as an object, minus `streamed`, without its closing brace.
+fn write_prefix_without(
+    writer: &mut impl Write,
+    value: &impl serde::Serialize,
+    streamed: &str,
+) -> io::Result<()> {
+    let mut metadata = serde_json::to_value(value).map_err(io::Error::other)?;
+    let Some(fields) = metadata.as_object_mut() else {
+        return Err(io::Error::other("recovery metadata is not an object"));
+    };
+    fields.remove(streamed);
+    write_prefix(writer, &metadata)
+}
 fn write_tab(writer: &mut impl Write, tab: &SessionTab) -> io::Result<()> {
-    let mut metadata = serde_json::to_value(tab).map_err(io::Error::other)?;
-    metadata
-        .as_object_mut()
-        .expect("tab object")
-        .remove("buffers");
-    write_prefix(writer, &metadata)?;
-    writer.write_all(b",\"buffers\":[")?;
-    for (index, buffer) in tab.buffers.iter().enumerate() {
-        if index > 0 {
-            writer.write_all(b",")?;
-        }
-        write_buffer(writer, buffer)?;
-    }
-    writer.write_all(b"]}")
+    write_prefix_without(writer, tab, "buffers")?;
+    writer.write_all(b",\"buffers\":")?;
+    write_array(writer, &tab.buffers, write_buffer)?;
+    writer.write_all(b"}")
 }
 fn write_buffer(writer: &mut impl Write, buffer: &SessionBuffer) -> io::Result<()> {
-    let mut metadata = serde_json::to_value(buffer).map_err(io::Error::other)?;
-    metadata
-        .as_object_mut()
-        .expect("buffer object")
-        .remove("text_history");
-    write_prefix(writer, &metadata)?;
+    write_prefix_without(writer, buffer, "text_history")?;
     writer.write_all(b",\"text_history\":")?;
     if let Some(document) = &buffer.history_document {
         document.write_recovery_history(writer)?;
