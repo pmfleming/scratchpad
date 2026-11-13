@@ -2,6 +2,7 @@
 //! Status and Encoding): the docked window, outside-click dismissal, the title row
 //! with its switch, and the measured bottom panel.
 use crate::app::app_state::{ScratchpadApp, workspace::accessors};
+use crate::app::theme;
 use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 
@@ -234,4 +235,18 @@ pub(crate) fn measured_footer<R>(
         ui.ctx().request_discard(discard_reason);
     }
     inner
+}
+
+/// The accent-filled button for a panel's main action, greyed while unavailable.
+pub(crate) fn primary_button(
+    ui: &egui::Ui,
+    text: impl Into<String>,
+    enabled: bool,
+) -> egui::Button<'static> {
+    let (color, fill) = if enabled {
+        (super::on_accent(ui), theme::tab_selected_accent(ui))
+    } else {
+        (theme::text_muted(ui), theme::action_bg(ui))
+    };
+    egui::Button::new(egui::RichText::new(text).color(color)).fill(fill)
 }

@@ -5,7 +5,7 @@ use crate::app::{
     app_state::{ScratchpadApp, SearchStatus, search_state::SEARCH_RESULT_LIMIT_MESSAGE},
     shortcut_tooltips, theme,
     theme::text_muted,
-    ui::{panel_style, panel_style::window},
+    ui::panel_style::window,
 };
 use eframe::egui;
 
@@ -83,15 +83,15 @@ fn review(ui: &mut egui::Ui, app: &ScratchpadApp, actions: &mut SearchStripActio
     );
     ui.horizontal_wrapped(|ui| {
         actions.cancel_review |= ui.button("Cancel").clicked();
-        let primary = egui::Button::new(
-            egui::RichText::new(format!(
+        let primary = window::primary_button(
+            ui,
+            format!(
                 "Replace {} in {}",
                 review.total_match_count,
                 file_count_label(review.affected_buffer_count)
-            ))
-            .color(panel_style::on_accent(ui)),
-        )
-        .fill(theme::tab_selected_accent(ui));
+            ),
+            true,
+        );
         actions.replace_all_requested |= ui.add(primary).clicked();
     });
     true

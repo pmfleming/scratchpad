@@ -228,23 +228,12 @@ fn session_notice(ui: &mut egui::Ui, app: &ScratchpadApp, actions: &mut Actions)
             );
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let button = egui::Button::new(
-                egui::RichText::new(if resetting {
-                    "Creating new session…"
-                } else {
-                    "Start new session"
-                })
-                .color(if enabled {
-                    panel_style::on_accent(ui)
-                } else {
-                    muted
-                }),
-            )
-            .fill(if enabled {
-                theme::tab_selected_accent(ui)
+            let text = if resetting {
+                "Creating new session…"
             } else {
-                theme::action_bg(ui)
-            });
+                "Start new session"
+            };
+            let button = window::primary_button(ui, text, enabled);
             actions.start_session |= ui.add_enabled(enabled, button).clicked();
         });
     });

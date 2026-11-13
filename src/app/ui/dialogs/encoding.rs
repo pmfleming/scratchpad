@@ -334,8 +334,31 @@ fn footer(ui: &mut egui::Ui, app: &mut ScratchpadApp, facts: &FileFacts, actions
         ui.checkbox(&mut dialog.bom, format!("{label} with BOM"))
             .on_hover_text("Start the file with a byte order mark. Some Windows tools expect one; most other tools do not.");
     }
-    let unicode = dialog.choice.to_ascii_uppercase().starts_with("UTF-");
-    let (note, warn) = match (dialog.mode, facts.reopen_blocked()) {
+    let (note, warn) = mode_note(dialog.mode, &dialog.choice, &label, facts);
+    let color = if warn {
+        ui.visuals().warn_fg_color
+    } else {
+        theme::text_muted(ui)
+    };
+    ui.add(egui::Label::new(egui::RichText::new(note).size(NOTE_SIZE).color(color)).wrap());
+    let enabled = saving || facts.reopen_blocked().is_none();
+    let verb = if saving { "Save" } else { "Reopen" };
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(KEY_HINTS).size(HINT_SIZE).weak());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let button = window::primary_button(ui, format!("{verb} as {label}"), enabled);
+            actions.apply |= ui.add_enabled(enabled, button).clicked();
+        });
+    });
+    if !enabled {
+        actions.apply = false;
+    }
+}
+
+/// What the chosen action will do, and whether that needs a warning colour.
+fn mode_note(mode: EncodingMode, choice: &str, label: &str, facts: &FileFacts) -> (String, bool) {
+    let unicode = choice.to_ascii_uppercase().starts_with("UTF-");
+    match (mode, facts.reopen_blocked()) {
         (EncodingMode::Reopen, Some(reason)) => (reason.to_owned(), true),
         (EncodingMode::Reopen, None) => (
             format!(
@@ -353,37 +376,6 @@ fn footer(ui: &mut egui::Ui, app: &mut ScratchpadApp, facts: &FileFacts, actions
             (format!("Choose where to save, as {label}."), false)
         }
         (EncodingMode::Save, _) => (format!("Writes the file as {label}."), false),
-    };
-    ui.add(
-        egui::Label::new(egui::RichText::new(note).size(NOTE_SIZE).color(if warn {
-            ui.visuals().warn_fg_color
-        } else {
-            theme::text_muted(ui)
-        }))
-        .wrap(),
-    );
-    let enabled = saving || facts.reopen_blocked().is_none();
-    let verb = if saving { "Save" } else { "Reopen" };
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(KEY_HINTS).size(HINT_SIZE).weak());
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let button = egui::Button::new(
-                egui::RichText::new(format!("{verb} as {label}")).color(if enabled {
-                    panel_style::on_accent(ui)
-                } else {
-                    theme::text_muted(ui)
-                }),
-            )
-            .fill(if enabled {
-                theme::tab_selected_accent(ui)
-            } else {
-                theme::action_bg(ui)
-            });
-            actions.apply |= ui.add_enabled(enabled, button).clicked();
-        });
-    });
-    if !enabled {
-        actions.apply = false;
     }
 }
 
