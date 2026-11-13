@@ -19,10 +19,6 @@ pub struct StorageUsage {
 
 impl SessionStore {
     /// Run off the UI thread. Does not checkpoint or modify the database.
-    pub fn storage_usage(&self) -> io::Result<StorageUsage> {
-        self.storage_usage_with_settings(self.root())
-    }
-
     pub fn storage_usage_with_settings(&self, settings_root: &Path) -> io::Result<StorageUsage> {
         let result = self
             .worker()
@@ -127,7 +123,7 @@ mod tests {
             )
             .unwrap();
         fs::write(store.root().join("other"), [0; 123]).unwrap();
-        let usage = store.storage_usage().unwrap();
+        let usage = store.storage_usage_with_settings(store.root()).unwrap();
         assert!(usage.database > 0);
         assert!(usage.other >= 123);
         assert_eq!(
