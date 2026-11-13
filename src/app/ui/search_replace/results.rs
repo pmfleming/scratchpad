@@ -12,7 +12,6 @@ use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{CARET_DOWN, CARET_RIGHT};
 
-const SEARCH_RESULT_VISIBLE_ROWS: usize = 5;
 const SEARCH_RESULT_FILE_SPACING: f32 = 10.0;
 const SEARCH_RESULT_LINE_SPACING: f32 = 2.0;
 const SEARCH_RESULT_LINE_PILL_CORNER_RADIUS: u8 = 8;
@@ -31,27 +30,7 @@ pub(super) fn show_search_results(
     state: &SearchStripState,
     actions: &mut SearchStripActions,
 ) {
-    let default_height = (SEARCH_RESULT_VISIBLE_ROWS as f32)
-        * (SEARCH_RESULT_FILE_PILL_HEIGHT + SEARCH_RESULT_FILE_SPACING)
-        - SEARCH_RESULT_FILE_SPACING;
-    let height_id = egui::Id::unique("search.results.height");
-    let mut results_height = ui
-        .data_mut(|d| d.get_persisted::<f32>(height_id))
-        .unwrap_or(default_height)
-        .clamp(180.0, ui.ctx().content_rect().height().max(300.0) - 120.0);
-    let reserved = if state.replace_open { 480.0 } else { 350.0 }
-        + if app
-            .state
-            .search_state
-            .replace
-            .pending_replace_all_confirmation
-            .is_some()
-        {
-            160.0
-        } else {
-            0.0
-        };
-    results_height = results_height.min((ui.ctx().content_rect().height() - reserved).max(180.0));
+    let results_height = ui.available_height().max(SEARCH_RESULT_FILE_PILL_HEIGHT);
     let empty_message = empty_message(state);
 
     egui::ScrollArea::vertical()
@@ -95,28 +74,6 @@ pub(super) fn show_search_results(
                 state.result_groups.len() - rendered,
             );
         });
-    let response = widget_ids::allocate_exact_interact(
-        ui,
-        egui::vec2(ui.available_width(), 8.0),
-        widget_ids::local(ui, "search.results.resize"),
-        egui::Sense::drag(),
-        "search.results.resize",
-    );
-    let rect = response.rect;
-    let response = response
-        .on_hover_cursor(egui::CursorIcon::ResizeVertical)
-        .on_hover_text("Drag to resize results");
-    ui.painter().line_segment(
-        [
-            rect.center() - egui::vec2(18.0, 0.0),
-            rect.center() + egui::vec2(18.0, 0.0),
-        ],
-        egui::Stroke::new(2.0, text_muted(ui)),
-    );
-    if response.dragged() {
-        results_height = (results_height + response.drag_delta().y).max(180.0);
-        ui.data_mut(|d| d.insert_persisted(height_id, results_height));
-    }
 }
 
 fn show_result_group(

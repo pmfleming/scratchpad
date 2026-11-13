@@ -1,7 +1,6 @@
 use super::{HistoryUi, style};
 use crate::app::{
     app_state::{ScratchpadApp, workspace::accessors},
-    theme,
     ui::{callout, settings, widget_ids},
 };
 use eframe::egui;
@@ -15,17 +14,11 @@ pub(super) fn show(
     add_contents: impl FnOnce(&mut egui::Ui, &mut ScratchpadApp, &mut HistoryUi),
 ) -> bool {
     let screen = ctx.content_rect();
-    let dismissible = super::dismissible_history(app);
+    let dismissible = style::dismiss_on_outside_click(app);
     let popup_open = egui::Popup::is_any_open(ctx);
     let layer = widget_ids::area_layer_id(egui::Order::Foreground, "text_history_window");
     let was_visible = ctx.memory(|m| m.areas().visible_last_frame(&layer));
-    let frame = egui::Frame::NONE
-        .fill(app.state.app_settings.editor_background_color())
-        .stroke(egui::Stroke::new(
-            1.0,
-            theme::border_for_visuals(&ctx.global_style().visuals),
-        ))
-        .inner_margin(egui::Margin::symmetric(12, 8));
+    let frame = style::window_frame(ctx, app.state.app_settings.editor_background_color());
     let mut close = false;
     let response = egui::Window::new("History")
         .id(layer.id)

@@ -1,20 +1,22 @@
 use super::callout;
 mod controls;
+mod footer;
+mod header;
 mod result_model;
 mod results;
 mod state;
 mod summary;
 
-use crate::app::app_state::{ScratchpadApp, SearchFocusTarget, search_runtime};
+use crate::app::app_state::{ScratchpadApp, SearchFocusTarget, search_runtime, workspace};
 use crate::app::commands::{AppCommand, EditCommand, SearchCommand};
-use crate::app::ui::settings;
-use crate::app::ui::widget_ids;
+use crate::app::ui::{panel_style, settings, widget_ids};
 use eframe::egui;
 use state::{SearchStripActions, SearchStripState};
 
+/// Width shared by other dialogs that line up with Search.
 pub(crate) const SEARCH_DIALOG_WIDTH: f32 = 620.0;
-const SEARCH_DIALOG_HEIGHT: f32 = 520.0;
-const SEARCH_TITLE_SIZE: f32 = 24.0;
+const SEARCH_DEFAULT_SIZE: egui::Vec2 = egui::vec2(480.0, 600.0);
+const SEARCH_MIN_HEIGHT: f32 = 320.0;
 
 pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     if !app.state.search_state.open() {
@@ -25,46 +27,60 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let mut actions = SearchStripActions::default();
     let find_input_id = widget_ids::local(ui, "search_find_input");
     let replace_input_id = widget_ids::local(ui, "search_replace_input");
+    let ctx = ui.ctx().clone();
+    let screen = ctx.content_rect();
+    let dismissible = panel_style::dismiss_on_outside_click(app);
+    let popup_open = egui::Popup::is_any_open(&ctx);
+    let layer = widget_ids::area_layer_id(egui::Order::Foreground, "search_window");
+    let was_visible = ctx.memory(|m| m.areas().visible_last_frame(&layer));
+    let frame = panel_style::window_frame(&ctx, app.state.app_settings.editor_background_color());
+    let min_size = egui::vec2(header::min_width(&ctx), SEARCH_MIN_HEIGHT);
 
-    let default_pos = callout::centered_position(
-        ui.ctx(),
-        egui::vec2(SEARCH_DIALOG_WIDTH, SEARCH_DIALOG_HEIGHT),
-    );
-
-    widget_ids::area("search_dialog_overlay")
-        .order(egui::Order::Foreground)
-        .constrain(true)
-        .movable(true)
-        .default_pos(default_pos)
-        .show(ui.ctx(), |ui| {
+    let response = egui::Window::new("Search")
+        .id(layer.id)
+        .order(layer.order)
+        .title_bar(false)
+        .resizable(true)
+        .default_size(SEARCH_DEFAULT_SIZE.max(min_size))
+        .min_size(min_size)
+        .max_size((screen.size() - egui::vec2(24.0, 24.0)).max(min_size))
+        .frame(frame)
+        .default_pos(egui::pos2(
+            (screen.right() - SEARCH_DEFAULT_SIZE.x - 24.0).max(screen.left()),
+            screen.top() + 72.0,
+        ))
+        .show(&ctx, |ui| {
             widget_ids::feature_scope(ui, "search_dialog", |ui| {
-                ui.set_width(SEARCH_DIALOG_WIDTH);
-                ui.set_min_width(SEARCH_DIALOG_WIDTH);
-                ui.set_max_width(SEARCH_DIALOG_WIDTH);
-                let inner = callout::frame(ui).show(ui, |ui| {
-                    settings::apply_dialog_typography(ui);
-                    callout::apply_spacing(ui);
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
+                settings::apply_dialog_typography(ui);
+                callout::apply_spacing(ui);
+                panel_style::apply(ui);
+                ui.visuals_mut().panel_fill = frame.fill;
+                ui.visuals_mut().window_fill = frame.fill;
 
-                    if render_search_header(ui) {
-                        actions.close_requested = true;
-                    }
-                    ui.add_space(4.0);
-
-                    controls::show_search_controls(
-                        ui,
-                        &mut state,
-                        &mut actions,
-                        find_input_id,
-                        replace_input_id,
-                    );
-                    summary::show(ui, app, &state, &mut actions);
-                    results::show_search_results(ui, app, &state, &mut actions);
-                    summary::footer(ui, app, &state, &mut actions);
-                });
-                callout::mark_scroll_blocker_if_hovered(ui.ctx(), &inner.response);
+                actions.close_requested |= header::show(ui, &mut state, &mut actions, !dismissible);
+                controls::show_search_controls(
+                    ui,
+                    &mut state,
+                    &mut actions,
+                    find_input_id,
+                    replace_input_id,
+                );
+                summary::show(ui, app, &state, &mut actions);
+                footer::panel(ui, app, &state, &mut actions);
+                results::show_search_results(ui, app, &state, &mut actions);
             });
         });
+    if let Some(response) = response {
+        callout::mark_scroll_blocker_if_hovered(&ctx, &response.response);
+        // Ignore the opening click and interactions with the panel's menus.
+        actions.close_requested |= dismissible
+            && was_visible
+            && !popup_open
+            && !egui::Popup::is_any_open(&ctx)
+            && !app.state.dialogs.any_modal_open()
+            && workspace::accessors::pending_action(app).is_none()
+            && response.response.clicked_elsewhere();
+    }
 
     apply_search_inputs(app, &state);
     if actions.settings_requested {
@@ -243,16 +259,6 @@ fn dispatch_requested_command(
 
     search_runtime::request_search_focus(app, target_focus);
     crate::app::commands::handle_command(app, command);
-}
-
-fn render_search_header(ui: &mut egui::Ui) -> bool {
-    callout::header_row(ui, "search_replace.header", "Close search", |ui| {
-        ui.label(
-            egui::RichText::new("Search")
-                .size(SEARCH_TITLE_SIZE)
-                .color(callout::text(ui)),
-        );
-    })
 }
 
 #[cfg(test)]

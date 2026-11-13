@@ -1,6 +1,6 @@
 use super::state::{SearchStripActions, SearchStripState};
 mod shortcuts;
-use crate::app::app_state::{SearchFocusTarget, SearchScope};
+use crate::app::app_state::SearchFocusTarget;
 use crate::app::services::search::SearchMode;
 use crate::app::theme::{border, text_muted};
 use eframe::egui;
@@ -60,50 +60,6 @@ pub(super) fn show_search_controls(
             consume_text_input_keys(ui, actions, TextInputKind::Replace);
         }
     }
-    ui.horizontal_wrapped(|ui| {
-        ui.label(
-            egui::RichText::new("Look in")
-                .size(12.5)
-                .color(text_muted(ui)),
-        );
-        for (scope, label, hint) in [
-            (
-                SearchScope::SelectionOnly,
-                "Selection",
-                crate::app::shortcut_tooltips::SEARCH_SCOPE_SELECTION,
-            ),
-            (
-                SearchScope::ActiveBuffer,
-                "File",
-                crate::app::shortcut_tooltips::SEARCH_SCOPE_CURRENT_FILE,
-            ),
-            (
-                SearchScope::ActiveWorkspaceTab,
-                "Tab",
-                crate::app::shortcut_tooltips::SEARCH_SCOPE_CURRENT_TAB,
-            ),
-            (
-                SearchScope::AllOpenTabs,
-                "All tabs",
-                crate::app::shortcut_tooltips::SEARCH_SCOPE_ALL_TABS,
-            ),
-        ] {
-            if ui
-                .selectable_label(state.scope == scope, label)
-                .on_hover_text(
-                    if scope == SearchScope::SelectionOnly && state.scope == scope {
-                        crate::app::shortcut_tooltips::SEARCH_SCOPE_SELECTION_DEFAULT
-                    } else {
-                        hint
-                    },
-                )
-                .clicked()
-            {
-                state.scope = scope;
-                actions.recapture_selection = scope == SearchScope::SelectionOnly;
-            }
-        }
-    });
     consume_search_strip_shortcuts(ui, state, actions, find.has_focus() || replace_focused);
 }
 

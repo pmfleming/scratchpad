@@ -18,7 +18,6 @@ use crate::app::{
         workspace::{accessors, mutation},
     },
     domain::buffer::TextHistoryEvent,
-    platform::{PlatformProfile, resolved_profile},
 };
 use eframe::egui;
 pub(crate) use scrubber::history_scrubbing;
@@ -49,12 +48,6 @@ fn active_buffer(app: &ScratchpadApp) -> Option<u64> {
     app.tab_manager
         .active_tab()
         .map(|tab| tab.active_buffer().id)
-}
-fn dismissible_history(app: &ScratchpadApp) -> bool {
-    matches!(
-        resolved_profile(app.state.app_settings.platform_profile()),
-        PlatformProfile::LinuxGeneric | PlatformProfile::Hyprland
-    )
 }
 fn lock_navigation_focus(ctx: &egui::Context, id: egui::Id) {
     ctx.memory_mut(|m| {

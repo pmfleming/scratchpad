@@ -198,3 +198,23 @@ pub(crate) fn rail(ui: &egui::Ui, rect: egui::Rect, x: f32, dot_y: f32, dot: Rai
     ui.painter()
         .circle(center, radius, fill, egui::Stroke::new(width, accent));
 }
+
+/// The flat, bordered frame shared by History and Search windows.
+pub(crate) fn window_frame(ctx: &egui::Context, fill: egui::Color32) -> egui::Frame {
+    egui::Frame::NONE
+        .fill(fill)
+        .stroke(egui::Stroke::new(
+            1.0,
+            theme::border_for_visuals(&ctx.global_style().visuals),
+        ))
+        .inner_margin(egui::Margin::symmetric(12, 8))
+}
+
+/// Tiling desktops close panels on an outside click and omit their close button.
+pub(crate) fn dismiss_on_outside_click(app: &crate::app::app_state::ScratchpadApp) -> bool {
+    use crate::app::platform::{PlatformProfile, resolved_profile};
+    matches!(
+        resolved_profile(app.state.app_settings.platform_profile()),
+        PlatformProfile::LinuxGeneric | PlatformProfile::Hyprland
+    )
+}
