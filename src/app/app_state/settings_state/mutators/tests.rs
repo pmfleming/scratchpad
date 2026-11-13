@@ -151,7 +151,7 @@ fn reset_settings_to_defaults_restores_startup_default_state() {
     );
     assert_eq!(
         app.state.app_settings.theme_mode(),
-        crate::app::services::settings_store::AppThemeMode::System
+        crate::app::services::settings_store::AppThemeMode::Auto
     );
     assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
     assert_eq!(
@@ -215,4 +215,147 @@ fn search_limit_changes_persist_and_restart_an_open_query() {
         app.state.app_settings.search.result_limit,
         SearchResultLimit::Recommended
     );
+}
+
+mod appearance {
+    use super::{settings_controller, test_app};
+    use crate::app::app_state::ScratchpadApp;
+    use crate::app::fonts::EditorFontPreset;
+    use crate::app::services::settings_store::{AppThemeMode, EditorAppearanceSource};
+    use eframe::egui;
+
+    const RED: egui::Color32 = egui::Color32::from_rgb(200, 30, 30);
+
+    fn colors(app: &ScratchpadApp) -> [egui::Color32; 3] {
+        let settings = &app.state.app_settings;
+        [
+            settings.editor_text_color(),
+            settings.editor_background_color(),
+            settings.editor_text_highlight_color(),
+        ]
+    }
+
+    /// Settings as the next start would see them.
+    fn reloaded(app: &ScratchpadApp) -> ScratchpadApp {
+        let stored = app
+            .state
+            .persistence
+            .settings_store
+            .load()
+            .unwrap()
+            .unwrap();
+        let mut next = test_app([]);
+        crate::app::app_state::settings_state::apply_settings(&mut next, stored);
+        next
+    }
+
+    #[test]
+    fn editing_while_following_the_system_forks_from_what_is_on_screen() {
+        let mut app = test_app([]);
+        settings_controller::set_editor_appearance_source(&mut app, EditorAppearanceSource::System);
+        let font = app.state.app_settings.editor_font_selection();
+        let size = app.state.app_settings.font_size();
+        let [_, background, highlight] = colors(&app);
+
+        settings_controller::set_editor_text_color(&mut app, RED);
+
+        let settings = &app.state.app_settings;
+        assert_eq!(
+            settings.editor_appearance_source(),
+            EditorAppearanceSource::App
+        );
+        assert_eq!(settings.theme_mode(), AppThemeMode::Custom);
+        assert_eq!(colors(&app), [RED, background, highlight]);
+        assert_eq!(settings.font_size(), size);
+        assert_eq!(settings.editor_font_selection(), font);
+        assert_eq!(colors(&reloaded(&app)), [RED, background, highlight]);
+    }
+
+    #[test]
+    fn choosing_a_preset_while_following_the_system_keeps_the_desktop_font() {
+        let mut app = test_app([]);
+        settings_controller::set_editor_appearance_source(&mut app, EditorAppearanceSource::System);
+        let font = app.state.app_settings.editor_font_selection();
+
+        settings_controller::set_theme_mode(&mut app, AppThemeMode::Light);
+
+        assert_eq!(app.state.app_settings.theme_mode(), AppThemeMode::Light);
+        assert_eq!(app.state.app_settings.editor_font_selection(), font);
+    }
+
+    #[test]
+    fn returning_to_scratchpad_without_an_edit_restores_the_saved_set() {
+        let mut app = test_app([]);
+        settings_controller::set_theme_mode(&mut app, AppThemeMode::Dark);
+        settings_controller::set_font_size(&mut app, 20.0);
+        settings_controller::set_editor_font(&mut app, Some(EditorFontPreset::Serif));
+        let saved = colors(&app);
+
+        settings_controller::set_editor_appearance_source(&mut app, EditorAppearanceSource::System);
+        settings_controller::set_editor_appearance_source(&mut app, EditorAppearanceSource::App);
+
+        let settings = &app.state.app_settings;
+        assert_eq!(settings.theme_mode(), AppThemeMode::Dark);
+        assert_eq!(settings.font_size(), 20.0);
+        assert_eq!(settings.editor_font(), EditorFontPreset::Serif);
+        assert_eq!(colors(&app), saved);
+    }
+
+    #[test]
+    fn a_swatch_edit_turns_the_preset_into_a_custom_set_that_survives_a_restart() {
+        let mut app = test_app([]);
+        settings_controller::set_theme_mode(&mut app, AppThemeMode::Light);
+        let [text, background, _] = colors(&app);
+
+        settings_controller::set_editor_text_highlight_color(&mut app, RED);
+
+        assert_eq!(app.state.app_settings.theme_mode(), AppThemeMode::Custom);
+        assert_eq!(colors(&app), [text, background, RED]);
+        let next = reloaded(&app);
+        assert_eq!(next.state.app_settings.theme_mode(), AppThemeMode::Custom);
+        assert_eq!(colors(&next), [text, background, RED]);
+    }
+
+    #[test]
+    fn presets_reset_all_three_swatches() {
+        let mut app = test_app([]);
+        settings_controller::set_theme_mode(&mut app, AppThemeMode::Dark);
+        let stock = colors(&app);
+        settings_controller::set_editor_background_color(&mut app, RED);
+        settings_controller::set_editor_text_highlight_color(&mut app, RED);
+
+        settings_controller::set_theme_mode(&mut app, AppThemeMode::Dark);
+
+        assert_eq!(app.state.app_settings.theme_mode(), AppThemeMode::Dark);
+        assert_eq!(colors(&app), stock);
+        assert_eq!(
+            reloaded(&app).state.app_settings.theme_mode(),
+            AppThemeMode::Dark
+        );
+    }
+
+    #[test]
+    fn choosing_custom_keeps_the_preset_colors_on_screen() {
+        let mut app = test_app([]);
+        settings_controller::set_theme_mode(&mut app, AppThemeMode::Light);
+        let light = colors(&app);
+
+        settings_controller::set_theme_mode(&mut app, AppThemeMode::Custom);
+
+        assert_eq!(app.state.app_settings.theme_mode(), AppThemeMode::Custom);
+        assert_eq!(colors(&app), light);
+    }
+
+    #[test]
+    fn system_font_choice_uses_the_desktop_family() {
+        let mut app = test_app([]);
+        settings_controller::set_editor_font(&mut app, None);
+
+        let selection = app.state.app_settings.editor_font_selection();
+        assert_eq!(selection.source, crate::app::fonts::EditorFontSource::Os);
+        assert_eq!(
+            selection.os_family,
+            crate::app::system_appearance::editor_font_family()
+        );
+    }
 }

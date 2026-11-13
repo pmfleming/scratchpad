@@ -56,10 +56,14 @@ pub enum StartupSessionBehavior {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AppThemeMode {
+    /// Stock light or dark palette, following the desktop's color scheme live.
     #[default]
-    System,
+    #[serde(alias = "system")]
+    Auto,
     Light,
     Dark,
+    /// The stored text, background and highlight colors.
+    Custom,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,17 +169,6 @@ impl EditorAppearanceSource {
         match self {
             Self::App => "App",
             Self::System => "System",
-        }
-    }
-}
-
-impl AppThemeMode {
-    #[must_use]
-    pub fn theme_preference(self) -> egui::ThemePreference {
-        match self {
-            Self::System => egui::ThemePreference::System,
-            Self::Light => egui::ThemePreference::Light,
-            Self::Dark => egui::ThemePreference::Dark,
         }
     }
 }

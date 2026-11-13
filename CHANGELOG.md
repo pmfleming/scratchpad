@@ -26,6 +26,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 - Tab labels use the configured font size without a separate cap and match the editor at 100% zoom and Settings labels. Tab rows grow to fit, and tab text follows the configured text colour.
 
 - Settings follows the selected System or Scratchpad font, size, text and background palette, including menus and color pickers. Headings scale with the base size and controls wrap or stack in narrow layouts.
+- Appearance rows always show the value in use. Changing one while using the System appearance keeps the desktop's other values instead of jumping to older Scratchpad ones, and the Font menu offers "System font". Colors offers Auto, Light, Dark and Custom: Auto follows the desktop's light/dark scheme as it changes, presets reset all three swatches, and Custom is saved, including a highlight-only change. Custom colors also set the window's light or dark theme. `theme_mode = "system"` reads as `"auto"`.
 
 - Timeline uses the same blue rail as This file, without date headings. Connected up/down controls jump to the newest and oldest events without changing the document.
 

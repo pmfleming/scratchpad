@@ -475,7 +475,11 @@ Close Settings with:
 Settings are grouped into expandable cards:
 
 - Editor Appearance: app or system appearance, font, size, theme, colors,
-  gutter, preview, and word wrap.
+  gutter, preview, and word wrap. Every row shows the value in use. Changing
+  one while following the system starts a Scratchpad appearance from what is
+  on screen, so only that value changes. Colors offers Auto (follows the
+  desktop's light or dark scheme), Light, Dark, and Custom; editing a swatch
+  switches to Custom.
 - Editing: indentation style and width, and tab-character display.
 - Opening: file-open behavior, startup/session behavior, and recent files.
 - Tab Position: tab-list placement, new-tab placement, auto-hide behavior, and

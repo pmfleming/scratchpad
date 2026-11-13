@@ -56,7 +56,7 @@ tab_display = "hidden"         # hidden, character, tablines
 editor_font = "standard"        # standard, flex, mono, serif
 font_source = "scratchpad"      # scratchpad, os
 os_font_family = ""             # empty selects the OS default editor font
-theme_mode = "system"           # system, light, dark
+theme_mode = "auto"             # auto, light, dark, custom
 editor_text_color = "#ffffff"
 editor_background_color = "#15181d"
 editor_text_highlight_color = "#fff36d"
@@ -66,7 +66,18 @@ editor_text_highlight_text_color = "#0b0f3d"
 With `appearance_source = "system"`, Scratchpad resolves the editor and Settings-page font,
 font size, theme, and palette from the desktop and uses conservative fallbacks
 when a value is unavailable. With `appearance_source = "app"`, the remaining
-editor values are authoritative. Colors use six-digit `#RRGGBB` notation.
+editor values are authoritative. Changing any appearance control in Settings
+while following the system copies the desktop's font, size and colors into the
+Scratchpad values first, so only the changed value differs; this replaces the
+previously saved Scratchpad values.
+
+`theme_mode = "auto"` shows the stock light or dark palette and follows the
+desktop's color scheme as it changes; `"light"` and `"dark"` fix one of them.
+`"custom"` uses `editor_text_color`, `editor_background_color` and
+`editor_text_highlight_color`, and picks the window's light or dark theme from
+the background. The color keys apply only with `"custom"`; a file that pairs a
+preset with other colors loads as `"custom"`. The older value `"system"` reads
+as `"auto"`. Colors use six-digit `#RRGGBB` notation.
 The Settings page and its menus use the resolved font, base size, text and background
 colors too. Headings and descriptions scale with the base size; controls wrap or
 stack to fit larger fonts.

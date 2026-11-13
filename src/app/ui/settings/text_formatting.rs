@@ -7,8 +7,14 @@ use super::{
     },
 };
 use crate::app::app_state::settings_controller as settings;
+use crate::app::fonts::EditorFontSource;
 use crate::app::ui::widget_ids;
 
+const SYSTEM_FONT_LABEL: &str = "System font";
+
+/// Every row shows the value in effect, whichever source supplies it. Editing
+/// a row while following the system starts a Scratchpad set from what is on
+/// screen (see `settings_controller::edit_appearance`).
 pub(super) fn render_appearance(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let mut source = app.state.app_settings.editor_appearance_source();
     if segmented_row(
@@ -22,49 +28,25 @@ pub(super) fn render_appearance(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     ) {
         settings::set_editor_appearance_source(app, source);
     }
-    let mut font = app.state.app_settings.editor_font();
-    inner_select_row(ui, "Font", None, |ui| {
-        if dropdown(
-            ui,
-            "Font",
-            &mut font,
-            &EditorFontPreset::ALL,
-            |font| font.label().into(),
-            180.0 * SettingsUi::scale(ui).max(1.0),
-            "",
-        ) {
-            use_app_appearance(app);
-            settings::set_editor_font(app, font);
-        }
-    });
+    font_row(ui, app);
     font_size_row(ui, app);
-    let custom_id = egui::Id::unique("settings.custom_palette");
-    let custom = ui
-        .data_mut(|data| data.get_temp::<bool>(custom_id))
-        .unwrap_or(false);
-    let mut mode = if custom || app.state.app_settings.has_custom_editor_palette() {
-        None
-    } else {
-        Some(app.state.app_settings.theme_mode())
-    };
+    // No segment is selected while the desktop supplies the colors.
+    let mut mode = (!app.state.app_settings.uses_system_editor_appearance())
+        .then(|| app.state.app_settings.theme_mode());
     if segmented_row(
         ui,
         "Colors",
         &mut mode,
         &[
-            (Some(AppThemeMode::System), "System"),
+            (Some(AppThemeMode::Auto), "Auto"),
             (Some(AppThemeMode::Light), "Light"),
             (Some(AppThemeMode::Dark), "Dark"),
-            (None, "Custom"),
+            (Some(AppThemeMode::Custom), "Custom"),
         ],
-    ) {
-        use_app_appearance(app);
-        ui.data_mut(|data| data.insert_temp(custom_id, mode.is_none()));
-        if let Some(mode) = mode {
-            settings::apply_theme_mode_preset(app, mode, ui.ctx().system_theme());
-        }
+    ) && let Some(mode) = mode
+    {
+        settings::set_theme_mode(app, mode);
     }
-    // These controls remain visible even when following the operating system.
     color_row(
         ui,
         "Text",
@@ -89,6 +71,45 @@ pub(super) fn render_appearance(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     render_preview_panel(ui, app, false);
 }
 
+/// `None` is the desktop's font, the only font in effect while following the
+/// system.
+fn font_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    let appearance = &app.state.app_settings;
+    let follows_system = appearance.uses_system_editor_appearance();
+    let mut font = (!follows_system
+        && appearance.editor_font_source() == EditorFontSource::Scratchpad)
+        .then(|| appearance.editor_font());
+    // A family set by hand in settings.toml is named; the desktop's is not.
+    let stored_family = appearance.os_font_family().trim();
+    let desktop_family = crate::app::system_appearance::editor_font_family();
+    let os_label = if follows_system
+        || stored_family.is_empty()
+        || desktop_family.as_deref() == Some(stored_family)
+    {
+        SYSTEM_FONT_LABEL.to_owned()
+    } else {
+        stored_family.to_owned()
+    };
+    let options: Vec<_> = EditorFontPreset::ALL
+        .map(Some)
+        .into_iter()
+        .chain([None])
+        .collect();
+    inner_select_row(ui, "Font", None, |ui| {
+        if dropdown(
+            ui,
+            "Font",
+            &mut font,
+            &options,
+            |font| font.map_or_else(|| os_label.clone(), |font| font.label().into()),
+            180.0 * SettingsUi::scale(ui).max(1.0),
+            "",
+        ) {
+            settings::set_editor_font(app, font);
+        }
+    });
+}
+
 fn font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let mut size = app.state.app_settings.font_size();
     inner_select_row(ui, "Size", None, |ui| {
@@ -104,7 +125,6 @@ fn font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             "pt",
         );
         if slider_changed || preset_changed {
-            use_app_appearance(app);
             settings::set_font_size(app, size);
         }
     });
@@ -161,12 +181,6 @@ fn font_size_slider(ui: &mut egui::Ui, size: &mut f32) -> bool {
     changed
 }
 
-fn use_app_appearance(app: &mut ScratchpadApp) {
-    if app.state.app_settings.uses_system_editor_appearance() {
-        settings::set_editor_appearance_source(app, EditorAppearanceSource::App);
-    }
-}
-
 fn color_row(
     ui: &mut egui::Ui,
     label: &str,
@@ -180,11 +194,7 @@ fn color_row(
             let response = super::widgets::color_button(ui, label, &mut color);
             record_settings_control_box(format!("color.{label}"), response.rect);
             if response.changed() {
-                use_app_appearance(app);
                 set(app, color);
-                ui.data_mut(|data| {
-                    data.insert_temp(egui::Id::unique("settings.custom_palette"), true)
-                });
             }
         });
     });

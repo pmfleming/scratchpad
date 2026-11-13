@@ -1,11 +1,16 @@
-use super::super::stock_editor_palette_for_selection;
+use super::super::stock_editor_palette;
 use crate::app::domain::TextHistoryBudget;
-use crate::app::fonts::EditorFontPreset;
+use crate::app::fonts::{EditorFontPreset, EditorFontSource};
 use crate::app::services::settings_store::{
-    AppSettings, AppThemeMode, EditorAppearanceSource, FileOpenDisposition, IndentationStyle,
-    NewTabPlacement, StartupSessionBehavior, TabDisplayMode, color_to_hex,
+    AppSettings, AppThemeMode, DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR,
+    DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, EditorAppearanceSource, FileOpenDisposition,
+    IndentationStyle, NewTabPlacement, StartupSessionBehavior, TabDisplayMode, color_to_hex,
 };
 use eframe::egui;
+
+fn system_font_family() -> String {
+    crate::app::system_appearance::editor_font_family().unwrap_or_default()
+}
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct SettingEffects {
@@ -59,8 +64,58 @@ impl AppSettings {
         true
     }
 
-    pub(super) fn set_editor_font(&mut self, editor_font: EditorFontPreset) -> bool {
-        replace_if_changed(&mut self.editor.editor_font, editor_font)
+    /// `None` selects the desktop's font.
+    pub(super) fn set_editor_font(&mut self, choice: Option<EditorFontPreset>) -> bool {
+        match choice {
+            Some(preset) => {
+                replace_if_changed(&mut self.editor.font_source, EditorFontSource::Scratchpad)
+                    | replace_if_changed(&mut self.editor.editor_font, preset)
+            }
+            None => {
+                replace_if_changed(&mut self.editor.font_source, EditorFontSource::Os)
+                    | replace_if_changed(&mut self.editor.os_font_family, system_font_family())
+            }
+        }
+    }
+
+    /// Editing any appearance control while following the system starts a
+    /// custom set from what is on screen, so only the edited value changes.
+    /// The font selection it stores resolves to the same font, so nothing
+    /// reloads. Returns whether it forked.
+    pub(super) fn adopt_resolved_appearance(&mut self) -> bool {
+        if !self.uses_system_editor_appearance() {
+            return false;
+        }
+
+        let font_size = self.font_size();
+        self.store_resolved_colors();
+        self.editor.font_size = font_size.clamp(8.0, 72.0);
+        self.editor.font_source = EditorFontSource::Os;
+        self.editor.os_font_family = system_font_family();
+        self.editor.appearance_source = EditorAppearanceSource::App;
+        true
+    }
+
+    /// Leaving a preset keeps the colors on screen as the starting custom set.
+    pub(super) fn freeze_palette(&mut self) -> bool {
+        if self.editor.theme_mode == AppThemeMode::Custom {
+            return false;
+        }
+
+        self.store_resolved_colors();
+        true
+    }
+
+    fn store_resolved_colors(&mut self) {
+        let text = color_to_hex(self.editor_text_color());
+        let background = color_to_hex(self.editor_background_color());
+        let highlight = color_to_hex(self.editor_text_highlight_color());
+        let highlight_text = color_to_hex(self.editor_text_highlight_text_color());
+        self.editor.editor_text_color = text;
+        self.editor.editor_background_color = background;
+        self.editor.editor_text_highlight_color = highlight;
+        self.editor.editor_text_highlight_text_color = highlight_text;
+        self.editor.theme_mode = AppThemeMode::Custom;
     }
 
     pub(super) fn set_word_wrap(&mut self, enabled: bool) -> bool {
@@ -83,24 +138,31 @@ impl AppSettings {
         replace_if_changed(&mut self.editor.tab_display, mode)
     }
 
-    pub(super) fn apply_theme_mode_preset(
-        &mut self,
-        theme_mode: AppThemeMode,
-        system_theme: Option<egui::Theme>,
-    ) -> bool {
-        let (text_color, background_color) =
-            stock_editor_palette_for_selection(theme_mode, system_theme);
-        if self.editor.theme_mode == theme_mode
-            && self.editor.editor_text_color == text_color
-            && self.editor.editor_background_color == background_color
-        {
-            return false;
-        }
+    /// A preset resets all three swatches; `Custom` keeps the colors on screen.
+    pub(super) fn set_theme_mode(&mut self, theme_mode: AppThemeMode) -> bool {
+        let Some((text, background)) = stock_editor_palette(
+            theme_mode,
+            crate::app::system_appearance::system_color_scheme(),
+        ) else {
+            return self.freeze_palette();
+        };
 
-        self.editor.theme_mode = theme_mode;
-        text_color.clone_into(&mut self.editor.editor_text_color);
-        background_color.clone_into(&mut self.editor.editor_background_color);
-        true
+        // Stored stock values keep the file self-consistent; presets resolve
+        // their colors without reading them.
+        replace_if_changed(&mut self.editor.theme_mode, theme_mode)
+            | replace_if_changed(&mut self.editor.editor_text_color, text.to_owned())
+            | replace_if_changed(
+                &mut self.editor.editor_background_color,
+                background.to_owned(),
+            )
+            | replace_if_changed(
+                &mut self.editor.editor_text_highlight_color,
+                DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR.to_owned(),
+            )
+            | replace_if_changed(
+                &mut self.editor.editor_text_highlight_text_color,
+                DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR.to_owned(),
+            )
     }
 
     pub(super) fn set_editor_text_color(&mut self, color: egui::Color32) -> bool {

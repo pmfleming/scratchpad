@@ -28,7 +28,7 @@ fn apply_setting_effects(app: &mut ScratchpadApp, changed: bool, effects: Settin
         app.state.window.applied_editor_font = None;
     }
     if effects.invalidate_theme {
-        app.state.window.applied_theme_mode = None;
+        app.state.window.applied_theme_preference = None;
     }
     if effects.relayout {
         crate::app::app_state::frame::begin_layout_transition(app);
@@ -76,14 +76,39 @@ pub(crate) fn set_editor_appearance_source(
     apply_setting_effects(app, changed, SettingEffects::FONT_AND_THEME);
 }
 
-pub(crate) fn set_font_size(app: &mut ScratchpadApp, font_size: f32) {
-    let changed = app.state.app_settings.set_font_size(font_size);
-    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
+/// Every appearance control edits the Scratchpad set. While following the
+/// system, the first edit copies what is on screen into that set before
+/// applying, so only the edited value changes.
+fn edit_appearance(
+    app: &mut ScratchpadApp,
+    effects: SettingEffects,
+    edit: impl FnOnce(&mut AppSettings) -> bool,
+) {
+    let settings = &mut app.state.app_settings;
+    let forked = settings.adopt_resolved_appearance();
+    let changed = edit(settings);
+    let effects = if forked {
+        SettingEffects {
+            invalidate_theme: true,
+            ..effects
+        }
+    } else {
+        effects
+    };
+    apply_setting_effects(app, forked || changed, effects);
 }
 
-pub(crate) fn set_editor_font(app: &mut ScratchpadApp, editor_font: EditorFontPreset) {
-    let changed = app.state.app_settings.set_editor_font(editor_font);
-    apply_setting_effects(app, changed, SettingEffects::FONT);
+pub(crate) fn set_font_size(app: &mut ScratchpadApp, font_size: f32) {
+    edit_appearance(app, SettingEffects::PERSIST_ONLY, |settings| {
+        settings.set_font_size(font_size)
+    });
+}
+
+/// `None` selects the desktop's font.
+pub(crate) fn set_editor_font(app: &mut ScratchpadApp, choice: Option<EditorFontPreset>) {
+    edit_appearance(app, SettingEffects::FONT, |settings| {
+        settings.set_editor_font(choice)
+    });
 }
 
 pub(crate) fn set_word_wrap(app: &mut ScratchpadApp, enabled: bool) {
@@ -111,34 +136,30 @@ pub(crate) fn set_tab_display(app: &mut ScratchpadApp, mode: TabDisplayMode) {
     apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
-pub(crate) fn apply_theme_mode_preset(
-    app: &mut ScratchpadApp,
-    theme_mode: AppThemeMode,
-    system_theme: Option<egui::Theme>,
-) {
-    let changed = app
-        .state
-        .app_settings
-        .apply_theme_mode_preset(theme_mode, system_theme);
-    apply_setting_effects(app, changed, SettingEffects::THEME);
+pub(crate) fn set_theme_mode(app: &mut ScratchpadApp, theme_mode: AppThemeMode) {
+    edit_appearance(app, SettingEffects::THEME, |settings| {
+        settings.set_theme_mode(theme_mode)
+    });
 }
 
+// Swatch edits switch a preset to Custom, starting from the colors on screen.
+// The window theme follows the resolved background each frame.
 pub(crate) fn set_editor_text_color(app: &mut ScratchpadApp, color: egui::Color32) {
-    let changed = app.state.app_settings.set_editor_text_color(color);
-    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
+    edit_appearance(app, SettingEffects::PERSIST_ONLY, |settings| {
+        settings.freeze_palette() | settings.set_editor_text_color(color)
+    });
 }
 
 pub(crate) fn set_editor_background_color(app: &mut ScratchpadApp, color: egui::Color32) {
-    let changed = app.state.app_settings.set_editor_background_color(color);
-    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
+    edit_appearance(app, SettingEffects::PERSIST_ONLY, |settings| {
+        settings.freeze_palette() | settings.set_editor_background_color(color)
+    });
 }
 
 pub(crate) fn set_editor_text_highlight_color(app: &mut ScratchpadApp, color: egui::Color32) {
-    let changed = app
-        .state
-        .app_settings
-        .set_editor_text_highlight_color(color);
-    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
+    edit_appearance(app, SettingEffects::PERSIST_ONLY, |settings| {
+        settings.freeze_palette() | settings.set_editor_text_highlight_color(color)
+    });
 }
 
 pub(crate) fn set_tab_list_position(app: &mut ScratchpadApp, position: TabListPosition) {

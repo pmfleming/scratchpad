@@ -8,6 +8,7 @@ fn labels_tabs_and_both_previews_share_the_configured_font() {
             app.state.app_settings.editor.appearance_source = EditorAppearanceSource::App;
             app.state.app_settings.editor.editor_font = preset;
             app.state.app_settings.editor.font_size = size;
+            app.state.app_settings.editor.theme_mode = super::AppThemeMode::Custom;
             app.state.app_settings.editor.editor_text_color = "#e4c7a2".into();
             app.state.app_settings.editor.editor_background_color = "#241837".into();
             app.state.app_settings.editor.editor_text_highlight_color = "#68aeee".into();

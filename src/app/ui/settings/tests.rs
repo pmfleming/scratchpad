@@ -343,12 +343,14 @@ fn long_segment_labels_stack_without_overlapping_the_next_row() {
 }
 
 #[test]
-fn appearance_controls_stay_visible_for_system_source_and_editing_switches_source() {
+fn appearance_controls_stay_visible_for_system_source_and_editing_forks_from_it() {
     let mut app = app();
     crate::app::app_state::settings_controller::set_editor_appearance_source(
         &mut app,
         EditorAppearanceSource::System,
     );
+    let system_size = app.state.app_settings.font_size();
+    let system_colors = resolved_colors(&app);
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1000.0, 1800.0))
         .with_context_setup(setup)
@@ -369,24 +371,37 @@ fn appearance_controls_stay_visible_for_system_source_and_editing_switches_sourc
     harness.run_steps(2);
     harness.get_by_label("Mono").click_accesskit();
     harness.run_steps(2);
+    let settings = &harness.state().state.app_settings;
     assert_eq!(
-        harness
-            .state()
-            .state
-            .app_settings
-            .editor_appearance_source(),
+        settings.editor_appearance_source(),
         EditorAppearanceSource::App
     );
     assert_eq!(
-        harness.state().state.app_settings.editor_font(),
-        EditorFontPreset::Mono
+        settings.editor_font_selection(),
+        crate::app::fonts::EditorFontSelection::scratchpad(EditorFontPreset::Mono)
     );
+    // Only the font changed; the rest is what System showed.
+    assert_eq!(settings.font_size(), system_size);
+    assert_eq!(resolved_colors(harness.state()), system_colors);
+    assert_eq!(settings.theme_mode(), AppThemeMode::Custom);
+}
+
+fn resolved_colors(app: &ScratchpadApp) -> [egui::Color32; 4] {
+    let settings = &app.state.app_settings;
+    [
+        settings.editor_text_color(),
+        settings.editor_background_color(),
+        settings.editor_text_highlight_color(),
+        settings.editor_text_highlight_text_color(),
+    ]
 }
 
 #[test]
 fn font_size_slider_and_presets_stay_in_sync_and_persist() {
     let mut app = app();
     app.state.app_settings.editor.appearance_source = EditorAppearanceSource::System;
+    let system_font = app.state.app_settings.editor_font_selection();
+    let system_colors = resolved_colors(&app);
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1000.0, 1800.0))
         .with_context_setup(setup)
@@ -412,6 +427,12 @@ fn font_size_slider_and_presets_stay_in_sync_and_persist() {
             .editor_appearance_source(),
         EditorAppearanceSource::App
     );
+    // Only the size changed; font and colors are still the desktop's.
+    assert_eq!(
+        harness.state().state.app_settings.editor_font_selection(),
+        system_font
+    );
+    assert_eq!(resolved_colors(harness.state()), system_colors);
     assert_eq!(
         harness
             .get_by_role_and_label(egui::Role::ComboBox, "Size")
@@ -549,6 +570,7 @@ fn both_reset_actions_are_destructive_without_restyling_ordinary_buttons() {
                 },
                 {
                     let mut state = app();
+                    state.state.app_settings.editor.theme_mode = AppThemeMode::Custom;
                     state.state.app_settings.editor.editor_background_color =
                         if dark { "#15181d" } else { "#ffffff" }.into();
                     state
