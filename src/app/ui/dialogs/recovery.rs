@@ -271,14 +271,14 @@ pub(super) fn text_preview(ui: &mut egui::Ui, title: &str, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{ViewState, render_preview};
+    use super::{SaveResult, ViewState, render_preview};
     use crate::app::{
-        app_state::test_support::{test_app, ui_harness},
+        app_state::test_support::{test_app, ui_harness, write_file},
         services::session_store::recovery::{RecoveryItem, RecoveryPreview},
     };
     use eframe::egui;
     use egui_kittest::kittest::Queryable;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn partial_recovery_ui_opens_a_separate_dirty_copy_with_gap_markers() {
@@ -315,5 +315,61 @@ mod tests {
         assert!(copy.active_buffer().path.is_none());
         assert!(copy.active_buffer().is_dirty);
         assert_ne!(copy.active_buffer().temp_id, "protected-id");
+    }
+
+    #[test]
+    fn verified_preview_reports_export_outcomes_and_compares_with_disk() {
+        let root = tempfile::tempdir().unwrap();
+        let disk = write_file(root.path(), "draft.txt", "disk text");
+        let preview = Arc::new(RecoveryPreview {
+            item: RecoveryItem {
+                id: "verified-id".into(),
+                name: "draft.txt".into(),
+                path: Some(disk.clone()),
+                reason: "session could not be opened".into(),
+            },
+            text: "recovered text".into(),
+            gaps: 0,
+            truncated: true,
+        });
+        let outcomes = [
+            (None, "Waiting for recovery export…".into()),
+            (Some(Ok(None)), "Export cancelled.".into()),
+            (Some(Err("disk full".into())), "disk full".into()),
+            (
+                Some(Ok(Some(disk.clone()))),
+                format!("Recovered copy saved to {}", disk.display()),
+            ),
+        ];
+        for (outcome, label) in outcomes {
+            let save: SaveResult = Arc::new(Mutex::new(outcome));
+            let mut state = ViewState {
+                selected: Some("verified-id".into()),
+                compare: true,
+                save: Some(save),
+            };
+            let preview = preview.clone();
+            let path = root.path().to_owned();
+            let mut harness = ui_harness(
+                egui::vec2(1100., 700.),
+                test_app(root.path()),
+                move |ui, app| {
+                    render_preview(ui, app, &preview, &mut state, &path);
+                },
+            );
+            harness.get_by_label_contains("Current text verified");
+            harness.get_by_label_contains("Recovery size limit reached");
+            harness.get_by_label(&label);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while harness.query_by_label("Current disk file").is_none() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "disk text never loaded"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                harness.run_steps(1);
+            }
+            harness.get_by_label("Recovered text");
+        }
     }
 }
