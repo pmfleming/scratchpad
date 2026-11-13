@@ -21,6 +21,16 @@ struct LoadedDocument {
     inspection: StreamedTextInspection,
     has_decoding_warnings: bool,
 }
+impl LoadedDocument {
+    /// A document decoded from valid UTF-8, so no replacement characters were added.
+    fn exact_utf8(document: TextDocument, inspection: StreamedTextInspection) -> Self {
+        Self {
+            document,
+            inspection,
+            has_decoding_warnings: false,
+        }
+    }
+}
 struct StagedDocument {
     content: String,
     inspector: StreamingTextInspector,
@@ -42,6 +52,14 @@ impl StagedDocument {
         self.inspector.observe(text);
         self.content.push_str(text);
         Ok(())
+    }
+    fn check_bulk_capacity(&self, context: &ImportContext) -> io::Result<()> {
+        match &context.store {
+            Some(store) if self.content.len() >= CHUNKED_UTF8_MIN_BYTES as usize => {
+                store.check_bulk_capacity(self.content.len())
+            }
+            _ => Ok(()),
+        }
     }
     fn finish(self, context: &ImportContext) -> io::Result<LoadedDocument> {
         let document = if self.content.len() >= CHUNKED_UTF8_MIN_BYTES as usize {
@@ -106,7 +124,6 @@ pub(super) fn read_file_content(
         || encoding == encoding_rs::UTF_16BE;
     Ok(FileContent {
         document,
-        artifact_summary: text_metadata.artifact_summary.clone(),
         format,
         text_metadata,
         decoded_digest: Some(digest),
@@ -140,32 +157,28 @@ pub(super) fn read_first_visible_window(
         &bytes
     };
 
-    let (text, has_decoding_warnings) = if encoding == encoding_rs::UTF_8 {
-        match std::str::from_utf8(without_bom) {
-            Ok(text) => (text.to_owned(), false),
-            Err(error) if error.error_len().is_none() && !complete => (
-                String::from_utf8_lossy(&without_bom[..error.valid_up_to()]).into_owned(),
-                false,
-            ),
-            Err(_) => {
-                let (decoded, had_errors) = encoding.decode_without_bom_handling(without_bom);
-                (decoded.into_owned(), had_errors)
-            }
-        }
-    } else {
-        let (decoded, had_errors) = encoding.decode_without_bom_handling(without_bom);
-        (decoded.into_owned(), had_errors)
-    };
-
     Ok(FileVisibleWindow {
-        text,
+        text: decode_visible_prefix(encoding, without_bom, complete),
         file_size_bytes,
         loaded_bytes,
         encoding_name: encoding.name().to_owned(),
         has_bom,
-        has_decoding_warnings,
         complete,
     })
+}
+
+fn decode_visible_prefix(encoding: &'static Encoding, bytes: &[u8], complete: bool) -> String {
+    if encoding == encoding_rs::UTF_8 {
+        match std::str::from_utf8(bytes) {
+            Ok(text) => return text.to_owned(),
+            // A partial window may end inside a code point; keep the complete prefix.
+            Err(error) if error.error_len().is_none() && !complete => {
+                return String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned();
+            }
+            Err(_) => {}
+        }
+    }
+    encoding.decode_without_bom_handling(bytes).0.into_owned()
 }
 
 fn ensure_text_prefix(prefix: &[u8], has_bom: bool) -> io::Result<()> {
@@ -185,26 +198,29 @@ fn read_document_with_encoding(
     has_bom: bool,
     context: &ImportContext,
 ) -> io::Result<LoadedDocument> {
+    if encoding == encoding_rs::UTF_8 {
+        if File::open(path)?.metadata()?.len() >= CHUNKED_UTF8_MIN_BYTES {
+            let (document, inspection) =
+                TextDocument::import_utf8_file(path, if has_bom { 3 } else { 0 }, context)?;
+            return Ok(LoadedDocument::exact_utf8(document, inspection));
+        }
+        if let Some(loaded) = read_utf8_document_fast_path(path, has_bom)? {
+            return Ok(loaded);
+        }
+    }
+    decode_document_streaming(path, encoding, has_bom, context)
+}
+
+/// Decodes `path` in bounded reads, staging the UTF-8 text until it is
+/// complete. Large staged text is checked against the bulk-import budget.
+fn decode_document_streaming(
+    path: &Path,
+    encoding: &'static Encoding,
+    has_bom: bool,
+    context: &ImportContext,
+) -> io::Result<LoadedDocument> {
     const RAW_READ_BYTES: usize = 16 * 1024;
     const DECODED_CHUNK_BYTES: usize = 32 * 1024;
-
-    if encoding == encoding_rs::UTF_8
-        && File::open(path)?.metadata()?.len() >= CHUNKED_UTF8_MIN_BYTES
-    {
-        let (document, inspection) =
-            TextDocument::import_utf8_file(path, if has_bom { 3 } else { 0 }, context)?;
-        return Ok(LoadedDocument {
-            document,
-            inspection,
-            has_decoding_warnings: false,
-        });
-    }
-
-    if encoding == encoding_rs::UTF_8
-        && let Some(loaded) = read_utf8_document_fast_path(path, has_bom)?
-    {
-        return Ok(loaded);
-    }
 
     let mut file = File::open(path)?;
     let decoded_capacity = file
@@ -229,11 +245,7 @@ fn read_document_with_encoding(
         pending.extend_from_slice(&raw[..read]);
         let consumed = decode_pending(&mut decoder, &pending, &mut decoded, eof, &mut document)?;
         pending.drain(..consumed);
-        if document.content.len() >= CHUNKED_UTF8_MIN_BYTES as usize
-            && let Some(store) = &context.store
-        {
-            store.check_bulk_capacity(document.content.len())?;
-        }
+        document.check_bulk_capacity(context)?;
         if eof {
             return document.finish(context);
         }
@@ -283,11 +295,10 @@ fn read_utf8_document_fast_path(path: &Path, has_bom: bool) -> io::Result<Option
 
     let mut inspector = StreamingTextInspector::new();
     inspector.observe(&content);
-    Ok(Some(LoadedDocument {
-        document: TextDocument::new(content),
-        inspection: inspector.finish(),
-        has_decoding_warnings: false,
-    }))
+    Ok(Some(LoadedDocument::exact_utf8(
+        TextDocument::new(content),
+        inspector.finish(),
+    )))
 }
 
 fn is_probably_binary(prefix: &[u8], has_bom: bool) -> bool {
