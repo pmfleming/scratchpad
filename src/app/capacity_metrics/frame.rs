@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::{
     CapacityMetricsSnapshot, FRAME_HISTOGRAM_BUCKETS, divide_u64, load_counter, reset_counter,
-    reset_counters, saturating_u64, update_max,
+    saturating_u64, update_max,
 };
 
 const FRAME_HISTOGRAM_BUCKET_WIDTH_NS: u64 = 500_000;
@@ -49,61 +49,16 @@ pub(super) struct MetricsSnapshot {
     pub finish: FramePhaseMetricsSnapshot,
 }
 
-#[derive(Clone, Copy)]
-struct Counters {
-    total_ns: &'static AtomicU64,
-    max_ns: &'static AtomicU64,
-}
-
-macro_rules! frame_counters {
-    ($($name:ident),+ $(,)?) => {
-        $(static $name: AtomicU64 = AtomicU64::new(0);)+
-    };
-}
-
-frame_counters! {
-    FRAME_COUNT,
-    FRAME_TIME_TOTAL_NS,
-    FRAME_TIME_MAX_NS,
-    FRAME_PREPARE_TOTAL_NS,
-    FRAME_PREPARE_MAX_NS,
-    FRAME_BACKGROUND_POLL_TOTAL_NS,
-    FRAME_BACKGROUND_POLL_MAX_NS,
-    FRAME_PAINT_TOTAL_NS,
-    FRAME_PAINT_MAX_NS,
-    FRAME_CHROME_TOTAL_NS,
-    FRAME_CHROME_MAX_NS,
-    FRAME_ACTIVE_SURFACE_TOTAL_NS,
-    FRAME_ACTIVE_SURFACE_MAX_NS,
-    FRAME_GUTTER_TOTAL_NS,
-    FRAME_GUTTER_MAX_NS,
-    FRAME_SCROLL_TOTAL_NS,
-    FRAME_SCROLL_MAX_NS,
-    FRAME_DIALOGS_TOTAL_NS,
-    FRAME_DIALOGS_MAX_NS,
-    FRAME_SHORTCUTS_TOTAL_NS,
-    FRAME_SHORTCUTS_MAX_NS,
-    FRAME_FINISH_TOTAL_NS,
-    FRAME_FINISH_MAX_NS,
-}
-
+static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
+static FRAME_TIME_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_TIME_MAX_NS: AtomicU64 = AtomicU64::new(0);
 static FRAME_TIME_BUCKET_COUNTS: [AtomicU64; FRAME_HISTOGRAM_BUCKETS] =
     [const { AtomicU64::new(0) }; FRAME_HISTOGRAM_BUCKETS];
 
-impl FramePhase {
-    const ALL: [Self; 10] = [
-        Self::Prepare,
-        Self::BackgroundPoll,
-        Self::Paint,
-        Self::Chrome,
-        Self::ActiveSurface,
-        Self::Gutter,
-        Self::Scroll,
-        Self::Dialogs,
-        Self::Shortcuts,
-        Self::Finish,
-    ];
-}
+/// Phase counters are indexed by `FramePhase as usize`.
+const PHASE_COUNT: usize = FramePhase::Finish as usize + 1;
+static PHASE_TOTAL_NS: [AtomicU64; PHASE_COUNT] = [const { AtomicU64::new(0) }; PHASE_COUNT];
+static PHASE_MAX_NS: [AtomicU64; PHASE_COUNT] = [const { AtomicU64::new(0) }; PHASE_COUNT];
 
 impl CapacityMetricsSnapshot {
     #[must_use]
@@ -141,31 +96,30 @@ impl CapacityMetricsSnapshot {
         }
         let target = ((self.frame_count as f64) * percentile).ceil() as u64;
         let mut cumulative = 0;
-        for (index, count) in self.frame_time_bucket_counts.iter().enumerate() {
+        let Some(index) = self.frame_time_bucket_counts.iter().position(|count| {
             cumulative += count;
-            if cumulative >= target {
-                let upper = ((index as u64) + 1) * self.frame_time_bucket_width_ns;
-                // The final bucket includes overflow; its nominal edge is not an upper bound.
-                // Return a conservative observed bound rather than clipping long stalls.
-                return if index + 1 == self.frame_time_bucket_counts.len() {
-                    upper.max(self.frame_time_max_ns) as f64
-                } else {
-                    upper as f64
-                };
-            }
+            cumulative >= target
+        }) else {
+            return self.frame_time_max_ns as f64;
+        };
+        let upper = ((index as u64) + 1) * self.frame_time_bucket_width_ns;
+        // The final bucket includes overflow; its nominal edge is not an upper bound.
+        // Return a conservative observed bound rather than clipping long stalls.
+        if index + 1 == FRAME_HISTOGRAM_BUCKETS {
+            upper.max(self.frame_time_max_ns) as f64
+        } else {
+            upper as f64
         }
-        self.frame_time_max_ns as f64
     }
 }
 
 pub(super) fn reset() {
-    reset_counters(&[&FRAME_COUNT, &FRAME_TIME_TOTAL_NS, &FRAME_TIME_MAX_NS]);
-    for bucket in &FRAME_TIME_BUCKET_COUNTS {
-        reset_counter(bucket);
-    }
-    for phase in FramePhase::ALL {
-        counters(phase).reset();
-    }
+    [&FRAME_COUNT, &FRAME_TIME_TOTAL_NS, &FRAME_TIME_MAX_NS]
+        .into_iter()
+        .chain(&FRAME_TIME_BUCKET_COUNTS)
+        .chain(&PHASE_TOTAL_NS)
+        .chain(&PHASE_MAX_NS)
+        .for_each(reset_counter);
 }
 
 pub(super) fn snapshot() -> MetricsSnapshot {
@@ -174,17 +128,17 @@ pub(super) fn snapshot() -> MetricsSnapshot {
         total_ns: load_counter(&FRAME_TIME_TOTAL_NS),
         max_ns: load_counter(&FRAME_TIME_MAX_NS),
         bucket_width_ns: FRAME_HISTOGRAM_BUCKET_WIDTH_NS,
-        bucket_counts: bucket_counts(),
-        prepare: counters(FramePhase::Prepare).snapshot(),
-        background_poll: counters(FramePhase::BackgroundPoll).snapshot(),
-        paint: counters(FramePhase::Paint).snapshot(),
-        chrome: counters(FramePhase::Chrome).snapshot(),
-        active_surface: counters(FramePhase::ActiveSurface).snapshot(),
-        gutter: counters(FramePhase::Gutter).snapshot(),
-        scroll: counters(FramePhase::Scroll).snapshot(),
-        dialogs: counters(FramePhase::Dialogs).snapshot(),
-        shortcuts: counters(FramePhase::Shortcuts).snapshot(),
-        finish: counters(FramePhase::Finish).snapshot(),
+        bucket_counts: std::array::from_fn(|index| load_counter(&FRAME_TIME_BUCKET_COUNTS[index])),
+        prepare: phase_snapshot(FramePhase::Prepare),
+        background_poll: phase_snapshot(FramePhase::BackgroundPoll),
+        paint: phase_snapshot(FramePhase::Paint),
+        chrome: phase_snapshot(FramePhase::Chrome),
+        active_surface: phase_snapshot(FramePhase::ActiveSurface),
+        gutter: phase_snapshot(FramePhase::Gutter),
+        scroll: phase_snapshot(FramePhase::Scroll),
+        dialogs: phase_snapshot(FramePhase::Dialogs),
+        shortcuts: phase_snapshot(FramePhase::Shortcuts),
+        finish: phase_snapshot(FramePhase::Finish),
     }
 }
 
@@ -197,78 +151,16 @@ pub fn record_frame(elapsed: Duration) {
 }
 
 pub fn record_frame_phase(phase: FramePhase, elapsed: Duration) {
-    counters(phase).record(saturating_u64(elapsed.as_nanos()));
+    let elapsed_ns = saturating_u64(elapsed.as_nanos());
+    PHASE_TOTAL_NS[phase as usize].fetch_add(elapsed_ns, Ordering::Relaxed);
+    update_max(&PHASE_MAX_NS[phase as usize], elapsed_ns);
 }
 
-impl Counters {
-    fn reset(self) {
-        reset_counters(&[self.total_ns, self.max_ns]);
+fn phase_snapshot(phase: FramePhase) -> FramePhaseMetricsSnapshot {
+    FramePhaseMetricsSnapshot {
+        total_ns: load_counter(&PHASE_TOTAL_NS[phase as usize]),
+        max_ns: load_counter(&PHASE_MAX_NS[phase as usize]),
     }
-
-    fn snapshot(self) -> FramePhaseMetricsSnapshot {
-        FramePhaseMetricsSnapshot {
-            total_ns: load_counter(self.total_ns),
-            max_ns: load_counter(self.max_ns),
-        }
-    }
-
-    fn record(self, elapsed_ns: u64) {
-        self.total_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
-        update_max(self.max_ns, elapsed_ns);
-    }
-}
-
-fn counters(phase: FramePhase) -> Counters {
-    match phase {
-        FramePhase::Prepare => Counters {
-            total_ns: &FRAME_PREPARE_TOTAL_NS,
-            max_ns: &FRAME_PREPARE_MAX_NS,
-        },
-        FramePhase::BackgroundPoll => Counters {
-            total_ns: &FRAME_BACKGROUND_POLL_TOTAL_NS,
-            max_ns: &FRAME_BACKGROUND_POLL_MAX_NS,
-        },
-        FramePhase::Paint => Counters {
-            total_ns: &FRAME_PAINT_TOTAL_NS,
-            max_ns: &FRAME_PAINT_MAX_NS,
-        },
-        FramePhase::Chrome => Counters {
-            total_ns: &FRAME_CHROME_TOTAL_NS,
-            max_ns: &FRAME_CHROME_MAX_NS,
-        },
-        FramePhase::ActiveSurface => Counters {
-            total_ns: &FRAME_ACTIVE_SURFACE_TOTAL_NS,
-            max_ns: &FRAME_ACTIVE_SURFACE_MAX_NS,
-        },
-        FramePhase::Gutter => Counters {
-            total_ns: &FRAME_GUTTER_TOTAL_NS,
-            max_ns: &FRAME_GUTTER_MAX_NS,
-        },
-        FramePhase::Scroll => Counters {
-            total_ns: &FRAME_SCROLL_TOTAL_NS,
-            max_ns: &FRAME_SCROLL_MAX_NS,
-        },
-        FramePhase::Dialogs => Counters {
-            total_ns: &FRAME_DIALOGS_TOTAL_NS,
-            max_ns: &FRAME_DIALOGS_MAX_NS,
-        },
-        FramePhase::Shortcuts => Counters {
-            total_ns: &FRAME_SHORTCUTS_TOTAL_NS,
-            max_ns: &FRAME_SHORTCUTS_MAX_NS,
-        },
-        FramePhase::Finish => Counters {
-            total_ns: &FRAME_FINISH_TOTAL_NS,
-            max_ns: &FRAME_FINISH_MAX_NS,
-        },
-    }
-}
-
-fn bucket_counts() -> [u64; FRAME_HISTOGRAM_BUCKETS] {
-    let mut counts = [0; FRAME_HISTOGRAM_BUCKETS];
-    for (index, bucket) in FRAME_TIME_BUCKET_COUNTS.iter().enumerate() {
-        counts[index] = load_counter(bucket);
-    }
-    counts
 }
 
 fn bucket_index(elapsed_ns: u64) -> usize {

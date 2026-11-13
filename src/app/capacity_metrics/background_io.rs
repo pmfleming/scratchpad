@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use super::{CapacityMetricsSnapshot, load_counter, reset_counters, saturating_u64, update_max};
+use super::{CapacityMetricsSnapshot, load_counter, reset_counter, saturating_u64, update_max};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct BackgroundIoLaneMetricsSnapshot {
@@ -27,38 +27,12 @@ pub(super) struct MetricsSnapshot {
     pub analysis: BackgroundIoLaneMetricsSnapshot,
 }
 
-#[derive(Clone, Copy)]
-struct Counters {
-    requests: &'static AtomicU64,
-    active_ns: &'static AtomicU64,
-    max_queue_depth: &'static AtomicU64,
-    saturation_count: &'static AtomicU64,
-}
-
-macro_rules! lane_counters {
-    ($($name:ident),+ $(,)?) => {
-        $(static $name: AtomicU64 = AtomicU64::new(0);)+
-    };
-}
-
-lane_counters! {
-    BACKGROUND_IO_PATH_REQUESTS,
-    BACKGROUND_IO_PATH_ACTIVE_NS,
-    BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH,
-    BACKGROUND_IO_SESSION_REQUESTS,
-    BACKGROUND_IO_SESSION_ACTIVE_NS,
-    BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH,
-    BACKGROUND_IO_ANALYSIS_REQUESTS,
-    BACKGROUND_IO_ANALYSIS_ACTIVE_NS,
-    BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH,
-    BACKGROUND_IO_PATH_SATURATION_COUNT,
-    BACKGROUND_IO_SESSION_SATURATION_COUNT,
-    BACKGROUND_IO_ANALYSIS_SATURATION_COUNT,
-}
-
-impl BackgroundIoLane {
-    const ALL: [Self; 3] = [Self::Path, Self::Session, Self::Analysis];
-}
+/// Lane counters are indexed by `BackgroundIoLane as usize`.
+const LANE_COUNT: usize = BackgroundIoLane::Analysis as usize + 1;
+static REQUESTS: [AtomicU64; LANE_COUNT] = [const { AtomicU64::new(0) }; LANE_COUNT];
+static ACTIVE_NS: [AtomicU64; LANE_COUNT] = [const { AtomicU64::new(0) }; LANE_COUNT];
+static MAX_QUEUE_DEPTH: [AtomicU64; LANE_COUNT] = [const { AtomicU64::new(0) }; LANE_COUNT];
+static SATURATION_COUNT: [AtomicU64; LANE_COUNT] = [const { AtomicU64::new(0) }; LANE_COUNT];
 
 impl CapacityMetricsSnapshot {
     #[must_use]
@@ -87,83 +61,41 @@ impl CapacityMetricsSnapshot {
 }
 
 pub(super) fn reset() {
-    for lane in BackgroundIoLane::ALL {
-        counters(lane).reset();
-    }
+    REQUESTS
+        .iter()
+        .chain(&ACTIVE_NS)
+        .chain(&MAX_QUEUE_DEPTH)
+        .chain(&SATURATION_COUNT)
+        .for_each(reset_counter);
 }
 
 pub(super) fn snapshot() -> MetricsSnapshot {
     MetricsSnapshot {
-        path: counters(BackgroundIoLane::Path).snapshot(),
-        session: counters(BackgroundIoLane::Session).snapshot(),
-        analysis: counters(BackgroundIoLane::Analysis).snapshot(),
+        path: lane_snapshot(BackgroundIoLane::Path),
+        session: lane_snapshot(BackgroundIoLane::Session),
+        analysis: lane_snapshot(BackgroundIoLane::Analysis),
     }
 }
 
 pub fn record_background_io_lane(lane: BackgroundIoLane, elapsed: Duration) {
-    counters(lane).record_elapsed(saturating_u64(elapsed.as_nanos()));
+    REQUESTS[lane as usize].fetch_add(1, Ordering::Relaxed);
+    ACTIVE_NS[lane as usize].fetch_add(saturating_u64(elapsed.as_nanos()), Ordering::Relaxed);
 }
 
 pub fn record_background_io_queue_depth(lane: BackgroundIoLane, depth: usize) {
-    counters(lane).record_queue_depth(saturating_u64(depth));
+    update_max(&MAX_QUEUE_DEPTH[lane as usize], saturating_u64(depth));
 }
 
 pub fn record_background_io_saturation(lane: BackgroundIoLane) {
-    counters(lane).record_saturation();
+    SATURATION_COUNT[lane as usize].fetch_add(1, Ordering::Relaxed);
 }
 
-impl Counters {
-    fn reset(self) {
-        reset_counters(&[
-            self.requests,
-            self.active_ns,
-            self.max_queue_depth,
-            self.saturation_count,
-        ]);
-    }
-
-    fn snapshot(self) -> BackgroundIoLaneMetricsSnapshot {
-        BackgroundIoLaneMetricsSnapshot {
-            requests: load_counter(self.requests),
-            active_ns: load_counter(self.active_ns),
-            max_queue_depth: load_counter(self.max_queue_depth),
-            saturation_count: load_counter(self.saturation_count),
-        }
-    }
-
-    fn record_elapsed(self, elapsed_ns: u64) {
-        self.requests.fetch_add(1, Ordering::Relaxed);
-        self.active_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
-    }
-
-    fn record_queue_depth(self, depth: u64) {
-        update_max(self.max_queue_depth, depth);
-    }
-
-    fn record_saturation(self) {
-        self.saturation_count.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
-fn counters(lane: BackgroundIoLane) -> Counters {
-    match lane {
-        BackgroundIoLane::Path => Counters {
-            requests: &BACKGROUND_IO_PATH_REQUESTS,
-            active_ns: &BACKGROUND_IO_PATH_ACTIVE_NS,
-            max_queue_depth: &BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH,
-            saturation_count: &BACKGROUND_IO_PATH_SATURATION_COUNT,
-        },
-        BackgroundIoLane::Session => Counters {
-            requests: &BACKGROUND_IO_SESSION_REQUESTS,
-            active_ns: &BACKGROUND_IO_SESSION_ACTIVE_NS,
-            max_queue_depth: &BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH,
-            saturation_count: &BACKGROUND_IO_SESSION_SATURATION_COUNT,
-        },
-        BackgroundIoLane::Analysis => Counters {
-            requests: &BACKGROUND_IO_ANALYSIS_REQUESTS,
-            active_ns: &BACKGROUND_IO_ANALYSIS_ACTIVE_NS,
-            max_queue_depth: &BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH,
-            saturation_count: &BACKGROUND_IO_ANALYSIS_SATURATION_COUNT,
-        },
+fn lane_snapshot(lane: BackgroundIoLane) -> BackgroundIoLaneMetricsSnapshot {
+    let lane = lane as usize;
+    BackgroundIoLaneMetricsSnapshot {
+        requests: load_counter(&REQUESTS[lane]),
+        active_ns: load_counter(&ACTIVE_NS[lane]),
+        max_queue_depth: load_counter(&MAX_QUEUE_DEPTH[lane]),
+        saturation_count: load_counter(&SATURATION_COUNT[lane]),
     }
 }
