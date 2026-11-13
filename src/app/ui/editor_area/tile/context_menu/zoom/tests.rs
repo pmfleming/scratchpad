@@ -1,13 +1,10 @@
 use crate::app::{
-    app_state::test_support::test_app,
+    app_state::test_support::{test_app, ui_harness},
     domain::{BufferState, SplitAxis, WorkspaceTab},
     ui::editor_area::tile::TileRenderRequest,
 };
 use eframe::egui;
-use egui_kittest::{
-    Harness,
-    kittest::{NodeT, Queryable},
-};
+use egui_kittest::kittest::{NodeT, Queryable};
 
 #[test]
 fn zoom_menu_targets_clicked_pane_and_stays_open_for_repeated_adjustments() {
@@ -19,42 +16,24 @@ fn zoom_menu_targets_clicked_pane_and_stays_open_for_repeated_adjustments() {
     tab.activate_view(first);
     app.tab_manager.set_tabs(vec![tab], 0);
     let baseline = app.state.app_settings.font_size();
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(800.0, 900.0))
-        .with_context_setup(|ctx| {
-            let mut fonts = egui::FontDefinitions::default();
-            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-            ctx.set_fonts(fonts);
-        })
-        .build_ui_state(
-            move |ui, app| {
-                let response =
-                    ui.add_sized(egui::vec2(300.0, 100.0), egui::Button::new("Second pane"));
-                let request = TileRenderRequest {
-                    tab_index: 0,
-                    view_id: second,
-                    pane_path: Vec::new(),
-                    rect: response.rect,
-                    is_active: app
-                        .tab_manager
-                        .active_tab()
-                        .unwrap()
-                        .layout
-                        .active_view_id()
-                        == second,
-                    multiple_tiles_visible: true,
-                };
-                super::super::attach_editor_context_menu(
-                    &response,
-                    ui,
-                    app,
-                    &request,
-                    &mut Vec::new(),
-                );
-            },
-            app,
-        );
-    harness.run();
+    let mut harness = ui_harness(egui::vec2(800.0, 900.0), app, move |ui, app| {
+        let response = ui.add_sized(egui::vec2(300.0, 100.0), egui::Button::new("Second pane"));
+        let request = TileRenderRequest {
+            tab_index: 0,
+            view_id: second,
+            pane_path: Vec::new(),
+            rect: response.rect,
+            is_active: app
+                .tab_manager
+                .active_tab()
+                .unwrap()
+                .layout
+                .active_view_id()
+                == second,
+            multiple_tiles_visible: true,
+        };
+        super::super::attach_editor_context_menu(&response, ui, app, &request, &mut Vec::new());
+    });
     harness.get_by_label("Second pane").click_secondary();
     harness.run();
     harness.get_by_label(egui_phosphor::regular::MAGNIFYING_GLASS);
