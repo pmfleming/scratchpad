@@ -7,9 +7,7 @@ use crate::app::services::session_store::{ColdSessionTab, SessionStore};
 pub(in crate::app::services::background_io) fn spawn_session_lane(endpoints: LaneEndpoints) {
     spawn_lane(
         BackgroundIoLane::Session,
-        endpoints.request_rx,
-        endpoints.result_tx,
-        endpoints.lane_depths,
+        endpoints,
         |request, result_tx| match request {
             BackgroundIoRequest::RestoreSession {
                 request_id,

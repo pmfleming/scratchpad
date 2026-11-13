@@ -1,11 +1,16 @@
 use super::{LaneEndpoints, LaneOutcome, spawn_lane};
 use crate::app::capacity_metrics::BackgroundIoLane;
-use crate::app::domain::{DocumentSnapshot, TextFormatMetadata};
+use crate::app::domain::buffer::PrepareTextRequest;
+use crate::app::domain::{DocumentSnapshot, PieceSource, TextFormatMetadata, WorkspaceTab};
 use crate::app::services::background_io::types::{
-    BackgroundIoRequest, BackgroundIoResult, ColdFileShellResult, LoadedPathResult, PathLoadRequest,
+    BackgroundIoRequest, BackgroundIoResult, ColdFileShellResult, LoadedPathResult,
+    PathLoadRequest, RestoredTabResult,
 };
+use crate::app::services::chunk_store::{ChunkStoreHandle, ImportContext};
 use crate::app::services::file_service::{FileContent, FileService};
 use crate::app::services::repaint::WakeSender as Sender;
+use crate::app::services::session_store::{RetainedTarget, SessionStore};
+use crate::app::{CanonicalPathKey, domain::BufferState};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -14,9 +19,7 @@ use std::thread;
 pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEndpoints) {
     spawn_lane(
         BackgroundIoLane::Path,
-        endpoints.request_rx,
-        endpoints.result_tx,
-        endpoints.lane_depths,
+        endpoints,
         |request, result_tx| match request {
             BackgroundIoRequest::PrepareText {
                 request_id,
@@ -26,15 +29,7 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
             } => LaneOutcome::result(BackgroundIoResult::TextPrepared {
                 request_id,
                 buffer_id,
-                result: request
-                    .prepare_with_store(
-                        session_store
-                            .chunk_store_handle()
-                            .ok()
-                            .or_else(|| session_store.opened_chunk_store()),
-                    )
-                    .map(Box::new)
-                    .map_err(|cause| cause.to_string()),
+                result: prepare_text(*request, &session_store),
             }),
             BackgroundIoRequest::ReopenRetained {
                 request_id,
@@ -43,34 +38,24 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
                 claimed,
             } => LaneOutcome::result(BackgroundIoResult::RetainedReopened {
                 request_id,
-                result: match target {
-                    crate::app::services::session_store::RetainedTarget::Cold(cold) => {
-                        session_store.restore_cold_session_tab(cold)
-                    }
-                    target => session_store
-                        .reopen_target(target, &claimed)
-                        .map(|tab| (tab, None)),
-                }
-                .map(|(tab, status)| (Box::new(tab), status))
-                .map_err(|e| e.to_string()),
+                result: reopen_retained(&session_store, target, &claimed),
             }),
             BackgroundIoRequest::LoadPaths {
                 request_id,
                 requests,
                 streaming,
-            } => {
-                if streaming && requests.len() > 1 {
-                    LaneOutcome::HandledWithSendFailure(stream_load_paths(
-                        request_id, requests, result_tx,
-                    ))
-                } else {
-                    LaneOutcome::result(BackgroundIoResult::PathsLoaded {
-                        request_id,
-                        results: load_paths(requests),
-                        is_partial: false,
-                    })
-                }
-            }
+            } if streaming && requests.len() > 1 => LaneOutcome::HandledWithSendFailure(
+                stream_load_paths(request_id, requests, result_tx),
+            ),
+            BackgroundIoRequest::LoadPaths {
+                request_id,
+                requests,
+                ..
+            } => LaneOutcome::result(BackgroundIoResult::PathsLoaded {
+                request_id,
+                results: load_paths(requests),
+                is_partial: false,
+            }),
             BackgroundIoRequest::BuildColdFileShells {
                 request_id,
                 paths,
@@ -92,10 +77,44 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
     );
 }
 
+/// The session's chunk store, opening it when possible and otherwise reusing
+/// one that is already open (for example while writes are blocked).
+fn available_chunk_store(session_store: &SessionStore) -> Option<ChunkStoreHandle> {
+    session_store
+        .chunk_store_handle()
+        .ok()
+        .or_else(|| session_store.opened_chunk_store())
+}
+
+fn prepare_text(
+    request: PrepareTextRequest,
+    session_store: &SessionStore,
+) -> Result<Box<crate::app::domain::buffer::PreparedText>, String> {
+    request
+        .prepare_with_store(available_chunk_store(session_store))
+        .map(Box::new)
+        .map_err(|cause| cause.to_string())
+}
+
+fn reopen_retained(
+    session_store: &SessionStore,
+    target: RetainedTarget,
+    claimed: &[CanonicalPathKey],
+) -> RestoredTabResult {
+    match target {
+        RetainedTarget::Cold(cold) => session_store.restore_cold_session_tab(cold),
+        target => session_store
+            .reopen_target(target, claimed)
+            .map(|tab| (tab, None)),
+    }
+    .map(|(tab, status)| (Box::new(tab), status))
+    .map_err(|e| e.to_string())
+}
+
 fn stream_cold_file_shells(
     request_id: u64,
     mut paths: Vec<PathBuf>,
-    store: &crate::app::services::session_store::SessionStore,
+    store: &SessionStore,
     result_tx: &Sender<BackgroundIoResult>,
 ) -> bool {
     let selected_path = paths.pop();
@@ -159,27 +178,35 @@ fn for_each_loaded(
         .map_or(2, |p| p.get().min(MAX_CONCURRENT_READS))
         .min(total);
     let chunk_size = total.div_ceil(worker_count);
-    let mut iter = requests.into_iter().enumerate();
+    let mut indexed = requests.into_iter().enumerate();
+    let chunks = std::iter::from_fn(|| {
+        let chunk = indexed.by_ref().take(chunk_size).collect::<Vec<_>>();
+        (!chunk.is_empty()).then_some(chunk)
+    });
     let (load_tx, load_rx) = mpsc::channel::<(usize, LoadedPathResult)>();
 
     thread::scope(|scope| {
-        for _ in (0..total).step_by(chunk_size) {
-            let chunk = iter.by_ref().take(chunk_size).collect::<Vec<_>>();
+        for chunk in chunks {
             let load_tx = load_tx.clone();
-            scope.spawn(move || {
-                for (index, request) in chunk {
-                    if load_tx.send((index, load_one(request))).is_err() {
-                        return;
-                    }
-                }
-            });
+            scope.spawn(move || load_chunk(chunk, &load_tx));
         }
         drop(load_tx);
-
         for (index, result) in load_rx {
             consume(index, result);
         }
     });
+}
+
+/// Loads `chunk` in order, stopping early once the consumer has gone away.
+fn load_chunk(
+    chunk: Vec<(usize, PathLoadRequest)>,
+    load_tx: &mpsc::Sender<(usize, LoadedPathResult)>,
+) {
+    for (index, request) in chunk {
+        if load_tx.send((index, load_one(request))).is_err() {
+            return;
+        }
+    }
 }
 
 /// Stream individual `PathsLoaded` messages as each path finishes loading,
@@ -242,15 +269,12 @@ fn load_paths(requests: Vec<PathLoadRequest>) -> Vec<LoadedPathResult> {
 }
 
 fn load_one(request: PathLoadRequest) -> LoadedPathResult {
-    load_one_with_context(
-        request,
-        crate::app::services::chunk_store::ImportContext::default(),
-    )
+    load_one_with_context(request, ImportContext::default())
 }
-fn load_one_with_context(
-    request: PathLoadRequest,
-    mut context: crate::app::services::chunk_store::ImportContext,
-) -> LoadedPathResult {
+
+/// Wrapper requests adjust the import context or post-process the inner
+/// load; leaf requests read one path.
+fn load_one_with_context(request: PathLoadRequest, mut context: ImportContext) -> LoadedPathResult {
     match request {
         PathLoadRequest::Cancelable { cancelled, request } => {
             context.cancelled = Some(cancelled);
@@ -263,31 +287,15 @@ fn load_one_with_context(
             request,
         } => {
             let mut loaded = load_one_with_context(*request, context);
-            loaded.result = loaded.result.and_then(|loaded| {
-                if materialized_only && !loaded.replacement_ready {
-                    Ok(loaded)
-                } else {
-                    base.prepare_loaded_replacement(loaded, source)
-                        .map_err(|cause| cause.to_string())
-                }
-            });
+            loaded.result = loaded
+                .result
+                .and_then(|loaded| reconcile_loaded(*base, source, materialized_only, loaded));
             loaded
         }
         PathLoadRequest::Bound { store, request } => {
             context.store = Some(store.clone());
             let mut loaded = load_one_with_context(*request, context);
-            if let Ok(buffer) = &mut loaded.result
-                && let Err(cause) = buffer.document_mut().bind_store(store.clone())
-            {
-                loaded.result = Err(cause.to_string());
-            }
-            if let Some(tab) = &mut loaded.retained_tab {
-                for buffer in tab.buffers_mut() {
-                    if let Err(cause) = buffer.document_mut().bind_store(store.clone()) {
-                        loaded.result = Err(cause.to_string());
-                    }
-                }
-            }
+            bind_loaded_to_store(&mut loaded, &store);
             loaded
         }
         PathLoadRequest::Observed {
@@ -301,33 +309,9 @@ fn load_one_with_context(
             claimed,
         } => {
             if context.store.is_none() {
-                context.store = session_store
-                    .chunk_store_handle()
-                    .ok()
-                    .or_else(|| session_store.opened_chunk_store());
+                context.store = available_chunk_store(&session_store);
             }
-            match session_store.reopen_path_with_context(&path, &claimed, &context) {
-                Ok(Some(tab)) => LoadedPathResult {
-                    missing: false,
-                    path,
-                    disk_state: tab.active_buffer().disk_state.clone(),
-                    result: Ok(tab.active_buffer().clone()),
-                    retained_tab: Some(tab),
-                },
-                Ok(None) => load_path_result(path, |path| {
-                    FileService::read_file_with_context(path, &context)
-                }),
-                Err(_) if session_store.writes_blocked() => load_path_result(path, |path| {
-                    FileService::read_file_with_context(path, &context)
-                }),
-                Err(error) => LoadedPathResult {
-                    missing: error.kind() == io::ErrorKind::NotFound,
-                    path,
-                    disk_state: None,
-                    result: Err(error.to_string()),
-                    retained_tab: None,
-                },
-            }
+            load_retained(path, &session_store, &claimed, &context)
         }
         PathLoadRequest::Standard(path) => load_path_result(path, |path| {
             FileService::read_file_with_context(path, &context)
@@ -341,10 +325,61 @@ fn load_one_with_context(
     }
 }
 
-fn build_cold_file_shell(
+fn reconcile_loaded(
+    base: BufferState,
+    source: Option<PieceSource>,
+    materialized_only: bool,
+    loaded: BufferState,
+) -> Result<BufferState, String> {
+    if materialized_only && !loaded.replacement_ready {
+        return Ok(loaded);
+    }
+    base.prepare_loaded_replacement(loaded, source)
+        .map_err(|cause| cause.to_string())
+}
+
+/// Binds every loaded document to `store`; any binding failure fails the load.
+fn bind_loaded_to_store(loaded: &mut LoadedPathResult, store: &ChunkStoreHandle) {
+    if let Ok(buffer) = &mut loaded.result
+        && let Err(cause) = buffer.document_mut().bind_store(store.clone())
+    {
+        loaded.result = Err(cause.to_string());
+    }
+    let retained_buffers = loaded
+        .retained_tab
+        .iter_mut()
+        .flat_map(WorkspaceTab::buffers_mut);
+    for buffer in retained_buffers {
+        if let Err(cause) = buffer.document_mut().bind_store(store.clone()) {
+            loaded.result = Err(cause.to_string());
+        }
+    }
+}
+
+/// Reopens retained session state for `path`, falling back to the disk file
+/// when nothing is retained or the session store cannot be written.
+fn load_retained(
     path: PathBuf,
-    store: &crate::app::services::session_store::SessionStore,
-) -> ColdFileShellResult {
+    session_store: &SessionStore,
+    claimed: &[CanonicalPathKey],
+    context: &ImportContext,
+) -> LoadedPathResult {
+    match session_store.reopen_path_with_context(&path, claimed, context) {
+        Ok(Some(tab)) => LoadedPathResult {
+            missing: false,
+            path,
+            disk_state: tab.active_buffer().disk_state.clone(),
+            result: Ok(tab.active_buffer().clone()),
+            retained_tab: Some(tab),
+        },
+        Err(error) if !session_store.writes_blocked() => LoadedPathResult::failed(path, &error),
+        Ok(None) | Err(_) => load_path_result(path, |path| {
+            FileService::read_file_with_context(path, context)
+        }),
+    }
+}
+
+fn build_cold_file_shell(path: PathBuf, store: &SessionStore) -> ColdFileShellResult {
     // Adopt the requested version before publishing a cold tab. A new source
     // is distinct from a damaged committed manifest: restore never falls back
     // to a potentially newer disk file.
@@ -352,12 +387,11 @@ fn build_cold_file_shell(
         .chunk_store_handle()
         .and_then(|handle| {
             let content = FileService::read_file_in_store(&path, handle)?;
-            let tab =
-                crate::app::domain::WorkspaceTab::new(FileService::build_buffer_from_file_content(
-                    &path,
-                    content,
-                    FileService::read_disk_state(&path).ok(),
-                ));
+            let tab = WorkspaceTab::new(FileService::build_buffer_from_file_content(
+                &path,
+                content,
+                FileService::read_disk_state(&path).ok(),
+            ));
             Ok(store.cold_tab_from_imported(&tab))
         })
         .map_err(|error| error.to_string());
@@ -414,27 +448,18 @@ fn load_observed(
     path: PathBuf,
     materialize: bool,
     known_digest: Option<&str>,
-    context: &crate::app::services::chunk_store::ImportContext,
+    context: &ImportContext,
 ) -> LoadedPathResult {
     match FileService::read_observed_buffer_with_context(&path, materialize, known_digest, context)
     {
-        Ok(buffer) => {
-            let state = buffer.disk_state.clone();
-            LoadedPathResult {
-                path: path.clone(),
-                disk_state: state,
-                result: Ok(buffer),
-                missing: false,
-                retained_tab: None,
-            }
-        }
-        Err(error) => LoadedPathResult {
+        Ok(buffer) => LoadedPathResult {
             path,
-            disk_state: None,
-            missing: error.kind() == io::ErrorKind::NotFound,
-            result: Err(error.to_string()),
+            disk_state: buffer.disk_state.clone(),
+            result: Ok(buffer),
+            missing: false,
             retained_tab: None,
         },
+        Err(error) => LoadedPathResult::failed(path, &error),
     }
 }
 

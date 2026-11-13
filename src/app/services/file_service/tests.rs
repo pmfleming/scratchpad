@@ -16,7 +16,14 @@ fn unreadable_snapshot_save_preserves_the_existing_destination() {
     )
     .unwrap();
     document.piece_tree().inject_read_failure_for_test();
-    assert!(FileService::write_snapshot_utf8(&target, &document.snapshot()).is_err());
+    assert!(
+        FileService::write_snapshot_with_format(
+            &target,
+            &document.snapshot(),
+            &TextFormatMetadata::utf8_for_new_file(""),
+        )
+        .is_err()
+    );
     assert_eq!(
         std::fs::read_to_string(&target).unwrap(),
         "keep this exact destination"
@@ -53,7 +60,12 @@ fn large_utf8_import_uses_durable_lazy_chunks_and_survives_source_replacement() 
     assert_eq!(document.piece_tree().extract_range(0..10), "alpha lazy");
 
     let saved = directory.path().join("file-backed-saved.txt");
-    FileService::write_snapshot_utf8(&saved, &document.snapshot()).unwrap();
+    FileService::write_snapshot_with_format(
+        &saved,
+        &document.snapshot(),
+        &TextFormatMetadata::utf8_for_new_file(""),
+    )
+    .unwrap();
     assert_eq!(
         std::fs::metadata(&saved).unwrap().len(),
         text.len() as u64 + 5
@@ -77,7 +89,6 @@ fn first_visible_window_stops_on_a_utf8_boundary() {
     assert_eq!(window.loaded_bytes, 9);
     assert_eq!(window.file_size_bytes, 24);
     assert!(!window.complete);
-    assert!(!window.has_decoding_warnings);
 }
 
 #[test]

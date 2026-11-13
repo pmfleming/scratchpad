@@ -5,6 +5,7 @@ use crate::app::app_state::workspace::accessors as workspace_accessors;
 use crate::app::diagnostics;
 use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
 use crate::app::services::file_controller::FileController;
+use crate::app::services::session_store::activity::ActivityKind;
 use crate::app::services::settings_store::{FileOpenDisposition, NewTabPlacement};
 use crate::app::utils::pluralize;
 use std::collections::HashSet;
@@ -15,11 +16,7 @@ pub(crate) fn new_tab(app: &mut ScratchpadApp) {
 }
 
 pub(crate) fn append_created_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
-    create_workspace_tab(
-        app,
-        tab,
-        Some(crate::app::services::session_store::activity::ActivityKind::Created),
-    );
+    create_workspace_tab(app, tab, Some(ActivityKind::Created));
 }
 
 pub(crate) fn open_file(app: &mut ScratchpadApp) {
@@ -73,20 +70,7 @@ pub(crate) fn save_all_files(app: &mut ScratchpadApp) {
         .collect::<Vec<_>>();
     let targets = save_all_targets(app);
     let had_targets = !targets.is_empty();
-    let mut queued_count = 0usize;
-
-    for (tab_index, view_id) in targets {
-        app.tab_manager.set_active_tab_index_clamped(tab_index);
-        if let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(tab_index) {
-            tab.activate_view(view_id);
-        }
-        if FileController::save_file_at(app, tab_index) {
-            queued_count += 1;
-        }
-        if crate::app::app_state::workspace::accessors::pending_action(app).is_some() {
-            break;
-        }
-    }
+    let queued_count = save_targets_until_prompt(app, targets);
 
     app.tab_manager
         .set_active_tab_index_clamped(active_tab_index);
@@ -100,18 +84,36 @@ pub(crate) fn save_all_files(app: &mut ScratchpadApp) {
         tab.activate_view(view_id);
     }
     workspace_accessors::request_focus_for_active_view(app);
-    if had_targets {
-        if queued_count > 0
-            && crate::app::app_state::workspace::accessors::pending_action(app).is_none()
-        {
-            app.state.status.set_info_status_in_domain(
-                StatusDomain::File,
-                format!("Saving {}.", pluralize(queued_count, "file")),
-            );
-        }
-        app.tab_manager.mark_session_dirty();
-        crate::app::app_state::workspace::accessors::request_session_persist(app);
+    if !had_targets {
+        return;
     }
+    if queued_count > 0 && workspace_accessors::pending_action(app).is_none() {
+        app.state.status.set_info_status_in_domain(
+            StatusDomain::File,
+            format!("Saving {}.", pluralize(queued_count, "file")),
+        );
+    }
+    app.tab_manager.mark_session_dirty();
+    workspace_accessors::request_session_persist(app);
+}
+
+/// Saves each target view in turn, stopping when a save needs a prompt.
+/// Returns how many saves were queued.
+fn save_targets_until_prompt(app: &mut ScratchpadApp, targets: Vec<(usize, ViewId)>) -> usize {
+    let mut queued_count = 0;
+    for (tab_index, view_id) in targets {
+        app.tab_manager.set_active_tab_index_clamped(tab_index);
+        if let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(tab_index) {
+            tab.activate_view(view_id);
+        }
+        if FileController::save_file_at(app, tab_index) {
+            queued_count += 1;
+        }
+        if workspace_accessors::pending_action(app).is_some() {
+            break;
+        }
+    }
+    queued_count
 }
 
 pub(crate) fn save_file_at(app: &mut ScratchpadApp, index: usize) -> bool {
@@ -193,31 +195,19 @@ pub(crate) fn install_archive(app: &mut ScratchpadApp, mut tab: WorkspaceTab) ->
             buffer.recover_as_untitled("recovered");
         }
     }
-    create_workspace_tab(
-        app,
-        tab,
-        Some(crate::app::services::session_store::activity::ActivityKind::Opened),
-    );
+    create_workspace_tab(app, tab, Some(ActivityKind::Opened));
     true
 }
 
 pub(crate) fn append_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
-    create_workspace_tab(
-        app,
-        tab,
-        Some(crate::app::services::session_store::activity::ActivityKind::Opened),
-    );
+    create_workspace_tab(app, tab, Some(ActivityKind::Opened));
 }
 
 pub(crate) fn append_transferred_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
     create_workspace_tab(app, tab, None);
 }
 
-fn create_workspace_tab(
-    app: &mut ScratchpadApp,
-    tab: WorkspaceTab,
-    kind: Option<crate::app::services::session_store::activity::ActivityKind>,
-) {
+fn create_workspace_tab(app: &mut ScratchpadApp, tab: WorkspaceTab, kind: Option<ActivityKind>) {
     let documents: Vec<_> = tab
         .buffers()
         .filter(|b| !b.is_loading_preview)
@@ -345,13 +335,7 @@ pub(crate) fn cancel_loading_previews(app: &mut ScratchpadApp, buffers: &[Buffer
         })
         .collect();
     for (path, key) in cancelled {
-        if let Some(tokens) = app.state.background_io.path_imports.remove(&path) {
-            for token in tokens {
-                if let Some(token) = token.upgrade() {
-                    token.store(true, std::sync::atomic::Ordering::Release);
-                }
-            }
-        }
+        app.state.background_io.cancel_path_imports(&path);
         app.state.cancelled_loading_previews.insert(path);
         if let Some(key) = key {
             app.state.pending_open_file_paths.remove(&key);

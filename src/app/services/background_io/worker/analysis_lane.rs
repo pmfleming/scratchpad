@@ -7,9 +7,7 @@ use crate::app::services::background_io::types::{BackgroundIoRequest, Background
 pub(in crate::app::services::background_io) fn spawn_analysis_lane(endpoints: LaneEndpoints) {
     spawn_lane(
         BackgroundIoLane::Analysis,
-        endpoints.request_rx,
-        endpoints.result_tx,
-        endpoints.lane_depths,
+        endpoints,
         |request, _| match request {
             BackgroundIoRequest::RefreshTextMetadata {
                 request_id,

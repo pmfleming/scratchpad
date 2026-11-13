@@ -1,6 +1,7 @@
 use super::{BufferFreshness, FileController, ScratchpadApp, StatusDomain};
 use crate::app::{
-    app_state::{DeferredSave, PendingReloadBufferAction},
+    app_state::{DeferredSave, PendingReloadBufferAction, PendingReloadMode},
+    domain::{BufferState, DiskFileState},
     services::{
         background_io::LoadedPathResult,
         session_store::activity::{ActivityEvent, ActivityKind},
@@ -62,10 +63,9 @@ impl FileController {
         {
             return true;
         }
-        let Some(mut retry) = PendingReloadBufferAction::new(
-            buffer,
-            crate::app::app_state::PendingReloadMode::ObserveDiskChange,
-        ) else {
+        let Some(mut retry) =
+            PendingReloadBufferAction::new(buffer, PendingReloadMode::ObserveDiskChange)
+        else {
             return false;
         };
         retry.resume_save = Some(save);
@@ -107,78 +107,99 @@ impl FileController {
             Self::refresh_buffer_disk_state_by_id(app, action.buffer_id);
             return true;
         }
-        let valid = match result.result {
+        let applied = match result.result {
             Ok(loaded) => {
-                let digest = loaded.observed_disk_digest.clone();
-                let changed = digest != buffer.observed_disk_digest;
-                let keep_local =
-                    buffer.is_dirty || buffer.document().revision_key() != action.expected_revision;
-                if changed && !keep_local {
-                    Self::replace_buffer_from_loaded_buffer(
-                        app,
-                        index,
-                        action.buffer_id,
-                        loaded,
-                        result.disk_state,
-                        crate::app::app_state::PendingReloadMode::ObserveDiskChange,
-                    )
-                    .is_some()
-                } else {
-                    let Some(buffer) = app.tab_manager.tabs.as_mut_slice()[index]
-                        .buffer_by_id_mut(action.buffer_id)
-                    else {
-                        return false;
-                    };
-                    buffer.disk_state = result.disk_state;
-                    buffer.observed_disk_digest = digest;
-                    buffer.observed_disk_missing = false;
-                    if changed {
-                        buffer.mark_conflict_on_disk(buffer.disk_state.clone());
-                        app.state
-                            .persistence
-                            .pending_activity
-                            .push(ActivityEvent::new(ActivityKind::DiskConflict, buffer));
-                        app.state.status.set_warning_status_in_domain(
-                            StatusDomain::Disk,
-                            format!("{} changed on disk. Local work kept.", action.buffer_name),
-                        );
-                    } else if buffer.freshness == BufferFreshness::MissingOnDisk {
-                        buffer.freshness =
-                            if buffer.disk_content_digest == buffer.observed_disk_digest {
-                                BufferFreshness::InSync
-                            } else {
-                                BufferFreshness::ConflictOnDisk
-                            };
-                    }
-                    app.tab_manager.mark_session_dirty();
-                    true
-                }
+                Self::apply_observed_contents(app, index, &action, loaded, result.disk_state)
+            }
+            Err(_) if result.missing => {
+                Self::mark_buffer_missing_on_disk(app, index, action.buffer_id);
+                true
             }
             Err(error) => {
-                if result.missing {
-                    Self::mark_buffer_missing_on_disk(app, index, action.buffer_id);
-                    true
-                } else {
-                    let Some(buffer) = app.tab_manager.tabs.as_mut_slice()[index]
-                        .buffer_by_id_mut(action.buffer_id)
-                    else {
-                        return false;
-                    };
-                    buffer.mark_stale_on_disk(result.disk_state);
-                    app.state.status.set_warning_status_with_detail(
-                        StatusDomain::Disk,
-                        format!("Could not read {} after a disk change.", action.buffer_name),
-                        error,
-                    );
-                    app.tab_manager.mark_session_dirty();
-                    false
-                }
+                Self::apply_observation_read_failure(app, index, &action, result.disk_state, error);
+                false
             }
         };
-        if valid {
-            return Self::resume_observed_save(app, index, action);
+        applied && Self::resume_observed_save(app, index, action)
+    }
+
+    /// Reloads a clean, unchanged buffer from the observed contents, or records
+    /// the new disk baseline beside local work that must be kept.
+    fn apply_observed_contents(
+        app: &mut ScratchpadApp,
+        index: usize,
+        action: &PendingReloadBufferAction,
+        loaded: BufferState,
+        disk_state: Option<DiskFileState>,
+    ) -> bool {
+        let Some(buffer) = app.tab_manager.tabs.as_slice()[index].buffer_by_id(action.buffer_id)
+        else {
+            return false;
+        };
+        let digest = loaded.observed_disk_digest.clone();
+        let changed = digest != buffer.observed_disk_digest;
+        let keep_local =
+            buffer.is_dirty || buffer.document().revision_key() != action.expected_revision;
+        if changed && !keep_local {
+            return Self::replace_buffer_from_loaded_buffer(
+                app,
+                index,
+                action.buffer_id,
+                loaded,
+                disk_state,
+                PendingReloadMode::ObserveDiskChange,
+            )
+            .is_some();
         }
-        false
+        let Some(buffer) =
+            app.tab_manager.tabs.as_mut_slice()[index].buffer_by_id_mut(action.buffer_id)
+        else {
+            return false;
+        };
+        buffer.disk_state = disk_state;
+        buffer.observed_disk_digest = digest;
+        buffer.observed_disk_missing = false;
+        if changed {
+            buffer.mark_conflict_on_disk(buffer.disk_state.clone());
+            app.state
+                .persistence
+                .pending_activity
+                .push(ActivityEvent::new(ActivityKind::DiskConflict, buffer));
+            app.state.status.set_warning_status_in_domain(
+                StatusDomain::Disk,
+                format!("{} changed on disk. Local work kept.", action.buffer_name),
+            );
+        } else if buffer.freshness == BufferFreshness::MissingOnDisk {
+            // The file reappeared without changing since it was last observed.
+            buffer.freshness = if buffer.disk_content_digest == buffer.observed_disk_digest {
+                BufferFreshness::InSync
+            } else {
+                BufferFreshness::ConflictOnDisk
+            };
+        }
+        app.tab_manager.mark_session_dirty();
+        true
+    }
+
+    fn apply_observation_read_failure(
+        app: &mut ScratchpadApp,
+        index: usize,
+        action: &PendingReloadBufferAction,
+        disk_state: Option<DiskFileState>,
+        error: String,
+    ) {
+        let Some(buffer) =
+            app.tab_manager.tabs.as_mut_slice()[index].buffer_by_id_mut(action.buffer_id)
+        else {
+            return;
+        };
+        buffer.mark_stale_on_disk(disk_state);
+        app.state.status.set_warning_status_with_detail(
+            StatusDomain::Disk,
+            format!("Could not read {} after a disk change.", action.buffer_name),
+            error,
+        );
+        app.tab_manager.mark_session_dirty();
     }
 
     fn resume_observed_save(

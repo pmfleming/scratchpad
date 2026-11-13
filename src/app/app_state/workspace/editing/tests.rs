@@ -1,5 +1,13 @@
-use super::{toggle_active_buffer_control_chars, toggle_active_buffer_reading_order};
-use crate::app::app_state::test_support::test_app;
+use super::{
+    active_buffer_can_redo_text_operation, active_buffer_can_undo_text_operation,
+    active_buffer_transaction_label, copy_selected_text_in_active_view,
+    cut_selected_text_in_active_view, delete_selected_text_in_active_view,
+    insert_text_in_active_view, redo_active_buffer_text_operation, select_all_in_active_view,
+    toggle_active_buffer_control_chars, toggle_active_buffer_reading_order,
+    undo_active_buffer_text_operation,
+};
+use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::test_support::{named_tabs, test_app, test_app_with_tabs};
 use crate::app::domain::view::LayoutCacheKey;
 use crate::app::domain::{BufferState, SearchHighlightState, SplitAxis, TabManager, WorkspaceTab};
 use eframe::egui;
@@ -52,6 +60,48 @@ fn display_toggles_affect_only_active_buffer_and_its_views() {
     let buffer = app.tab_manager.active_tab().unwrap().active_buffer();
     assert!(!buffer.show_control_chars);
     assert!(!buffer.right_to_left_reading_order);
+}
+
+#[test]
+fn clipboard_edits_and_undo_redo_round_trip_in_the_active_view() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = test_app_with_tabs(directory.path(), named_tabs(&["notes.txt"]));
+    let text = |app: &ScratchpadApp| app.tab_manager.active_tab().unwrap().active_buffer().text();
+    assert!(!active_buffer_can_undo_text_operation(&app));
+
+    assert!(insert_text_in_active_view(&mut app, "hello"));
+    assert!(select_all_in_active_view(&mut app));
+    assert_eq!(
+        copy_selected_text_in_active_view(&app).as_deref(),
+        Some("hello")
+    );
+    assert_eq!(
+        cut_selected_text_in_active_view(&mut app).as_deref(),
+        Some("hello")
+    );
+    assert_eq!(text(&app), "");
+    assert!(insert_text_in_active_view(&mut app, "bye"));
+    assert!(select_all_in_active_view(&mut app));
+    assert!(delete_selected_text_in_active_view(&mut app));
+    assert_eq!(text(&app), "");
+
+    assert!(undo_active_buffer_text_operation(&mut app));
+    assert_eq!(text(&app), "bye");
+    assert!(active_buffer_can_redo_text_operation(&app));
+    assert!(redo_active_buffer_text_operation(&mut app));
+    assert_eq!(text(&app), "");
+    assert_eq!(
+        active_buffer_transaction_label(&app).as_deref(),
+        Some("notes.txt")
+    );
+    assert_eq!(
+        app.state
+            .status
+            .current
+            .as_ref()
+            .map(|status| status.text.as_str()),
+        Some("Redid last text operation in notes.txt.")
+    );
 }
 
 fn seed_layout_caches(tab: &mut WorkspaceTab) {

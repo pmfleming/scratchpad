@@ -1,28 +1,37 @@
 use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::app_state::settings_controller;
 use crate::app::app_state::workspace::accessors as workspace_accessors;
-use crate::app::domain::{BufferId, CursorRevealMode};
+use crate::app::domain::buffer::TextHistoryEvent;
+use crate::app::domain::{
+    BufferId, BufferState, CursorRevealMode, DocumentSnapshot, TextFormatMetadata, WorkspaceTab,
+};
+
 pub(crate) fn clear_text_history(app: &mut ScratchpadApp, buffer_ids: &[BufferId]) -> bool {
     let mut cleared = false;
-    for tab in app.tab_manager.tabs.as_mut_slice() {
-        for buffer in tab.buffers_mut() {
-            if buffer.is_preparing_text() {
-                continue;
-            }
-            if buffer_ids.contains(&buffer.id) && !buffer.document().history_entries().is_empty() {
-                buffer.document_mut().clear_operation_history();
-                let document = buffer.temp_id.clone();
-                app.state
-                    .persistence
-                    .pending_activity
-                    .retain(|event| event.document != document);
-                app.state.persistence.pending_history_forgets.insert(
-                    document,
-                    app.state.persistence.session_store.history_epoch() + 1,
-                );
-                cleared = true;
-            }
+    let buffers = app
+        .tab_manager
+        .tabs
+        .as_mut_slice()
+        .iter_mut()
+        .flat_map(WorkspaceTab::buffers_mut);
+    for buffer in buffers {
+        if buffer.is_preparing_text()
+            || !buffer_ids.contains(&buffer.id)
+            || buffer.document().history_entries().is_empty()
+        {
+            continue;
         }
+        buffer.document_mut().clear_operation_history();
+        let document = buffer.temp_id.clone();
+        app.state
+            .persistence
+            .pending_activity
+            .retain(|event| event.document != document);
+        app.state.persistence.pending_history_forgets.insert(
+            document,
+            app.state.persistence.session_store.history_epoch() + 1,
+        );
+        cleared = true;
     }
     if cleared {
         app.state.persistence.session_store.invalidate_history();
@@ -49,15 +58,7 @@ pub(crate) fn finalize_active_buffer_text_mutation(
         .buffer
         .refresh_text_metadata_after_operation(latest_edit.as_ref());
     tab.buffers.buffer.mark_dirty_after_local_edit();
-    let text_metadata_refresh = tab.buffers.buffer.text_metadata_refresh_needed().then(|| {
-        let buffer = &tab.buffers.buffer;
-        (
-            buffer.id,
-            buffer.document_revision(),
-            buffer.document_snapshot(),
-            buffer.format.clone(),
-        )
-    });
+    let text_metadata_refresh = pending_text_metadata_refresh(&tab.buffers.buffer);
     let warning_message = tab
         .buffers
         .buffer
@@ -66,16 +67,14 @@ pub(crate) fn finalize_active_buffer_text_mutation(
         .map(|message| format!("{message}; raw-text editing remains enabled"));
     let _ = tab;
 
-    if let Some((buffer_id, revision, snapshot, format)) = text_metadata_refresh {
-        app.queue_background_text_metadata_refresh(buffer_id, revision, snapshot, format);
-    }
+    queue_text_metadata_refresh(app, text_metadata_refresh);
 
     if let Some(message) = warning_message {
         app.state
             .status
             .set_warning_status_in_domain(StatusDomain::Encoding, message);
     } else {
-        crate::app::app_state::workspace::accessors::clear_status_message(app);
+        workspace_accessors::clear_status_message(app);
     }
     app.enforce_aggregate_text_history_budget();
     crate::app::app_state::search_runtime::mark_search_dirty(app);
@@ -104,62 +103,27 @@ pub(crate) fn navigate_text_history(
                 || b.document().piece_tree().len_bytes() >= 256 * 1024
         });
     if needs_preparation {
-        let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
-        let view = tab
-            .layout
-            .views()
-            .iter()
-            .find(|v| v.buffer_id == buffer_id)
-            .map(|v| (v.id, v.cursor_range.unwrap_or_default()));
-        let queued = tab.buffer_by_id_mut(buffer_id).is_some_and(|buffer| {
-            buffer.queue_history_preparation(
-                entry_id,
-                view.map_or_else(Default::default, |(_, cursor)| cursor),
-                view.map(|(id, _)| id),
-                crate::app::domain::buffer::TextHistoryEvent::Navigate,
-            )
-        });
-        if queued && follow_focus {
-            app.tab_manager.set_active_tab_index_clamped(tab_index);
-            if let Some((id, _)) = view {
-                app.tab_manager.tabs.as_mut_slice()[tab_index].activate_view(id);
-                crate::app::app_state::workspace::accessors::request_focus_for_view(app, id);
-            }
-        }
-        return queued;
+        return queue_history_navigation(app, tab_index, buffer_id, entry_id, follow_focus);
     }
     let (selection, text_metadata_refresh) = {
         let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
         let Some(buffer) = tab.buffer_by_id_mut(buffer_id) else {
             return false;
         };
-        let result = buffer.navigate_history(entry_id);
-        if let Ok(selection) = result {
-            // Tool navigation updates an already visible scrubber. Automatic
-            // opening belongs to editor undo/redo, not rail hover.
-            buffer.note_text_history_event(crate::app::domain::buffer::TextHistoryEvent::Navigate);
-            buffer.mark_dirty_after_local_edit();
-            let text_metadata_refresh = buffer.text_metadata_refresh_needed().then(|| {
-                (
-                    buffer.id,
-                    buffer.document_revision(),
-                    buffer.document_snapshot(),
-                    buffer.format.clone(),
-                )
-            });
-            (selection, text_metadata_refresh)
-        } else {
+        let Ok(selection) = buffer.navigate_history(entry_id) else {
             app.state.status.set_error_status_in_domain(
                 StatusDomain::History,
                 "Text history entry conflicts with the current file contents.",
             );
             return false;
-        }
+        };
+        // Tool navigation updates an already visible scrubber. Automatic
+        // opening belongs to editor undo/redo, not rail hover.
+        buffer.note_text_history_event(TextHistoryEvent::Navigate);
+        buffer.mark_dirty_after_local_edit();
+        (selection, pending_text_metadata_refresh(buffer))
     };
-
-    if let Some((buffer_id, revision, snapshot, format)) = text_metadata_refresh {
-        app.queue_background_text_metadata_refresh(buffer_id, revision, snapshot, format);
-    }
+    queue_text_metadata_refresh(app, text_metadata_refresh);
 
     if follow_focus {
         restore_text_history_selection(app, tab_index, buffer_id, selection);
@@ -168,6 +132,59 @@ pub(crate) fn navigate_text_history(
     app.tab_manager.mark_session_dirty();
     app.apply_current_tab_ordering();
     true
+}
+
+/// Large or unprepared history steps run on the background lane; the view
+/// that shows the buffer is focused once the step is queued.
+fn queue_history_navigation(
+    app: &mut ScratchpadApp,
+    tab_index: usize,
+    buffer_id: BufferId,
+    entry_id: u64,
+    follow_focus: bool,
+) -> bool {
+    let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
+    let view = tab
+        .layout
+        .views()
+        .iter()
+        .find(|v| v.buffer_id == buffer_id)
+        .map(|v| (v.id, v.cursor_range.unwrap_or_default()));
+    let queued = tab.buffer_by_id_mut(buffer_id).is_some_and(|buffer| {
+        buffer.queue_history_preparation(
+            entry_id,
+            view.map_or_else(Default::default, |(_, cursor)| cursor),
+            view.map(|(id, _)| id),
+            TextHistoryEvent::Navigate,
+        )
+    });
+    if queued && follow_focus {
+        app.tab_manager.set_active_tab_index_clamped(tab_index);
+        if let Some((id, _)) = view {
+            app.tab_manager.tabs.as_mut_slice()[tab_index].activate_view(id);
+            workspace_accessors::request_focus_for_view(app, id);
+        }
+    }
+    queued
+}
+
+type TextMetadataRefresh = (BufferId, u64, DocumentSnapshot, TextFormatMetadata);
+
+fn pending_text_metadata_refresh(buffer: &BufferState) -> Option<TextMetadataRefresh> {
+    buffer.text_metadata_refresh_needed().then(|| {
+        (
+            buffer.id,
+            buffer.document_revision(),
+            buffer.document_snapshot(),
+            buffer.format.clone(),
+        )
+    })
+}
+
+fn queue_text_metadata_refresh(app: &mut ScratchpadApp, refresh: Option<TextMetadataRefresh>) {
+    if let Some((buffer_id, revision, snapshot, format)) = refresh {
+        app.queue_background_text_metadata_refresh(buffer_id, revision, snapshot, format);
+    }
 }
 
 pub(crate) fn tab_index_for_buffer(app: &mut ScratchpadApp, buffer_id: BufferId) -> Option<usize> {
@@ -240,17 +257,15 @@ fn restore_text_history_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::ScratchpadApp;
     use super::navigate_text_history;
-    use crate::app::domain::{BufferState, SplitAxis, WorkspaceTab};
-    use crate::app::services::session_store::SessionStore;
-    use crate::app::services::settings_store::SettingsStore;
+    use crate::app::app_state::test_support::{named_tabs, test_app_with_tabs};
+    use crate::app::domain::SplitAxis;
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
-    use crate::app::{domain::TabManager, startup::StartupOptions};
 
     #[test]
     fn follow_history_undo_activates_containing_tab_and_moves_one_view() {
-        let mut app = test_app_with_tabs(["first.txt", "second.txt"]);
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_app_with_tabs(root.path(), named_tabs(&["first.txt", "second.txt"]));
         let target_tab_index = 1;
         let target_buffer_id = app.tab_manager.tabs.as_slice()[target_tab_index]
             .buffers
@@ -308,23 +323,5 @@ mod tests {
         );
         assert_eq!(original_view.pending_cursor_range, None);
         assert_eq!(original_view.cursor_reveal_mode(), None);
-    }
-
-    fn test_app_with_tabs<const N: usize>(names: [&str; N]) -> ScratchpadApp {
-        let temp_dir = tempfile::tempdir().expect("create temp app root");
-        let root = temp_dir.keep();
-        let mut app = ScratchpadApp::with_stores_and_startup(
-            SessionStore::new(root.clone()),
-            SettingsStore::new(root),
-            StartupOptions::default(),
-        );
-        app.set_session_persist_on_drop(false);
-        app.tab_manager = TabManager::for_test_tabs(names.into_iter().map(test_tab).collect());
-        crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
-        app
-    }
-
-    fn test_tab(name: &str) -> WorkspaceTab {
-        WorkspaceTab::new(BufferState::new(name.to_owned(), String::new(), None))
     }
 }
