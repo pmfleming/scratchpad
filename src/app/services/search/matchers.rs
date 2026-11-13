@@ -59,30 +59,29 @@ pub(super) fn collect_regex_matches<F>(
 where
     F: FnMut() -> bool,
 {
-    let ascii = text.is_ascii();
     let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
+    if text.is_ascii() {
+        // ASCII byte offsets are char offsets.
+        let bytes = text.as_bytes();
+        return collect_matches(
+            regex.find_iter(text),
+            |matched| {
+                let (start, end) = (matched.start(), matched.end());
+                whole_word_allows(true, bytes, &whole_word_matcher, whole_word, start, end)
+                    .then_some(start..end)
+            },
+            limit,
+            should_continue,
+        );
+    }
     let mut char_cursor = ByteToCharCursor::default();
     collect_matches(
         regex.find_iter(text),
         |matched| {
-            let (start, end) = if ascii {
-                (matched.start(), matched.end())
-            } else {
-                char_cursor.byte_range(text, matched.start(), matched.end())
-            };
-            let allowed = if ascii {
-                whole_word_allows(
-                    true,
-                    text.as_bytes(),
-                    &whole_word_matcher,
-                    whole_word,
-                    start,
-                    end,
-                )
-            } else {
-                whole_word_matcher.allows_byte_range(matched.start(), matched.end())
-            };
-            allowed.then_some(start..end)
+            let (start, end) = char_cursor.byte_range(text, matched.start(), matched.end());
+            whole_word_matcher
+                .allows_byte_range(matched.start(), matched.end())
+                .then_some(start..end)
         },
         limit,
         should_continue,
@@ -154,16 +153,13 @@ impl InterruptCheck {
     }
 }
 
-fn find_matches_case_sensitive_impl<F>(
+fn find_matches_case_sensitive_impl(
     text: &str,
     query: &str,
     whole_word: bool,
     limit: usize,
-    mut should_continue: F,
-) -> Option<Vec<Range<usize>>>
-where
-    F: FnMut() -> bool,
-{
+    should_continue: &mut impl FnMut() -> bool,
+) -> Option<Vec<Range<usize>>> {
     if query.len() > text.len() {
         return Some(Vec::new());
     }
@@ -174,7 +170,7 @@ where
             query.as_bytes(),
             whole_word,
             limit,
-            &mut should_continue,
+            should_continue,
         );
     }
 
@@ -195,20 +191,17 @@ where
             Some(start..end)
         },
         limit,
-        &mut should_continue,
+        should_continue,
     )
 }
 
-fn find_matches_ascii_case_insensitive_impl<F>(
+fn find_matches_ascii_case_insensitive_impl(
     text_bytes: &[u8],
     query_bytes: &[u8],
     whole_word: bool,
     limit: usize,
-    mut should_continue: F,
-) -> Option<Vec<Range<usize>>>
-where
-    F: FnMut() -> bool,
-{
+    should_continue: &mut impl FnMut() -> bool,
+) -> Option<Vec<Range<usize>>> {
     if query_bytes.len() > text_bytes.len() {
         return Some(Vec::new());
     }
@@ -219,7 +212,7 @@ where
             query_bytes[0].to_ascii_lowercase(),
             whole_word,
             limit,
-            &mut should_continue,
+            should_continue,
         );
     }
 
@@ -232,20 +225,17 @@ where
         &query_lower,
         whole_word,
         limit,
-        &mut should_continue,
+        should_continue,
     )
 }
 
-fn find_matches_unicode_case_insensitive_impl<F>(
+fn find_matches_unicode_case_insensitive_impl(
     text: &str,
     query: &str,
     whole_word: bool,
     limit: usize,
-    mut should_continue: F,
-) -> Option<Vec<Range<usize>>>
-where
-    F: FnMut() -> bool,
-{
+    should_continue: &mut impl FnMut() -> bool,
+) -> Option<Vec<Range<usize>>> {
     let query_char_len = query.chars().count();
     let char_to_byte = char_to_byte_map(text);
     let char_count = char_to_byte.len().saturating_sub(1);
@@ -265,7 +255,7 @@ where
             .then_some(start..end)
         },
         limit,
-        &mut should_continue,
+        should_continue,
     )
 }
 
