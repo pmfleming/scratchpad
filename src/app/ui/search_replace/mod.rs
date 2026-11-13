@@ -13,8 +13,6 @@ use crate::app::ui::{panel_style, settings, widget_ids};
 use eframe::egui;
 use state::{SearchStripActions, SearchStripState};
 
-/// Width shared by other dialogs that line up with Search.
-pub(crate) const SEARCH_DIALOG_WIDTH: f32 = 620.0;
 const SEARCH_DEFAULT_SIZE: egui::Vec2 = egui::vec2(480.0, 600.0);
 const SEARCH_MIN_HEIGHT: f32 = 320.0;
 

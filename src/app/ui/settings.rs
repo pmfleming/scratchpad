@@ -100,31 +100,6 @@ pub(crate) fn apply_dialog_typography(ui: &mut egui::Ui) {
         style.text_styles.insert(text, font.clone());
     }
 }
-// Dialogs also use these helpers; keep their established geometry and palette
-// independent of the settings-page redesign.
-pub(crate) fn dialog_card_frame(ui: &egui::Ui) -> egui::Frame {
-    egui::Frame::new()
-        .fill(if ui.visuals().dark_mode {
-            egui::Color32::from_rgb(42, 47, 57)
-        } else {
-            egui::Color32::WHITE
-        })
-        .stroke(egui::Stroke::new(1.0, dialog_card_border(ui)))
-        .corner_radius(10)
-        .inner_margin(egui::Margin {
-            left: 18,
-            right: 18,
-            top: 14,
-            bottom: 14,
-        })
-}
-pub(crate) fn dialog_card_border(ui: &egui::Ui) -> egui::Color32 {
-    if ui.visuals().dark_mode {
-        egui::Color32::from_rgb(61, 67, 77)
-    } else {
-        egui::Color32::from_rgb(204, 213, 226)
-    }
-}
 
 fn text_primary(ui: &egui::Ui) -> egui::Color32 {
     ui.visuals()

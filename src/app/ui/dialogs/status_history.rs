@@ -1,512 +1,381 @@
-use super::common::HISTORY_DIALOG_SIZE;
-use super::common::{history_dialog_card, history_dialog_header, show_centered_callout};
-use crate::app::app_state::{ScratchpadApp, StatusDomain, StatusMessage, StatusSeverity};
-use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg};
-use crate::app::ui::{callout, settings, widget_ids};
+//! Status messages in History's panel style: a severity switch, flat rows and the
+//! selected message in full below.
+use crate::app::app_state::{ScratchpadApp, StatusDomain, StatusFilter, StatusSeverity, workspace};
+use crate::app::theme;
+use crate::app::ui::{callout, panel_style, settings, widget_ids};
 use eframe::egui;
-use egui_phosphor::regular::{BRACKETS_SQUARE, EXCLAMATION_MARK, QUESTION_MARK, X};
 
-const STATUS_LIST_MIN_HEIGHT: f32 = 330.0;
-const STATUS_PILL_CORNER_RADIUS: u8 = 8;
-const STATUS_PILL_INNER_MARGIN: i8 = 10;
-const STATUS_PILL_SPACING: f32 = 6.0;
+mod footer;
+mod list;
+mod model;
+#[cfg(test)]
+mod tests;
 
-const STATUS_TITLE_SIZE: f32 = 24.0;
-const STATUS_FILTER_BUTTON_HEIGHT: f32 = 30.0;
-const STATUS_PILL_ICON_SIZE: f32 = 16.0;
-const STATUS_CARD_CORNER_RADIUS: u8 = 12;
+const DEFAULT_SIZE: egui::Vec2 = egui::vec2(460.0, 540.0);
+const MIN_HEIGHT: f32 = 300.0;
+/// Used until the header has been measured once.
+const ESTIMATED_MIN_WIDTH: f32 = 360.0;
+/// Keeps the title visibly separate from the filters at minimum width.
+const TITLE_GAP: f32 = 16.0;
+const NOTE_SIZE: f32 = 12.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StatusFilter {
-    All,
-    Info,
-    Warning,
-    Error,
-}
+const FILTERS: [(StatusFilter, &str, &str); 4] = [
+    (StatusFilter::All, "All", "Show every message"),
+    (StatusFilter::Errors, "Errors", "Show only errors"),
+    (StatusFilter::Warnings, "Warnings", "Show only warnings"),
+    (StatusFilter::Info, "Info", "Show only information"),
+];
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct StatusHistoryRow {
-    pub(super) id: u64,
-    pub(super) severity: StatusSeverity,
-    pub(super) domain: StatusDomain,
-    pub(super) text: String,
-    pub(super) detail: Option<String>,
-}
-
-impl StatusHistoryRow {
-    fn from_status(status: &StatusMessage) -> Self {
-        Self {
-            id: status.id,
-            severity: status.severity,
-            domain: status.domain,
-            text: status.text.clone(),
-            detail: status.detail.clone(),
-        }
-    }
+#[derive(Default)]
+pub(super) struct Actions {
+    close: bool,
+    select: Option<u64>,
+    copy: bool,
+    clear: bool,
+    start_session: bool,
 }
 
 pub(crate) fn show_status_history_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if !app.state.dialogs.status_history.is_open() {
         return;
     }
+    let opening = std::mem::take(&mut app.state.dialogs.status_history.opening);
+    if opening {
+        app.state.dialogs.status_history.new_from = app.state.status.seen_until;
+    }
+    // Everything listed while the panel is open counts as seen.
+    app.state.status.mark_seen();
 
-    let rows = status_history_rows(app.state.status.history.iter());
-    let filter = read_filter(ctx);
-    let mut next_filter = filter;
-    let mut close_requested = false;
-    let mut start_requested = false;
+    let dialog = &app.state.dialogs.status_history;
+    let counts = model::Counts::of(app.state.status.history.iter());
+    let rows = model::rows(app.state.status.history.iter(), dialog.filter);
+    let selected = dialog
+        .selected
+        .and_then(|id| rows.iter().position(|row| row.id == id))
+        .or((!rows.is_empty()).then_some(0));
+    let view = list::ListView {
+        rows: &rows,
+        selected,
+        new_from: dialog.new_from,
+        empty: model::empty_message(dialog.filter),
+        take_focus: opening,
+    };
 
-    show_centered_callout(
-        ctx,
-        "status_history_window",
-        "Status history",
-        HISTORY_DIALOG_SIZE,
-        |ui| {
+    let mut actions = Actions::default();
+    let dismissible = panel_style::dismiss_on_outside_click(app);
+    let popup_open = egui::Popup::is_any_open(ctx);
+    let layer = widget_ids::area_layer_id(egui::Order::Foreground, "status_history_window");
+    let was_visible = ctx.memory(|m| m.areas().visible_last_frame(&layer));
+    let frame = panel_style::window_frame(ctx, app.state.app_settings.editor_background_color());
+    let screen = ctx.content_rect();
+    // Window sizes include the frame, so add its margin to the header content width.
+    let min_size = egui::vec2(min_width(ctx) + frame.total_margin().sum().x, MIN_HEIGHT);
+    let response = egui::Window::new("Status")
+        .id(layer.id)
+        .order(layer.order)
+        .title_bar(false)
+        .resizable(true)
+        .default_size(DEFAULT_SIZE.max(min_size))
+        .min_size(min_size)
+        .max_size((screen.size() - egui::vec2(24.0, 24.0)).max(min_size))
+        .frame(frame)
+        .default_pos(egui::pos2(
+            (screen.right() - DEFAULT_SIZE.x - 24.0).max(screen.left()),
+            screen.top() + 72.0,
+        ))
+        .show(ctx, |ui| {
             widget_ids::feature_scope(ui, "status_history_dialog", |ui| {
-                render_status_history_window(
-                    ui,
-                    &rows,
-                    filter,
-                    &mut next_filter,
-                    &mut close_requested,
-                    app,
-                    &mut start_requested,
-                );
+                settings::apply_dialog_typography(ui);
+                callout::apply_spacing(ui);
+                panel_style::apply(ui);
+                ui.visuals_mut().panel_fill = frame.fill;
+                ui.visuals_mut().window_fill = frame.fill;
+                actions.close |= header(ui, app, counts, !dismissible);
+                notices(ui, app, &mut actions);
+                summary(ui, app, &rows, view.new_from, &mut actions);
+                footer::panel(ui, selected.map(|index| &rows[index]), &mut actions);
+                list::show(ui, &view, &mut actions);
+            });
+        });
+    if let Some(response) = response {
+        callout::mark_scroll_blocker_if_hovered(ctx, &response.response);
+        // Ignore the opening click and interactions with menus.
+        actions.close |= dismissible
+            && was_visible
+            && !popup_open
+            && !egui::Popup::is_any_open(ctx)
+            && workspace::accessors::pending_action(app).is_none()
+            && response.response.clicked_elsewhere();
+    }
+    actions.close |= ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    apply(ctx, app, &rows, selected, actions);
+}
+
+fn apply(
+    ctx: &egui::Context,
+    app: &mut ScratchpadApp,
+    rows: &[model::StatusRow],
+    selected: Option<usize>,
+    actions: Actions,
+) {
+    let dialog = &mut app.state.dialogs.status_history;
+    if let Some(id) = actions.select {
+        dialog.selected = Some(id);
+    }
+    if actions.copy
+        && let Some(row) = selected.map(|index| &rows[index])
+    {
+        ctx.copy_text(row.copy_text());
+    }
+    if actions.clear {
+        app.state.status.history.clear();
+        dialog.selected = None;
+    }
+    if actions.start_session {
+        dialog.filter = StatusFilter::All;
+        crate::app::services::session_manager::start_new_session(app, ctx);
+    }
+    if actions.close {
+        app.state.dialogs.status_history.close();
+        workspace::accessors::request_focus_for_active_view(app);
+    }
+}
+
+fn min_width_key() -> egui::Id {
+    egui::Id::unique("status_history.header.min_width")
+}
+
+/// The narrowest window content that shows the title and every filter on one row.
+fn min_width(ctx: &egui::Context) -> f32 {
+    ctx.data(|d| d.get_temp::<f32>(min_width_key()))
+        .unwrap_or(ESTIMATED_MIN_WIDTH)
+}
+
+/// Title on the left; the severity switch with counts on the right. Returns true on close.
+fn header(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    counts: model::Counts,
+    show_close: bool,
+) -> bool {
+    let spacing = ui.spacing().item_spacing.x;
+    let mut close = false;
+    let mut required = TITLE_GAP;
+    let height =
+        ui.spacing().interact_size.y.max(
+            ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y,
+        );
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            required += ui
+                .label(
+                    egui::RichText::new("Status")
+                        .size(14.0)
+                        .strong()
+                        .color(callout::text(ui)),
+                )
+                .rect
+                .width();
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if show_close {
+                    let button = panel_style::icon_button(
+                        ui,
+                        "status_history.close",
+                        egui_phosphor::regular::X,
+                        "Close status",
+                        true,
+                    );
+                    required += button.rect.width() + spacing;
+                    close = button.clicked();
+                }
+                let filter = &mut app.state.dialogs.status_history.filter;
+                for (candidate, label, hint) in FILTERS.into_iter().rev() {
+                    let count = counts.get(candidate);
+                    let text = if candidate == StatusFilter::All || count == 0 {
+                        label.to_owned()
+                    } else {
+                        format!("{label} {count}")
+                    };
+                    let response = ui
+                        .selectable_value(filter, candidate, text)
+                        .on_hover_text(hint);
+                    required += response.rect.width() + spacing;
+                }
             });
         },
     );
+    remember_min_width(ui.ctx(), required.ceil());
+    close
+}
 
-    if next_filter != filter {
-        write_filter(ctx, next_filter);
-    }
-    if close_requested {
-        app.state.dialogs.status_history.close();
-    }
-    if start_requested {
-        write_filter(ctx, StatusFilter::All);
-        crate::app::services::session_manager::start_new_session(app, ctx);
+fn remember_min_width(ctx: &egui::Context, required: f32) {
+    let changed = ctx
+        .data(|d| d.get_temp::<f32>(min_width_key()))
+        .is_none_or(|old| (old - required).abs() > 0.5);
+    if changed {
+        ctx.data_mut(|d| d.insert_temp(min_width_key(), required));
+        // Counts, fonts or theme changes alter the header; resize before it is painted.
+        ctx.request_discard("Status header width changed");
     }
 }
 
-fn status_history_rows<'a>(
-    messages: impl DoubleEndedIterator<Item = &'a StatusMessage>,
-) -> Vec<StatusHistoryRow> {
-    messages.rev().map(StatusHistoryRow::from_status).collect()
-}
-
-fn render_status_history_window(
-    ui: &mut egui::Ui,
-    rows: &[StatusHistoryRow],
-    filter: StatusFilter,
-    next_filter: &mut StatusFilter,
-    close_requested: &mut bool,
-    app: &mut ScratchpadApp,
-    start_requested: &mut bool,
-) {
-    settings::apply_dialog_typography(ui);
-    callout::apply_spacing(ui);
-    ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
-    if render_header(ui) {
-        *close_requested = true;
-    }
-
-    if app.state.persistence.session_store.storage_unavailable() {
-        history_dialog_card(ui, STATUS_CARD_CORNER_RADIUS, |ui| {
-            ui.heading("Start a new session");
-            if let Some(detail) = rows
-                .iter()
-                .find(|row| {
-                    row.domain == StatusDomain::Session && row.severity == StatusSeverity::Error
-                })
-                .and_then(|row| row.detail.as_ref())
-            {
-                ui.add(egui::Label::new(detail).wrap());
-            }
-            ui.add(egui::Label::new(
-                "The previous session could not be opened. Starting a new session will move the old session file to a temporary backup and create a new file at the usual location. The backup may be deleted during temporary-file cleanup."
-            ).wrap());
-            ui.add(
-                egui::Label::new(format!(
-                    "Session file: {}",
-                    app.state
-                        .persistence
-                        .session_store
-                        .root()
-                        .join("session.db")
-                        .display()
-                ))
-                .wrap(),
-            );
-            let resetting = app.state.persistence.session_reset.is_some();
-            let busy = app.state.background_io.has_pending_background_actions();
-            *start_requested = ui
-                .add_enabled(
-                    !resetting && !busy,
-                    egui::Button::new(if resetting {
-                        "Creating new session…"
-                    } else {
-                        "Start new session"
-                    }),
-                )
-                .clicked();
-            if busy && !resetting {
-                ui.label("Waiting for current file operations to finish…");
-            }
+/// Session reset and document recovery, which need action before the message list.
+fn notices(ui: &mut egui::Ui, app: &mut ScratchpadApp, actions: &mut Actions) {
+    egui::ScrollArea::vertical()
+        .id_salt("status_history.notices")
+        .max_height(ui.available_height() * 0.5)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            session_notice(ui, app, actions);
+            // Recovery is shared with Settings; keep its headings at panel size.
+            let heading = panel_style::font(ui, 13.0);
+            ui.style_mut()
+                .text_styles
+                .insert(egui::TextStyle::Heading, heading);
+            super::recovery::render(ui, app);
         });
+}
+
+fn session_notice(ui: &mut egui::Ui, app: &ScratchpadApp, actions: &mut Actions) {
+    if !app.state.persistence.session_store.storage_unavailable() {
+        return;
     }
-
-    super::recovery::render(ui, app);
-    ui.add_space(4.0);
-    history_dialog_card(ui, STATUS_CARD_CORNER_RADIUS, |ui| {
-        render_filter_controls(ui, filter, next_filter);
-    });
-
-    let filtered_rows = rows
+    let muted = theme::text_muted(ui);
+    ui.label(egui::RichText::new("Start a new session").strong());
+    if let Some(detail) = app
+        .state
+        .status
+        .history
         .iter()
-        .filter(|row| filter.matches(row.severity))
-        .collect::<Vec<_>>();
-    render_history_rows(ui, &filtered_rows);
-}
-
-fn render_header(ui: &mut egui::Ui) -> bool {
-    history_dialog_header(
-        ui,
-        "status_history.header",
-        "Close status",
-        "Status",
-        STATUS_TITLE_SIZE,
-    )
-}
-
-fn render_filter_controls(ui: &mut egui::Ui, filter: StatusFilter, next_filter: &mut StatusFilter) {
-    let filters = [
-        (
-            "all",
-            BRACKETS_SQUARE,
-            "All status messages",
-            StatusFilter::All,
-        ),
-        ("info", QUESTION_MARK, "Info messages", StatusFilter::Info),
-        (
-            "warning",
-            EXCLAMATION_MARK,
-            "Warning messages",
-            StatusFilter::Warning,
-        ),
-        ("error", X, "Error messages", StatusFilter::Error),
-    ];
-
-    ui.horizontal(|ui| {
-        for (id_source, icon, tooltip, candidate) in filters {
-            if control_icon_button(ui, id_source, icon, tooltip, filter == candidate).clicked() {
-                *next_filter = candidate;
-            }
-        }
-    });
-}
-
-fn control_icon_button(
-    ui: &mut egui::Ui,
-    id_source: &'static str,
-    icon: &str,
-    tooltip: &str,
-    selected: bool,
-) -> egui::Response {
-    let (fill, stroke_color, text_color) = if selected {
-        (
-            tab_selected_bg(ui),
-            tab_selected_accent(ui),
-            callout::text(ui),
-        )
-    } else {
-        (action_bg(ui), border(ui), callout::muted_text(ui))
-    };
-    let button = egui::Button::new(
-        egui::RichText::new(icon)
-            .font(egui_phosphor::font_id(16.0))
-            .color(text_color),
-    )
-    .min_size(egui::vec2(36.0, STATUS_FILTER_BUTTON_HEIGHT))
-    .fill(fill)
-    .stroke(egui::Stroke::new(1.0, stroke_color))
-    .corner_radius(egui::CornerRadius::same(8));
-    widget_ids::scope(ui, ("status_history.filter", id_source), |ui| {
-        ui.add(button)
-    })
-    .inner
-    .on_hover_text(tooltip)
-}
-
-fn render_history_rows(ui: &mut egui::Ui, rows: &[&StatusHistoryRow]) {
-    widget_ids::scope(ui, "status_history.rows", |ui| {
-        if rows.is_empty() {
-            ui.label(
-                egui::RichText::new("No status messages")
-                    .size(13.0)
-                    .color(callout::muted_text(ui)),
-            );
-            return;
-        }
-
-        egui::ScrollArea::vertical()
-            .id_salt(widget_ids::ctx_key("status_history.scroll.content"))
-            .auto_shrink([false, false])
-            .max_height(ui.available_height())
-            .min_scrolled_height(STATUS_LIST_MIN_HEIGHT.min(ui.available_height().max(0.0)))
-            .show(ui, |ui| {
-                ui.set_max_width(ui.available_width());
-                for row in rows {
-                    render_status_history_row(ui, row);
-                }
-            });
-    });
-}
-
-fn render_status_history_row(ui: &mut egui::Ui, row: &StatusHistoryRow) {
-    widget_ids::scope(ui, ("status_history.row", row.id), |ui| {
-        status_pill(ui, row);
-    });
-    ui.add_space(STATUS_PILL_SPACING);
-}
-
-fn status_pill(ui: &mut egui::Ui, row: &StatusHistoryRow) {
-    egui::Frame::NONE
-        .fill(action_bg(ui))
-        .stroke(egui::Stroke::new(1.0, border(ui)))
-        .corner_radius(egui::CornerRadius::same(STATUS_PILL_CORNER_RADIUS))
-        .inner_margin(egui::Margin::same(STATUS_PILL_INNER_MARGIN))
-        .show(ui, |ui| render_row_pill_contents(ui, row));
-}
-
-fn render_row_pill_contents(ui: &mut egui::Ui, row: &StatusHistoryRow) {
-    let content_width = ui.available_width();
-    ui.set_width(content_width);
-    ui.set_min_width(content_width);
-    ui.set_max_width(content_width);
-
-    ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(severity_icon(row.severity))
-                .font(egui_phosphor::font_id(STATUS_PILL_ICON_SIZE))
-                .color(severity_color(row.severity, ui.visuals().dark_mode)),
+        .rev()
+        .find(|row| row.domain == StatusDomain::Session && row.severity == StatusSeverity::Error)
+        .and_then(|row| row.detail.as_ref())
+    {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(detail)
+                    .size(NOTE_SIZE)
+                    .monospace()
+                    .color(ui.visuals().warn_fg_color),
+            )
+            .wrap(),
         );
-        ui.add_space(8.0);
-        ui.vertical(|ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(&row.text)
-                        .size(14.0)
-                        .color(callout::text(ui)),
-                )
-                .wrap(),
-            );
+    }
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(
+                "The previous session could not be opened. Starting a new session will move the old session file to a temporary backup and create a new file at the usual location. The backup may be deleted during temporary-file cleanup.",
+            )
+            .size(NOTE_SIZE)
+            .color(muted),
+        )
+        .wrap(),
+    );
+    let path = app
+        .state
+        .persistence
+        .session_store
+        .root()
+        .join("session.db")
+        .display()
+        .to_string();
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(format!("Session file: {path}"))
+                .size(NOTE_SIZE)
+                .color(muted),
+        )
+        .truncate(),
+    );
+    let resetting = app.state.persistence.session_reset.is_some();
+    let busy = app.state.background_io.has_pending_background_actions();
+    let enabled = !resetting && !busy;
+    ui.horizontal(|ui| {
+        if busy && !resetting {
             ui.label(
-                egui::RichText::new(domain_label(row.domain))
-                    .size(12.0)
-                    .color(callout::muted_text(ui)),
+                egui::RichText::new("Waiting for current file operations to finish…")
+                    .size(NOTE_SIZE)
+                    .color(muted),
             );
-            if let Some(detail) = &row.detail {
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let button = egui::Button::new(
+                egui::RichText::new(if resetting {
+                    "Creating new session…"
+                } else {
+                    "Start new session"
+                })
+                .color(if enabled {
+                    panel_style::on_accent(ui)
+                } else {
+                    muted
+                }),
+            )
+            .fill(if enabled {
+                theme::tab_selected_accent(ui)
+            } else {
+                theme::action_bg(ui)
+            });
+            actions.start_session |= ui.add_enabled(enabled, button).clicked();
+        });
+    });
+    ui.separator();
+}
+
+/// One muted line above the list, like Search's: what is listed and how much is new.
+fn summary(
+    ui: &mut egui::Ui,
+    app: &ScratchpadApp,
+    rows: &[model::StatusRow],
+    new_from: u64,
+    actions: &mut Actions,
+) {
+    let listed: usize = rows.iter().map(|row| row.repeats).sum();
+    let new = app
+        .state
+        .status
+        .history
+        .iter()
+        .filter(|status| {
+            status.id >= new_from
+                && app
+                    .state
+                    .dialogs
+                    .status_history
+                    .filter
+                    .matches(status.severity)
+        })
+        .count();
+    let count = match listed {
+        1 => "1 message".to_owned(),
+        n => format!("{n} messages"),
+    };
+    let text = if new > 0 {
+        format!("{count} · {new} new")
+    } else {
+        count
+    };
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            actions.clear |= ui
+                .add_enabled(
+                    !app.state.status.history.is_empty(),
+                    egui::Button::new(egui::RichText::new("Clear").size(NOTE_SIZE)).frame(false),
+                )
+                .on_hover_text("Remove every message from this list")
+                .clicked();
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add(
                     egui::Label::new(
-                        egui::RichText::new(detail)
-                            .size(12.0)
-                            .monospace()
-                            .color(callout::muted_text(ui)),
+                        egui::RichText::new(text)
+                            .size(NOTE_SIZE)
+                            .color(theme::text_muted(ui)),
                     )
-                    .wrap(),
+                    .truncate(),
                 );
-            }
+            });
         });
     });
-}
-
-fn severity_icon(severity: StatusSeverity) -> &'static str {
-    match severity {
-        StatusSeverity::Info => QUESTION_MARK,
-        StatusSeverity::Warning => EXCLAMATION_MARK,
-        StatusSeverity::Error => X,
-    }
-}
-
-fn severity_color(severity: StatusSeverity, dark_mode: bool) -> egui::Color32 {
-    match severity {
-        StatusSeverity::Info => {
-            if dark_mode {
-                egui::Color32::from_rgb(170, 178, 190)
-            } else {
-                egui::Color32::from_rgb(82, 92, 108)
-            }
-        }
-        StatusSeverity::Warning => egui::Color32::from_rgb(230, 132, 46),
-        StatusSeverity::Error => egui::Color32::from_rgb(220, 64, 64),
-    }
-}
-
-fn domain_label(domain: StatusDomain) -> &'static str {
-    match domain {
-        StatusDomain::File => "File",
-        StatusDomain::Disk => "Disk",
-        StatusDomain::Search => "Search",
-        StatusDomain::Settings => "Settings",
-        StatusDomain::Session => "Session",
-        StatusDomain::Encoding => "Encoding",
-        StatusDomain::History => "History",
-        StatusDomain::Layout => "Layout",
-    }
-}
-
-impl StatusFilter {
-    fn matches(self, severity: StatusSeverity) -> bool {
-        match self {
-            StatusFilter::All => true,
-            StatusFilter::Info => severity == StatusSeverity::Info,
-            StatusFilter::Warning => severity == StatusSeverity::Warning,
-            StatusFilter::Error => severity == StatusSeverity::Error,
-        }
-    }
-}
-
-fn read_filter(ctx: &egui::Context) -> StatusFilter {
-    ctx.data_mut(|data| {
-        data.get_persisted::<StatusFilter>(filter_id())
-            .unwrap_or(StatusFilter::All)
-    })
-}
-
-fn write_filter(ctx: &egui::Context, filter: StatusFilter) {
-    ctx.data_mut(|data| data.insert_persisted(filter_id(), filter));
-}
-
-fn filter_id() -> egui::Id {
-    widget_ids::ctx_key("status_history.filter")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{StatusFilter, StatusHistoryRow, status_history_rows};
-    use crate::app::app_state::{StatusDomain, StatusMessage, StatusSeverity};
-
-    #[test]
-    fn full_status_details_and_reset_action_are_visible_without_expanding() {
-        use crate::app::{
-            app_state::test_support::test_app,
-            fonts::{EditorFontPreset, EditorFontSelection, apply_editor_fonts},
-            services::session_manager,
-        };
-        use eframe::egui;
-        use egui_kittest::{Harness, kittest::Queryable};
-
-        let root = tempfile::tempdir().unwrap();
-        let mut app = test_app(root.path());
-        app.state.persistence.session_restore_failed = true;
-        app.state
-            .persistence
-            .session_store
-            .chunk_store_handle()
-            .unwrap()
-            .set_health(crate::app::services::chunk_store::Health::Unavailable(
-                "injected format failure".into(),
-            ));
-        let message = "Could not restore your previous session. Start a new session to resume session saving. This complete message should wrap rather than being cut off.";
-        let detail =
-            "Session format version 999 is incompatible with this build (expected version 10).";
-        app.state
-            .status
-            .set_error_status_with_detail(StatusDomain::Session, message, detail);
-        app.state.dialogs.status_history.open();
-        let mut harness = Harness::builder()
-            .allow_missing_glyphs()
-            .with_size(egui::vec2(1100.0, 900.0))
-            .with_context_setup(|ctx| {
-                apply_editor_fonts(
-                    ctx,
-                    &EditorFontSelection::scratchpad(EditorFontPreset::Standard),
-                    4.0,
-                )
-                .unwrap();
-            })
-            .build_ui_state(
-                |ui, app| {
-                    super::show_status_history_window(ui.ctx(), app);
-                },
-                app,
-            );
-        harness.run_steps(3);
-        assert!(harness.query_by_label(message).is_some());
-        assert!(harness.query_by_label("Detail").is_none());
-        assert!(harness.query_by_label("Start new session").is_some());
-        // Choosing a filter cannot hide the failure reason above the reset action.
-        super::write_filter(&harness.ctx, StatusFilter::Info);
-        harness.run_steps(2);
-        assert!(harness.query_by_label(detail).is_some());
-        harness.get_by_label("Start new session").click();
-        harness.run_steps(2);
-        assert!(harness.state().state.persistence.session_reset.is_some());
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while harness.state().state.persistence.session_reset.is_some()
-            && std::time::Instant::now() < deadline
-        {
-            session_manager::poll_session_reset(harness.state_mut());
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        assert!(!harness.state().state.persistence.session_restore_failed);
-        let detail = harness
-            .state()
-            .state
-            .status
-            .current
-            .as_ref()
-            .unwrap()
-            .detail
-            .as_ref()
-            .unwrap();
-        let backup = detail
-            .lines()
-            .next()
-            .unwrap()
-            .strip_prefix("Previous session moved to: ")
-            .unwrap();
-        std::fs::remove_dir_all(backup).unwrap();
-    }
-    #[test]
-    fn status_history_rows_are_newest_first() {
-        let older = message(1, "Older");
-        let newer = message(2, "Newer");
-
-        let rows = status_history_rows([older, newer].iter());
-
-        assert_eq!(
-            rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
-            vec!["Newer", "Older"]
-        );
-    }
-
-    #[test]
-    fn status_history_row_keeps_detail_separate_from_primary_text() {
-        let mut status = message(1, "Could not save your session.");
-        status.detail = Some("access denied".to_owned());
-
-        let row = StatusHistoryRow::from_status(&status);
-
-        assert_eq!(row.text, "Could not save your session.");
-        assert_eq!(row.detail.as_deref(), Some("access denied"));
-        assert!(!row.text.contains("access denied"));
-    }
-
-    #[test]
-    fn status_filter_matches_by_severity() {
-        assert!(StatusFilter::All.matches(StatusSeverity::Error));
-        assert!(StatusFilter::Warning.matches(StatusSeverity::Warning));
-        assert!(!StatusFilter::Warning.matches(StatusSeverity::Info));
-    }
-
-    fn message(id: u64, text: &str) -> StatusMessage {
-        StatusMessage {
-            id,
-            severity: StatusSeverity::Info,
-            domain: StatusDomain::Disk,
-            text: text.to_owned(),
-            detail: None,
-        }
-    }
 }

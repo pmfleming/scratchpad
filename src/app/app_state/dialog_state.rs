@@ -64,13 +64,46 @@ impl TextHistoryDialogState {
     }
 }
 
+/// Which severities the Status panel lists.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum StatusFilter {
+    #[default]
+    All,
+    Errors,
+    Warnings,
+    Info,
+}
+
+impl StatusFilter {
+    pub(crate) fn matches(self, severity: super::StatusSeverity) -> bool {
+        use super::StatusSeverity as S;
+        match self {
+            Self::All => true,
+            Self::Errors => severity == S::Error,
+            Self::Warnings => severity == S::Warning,
+            Self::Info => severity == S::Info,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct StatusHistoryDialogState {
     pub(crate) open: bool,
+    pub(crate) filter: StatusFilter,
+    /// The selected message, by id; the newest listed message when unset.
+    pub(crate) selected: Option<u64>,
+    /// Messages from this id on arrived since the panel was last shown.
+    pub(crate) new_from: u64,
+    /// Set by `open` until the panel has captured `new_from` and taken focus.
+    pub(crate) opening: bool,
 }
 
 impl StatusHistoryDialogState {
     pub(crate) fn open(&mut self) {
+        if !self.open {
+            self.opening = true;
+            self.selected = None;
+        }
         self.open = true;
     }
 

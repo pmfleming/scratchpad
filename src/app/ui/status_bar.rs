@@ -1,4 +1,4 @@
-use crate::app::app_state::{ScratchpadApp, StatusSeverity, frame};
+use crate::app::app_state::{ScratchpadApp, frame};
 use crate::app::commands::{AppCommand, DialogCommand, SettingsCommand};
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
@@ -292,12 +292,8 @@ fn show_status_history_button(
     app: &ScratchpadApp,
     actions: &mut StatusBarActions,
 ) {
-    let has_errors = app
-        .state
-        .status
-        .history
-        .iter()
-        .any(|status| status.severity == StatusSeverity::Error);
+    // Red until the Status panel has shown the error.
+    let has_errors = app.state.status.has_unseen_errors();
     let color = if has_errors {
         egui::Color32::from_rgb(220, 64, 64)
     } else {
@@ -307,9 +303,9 @@ fn show_status_history_button(
         ui.ctx(),
         ShortcutAction::OpenStatusHistory,
         if has_errors {
-            "Status History has Errors"
+            "Status has new errors"
         } else {
-            "Status History"
+            "Status"
         },
     );
     let response = fixed_status_icon_cell(

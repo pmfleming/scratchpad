@@ -35,7 +35,7 @@ mod window_lifecycle;
 pub(crate) mod workspace;
 
 pub(crate) use chrome_state::ChromeState;
-pub(crate) use dialog_state::{DialogState, EncodingMode};
+pub(crate) use dialog_state::{DialogState, EncodingMode, StatusFilter};
 pub(crate) use focus_state::FocusState;
 pub use frame::prepare_context_before_first_frame;
 pub(crate) use runtime_state::{BackgroundIoState, FileWatchState, OpenFileDialogState};
@@ -72,6 +72,8 @@ pub(crate) struct StatusMessage {
     pub(crate) domain: StatusDomain,
     pub(crate) text: String,
     pub(crate) detail: Option<String>,
+    /// Unix seconds when the message was posted.
+    pub(crate) time: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,6 +100,8 @@ pub(crate) struct StatusState {
     pub(crate) current: Option<StatusMessage>,
     pub(crate) history: VecDeque<StatusMessage>,
     pub(crate) next_id: u64,
+    /// Messages with a smaller id have been shown in the Status panel.
+    pub(crate) seen_until: u64,
 }
 
 pub struct ScratchpadApp {
@@ -229,6 +233,17 @@ impl Drop for ScratchpadApp {
 }
 
 impl StatusState {
+    /// True when an error arrived after the Status panel was last shown.
+    pub(crate) fn has_unseen_errors(&self) -> bool {
+        self.history
+            .iter()
+            .any(|status| status.severity == StatusSeverity::Error && status.id >= self.seen_until)
+    }
+
+    pub(crate) fn mark_seen(&mut self) {
+        self.seen_until = self.next_id;
+    }
+
     pub(crate) fn set_info_status_in_domain(
         &mut self,
         domain: StatusDomain,
@@ -388,6 +403,9 @@ impl StatusState {
             domain,
             text: message.into(),
             detail,
+            time: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
         };
         self.next_id = self.next_id.saturating_add(1);
         self.current = Some(status.clone());
