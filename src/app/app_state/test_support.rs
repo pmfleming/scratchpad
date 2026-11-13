@@ -1,6 +1,6 @@
 //! Shared headless fixtures; callers own the temporary directory lifetime.
 use super::ScratchpadApp;
-use crate::app::domain::BufferState;
+use crate::app::domain::{BufferState, TabManager, WorkspaceTab};
 use crate::app::fonts::{EditorFontPreset, EditorFontSelection, apply_editor_fonts};
 use crate::app::services::file_service::FileService;
 use crate::app::services::{session_store::SessionStore, settings_store::SettingsStore};
@@ -20,6 +20,22 @@ pub(crate) fn test_app(root: &Path) -> ScratchpadApp {
     );
     app.set_session_persist_on_drop(false);
     app
+}
+
+/// A test app whose workspace is exactly `tabs`, with no tab-strip selection.
+pub(crate) fn test_app_with_tabs(root: &Path, tabs: Vec<WorkspaceTab>) -> ScratchpadApp {
+    let mut app = test_app(root);
+    app.tab_manager = TabManager::for_test_tabs(tabs);
+    super::workspace::display_tabs::clear_tab_selection(&mut app);
+    app
+}
+
+/// One empty, pathless tab per name.
+pub(crate) fn named_tabs(names: &[&str]) -> Vec<WorkspaceTab> {
+    names
+        .iter()
+        .map(|name| WorkspaceTab::new(BufferState::new((*name).to_owned(), String::new(), None)))
+        .collect()
 }
 
 /// Writes `text` to `root/name` and returns the file path.

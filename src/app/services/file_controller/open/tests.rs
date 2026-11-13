@@ -1,21 +1,9 @@
 use super::{FileController, LoadedPathResult, OpenBatchSummary, ScratchpadApp};
-use crate::app::app_state::test_support::{self, wait_for_background_io};
-use crate::app::domain::{BufferState, TabManager, WorkspaceTab};
+use crate::app::app_state::test_support::{
+    disk_buffer, test_app_with_tabs, wait_for_background_io,
+};
+use crate::app::domain::WorkspaceTab;
 use crate::app::services::file_service::FileService;
-
-fn test_app(root: &std::path::Path, tabs: Vec<WorkspaceTab>) -> ScratchpadApp {
-    let mut app = test_support::test_app(root);
-    app.tab_manager = TabManager::for_test_tabs(tabs);
-    crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
-    app
-}
-
-fn disk_buffer(path: &std::path::Path, text: &str) -> BufferState {
-    let name = path.file_name().unwrap().to_string_lossy().into_owned();
-    let mut buffer = BufferState::new(name, text.to_owned(), Some(path.to_path_buf()));
-    buffer.sync_to_disk_state(FileService::read_disk_state(path).ok());
-    buffer
-}
 
 fn open_path_count(app: &ScratchpadApp, path: &std::path::Path) -> usize {
     app.tab_manager
@@ -37,7 +25,7 @@ fn open_selected_paths_async_deduplicates_pending_path() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("opened.txt");
     std::fs::write(&path, "opened").unwrap();
-    let mut app = test_app(directory.path(), vec![WorkspaceTab::untitled()]);
+    let mut app = test_app_with_tabs(directory.path(), vec![WorkspaceTab::untitled()]);
 
     FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
     FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
@@ -54,7 +42,7 @@ fn opening_hard_link_aliases_reserves_only_one_document() {
     let alias = root.path().join("alias");
     std::fs::write(&original, "shared").unwrap();
     std::fs::hard_link(&original, &alias).unwrap();
-    let mut app = test_app(root.path(), vec![WorkspaceTab::untitled()]);
+    let mut app = test_app_with_tabs(root.path(), vec![WorkspaceTab::untitled()]);
     FileController::open_selected_paths_async(&mut app, vec![original.clone(), alias]);
     wait_for_background_io(&mut app);
     assert_eq!(open_path_count(&app, &original), 1);
@@ -71,7 +59,7 @@ fn pending_reservation_releases_original_spelling_after_symlink_change() {
     std::fs::write(&a, "a").unwrap();
     std::fs::write(&b, "b").unwrap();
     std::os::unix::fs::symlink(&a, &link).unwrap();
-    let mut app = test_app(root.path(), vec![WorkspaceTab::untitled()]);
+    let mut app = test_app_with_tabs(root.path(), vec![WorkspaceTab::untitled()]);
     assert!(FileController::reserve_pending_open_path(&mut app, &link));
     std::fs::remove_file(&link).unwrap();
     std::os::unix::fs::symlink(&b, &link).unwrap();
@@ -85,7 +73,7 @@ fn large_file_stages_first_visible_window_before_background_hydration() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("large.txt");
     std::fs::write(&path, "first visible then fully hydrated").unwrap();
-    let mut app = test_app(directory.path(), vec![WorkspaceTab::untitled()]);
+    let mut app = test_app_with_tabs(directory.path(), vec![WorkspaceTab::untitled()]);
 
     FileController::open_selected_paths_async(&mut app, vec![path]);
 
@@ -110,7 +98,7 @@ fn cold_batch_reopening_both_paths_of_a_split_installs_each_document_once() {
             path
         })
         .collect();
-    let mut app = test_app(root.path(), vec![WorkspaceTab::untitled()]);
+    let mut app = test_app_with_tabs(root.path(), vec![WorkspaceTab::untitled()]);
     let load = |path: &std::path::Path| {
         FileService::build_buffer_from_file_content(
             path,
@@ -164,7 +152,7 @@ fn closing_a_loading_preview_cancels_its_open_without_recording_lifecycle_activi
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("large.txt");
     std::fs::write(&path, "first visible then fully hydrated").unwrap();
-    let mut app = test_app(root.path(), vec![WorkspaceTab::untitled()]);
+    let mut app = test_app_with_tabs(root.path(), vec![WorkspaceTab::untitled()]);
     FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
     assert!(
         app.tab_manager
@@ -175,7 +163,7 @@ fn closing_a_loading_preview_cancels_its_open_without_recording_lifecycle_activi
     );
     let index = app.tab_manager.active_tab_index;
     crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, index);
-    crate::app::app_state::test_support::wait_for_background_io(&mut app);
+    wait_for_background_io(&mut app);
     wait_for_background_io(&mut app);
     assert!(app.tab_manager.find_tab_by_path(&path).is_none());
     assert!(app.state.persistence.pending_activity.is_empty());
@@ -200,7 +188,7 @@ fn large_open_batch_hydrates_most_recent_tab_in_background() {
             path
         })
         .collect::<Vec<_>>();
-    let mut app = test_app(directory.path(), vec![WorkspaceTab::untitled()]);
+    let mut app = test_app_with_tabs(directory.path(), vec![WorkspaceTab::untitled()]);
 
     FileController::open_selected_paths_async(&mut app, paths.clone());
 
@@ -250,7 +238,7 @@ fn open_results_preserve_identity_release_reservations_and_handle_failures() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("opened.txt");
         std::fs::write(&path, "loaded").unwrap();
-        let mut app = test_app(directory.path(), vec![WorkspaceTab::untitled()]);
+        let mut app = test_app_with_tabs(directory.path(), vec![WorkspaceTab::untitled()]);
         let mut buffer = disk_buffer(&path, "original");
         buffer.is_loading_preview = mode == "preview";
         let original_id = buffer.id;
@@ -326,7 +314,7 @@ fn persisting_large_file_preview_keeps_retained_identity_and_history() {
     let path = root.path().join("large.txt");
     let text = "first visible then fully hydrated";
     std::fs::write(&path, text).unwrap();
-    let mut app = test_app(
+    let mut app = test_app_with_tabs(
         root.path(),
         vec![WorkspaceTab::new(disk_buffer(&path, text))],
     );
@@ -392,7 +380,7 @@ fn unavailable_store_opens_single_files_and_large_batches_from_disk() {
                     path
                 })
                 .collect();
-            let mut app = test_app(root.path(), vec![WorkspaceTab::untitled()]);
+            let mut app = test_app_with_tabs(root.path(), vec![WorkspaceTab::untitled()]);
             assert!(app.state.persistence.session_store.writes_blocked());
             app.state.persistence.session_restore_failed = restore_failed;
             FileController::open_selected_paths_async(&mut app, paths.clone());

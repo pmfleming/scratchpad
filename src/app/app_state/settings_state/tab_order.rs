@@ -324,17 +324,17 @@ fn tab_total_size(tab: &WorkspaceTab) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{ScratchpadApp, TabOrderMode};
-    use crate::app::domain::{BufferState, DiskFileState, PieceSource, TabManager, WorkspaceTab};
-    use crate::app::services::session_store::SessionStore;
-    use crate::app::services::settings_store::{SettingsStore, TabOrderDirection};
-    use crate::app::startup::StartupOptions;
+    use crate::app::app_state::test_support::{named_tabs, test_app_with_tabs};
+    use crate::app::domain::{BufferState, DiskFileState, PieceSource};
+    use crate::app::services::settings_store::TabOrderDirection;
     use crate::app::ui::editor_content::native_editor::{
         CharCursor, CursorRange, EditOperation, OperationRecord,
     };
 
     #[test]
     fn file_name_order_sorts_workspace_tabs_and_preserves_active_tab() {
-        let mut app = test_app(["zeta.txt", "Alpha.txt", "beta.txt"]);
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_app(root.path(), &["zeta.txt", "Alpha.txt", "beta.txt"]);
         app.tab_manager.active_tab_index = 0;
 
         app.set_tab_order_mode(TabOrderMode::FileName);
@@ -348,15 +348,10 @@ mod tests {
 
     #[test]
     fn file_age_order_uses_disk_modified_time_and_treats_unsaved_tabs_as_newest() {
-        let mut app = test_app(["newer.txt", "untitled", "older.txt"]);
-        app.tab_manager.tabs[0].buffers.buffer.disk_state = Some(DiskFileState {
-            modified_millis: Some(300),
-            len: 0,
-        });
-        app.tab_manager.tabs[2].buffers.buffer.disk_state = Some(DiskFileState {
-            modified_millis: Some(100),
-            len: 0,
-        });
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_app(root.path(), &["newer.txt", "untitled", "older.txt"]);
+        set_disk_state(&mut app, 0, Some(300), 0);
+        set_disk_state(&mut app, 2, Some(100), 0);
 
         app.set_tab_order_mode(TabOrderMode::FileAge);
 
@@ -369,15 +364,10 @@ mod tests {
 
     #[test]
     fn file_size_order_uses_disk_size_and_falls_back_to_buffer_text() {
-        let mut app = test_app(["large.txt", "small.txt", "draft.txt"]);
-        app.tab_manager.tabs[0].buffers.buffer.disk_state = Some(DiskFileState {
-            modified_millis: None,
-            len: 300,
-        });
-        app.tab_manager.tabs[1].buffers.buffer.disk_state = Some(DiskFileState {
-            modified_millis: None,
-            len: 10,
-        });
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_app(root.path(), &["large.txt", "small.txt", "draft.txt"]);
+        set_disk_state(&mut app, 0, None, 300);
+        set_disk_state(&mut app, 1, None, 10);
         app.tab_manager.tabs[2]
             .buffers
             .buffer
@@ -390,19 +380,11 @@ mod tests {
 
     #[test]
     fn recent_edit_order_uses_latest_text_history_sequence_then_save_date() {
-        let mut app = test_app(["alpha.txt", "beta.txt", "gamma.txt"]);
-        app.tab_manager.tabs[0].buffers.buffer.disk_state = Some(DiskFileState {
-            modified_millis: Some(300),
-            len: 0,
-        });
-        app.tab_manager.tabs[1].buffers.buffer.disk_state = Some(DiskFileState {
-            modified_millis: Some(100),
-            len: 0,
-        });
-        app.tab_manager.tabs[2].buffers.buffer.disk_state = Some(DiskFileState {
-            modified_millis: Some(200),
-            len: 0,
-        });
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_app(root.path(), &["alpha.txt", "beta.txt", "gamma.txt"]);
+        for (index, modified) in [300, 100, 200].into_iter().enumerate() {
+            set_disk_state(&mut app, index, Some(modified), 0);
+        }
         record_edit(&mut app.tab_manager.tabs[1].buffers.buffer, "b");
         record_edit(&mut app.tab_manager.tabs[2].buffers.buffer, "g");
 
@@ -417,7 +399,8 @@ mod tests {
 
     #[test]
     fn manual_display_reorder_switches_back_to_custom_order() {
-        let mut app = test_app(["alpha.txt", "beta.txt", "gamma.txt"]);
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_app(root.path(), &["alpha.txt", "beta.txt", "gamma.txt"]);
         app.set_tab_order_mode(TabOrderMode::FileName);
 
         assert!(
@@ -432,58 +415,42 @@ mod tests {
     }
 
     #[test]
-    fn custom_order_restores_order_from_before_automatic_sort() {
-        let mut app = test_app(["zeta.txt", "Alpha.txt", "beta.txt"]);
+    fn custom_order_restores_order_from_before_automatic_sorts() {
+        let sorts: [&[TabOrderMode]; 2] = [
+            &[TabOrderMode::FileName],
+            &[TabOrderMode::FileName, TabOrderMode::FileAge],
+        ];
+        for modes in sorts {
+            let root = tempfile::tempdir().unwrap();
+            let mut app = test_app(root.path(), &["zeta.txt", "Alpha.txt", "beta.txt"]);
+            for (index, modified) in [300, 100, 200].into_iter().enumerate() {
+                set_disk_state(&mut app, index, Some(modified), 0);
+            }
+            for mode in modes {
+                app.set_tab_order_mode(*mode);
+            }
+            assert_eq!(tab_names(&app), ["Alpha.txt", "beta.txt", "zeta.txt"]);
 
-        app.set_tab_order_mode(TabOrderMode::FileName);
-        assert_eq!(tab_names(&app), ["Alpha.txt", "beta.txt", "zeta.txt"]);
+            app.set_tab_order_mode(TabOrderMode::Custom);
 
-        app.set_tab_order_mode(TabOrderMode::Custom);
-
-        assert_eq!(tab_names(&app), ["zeta.txt", "Alpha.txt", "beta.txt"]);
+            assert_eq!(tab_names(&app), ["zeta.txt", "Alpha.txt", "beta.txt"]);
+        }
     }
 
-    #[test]
-    fn custom_order_survives_switching_between_automatic_modes() {
-        let mut app = test_app(["zeta.txt", "Alpha.txt", "beta.txt"]);
-        app.tab_manager.tabs[0].buffers.buffer.disk_state = Some(DiskFileState {
-            modified_millis: Some(300),
-            len: 0,
-        });
-        app.tab_manager.tabs[1].buffers.buffer.disk_state = Some(DiskFileState {
-            modified_millis: Some(100),
-            len: 0,
-        });
-        app.tab_manager.tabs[2].buffers.buffer.disk_state = Some(DiskFileState {
-            modified_millis: Some(200),
-            len: 0,
-        });
-
-        app.set_tab_order_mode(TabOrderMode::FileName);
-        app.set_tab_order_mode(TabOrderMode::FileAge);
-        assert_eq!(tab_names(&app), ["Alpha.txt", "beta.txt", "zeta.txt"]);
-
-        app.set_tab_order_mode(TabOrderMode::Custom);
-
-        assert_eq!(tab_names(&app), ["zeta.txt", "Alpha.txt", "beta.txt"]);
+    fn test_app(root: &std::path::Path, names: &[&str]) -> ScratchpadApp {
+        test_app_with_tabs(root, named_tabs(names))
     }
 
-    fn test_app<const N: usize>(names: [&str; N]) -> ScratchpadApp {
-        let temp_dir = tempfile::tempdir().expect("create temp app root");
-        let root = temp_dir.keep();
-        let mut app = ScratchpadApp::with_stores_and_startup(
-            SessionStore::new(root.clone()),
-            SettingsStore::new(root),
-            StartupOptions::default(),
-        );
-        app.set_session_persist_on_drop(false);
-        app.tab_manager = TabManager::for_test_tabs(names.into_iter().map(test_tab).collect());
-        crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
-        app
-    }
-
-    fn test_tab(name: &str) -> WorkspaceTab {
-        WorkspaceTab::new(BufferState::new(name.to_owned(), String::new(), None))
+    fn set_disk_state(
+        app: &mut ScratchpadApp,
+        index: usize,
+        modified_millis: Option<u64>,
+        len: u64,
+    ) {
+        app.tab_manager.tabs[index].buffers.buffer.disk_state = Some(DiskFileState {
+            modified_millis,
+            len,
+        });
     }
 
     fn tab_names(app: &ScratchpadApp) -> Vec<String> {
