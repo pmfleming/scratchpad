@@ -5,8 +5,10 @@ use crate::app::platform_file::OpenFileDialogKind;
 use crate::app::services::background_io::{BackgroundIoDispatcher, BackgroundIoResult};
 use crate::app::services::file_watch::{FileWatchEvent, FileWatchService};
 use std::collections::{BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Weak};
 use std::time::Instant;
 
 pub(crate) struct OpenFileDialogState {
@@ -15,7 +17,7 @@ pub(crate) struct OpenFileDialogState {
 }
 
 pub(crate) struct BackgroundIoState {
-    pub(crate) path_imports: HashMap<PathBuf, Vec<std::sync::Weak<std::sync::atomic::AtomicBool>>>,
+    pub(crate) path_imports: HashMap<PathBuf, Vec<Weak<AtomicBool>>>,
     pub(crate) bound_store_epoch: Option<u64>,
     pub(crate) preparations_pending: bool,
     pub(crate) tx: BackgroundIoDispatcher,
@@ -69,45 +71,35 @@ impl BackgroundIoState {
         self.pending_background_actions.get_mut(&request_id)
     }
 
+    fn any_pending(&self, matches: impl Fn(&PendingBackgroundAction) -> bool) -> bool {
+        self.pending_background_actions.values().any(matches)
+    }
+
     pub(crate) fn has_pending_persist(&self) -> bool {
-        self.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                crate::app::app_state::PendingBackgroundAction::PersistSession(_)
-            )
-        })
+        self.any_pending(|action| matches!(action, PendingBackgroundAction::PersistSession(_)))
     }
 
     pub(crate) fn has_pending_session_hydration(&self) -> bool {
-        self.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                crate::app::app_state::PendingBackgroundAction::HydrateSessionTab(_)
-            )
-        })
+        self.any_pending(|action| matches!(action, PendingBackgroundAction::HydrateSessionTab(_)))
     }
 
     pub(crate) fn has_pending_retained_open(&self, document: &str) -> bool {
-        self.pending_background_actions.values().any(|action|matches!(action,PendingBackgroundAction::ReopenRetained(open) if open.document.as_deref()==Some(document)))
+        self.any_pending(|action| {
+            matches!(action, PendingBackgroundAction::ReopenRetained(open)
+                if open.document.as_deref() == Some(document))
+        })
     }
 
     pub(crate) fn has_pending_save_for_buffer(&self, buffer_id: BufferId) -> bool {
-        self.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                crate::app::app_state::PendingBackgroundAction::SavePath(save)
-                    if save.buffer_id == buffer_id
-            )
+        self.any_pending(|action| {
+            matches!(action, PendingBackgroundAction::SavePath(save) if save.buffer_id == buffer_id)
         })
     }
 
     pub(crate) fn has_pending_reload_for_buffer(&self, buffer_id: BufferId) -> bool {
-        self.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                crate::app::app_state::PendingBackgroundAction::ReloadBuffer(reload)
-                    if reload.buffer_id == buffer_id
-            )
+        self.any_pending(|action| {
+            matches!(action, PendingBackgroundAction::ReloadBuffer(reload)
+                if reload.buffer_id == buffer_id)
         })
     }
 
@@ -129,12 +121,9 @@ impl BackgroundIoState {
     }
 
     pub(crate) fn has_pending_reopen_with_encoding_for_buffer(&self, buffer_id: BufferId) -> bool {
-        self.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                crate::app::app_state::PendingBackgroundAction::ReopenWithEncoding(reopen)
-                    if reopen.buffer_id == buffer_id
-            )
+        self.any_pending(|action| {
+            matches!(action, PendingBackgroundAction::ReopenWithEncoding(reopen)
+                if reopen.buffer_id == buffer_id)
         })
     }
 
@@ -143,12 +132,9 @@ impl BackgroundIoState {
         buffer_id: BufferId,
         revision: u64,
     ) -> bool {
-        self.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                crate::app::app_state::PendingBackgroundAction::RefreshTextMetadata(pending)
-                    if pending.buffer_id == buffer_id && pending.revision == revision
-            )
+        self.any_pending(|action| {
+            matches!(action, PendingBackgroundAction::RefreshTextMetadata(pending)
+                if pending.buffer_id == buffer_id && pending.revision == revision)
         })
     }
 
@@ -157,13 +143,38 @@ impl BackgroundIoState {
         buffer_id: BufferId,
         revision: u64,
     ) -> bool {
-        self.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                crate::app::app_state::PendingBackgroundAction::RefreshEncodingCompliance(pending)
-                    if pending.buffer_id == buffer_id && pending.revision == revision
-            )
+        self.any_pending(|action| {
+            matches!(action, PendingBackgroundAction::RefreshEncodingCompliance(pending)
+                if pending.buffer_id == buffer_id && pending.revision == revision)
         })
+    }
+
+    /// Registers a cancellation token for a new background import of `path`.
+    pub(crate) fn register_path_import(&mut self, path: &Path) -> Arc<AtomicBool> {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tokens = self.path_imports.entry(path.to_path_buf()).or_default();
+        tokens.retain(|token| token.strong_count() > 0);
+        tokens.push(Arc::downgrade(&cancelled));
+        cancelled
+    }
+
+    /// Forgets tokens whose imports of `path` have finished.
+    pub(crate) fn prune_path_imports(&mut self, path: &Path) {
+        if let Some(tokens) = self.path_imports.get_mut(path) {
+            tokens.retain(|token| token.strong_count() > 0);
+            if tokens.is_empty() {
+                self.path_imports.remove(path);
+            }
+        }
+    }
+
+    /// Asks every in-flight import of `path` to stop.
+    pub(crate) fn cancel_path_imports(&mut self, path: &Path) {
+        for token in self.path_imports.remove(path).into_iter().flatten() {
+            if let Some(token) = token.upgrade() {
+                token.store(true, Ordering::Release);
+            }
+        }
     }
 }
 
