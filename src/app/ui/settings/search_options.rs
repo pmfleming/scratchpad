@@ -230,7 +230,7 @@ fn threshold_row(ui: &mut egui::Ui, label: &str, value: &mut ReviewThreshold, re
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{UNLIMITED, format_stop, parse_stop};
 
     #[test]
     fn search_values_accept_units_snap_and_reject_invalid_input() {
