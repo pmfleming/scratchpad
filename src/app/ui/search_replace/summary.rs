@@ -1,5 +1,5 @@
 //! One muted status line above the results, like History's list header.
-use super::result_model::match_count_label;
+use super::result_model::{file_count_label, match_count_label};
 use super::state::{SearchStripActions, SearchStripState};
 use crate::app::{
     app_state::{
@@ -151,12 +151,4 @@ fn status_text(
         );
     }
     text
-}
-
-fn file_count_label(count: usize) -> String {
-    if count == 1 {
-        "1 file".into()
-    } else {
-        format!("{count} files")
-    }
 }

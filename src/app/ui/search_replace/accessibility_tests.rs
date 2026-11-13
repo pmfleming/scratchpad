@@ -236,3 +236,34 @@ fn alt_arrows_step_through_recent_searches_in_find() {
     assert_eq!(harness.state().state.search_state.query(), "newest");
     assert!(find_focused(&harness));
 }
+
+#[test]
+fn replace_all_review_replaces_the_footer_until_cancelled() {
+    use crate::app::services::settings_store::ReviewThreshold;
+    let root = tempfile::tempdir().unwrap();
+    let mut app = searched_app(root.path(), 5);
+    app.state.app_settings.search.review_matches_above = ReviewThreshold::Count(1);
+    crate::app::app_state::search_state::api::set_search_replace_open(&mut app, true);
+    let mut harness = harness(egui::vec2(1100.0, 900.0), app);
+    harness.run_steps(3);
+    harness.get_by_label("5 included");
+    harness
+        .get_by_role_and_label(egui::Role::Button, "Replace all included matches")
+        .click();
+    harness.run_steps(4);
+    harness.get_by_label("Replace 5 matches in 1 file?");
+    harness.get_by_role_and_label(egui::Role::Button, "Replace 5 in 1 file");
+    assert!(harness.query_by_label_contains("Esc Close").is_none());
+
+    harness
+        .get_by_role_and_label(egui::Role::Button, "Cancel")
+        .click();
+    harness.run_steps(4);
+    assert!(
+        harness
+            .query_by_label("Replace 5 matches in 1 file?")
+            .is_none()
+    );
+    harness.get_by_label_contains("Esc Close");
+    assert_eq!(harness.state().state.search_state.query(), "needle");
+}

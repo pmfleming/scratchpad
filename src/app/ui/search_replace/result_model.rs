@@ -9,6 +9,14 @@ pub(super) fn match_count_label(match_count: usize) -> String {
     }
 }
 
+pub(super) fn file_count_label(count: usize) -> String {
+    if count == 1 {
+        "1 file".to_owned()
+    } else {
+        format!("{count} files")
+    }
+}
+
 pub(super) fn match_preview(entry: &SearchResultEntry) -> &str {
     if entry.preview.is_empty() {
         "Match"
