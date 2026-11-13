@@ -25,7 +25,7 @@ use interactions::{
 };
 use layout::{
     allocate_editor_rect, build_editor_galley, editor_row_height, editor_viewport_height,
-    galley_origin, total_editor_content_height,
+    total_editor_content_height,
 };
 use painting::{
     CursorPaintOutcome, EditorFrame, consume_cursor_reveal, paint_editor, publish_ime_output,
@@ -50,9 +50,6 @@ pub struct EditorWidgetOutcome {
 // Public rendering entry points
 // ---------------------------------------------------------------------------
 
-// This is the top-level editor-frame pipeline; keeping its ordered phases in
-// one place is clearer than distributing the frame lifecycle across helpers.
-#[allow(clippy::too_many_lines)]
 pub fn render_editor_text_edit(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
@@ -63,20 +60,29 @@ pub fn render_editor_text_edit(
     if let Some(fault) = buffer.document().piece_tree().read_fault() {
         return render_storage_fault(ui, &fault);
     }
+    match render_editor_frame(ui, buffer, view, options, viewport) {
+        Ok(outcome) => outcome,
+        Err(error) => render_storage_fault(ui, &error.to_string()),
+    }
+}
+
+/// The ordered phases of one editor frame: lay out the visible slice, apply
+/// input, re-lay out if input changed what is highlighted, then paint.
+fn render_editor_frame(
+    ui: &mut egui::Ui,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    options: TextEditOptions<'_>,
+    viewport: Option<egui::Rect>,
+) -> std::io::Result<EditorWidgetOutcome> {
     view.resolve_anchored_ranges(buffer);
     let total_chars = buffer.current_file_length().chars;
-    let mut galley_context = match build_editor_galley(ui, buffer, view, options, viewport) {
-        Ok(galley) => galley,
-        Err(error) => return render_storage_fault(ui, &error.to_string()),
-    };
+    let mut galley_context = build_editor_galley(ui, buffer, view, options, viewport)?;
     if let Some(fault) = buffer.document().piece_tree().read_fault() {
-        return render_storage_fault(ui, &fault);
+        return Err(std::io::Error::other(fault));
     }
     let input_read = ui.input(|input| editing::InputRead::from_events(&input.events));
-    let _input_pin = match input_read.pin(buffer, &view.cursor_range.unwrap_or_default()) {
-        Ok(pin) => pin,
-        Err(error) => return render_storage_fault(ui, &error.to_string()),
-    };
+    let _input_pin = input_read.pin(buffer, &view.cursor_range.unwrap_or_default())?;
 
     let row_height = editor_row_height(ui, options.editor_font_id);
     let viewport_height = editor_viewport_height(ui, viewport);
@@ -95,12 +101,6 @@ pub fn render_editor_text_edit(
         total_content_height,
         viewport,
         galley_context.virtual_width,
-    );
-    let mut galley_pos = galley_origin(
-        rect,
-        galley_context.logical_line_base,
-        row_height,
-        galley_context.display_column_base,
     );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
@@ -124,7 +124,7 @@ pub fn render_editor_text_edit(
             response: &response,
             galley: &galley_context.galley,
             rect,
-            galley_pos,
+            galley_pos: galley_context.origin(rect, row_height),
             options,
             viewport,
             row_height,
@@ -150,16 +150,7 @@ pub fn render_editor_text_edit(
         galley_context.char_offset_base,
         galley_context.slice_chars,
     ) {
-        galley_context = match build_editor_galley(ui, buffer, view, options, viewport) {
-            Ok(galley) => galley,
-            Err(error) => return render_storage_fault(ui, &error.to_string()),
-        };
-        galley_pos = galley_origin(
-            rect,
-            galley_context.logical_line_base,
-            row_height,
-            galley_context.display_column_base,
-        );
+        galley_context = build_editor_galley(ui, buffer, view, options, viewport)?;
         request_repaint_if_wrapped_content_height_changed(WrappedContentHeightRepaint {
             ui,
             changed: input.changed,
@@ -173,13 +164,56 @@ pub fn render_editor_text_edit(
         });
     }
 
+    paint_editor_frame(
+        ui,
+        buffer,
+        view,
+        &galley_context,
+        PaintFrameRequest {
+            rect,
+            row_height,
+            options,
+            input: &input,
+        },
+    );
+    view.editor_has_focus = input.focused;
+
+    Ok(EditorWidgetOutcome {
+        changed: input.changed,
+        focused: input.focused,
+        response,
+    })
+}
+
+struct PaintFrameRequest<'a> {
+    rect: egui::Rect,
+    row_height: f32,
+    options: TextEditOptions<'a>,
+    input: &'a EditorInputOutcome,
+}
+
+/// Paint the laid-out slice, then publish what painting learned: the cursor
+/// reveal intent, IME geometry and the display snapshot for scrolling.
+fn paint_editor_frame(
+    ui: &mut egui::Ui,
+    buffer: &BufferState,
+    view: &mut EditorViewState,
+    galley_context: &layout::EditorGalleyContext,
+    request: PaintFrameRequest<'_>,
+) {
+    let PaintFrameRequest {
+        rect,
+        row_height,
+        options,
+        input,
+    } = request;
     let paint_outcome = if ui.is_rect_visible(rect) {
         paint_editor(
             ui,
             EditorFrame {
                 buffer,
                 galley: &galley_context.galley,
-                galley_pos,
+                galley_pos: galley_context.origin(rect, row_height),
                 rect,
                 options,
                 focused: input.focused,
@@ -217,14 +251,6 @@ pub fn render_editor_text_edit(
         galley_context.char_offset_base,
         galley_context.logical_line_base,
     );
-
-    view.editor_has_focus = input.focused;
-
-    EditorWidgetOutcome {
-        changed: input.changed,
-        focused: input.focused,
-        response,
-    }
 }
 
 struct EditorInputOutcome {
