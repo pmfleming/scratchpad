@@ -1,4 +1,4 @@
-use super::*;
+use super::{AppSettings, ShortcutAction, default_bindings};
 use crate::app::{
     platform::PlatformProfile,
     services::settings_store::{SettingsStore, parse_toml_settings},

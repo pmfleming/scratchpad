@@ -348,7 +348,10 @@ impl CharByteMap {
 
 #[cfg(test)]
 mod sweep_tests {
-    use super::*;
+    use super::{
+        CharByteMap, HighlightKind, TextHighlightRange, highlight_kind_for_segment,
+        visit_highlight_segments,
+    };
 
     #[test]
     fn sweep_matches_priority_for_overlapping_unsorted_ranges() {
