@@ -253,17 +253,10 @@ impl NumericLayout {
     fn reserve_reset(&mut self, ui: &egui::Ui, width: f32) {
         self.width = (self.width - width).max(1.0);
         // Reserve the same value column for every row, including Unlimited.
-        let number =
-            ui.fonts_mut(|fonts| {
-                fonts.layout_no_wrap(
-                    "Unlimited".into(),
-                    egui::TextStyle::Button.resolve(ui.style()),
-                    super::text_primary(ui),
-                )
-            })
-            .size()
-            .x + 20.0;
-        self.number = self.number.max(number).min(self.width);
+        self.number = self
+            .number
+            .max(value_column_width(ui, "Unlimited"))
+            .min(self.width);
     }
 
     fn update_rows(&mut self) {
@@ -282,17 +275,7 @@ impl NumericLayout {
         let width = ui.available_width().min(SettingsUi::column_width(ui));
         let number = [*value, *range.start(), *range.end()]
             .into_iter()
-            .map(|n| {
-                ui.fonts_mut(|fonts| {
-                    fonts.layout_no_wrap(
-                        n.to_string(),
-                        egui::TextStyle::Button.resolve(ui.style()),
-                        super::text_primary(ui),
-                    )
-                })
-                .size()
-                .x + 20.0
-            })
+            .map(|n| value_column_width(ui, &n.to_string()))
             .fold(78.0, f32::max);
         let unit = ui
             .fonts_mut(|fonts| {
@@ -365,4 +348,12 @@ impl NumericLayout {
             ]
         }
     }
+}
+
+/// Width of the value field needed to show `text` with its padding.
+fn value_column_width(ui: &egui::Ui, text: &str) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let galley =
+        ui.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, super::text_primary(ui)));
+    galley.size().x + 20.0
 }
