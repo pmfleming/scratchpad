@@ -113,6 +113,8 @@ pub enum FileCommand {
     SaveFileWithEncoding {
         tab_index: usize,
         encoding_name: String,
+        /// `None` keeps the file's byte order mark where the encoding supports one.
+        bom: Option<bool>,
     },
     SaveConflictOverwrite {
         tab_index: usize,

@@ -46,7 +46,7 @@ impl FileController {
         }
 
         let _ = Self::refresh_buffer_disk_state(app, index);
-        if Self::defer_save_for_observation(app, index, None) {
+        if Self::defer_save_for_observation(app, index, None, None) {
             return false;
         }
 
@@ -62,10 +62,12 @@ impl FileController {
         let _ = Self::save_file_as_at(app, index);
     }
 
+    /// Saves with `encoding_name`; `bom` overrides the byte order mark when the encoding has one.
     pub fn save_file_with_encoding_at(
         app: &mut ScratchpadApp,
         index: usize,
         encoding_name: &str,
+        bom: Option<bool>,
     ) -> bool {
         if app.tab_manager.tabs.as_slice().is_empty()
             || index >= app.tab_manager.tabs.as_slice().len()
@@ -74,10 +76,10 @@ impl FileController {
         }
 
         let _ = Self::refresh_buffer_disk_state(app, index);
-        if Self::defer_save_for_observation(app, index, Some(encoding_name.to_owned())) {
+        if Self::defer_save_for_observation(app, index, Some(encoding_name.to_owned()), bom) {
             return false;
         }
-        let format = match Self::format_with_selected_encoding(app, index, encoding_name) {
+        let format = match Self::format_with_selected_encoding(app, index, encoding_name, bom) {
             Ok(format) => format,
             Err(error) => {
                 diagnostics::record_io_error_with_details(
@@ -303,6 +305,7 @@ impl FileController {
         app: &ScratchpadApp,
         index: usize,
         encoding_name: &str,
+        bom: Option<bool>,
     ) -> std::io::Result<TextFormatMetadata> {
         let canonical = FileService::canonical_encoding_name(encoding_name)?;
         let mut format = app.tab_manager.tabs.as_slice()[index]
@@ -311,6 +314,9 @@ impl FileController {
             .clone();
         format.encoding_name = canonical;
         format.encoding_source = EncodingSource::ExplicitUserChoice;
+        if let Some(bom) = bom {
+            format.has_bom = bom;
+        }
         if !FileService::encoding_supports_bom(&format.encoding_name)? {
             format.has_bom = false;
         }

@@ -36,7 +36,8 @@ pub(super) fn handle_file_command(app: &mut ScratchpadApp, command: FileCommand)
         FileCommand::SaveFileWithEncoding {
             tab_index,
             encoding_name,
-        } => save_file_with_encoding_command(app, tab_index, &encoding_name),
+            bom,
+        } => FileController::save_file_with_encoding_at(app, tab_index, &encoding_name, bom),
         FileCommand::SaveConflictOverwrite { tab_index, view_id } => {
             save_conflict_overwrite_command(app, tab_index, view_id)
         }
@@ -55,14 +56,6 @@ fn reopen_buffer_with_encoding_command(
     encoding_name: &str,
 ) -> bool {
     FileController::reopen_buffer_with_encoding(app, tab_index, encoding_name)
-}
-
-fn save_file_with_encoding_command(
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    encoding_name: &str,
-) -> bool {
-    FileController::save_file_with_encoding_at(app, tab_index, encoding_name)
 }
 
 fn save_conflict_overwrite_command(

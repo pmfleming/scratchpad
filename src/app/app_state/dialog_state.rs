@@ -1,21 +1,38 @@
 use super::{PendingTabContextMenu, TabRenameState};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum EncodingMode {
+    /// Read the file from disk again with the chosen encoding.
+    #[default]
+    Reopen,
+    /// Write the file with the chosen encoding.
+    Save,
+}
+
 #[derive(Default)]
 pub(crate) struct EncodingDialogState {
     pub(crate) open: bool,
     pub(crate) choice: String,
+    pub(crate) mode: EncodingMode,
+    /// Whether Save writes a byte order mark, for encodings that have one.
+    pub(crate) bom: bool,
+    /// Set until the panel has taken keyboard focus once.
+    pub(crate) focus_pending: bool,
 }
 
 impl EncodingDialogState {
     pub(crate) fn new() -> Self {
         Self {
-            open: false,
             choice: "UTF-8".to_owned(),
+            ..Self::default()
         }
     }
 
-    pub(crate) fn open_with_choice(&mut self, choice: String) {
+    pub(crate) fn open_with(&mut self, choice: String, mode: EncodingMode, bom: bool) {
         self.choice = choice;
+        self.mode = mode;
+        self.bom = bom;
+        self.focus_pending = true;
         self.open = true;
     }
 
@@ -25,18 +42,6 @@ impl EncodingDialogState {
 
     pub(crate) fn is_open(&self) -> bool {
         self.open
-    }
-
-    pub(crate) fn choice_mut(&mut self) -> &mut String {
-        &mut self.choice
-    }
-
-    pub(crate) fn take_choice(&mut self) -> String {
-        std::mem::take(&mut self.choice)
-    }
-
-    pub(crate) fn restore_choice(&mut self, choice: String) {
-        self.choice = choice;
     }
 }
 

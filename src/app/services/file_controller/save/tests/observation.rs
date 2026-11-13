@@ -264,6 +264,7 @@ fn deferred_save_survives_superseded_observations_or_reports_failure() {
         action.expected_epoch = f.app.state.persistence.session_store.history_epoch();
         action.resume_save = Some(DeferredSave {
             encoding: Some("UTF-8".into()),
+            bom: None,
         });
         let observed = FileService::read_observed_file(&f.path).unwrap();
         let state = Some(observed.state.clone());
@@ -352,7 +353,7 @@ fn saving_pasted_newlines_does_not_create_false_external_changes() {
             let history = buffer.document().history_entries().len();
             if encoding_save {
                 assert!(FileController::save_file_with_encoding_at(
-                    &mut f.app, 0, "UTF-8"
+                    &mut f.app, 0, "UTF-8", None
                 ));
             } else {
                 assert!(FileController::save_file_at(&mut f.app, 0));

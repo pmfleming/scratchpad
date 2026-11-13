@@ -1,478 +1,447 @@
-use super::common::{apply_editor_dialog_typography, show_centered_callout};
-use crate::app::app_state::{ScratchpadApp, frame};
+//! Reopen or save the active file with another encoding, in History's panel style.
+use crate::app::app_state::{EncodingMode, ScratchpadApp, frame, workspace};
 use crate::app::commands::{AppCommand, FileCommand};
-use crate::app::services::file_service::COMMON_TEXT_ENCODINGS;
-use crate::app::theme::{action_hover_bg, border, text_muted, text_primary};
-use crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH;
-use crate::app::ui::{callout, settings, visuals::with_visual_overrides, widget_ids};
+use crate::app::domain::EncodingSource;
+use crate::app::services::file_service::{COMMON_TEXT_ENCODINGS, EncodingOption, FileService};
+use crate::app::theme;
+use crate::app::ui::{callout, panel_style, settings, widget_ids};
 use eframe::egui;
-use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, FILE_TEXT, FLOPPY_DISK, TRANSLATE, WARNING};
 
-const ENCODING_DIALOG_WIDTH: f32 = SEARCH_DIALOG_WIDTH;
-const ENCODING_DIALOG_SIZE: egui::Vec2 = egui::vec2(ENCODING_DIALOG_WIDTH, 388.0);
-const ENCODING_TITLE_SIZE: f32 = 24.0;
-const ENCODING_CARD_MIN_HEIGHT: f32 = 48.0;
-const ENCODING_WARNING_MIN_HEIGHT: f32 = 62.0;
-const ENCODING_CONTROL_WIDTH: f32 = 132.0;
-const ENCODING_ACTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(84.0, 26.0);
-const ENCODING_CARD_CORNER_RADIUS: u8 = 12;
-const ENCODING_COMBO_FILL_DARK: egui::Color32 = egui::Color32::from_rgb(74, 72, 68);
-const ENCODING_COMBO_FILL_HOVER_DARK: egui::Color32 = egui::Color32::from_rgb(84, 82, 78);
-const ENCODING_COMBO_FILL_LIGHT: egui::Color32 = egui::Color32::from_rgb(226, 235, 246);
-const ENCODING_COMBO_FILL_HOVER_LIGHT: egui::Color32 = egui::Color32::from_rgb(212, 224, 239);
-const ENCODING_FILE_ICON: egui::Color32 = egui::Color32::from_rgb(107, 158, 248);
-const ENCODING_WARNING_FILL: egui::Color32 = egui::Color32::from_rgb(142, 52, 52);
-const ENCODING_WARNING_TEXT: egui::Color32 = egui::Color32::WHITE;
+const ENCODING_PANEL_WIDTH: f32 = 400.0;
+const ROW_HEIGHT: f32 = panel_style::ROW_HEIGHT;
+const LIST_MAX_HEIGHT: f32 = 12.0 * ROW_HEIGHT;
+const NOTE_SIZE: f32 = 12.0;
+const HINT_SIZE: f32 = 11.0;
+const KEY_HINTS: &str = "↑ ↓ Move   Enter Apply   Esc Close";
+const CURRENT: &str = "CURRENT";
 
-struct EncodingDialogState {
-    active_index: usize,
-    buffer_label: String,
-    has_saved_path: bool,
-    is_dirty: bool,
+#[cfg(test)]
+mod tests;
+
+/// What the panel knows about the active file.
+struct FileFacts {
+    tab_index: usize,
+    name: String,
+    path: Option<String>,
+    encoding: String,
+    label: String,
+    source: EncodingSource,
+    dirty: bool,
 }
 
-#[derive(Clone, Copy)]
-struct EncodingActionSpec<'a> {
-    icon: &'a str,
-    title: &'a str,
-    subtitle: &'a str,
-    tooltip: &'a str,
-    enabled: bool,
-    action: EncodingAction,
-}
-
-#[derive(Clone, Copy)]
-enum EncodingAction {
-    Reopen,
-    Save,
-}
-
-impl EncodingDialogState {
+impl FileFacts {
     fn from_app(app: &ScratchpadApp) -> Self {
-        let active_index = app.tab_manager.active_tab_index;
-        let (buffer_label, has_saved_path, is_dirty) = app.tab_manager.active_tab().map_or_else(
-            || ("Untitled".to_owned(), false, false),
-            |tab| {
-                (
-                    tab.active_buffer().name.clone(),
-                    tab.active_buffer().path.is_some(),
-                    tab.active_buffer().is_dirty,
-                )
+        let tab_index = app.tab_manager.active_tab_index;
+        match app.tab_manager.active_tab() {
+            Some(tab) => {
+                let buffer = tab.active_buffer();
+                Self {
+                    tab_index,
+                    name: buffer.name.clone(),
+                    path: buffer.path.as_ref().map(|p| p.display().to_string()),
+                    encoding: buffer.format.encoding_name.clone(),
+                    label: buffer.format.encoding_label(),
+                    source: buffer.format.encoding_source,
+                    dirty: buffer.is_dirty,
+                }
+            }
+            None => Self {
+                tab_index,
+                name: "Untitled".into(),
+                path: None,
+                encoding: "UTF-8".into(),
+                label: "UTF-8".into(),
+                source: EncodingSource::DefaultForNewFile,
+                dirty: false,
             },
-        );
-
-        Self {
-            active_index,
-            buffer_label,
-            has_saved_path,
-            is_dirty,
         }
     }
 
-    fn reopen_enabled(&self) -> bool {
-        self.has_saved_path && !self.is_dirty
-    }
-
-    fn reopen_subtitle(&self) -> &'static str {
-        if !self.has_saved_path {
-            "Reopen the file using the selected encoding after it has been saved."
-        } else if self.is_dirty {
-            "Save or discard local changes before reopening with a different encoding."
+    /// Why Reopen is unavailable, if it is.
+    fn reopen_blocked(&self) -> Option<&'static str> {
+        if self.path.is_none() {
+            Some("Save this file before reopening it with another encoding.")
+        } else if self.dirty {
+            Some("Save or discard changes before reopening with another encoding.")
         } else {
-            "Reopen the file using the selected encoding."
-        }
-    }
-
-    fn save_subtitle(&self) -> &'static str {
-        if self.has_saved_path {
-            "Commit the file to disk using the selected encoding."
-        } else {
-            "Choose a path and save the file using the selected encoding."
+            None
         }
     }
 }
 
-impl EncodingActionSpec<'_> {
-    fn button_label(self) -> &'static str {
-        match self.title {
-            "Reopen with" => "Reopen",
-            "Save with" => "Save",
-            _ => "Apply",
-        }
-    }
+#[derive(Default)]
+struct Actions {
+    close: bool,
+    apply: bool,
+}
+
+fn list_focus_id() -> egui::Id {
+    egui::Id::unique("encoding.list.focus")
 }
 
 pub(crate) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if !app.state.dialogs.encoding.is_open() {
         return;
     }
-
-    let state = EncodingDialogState::from_app(app);
-    let mut close_requested = false;
-
-    show_centered_callout(
-        ctx,
-        "encoding_overlay_v1",
-        "Text encoding",
-        ENCODING_DIALOG_SIZE,
-        |ui| {
-            render_encoding_dialog(ui, app, &state, &mut close_requested);
-        },
-    );
-
-    if close_requested {
+    let facts = FileFacts::from_app(app);
+    let mut actions = Actions::default();
+    let dismissible = panel_style::dismiss_on_outside_click(app);
+    let popup_open = egui::Popup::is_any_open(ctx);
+    let layer = widget_ids::area_layer_id(egui::Order::Foreground, "encoding_window");
+    let was_visible = ctx.memory(|m| m.areas().visible_last_frame(&layer));
+    let frame = panel_style::window_frame(ctx, app.state.app_settings.editor_background_color());
+    let screen = ctx.content_rect();
+    let response = egui::Window::new("Encoding")
+        .id(layer.id)
+        .order(layer.order)
+        .title_bar(false)
+        .resizable(false)
+        .frame(frame)
+        .default_pos(egui::pos2(
+            (screen.right() - ENCODING_PANEL_WIDTH - frame.total_margin().sum().x - 24.0)
+                .max(screen.left()),
+            screen.top() + 72.0,
+        ))
+        .show(ctx, |ui| {
+            widget_ids::feature_scope(ui, "encoding_dialog", |ui| {
+                ui.set_width(ENCODING_PANEL_WIDTH);
+                settings::apply_dialog_typography(ui);
+                callout::apply_spacing(ui);
+                panel_style::apply(ui);
+                ui.visuals_mut().panel_fill = frame.fill;
+                actions.close |= header(ui, app, !dismissible);
+                file_line(ui, &facts);
+                ui.separator();
+                list(ui, app, &facts, &mut actions);
+                ui.separator();
+                footer(ui, app, &facts, &mut actions);
+            });
+        });
+    if let Some(response) = response {
+        callout::mark_scroll_blocker_if_hovered(ctx, &response.response);
+        // Ignore the opening click and interactions with menus.
+        actions.close |= dismissible
+            && was_visible
+            && !popup_open
+            && !egui::Popup::is_any_open(ctx)
+            && workspace::accessors::pending_action(app).is_none()
+            && response.response.clicked_elsewhere();
+    }
+    actions.close |= ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    if actions.apply && apply(app, &facts) {
+        actions.close = true;
+    }
+    if actions.close {
         frame::close_encoding_dialog(app);
+        workspace::accessors::request_focus_for_active_view(app);
     }
 }
 
-fn render_encoding_dialog(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    state: &EncodingDialogState,
-    close_requested: &mut bool,
-) {
-    settings::apply_dialog_typography(ui);
-    callout::apply_spacing(ui);
-    apply_editor_dialog_typography(ui);
-    ui.spacing_mut().item_spacing = egui::vec2(6.0, 8.0);
-
-    if render_dialog_header(ui) {
-        *close_requested = true;
-    }
-
-    ui.add_space(6.0);
-
-    render_selected_file_card(ui, state);
-    ui.add_space(6.0);
-
-    render_encoding_protocol_card(ui, app);
-
-    for spec in encoding_action_specs(state) {
-        ui.add_space(6.0);
-        if trigger_encoding_action(ui, app, state.active_index, spec) {
-            *close_requested = true;
-        }
-    }
-
-    ui.add_space(6.0);
-    render_encoding_warning(ui);
-}
-
-fn render_dialog_header(ui: &mut egui::Ui) -> bool {
-    callout::header_row(
-        ui,
-        "encoding_dialog.header",
-        "Close encoding actions",
+/// Title on the left; the Reopen │ Save switch on the right. Returns true on close.
+fn header(ui: &mut egui::Ui, app: &mut ScratchpadApp, show_close: bool) -> bool {
+    let mut close = false;
+    let height =
+        ui.spacing().interact_size.y.max(
+            ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y,
+        );
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             ui.label(
                 egui::RichText::new("Encoding")
-                    .size(ENCODING_TITLE_SIZE)
+                    .size(14.0)
+                    .strong()
                     .color(callout::text(ui)),
             );
-        },
-    )
-}
-
-fn encoding_action_specs(state: &EncodingDialogState) -> [EncodingActionSpec<'static>; 2] {
-    [
-        EncodingActionSpec {
-            icon: ARROW_COUNTER_CLOCKWISE,
-            title: "Reopen with",
-            subtitle: state.reopen_subtitle(),
-            tooltip: "Reopen active file with selected encoding",
-            enabled: state.reopen_enabled(),
-            action: EncodingAction::Reopen,
-        },
-        EncodingActionSpec {
-            icon: FLOPPY_DISK,
-            title: "Save with",
-            subtitle: state.save_subtitle(),
-            tooltip: "Save active file using selected encoding",
-            enabled: true,
-            action: EncodingAction::Save,
-        },
-    ]
-}
-
-fn trigger_encoding_action(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    active_index: usize,
-    spec: EncodingActionSpec<'_>,
-) -> bool {
-    render_encoding_action_card(ui, spec) && {
-        let encoding_name = app.state.dialogs.encoding.take_choice();
-        let command = match spec.action {
-            EncodingAction::Reopen => AppCommand::File(FileCommand::ReopenBufferWithEncoding {
-                tab_index: active_index,
-                encoding_name: encoding_name.clone(),
-            }),
-            EncodingAction::Save => AppCommand::File(FileCommand::SaveFileWithEncoding {
-                tab_index: active_index,
-                encoding_name: encoding_name.clone(),
-            }),
-        };
-        let result = crate::app::commands::handle_command(app, command);
-        app.state.dialogs.encoding.restore_choice(encoding_name);
-        result
-    }
-}
-
-fn render_selected_file_card(ui: &mut egui::Ui, state: &EncodingDialogState) {
-    encoding_card(ui, |ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), ENCODING_CARD_MIN_HEIGHT),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                render_card_icon(ui, FILE_TEXT);
-                ui.add_space(12.0);
-
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("Selected file")
-                            .size(15.0)
-                            .color(text_primary(ui)),
-                    );
-                    ui.add_space(1.0);
-                    ui.label(
-                        egui::RichText::new(state.buffer_label.as_str())
-                            .size(13.5)
-                            .color(text_primary(ui).gamma_multiply(0.92)),
-                    );
-                });
-            },
-        );
-    });
-}
-
-fn render_encoding_protocol_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    encoding_card(ui, |ui| {
-        render_dialog_card_row(
-            ui,
-            TRANSLATE,
-            "Encoding protocol",
-            "Choose how this file should be opened or saved.",
-            ENCODING_CONTROL_WIDTH,
-            |ui| {
-                ui.allocate_ui(egui::vec2(ENCODING_CONTROL_WIDTH, 0.0), |ui| {
-                    ui.set_width(ENCODING_CONTROL_WIDTH);
-                    ui.set_max_width(ENCODING_CONTROL_WIDTH);
-                    render_encoding_combo(ui, app.state.dialogs.encoding.choice_mut());
-                });
-            },
-        );
-    });
-}
-
-fn render_encoding_action_card(ui: &mut egui::Ui, spec: EncodingActionSpec<'_>) -> bool {
-    let mut clicked = false;
-    encoding_card(ui, |ui| {
-        render_dialog_card_row(
-            ui,
-            spec.icon,
-            spec.title,
-            spec.subtitle,
-            ENCODING_ACTION_BUTTON_SIZE.x,
-            |ui| {
-                clicked = ui
-                    .add_enabled(
-                        spec.enabled,
-                        egui::Button::new(
-                            egui::RichText::new(spec.button_label()).color(text_primary(ui)),
-                        )
-                        .min_size(ENCODING_ACTION_BUTTON_SIZE)
-                        .fill(action_hover_bg(ui))
-                        .stroke(egui::Stroke::new(1.0, border(ui).gamma_multiply(0.75)))
-                        .corner_radius(egui::CornerRadius::same(7)),
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if show_close {
+                    close = panel_style::icon_button(
+                        ui,
+                        "encoding.close",
+                        egui_phosphor::regular::X,
+                        "Close encoding",
+                        true,
                     )
-                    .on_hover_text(spec.tooltip)
                     .clicked();
-            },
-        );
-    });
-    clicked
-}
-
-fn render_encoding_warning(ui: &mut egui::Ui) {
-    encoding_card_frame(ui)
-        .fill(ENCODING_WARNING_FILL)
-        .stroke(egui::Stroke::new(1.0, settings::dialog_card_border(ui).gamma_multiply(0.55)))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.set_max_width(ui.available_width());
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), ENCODING_WARNING_MIN_HEIGHT),
-                egui::Layout::left_to_right(egui::Align::TOP),
-                |ui| {
-                    render_card_icon_with_color(ui, WARNING, ENCODING_WARNING_TEXT);
-                    ui.add_space(12.0);
-                    ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new("Compatibility warning")
-                                .size(15.0)
-                                .color(ENCODING_WARNING_TEXT),
-                        );
-                        ui.add_space(1.0);
-                        ui.label(
-                            egui::RichText::new(
-                                "Using an incompatible encoding may permanently corrupt characters or lose character mapping data. Proceed with caution.",
-                            )
-                            .size(12.0)
-                            .color(ENCODING_WARNING_TEXT.gamma_multiply(0.86)),
-                        );
-                    });
-                },
-            );
-        });
-}
-
-fn render_dialog_card_row(
-    ui: &mut egui::Ui,
-    icon: &str,
-    title: &str,
-    description: &str,
-    trailing_width: f32,
-    add_trailing: impl FnOnce(&mut egui::Ui),
-) {
-    ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), ENCODING_CARD_MIN_HEIGHT),
-        egui::Layout::left_to_right(egui::Align::TOP),
-        |ui| {
-            render_card_icon(ui, icon);
-            ui.add_space(12.0);
-
-            let text_width = (ui.available_width() - trailing_width - 10.0).max(180.0);
-            ui.allocate_ui_with_layout(
-                egui::vec2(text_width, 0.0),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.set_width(text_width);
-                    render_card_text(ui, title, description);
-                },
-            );
-
-            ui.add_space(10.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                ui.set_min_width(trailing_width);
-                add_trailing(ui);
+                }
+                let mode = &mut app.state.dialogs.encoding.mode;
+                ui.selectable_value(mode, EncodingMode::Save, "Save")
+                    .on_hover_text("Write the file with the selected encoding");
+                ui.selectable_value(mode, EncodingMode::Reopen, "Reopen")
+                    .on_hover_text("Read the file from disk again with the selected encoding");
             });
         },
     );
+    close
 }
 
-fn render_card_text(ui: &mut egui::Ui, title: &str, description: &str) {
-    ui.label(
-        egui::RichText::new(title)
-            .size(15.0)
-            .color(text_primary(ui)),
-    );
-    ui.label(
-        egui::RichText::new(description)
-            .size(12.0)
-            .color(text_muted(ui)),
-    );
-}
-
-fn render_card_icon(ui: &mut egui::Ui, icon: &str) {
-    let color = if icon == FILE_TEXT {
-        ENCODING_FILE_ICON
-    } else {
-        text_muted(ui)
+fn file_line(ui: &mut egui::Ui, facts: &FileFacts) {
+    let source = match facts.source {
+        EncodingSource::Bom => "from its byte order mark",
+        EncodingSource::Heuristic => "detected",
+        EncodingSource::ExplicitUserChoice => "chosen",
+        EncodingSource::DefaultForNewFile => "default",
     };
-    render_card_icon_with_color(ui, icon, color);
+    let text = format!("{} · {} ({source})", facts.name, facts.label);
+    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 18.0));
+    panel_style::text_end(ui, rect, &text, NOTE_SIZE, theme::text_muted(ui));
+    let response = widget_ids::interact(
+        ui,
+        rect,
+        egui::Id::unique("encoding.file"),
+        egui::Sense::hover(),
+        "encoding-file",
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &text));
+    response.on_hover_text(facts.path.as_deref().unwrap_or(&facts.name));
 }
 
-fn render_card_icon_with_color(ui: &mut egui::Ui, icon: &str, color: egui::Color32) {
-    ui.allocate_ui(egui::vec2(26.0, 26.0), |ui| {
-        ui.with_layout(
-            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-            |ui| {
-                ui.label(
-                    egui::RichText::new(icon)
-                        .font(egui_phosphor::font_id(20.0))
-                        .color(color),
-                );
+fn region(option: &EncodingOption) -> &'static str {
+    match option.canonical_name {
+        "UTF-8" | "UTF-16LE" | "UTF-16BE" => "Unicode",
+        "windows-1252" => "Western European",
+        "windows-1251" => "Cyrillic",
+        "windows-1250" => "Central European",
+        "Shift_JIS" | "EUC-JP" => "Japanese",
+        "GBK" => "Simplified Chinese",
+        "Big5" => "Traditional Chinese",
+        "EUC-KR" => "Korean",
+        _ => "",
+    }
+}
+
+fn selected_index(choice: &str) -> Option<usize> {
+    COMMON_TEXT_ENCODINGS
+        .iter()
+        .position(|option| option.canonical_name.eq_ignore_ascii_case(choice))
+}
+
+fn list(ui: &mut egui::Ui, app: &mut ScratchpadApp, facts: &FileFacts, actions: &mut Actions) {
+    keyboard(ui, app, actions);
+    let selected = selected_index(&app.state.dialogs.encoding.choice);
+    let output = egui::ScrollArea::vertical()
+        .id_salt("encoding.list")
+        .max_height(LIST_MAX_HEIGHT)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for (index, option) in COMMON_TEXT_ENCODINGS.iter().enumerate() {
+                let current = option.canonical_name.eq_ignore_ascii_case(&facts.encoding);
+                let row = row(ui, option, Some(index) == selected, current);
+                if row.clicked() || row.double_clicked() {
+                    option
+                        .canonical_name
+                        .clone_into(&mut app.state.dialogs.encoding.choice);
+                    ui.memory_mut(|m| m.request_focus(list_focus_id()));
+                }
+                actions.apply |= row.double_clicked();
+            }
+        });
+    let focus = widget_ids::interact(
+        ui,
+        output.inner_rect,
+        list_focus_id(),
+        egui::Sense::focusable_noninteractive(),
+        "encoding-list-focus",
+    );
+    focus.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListBox, true, "Encodings"));
+    if std::mem::take(&mut app.state.dialogs.encoding.focus_pending) {
+        focus.request_focus();
+    }
+    if focus.has_focus() {
+        panel_style::lock_navigation_focus(ui.ctx(), list_focus_id());
+    }
+}
+
+fn keyboard(ui: &egui::Ui, app: &mut ScratchpadApp, actions: &mut Actions) {
+    if !ui.memory(|m| m.has_focus(list_focus_id())) {
+        return;
+    }
+    let consume = |key| ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
+    let last = COMMON_TEXT_ENCODINGS.len() - 1;
+    let current = selected_index(&app.state.dialogs.encoding.choice);
+    let mut target = None;
+    if consume(egui::Key::ArrowDown) {
+        target = Some(current.map_or(0, |i| (i + 1).min(last)));
+    }
+    if consume(egui::Key::ArrowUp) {
+        target = Some(current.map_or(0, |i| i.saturating_sub(1)));
+    }
+    if consume(egui::Key::Home) {
+        target = Some(0);
+    }
+    if consume(egui::Key::End) {
+        target = Some(last);
+    }
+    if let Some(index) = target {
+        COMMON_TEXT_ENCODINGS[index]
+            .canonical_name
+            .clone_into(&mut app.state.dialogs.encoding.choice);
+    }
+    actions.apply |= consume(egui::Key::Enter);
+}
+
+/// A flat row: label, region and the file's current encoding tag.
+fn row(
+    ui: &mut egui::Ui,
+    option: &EncodingOption,
+    selected: bool,
+    current: bool,
+) -> egui::Response {
+    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), ROW_HEIGHT));
+    let response = widget_ids::interact(
+        ui,
+        rect,
+        egui::Id::unique(("encoding.row", option.canonical_name)),
+        egui::Sense::click(),
+        "encoding-row",
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::ListBoxOption, true, selected, option.label)
+    });
+    if selected {
+        ui.scroll_to_rect(rect, None);
+    }
+    if selected || response.hovered() {
+        ui.painter().rect_filled(
+            rect,
+            0,
+            if selected {
+                theme::tab_selected_bg(ui)
+            } else {
+                theme::action_bg(ui)
             },
         );
-    });
-}
-
-fn encoding_card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
-    encoding_card_frame(ui).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.set_max_width(ui.available_width());
-        add_contents(ui);
-    });
-}
-
-fn encoding_card_frame(ui: &egui::Ui) -> egui::Frame {
-    settings::dialog_card_frame(ui)
-        .corner_radius(egui::CornerRadius::same(ENCODING_CARD_CORNER_RADIUS))
-        .inner_margin(egui::Margin::symmetric(16, 8))
-}
-
-fn render_encoding_combo(ui: &mut egui::Ui, selected_encoding: &mut String) {
-    with_visual_overrides(ui, apply_encoding_combo_style, |ui| {
-        widget_ids::combo_box(ui, "encoding_dialog_combo")
-            .selected_text(
-                egui::RichText::new(selected_encoding.as_str())
-                    .size(13.5)
-                    .color(text_primary(ui)),
-            )
-            .icon(|ui, rect, visuals, _is_open| {
-                let painter = ui.painter();
-                let center = rect.center();
-                let width = 7.0;
-                let height = 4.0;
-                let points = vec![
-                    egui::pos2(center.x - width, center.y - height),
-                    egui::pos2(center.x + width, center.y - height),
-                    egui::pos2(center.x, center.y + height),
-                ];
-                painter.add(egui::Shape::convex_polygon(
-                    points,
-                    visuals.fg_stroke.color,
-                    egui::Stroke::NONE,
-                ));
-            })
-            .width(ui.available_width())
-            .show_ui(ui, |ui| {
-                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                for option in COMMON_TEXT_ENCODINGS {
-                    ui.selectable_value(
-                        selected_encoding,
-                        option.canonical_name.to_owned(),
-                        option.label,
-                    );
-                }
-            })
-            .response
-            .accessible_name("Text encoding");
-    });
-}
-
-fn apply_encoding_combo_style(ui: &mut egui::Ui) {
-    let text_color = text_primary(ui);
-    let (fill, hover_fill) = if ui.visuals().dark_mode {
-        (ENCODING_COMBO_FILL_DARK, ENCODING_COMBO_FILL_HOVER_DARK)
+    }
+    let inner = rect.shrink2(egui::vec2(10.0, 0.0));
+    let mut right = inner.right();
+    if current {
+        let width = panel_style::badge_width(ui, CURRENT);
+        let tag = egui::Rect::from_center_size(
+            egui::pos2(right - width * 0.5, inner.center().y),
+            egui::vec2(width, 17.0),
+        );
+        panel_style::badge(ui, tag, CURRENT);
+        right = tag.left() - 8.0;
+    }
+    let region_width = 140.0_f32.min((right - inner.left()) * 0.5);
+    panel_style::text_right(
+        ui,
+        egui::Rect::from_min_max(
+            egui::pos2(right - region_width, inner.top()),
+            egui::pos2(right, inner.bottom()),
+        ),
+        region(option),
+        HINT_SIZE,
+        theme::text_muted(ui),
+    );
+    panel_style::text(
+        ui,
+        egui::Rect::from_min_max(
+            inner.min,
+            egui::pos2(right - region_width - 8.0, inner.bottom()),
+        ),
+        option.label,
+        13.0,
+        theme::text_primary(ui),
+    );
+    response.on_hover_text(if current {
+        format!("{} · the file's current encoding", option.label)
     } else {
-        (ENCODING_COMBO_FILL_LIGHT, ENCODING_COMBO_FILL_HOVER_LIGHT)
+        option.label.to_owned()
+    })
+}
+
+fn supports_bom(encoding: &str) -> bool {
+    FileService::encoding_supports_bom(encoding).unwrap_or(false)
+}
+
+fn option_label(choice: &str) -> &str {
+    COMMON_TEXT_ENCODINGS
+        .iter()
+        .find(|option| option.canonical_name.eq_ignore_ascii_case(choice))
+        .map_or(choice, |option| option.label)
+}
+
+fn footer(ui: &mut egui::Ui, app: &mut ScratchpadApp, facts: &FileFacts, actions: &mut Actions) {
+    let dialog = &mut app.state.dialogs.encoding;
+    let label = option_label(&dialog.choice).to_owned();
+    let saving = dialog.mode == EncodingMode::Save;
+    if saving && supports_bom(&dialog.choice) {
+        ui.checkbox(&mut dialog.bom, format!("{label} with BOM"))
+            .on_hover_text("Start the file with a byte order mark. Some Windows tools expect one; most other tools do not.");
+    }
+    let unicode = dialog.choice.to_ascii_uppercase().starts_with("UTF-");
+    let (note, warn) = match (dialog.mode, facts.reopen_blocked()) {
+        (EncodingMode::Reopen, Some(reason)) => (reason.to_owned(), true),
+        (EncodingMode::Reopen, None) => (
+            format!(
+                "Reads the file from disk again as {label}. Nothing is written until you save."
+            ),
+            false,
+        ),
+        (EncodingMode::Save, _) if !unicode => (
+            format!(
+                "If the text has characters {label} cannot represent, the save stops and the file is unchanged."
+            ),
+            true,
+        ),
+        (EncodingMode::Save, _) if facts.path.is_none() => {
+            (format!("Choose where to save, as {label}."), false)
+        }
+        (EncodingMode::Save, _) => (format!("Writes the file as {label}."), false),
     };
-    let visuals = ui.visuals_mut();
-    visuals.widgets.inactive.bg_fill = fill;
-    visuals.widgets.hovered.bg_fill = hover_fill;
-    visuals.widgets.active.bg_fill = hover_fill;
-    visuals.widgets.open.bg_fill = hover_fill;
-    visuals.widgets.inactive.weak_bg_fill = fill;
-    visuals.widgets.hovered.weak_bg_fill = hover_fill;
-    visuals.widgets.active.weak_bg_fill = hover_fill;
-    visuals.widgets.open.weak_bg_fill = hover_fill;
-    visuals.widgets.inactive.fg_stroke.color = text_color;
-    visuals.widgets.hovered.fg_stroke.color = text_color;
-    visuals.widgets.active.fg_stroke.color = text_color;
-    visuals.widgets.open.fg_stroke.color = text_color;
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
+    ui.add(
+        egui::Label::new(egui::RichText::new(note).size(NOTE_SIZE).color(if warn {
+            ui.visuals().warn_fg_color
+        } else {
+            theme::text_muted(ui)
+        }))
+        .wrap(),
+    );
+    let enabled = saving || facts.reopen_blocked().is_none();
+    let verb = if saving { "Save" } else { "Reopen" };
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(KEY_HINTS).size(HINT_SIZE).weak());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let button = egui::Button::new(
+                egui::RichText::new(format!("{verb} as {label}")).color(if enabled {
+                    panel_style::on_accent(ui)
+                } else {
+                    theme::text_muted(ui)
+                }),
+            )
+            .fill(if enabled {
+                theme::tab_selected_accent(ui)
+            } else {
+                theme::action_bg(ui)
+            });
+            actions.apply |= ui.add_enabled(enabled, button).clicked();
+        });
+    });
+    if !enabled {
+        actions.apply = false;
+    }
+}
+
+/// Runs the chosen action; returns true when it started.
+fn apply(app: &mut ScratchpadApp, facts: &FileFacts) -> bool {
+    let dialog = &app.state.dialogs.encoding;
+    let encoding_name = dialog.choice.clone();
+    let command = match dialog.mode {
+        EncodingMode::Reopen if facts.reopen_blocked().is_none() => {
+            FileCommand::ReopenBufferWithEncoding {
+                tab_index: facts.tab_index,
+                encoding_name,
+            }
+        }
+        EncodingMode::Reopen => return false,
+        EncodingMode::Save => FileCommand::SaveFileWithEncoding {
+            tab_index: facts.tab_index,
+            bom: Some(dialog.bom && supports_bom(&encoding_name)),
+            encoding_name,
+        },
+    };
+    crate::app::commands::handle_command(app, AppCommand::File(command))
 }

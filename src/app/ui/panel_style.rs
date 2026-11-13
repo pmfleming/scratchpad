@@ -175,15 +175,29 @@ pub(crate) fn icon_label(
 }
 
 pub(crate) fn now_badge(ui: &egui::Ui, rect: egui::Rect) {
+    badge(ui, rect, "NOW");
+}
+
+/// A small accent tag, such as History's NOW.
+pub(crate) fn badge(ui: &egui::Ui, rect: egui::Rect, label: &str) {
     ui.painter()
         .rect_filled(rect, 0, theme::tab_selected_accent(ui));
     text(
         ui,
         rect.shrink2(egui::vec2(4.0, 0.0)),
-        "NOW",
+        label,
         10.0,
         on_accent(ui),
     );
+}
+
+/// Width of a `badge` holding `label`.
+pub(crate) fn badge_width(ui: &egui::Ui, label: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(label.to_owned(), font(ui, 10.0), on_accent(ui))
+        .size()
+        .x
+        + 8.0
 }
 
 /// How a rail marker is drawn: the list's emphasis, a filled step, or an open step.

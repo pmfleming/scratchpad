@@ -12,11 +12,12 @@ impl FileController {
         app: &mut ScratchpadApp,
         index: usize,
         encoding: Option<String>,
+        bom: Option<bool>,
     ) -> bool {
         let id = app.tab_manager.tabs.as_slice()[index].active_buffer().id;
         app.state
             .background_io
-            .defer_save_until_observed(id, DeferredSave { encoding })
+            .defer_save_until_observed(id, DeferredSave { encoding, bom })
     }
 
     pub(super) fn apply_disk_observation(
@@ -196,7 +197,7 @@ impl FileController {
             {
                 tab.activate_view(view);
                 if let Some(encoding) = save.encoding {
-                    Self::save_file_with_encoding_at(app, index, &encoding);
+                    Self::save_file_with_encoding_at(app, index, &encoding, save.bom);
                 } else {
                     Self::save_file_at(app, index);
                 }

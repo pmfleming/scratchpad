@@ -1,4 +1,4 @@
-use super::{AppSurface, ScratchpadApp};
+use super::{AppSurface, EncodingMode, ScratchpadApp};
 use crate::app::app_state::settings_state;
 use crate::app::capacity_metrics::{FramePhase, record_frame_phase};
 use crate::app::chrome::{handle_window_resize, show_window_resize_cursor};
@@ -13,12 +13,25 @@ use eframe::egui;
 use std::path::PathBuf;
 use std::time::Instant;
 
+/// Opens on the file's encoding. Reopen is the default unless the file cannot be reopened.
 pub(crate) fn open_encoding_dialog(app: &mut ScratchpadApp) {
-    let choice = app.tab_manager.active_tab().map_or_else(
-        || "UTF-8".to_owned(),
-        |tab| tab.active_buffer().format.encoding_name.clone(),
+    let (choice, reopenable, bom) = app.tab_manager.active_tab().map_or_else(
+        || ("UTF-8".to_owned(), false, false),
+        |tab| {
+            let buffer = tab.active_buffer();
+            (
+                buffer.format.encoding_name.clone(),
+                buffer.path.is_some() && !buffer.is_dirty,
+                buffer.format.has_bom,
+            )
+        },
     );
-    app.state.dialogs.encoding.open_with_choice(choice);
+    let mode = if reopenable {
+        EncodingMode::Reopen
+    } else {
+        EncodingMode::Save
+    };
+    app.state.dialogs.encoding.open_with(choice, mode, bom);
 }
 
 pub(crate) fn close_encoding_dialog(app: &mut ScratchpadApp) {

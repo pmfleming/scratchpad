@@ -35,7 +35,7 @@ mod window_lifecycle;
 pub(crate) mod workspace;
 
 pub(crate) use chrome_state::ChromeState;
-pub(crate) use dialog_state::DialogState;
+pub(crate) use dialog_state::{DialogState, EncodingMode};
 pub(crate) use focus_state::FocusState;
 pub use frame::prepare_context_before_first_frame;
 pub(crate) use runtime_state::{BackgroundIoState, FileWatchState, OpenFileDialogState};

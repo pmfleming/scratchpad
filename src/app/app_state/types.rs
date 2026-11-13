@@ -92,6 +92,8 @@ impl PendingReloadBufferAction {
 #[derive(Clone)]
 pub(crate) struct DeferredSave {
     pub(crate) encoding: Option<String>,
+    /// An explicit byte order mark choice; `None` keeps the file's current one.
+    pub(crate) bom: Option<bool>,
 }
 
 pub(crate) struct PendingSavePathAction {

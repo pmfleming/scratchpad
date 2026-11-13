@@ -114,7 +114,8 @@ fn save_with_encoding_failure_leaves_file_and_buffer_state_unchanged() {
     assert!(FileController::save_file_with_encoding_at(
         &mut fixture.app,
         0,
-        "windows-1252"
+        "windows-1252",
+        None
     ));
     wait_for_background_io(&mut fixture.app);
 
@@ -343,4 +344,34 @@ fn save_as_copy_creates_a_distinct_document_and_keeps_the_conflicted_original() 
         .active_buffer();
     assert_ne!(copy.temp_id, original);
     assert!(!copy.is_dirty);
+}
+
+#[test]
+fn save_with_encoding_can_add_and_remove_a_utf8_byte_order_mark() {
+    let mut fixture = SavedBufferFixture::dirty("bom.txt", "old", "text");
+    for (bom, expected) in [
+        (Some(true), b"\xEF\xBB\xBFtext".as_slice()),
+        // `None` keeps the mark the previous save wrote.
+        (None, b"\xEF\xBB\xBFtext".as_slice()),
+        (Some(false), b"text".as_slice()),
+    ] {
+        fixture.app.tab_manager.tabs.as_mut_slice()[0]
+            .active_buffer_mut()
+            .is_dirty = true;
+        assert!(FileController::save_file_with_encoding_at(
+            &mut fixture.app,
+            0,
+            "UTF-8",
+            bom
+        ));
+        wait_for_background_io(&mut fixture.app);
+        assert_eq!(std::fs::read(&fixture.path).unwrap(), expected, "{bom:?}");
+        assert_eq!(
+            fixture.app.tab_manager.tabs.as_slice()[0]
+                .active_buffer()
+                .format
+                .has_bom,
+            expected.starts_with(b"\xEF\xBB\xBF")
+        );
+    }
 }

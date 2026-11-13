@@ -7,6 +7,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 ### Added
 
 - Search settings includes default scope, preserve case, recent searches, result limits, and file/match review thresholds with Unlimited options.
+- The encoding panel opens top-right in History's style: a Reopen │ Save switch, the file's current encoding and how it was chosen, a flat list of encodings with a CURRENT tag, and one action button. It explains why Reopen is unavailable for unsaved or modified files, warns only when a non-Unicode save could stop, works from the keyboard (↑ ↓, Home/End, Enter, Esc), and adds a "with BOM" option for UTF-8 and UTF-16 saves.
 - Search/replace opens in a History-style window: scope choices beside the title, flat fields with in-field toggles, a one-line status, and matches as a single list on History's rail with the hit highlighted. Replace mode previews each change and the rail dot includes or excludes it (Shift+click for the whole file). ↓ in Find enters the results, where ↑ ↓, Home/End, Enter, and Space work like History; recent searches use Alt+↑ ↓. Replace-all review replaces the footer, and operations appear as grouped History timeline entries with Undo all.
 
 - Document recovery in Status and History settings offers verified text or marked partial previews, separate editable copies, safe exports, and comparison with the disk file while preserving protected originals.
