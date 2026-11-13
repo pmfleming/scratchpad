@@ -443,24 +443,50 @@ fn picker_contents(
     if files.is_empty() {
         ui.weak("No recent files match your search");
     }
-    state.picker_index = state.picker_index.min(files.len().saturating_sub(1));
-    let mut pick = None;
-    let mut moved = false;
-    if search.has_focus() {
-        ui.input_mut(|input| {
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-                state.picker_index = (state.picker_index + 1).min(files.len().saturating_sub(1));
-                moved = true;
-            }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-                state.picker_index = state.picker_index.saturating_sub(1);
-                moved = true;
-            }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) && !files.is_empty() {
-                pick = Some(state.picker_index);
-            }
-        });
-    }
+    let last = files.len().saturating_sub(1);
+    state.picker_index = state.picker_index.min(last);
+    let keys = if search.has_focus() {
+        picker_keys(ui, state, last)
+    } else {
+        PickerKeys::default()
+    };
+    let entered = (keys.enter && !files.is_empty()).then_some(state.picker_index);
+    let clicked = picker_rows(ui, &files, state, search.has_focus(), keys.moved);
+    let file = files.get(clicked.or(entered)?)?;
+    choose(ui, state, file)
+}
+
+#[derive(Default)]
+struct PickerKeys {
+    moved: bool,
+    enter: bool,
+}
+
+/// Arrow keys move the highlight while the search field keeps focus.
+fn picker_keys(ui: &egui::Ui, state: &mut HistoryUi, last: usize) -> PickerKeys {
+    let mut keys = PickerKeys::default();
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            state.picker_index = (state.picker_index + 1).min(last);
+            keys.moved = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            state.picker_index = state.picker_index.saturating_sub(1);
+            keys.moved = true;
+        }
+        keys.enter = input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+    });
+    keys
+}
+
+/// The file rows, scrolled to the highlight after a keyboard move. Returns a clicked row.
+fn picker_rows(
+    ui: &mut egui::Ui,
+    files: &[File],
+    state: &HistoryUi,
+    highlight: bool,
+    moved: bool,
+) -> Option<usize> {
     ui.spacing_mut().item_spacing.y = 0.0;
     let mut scroll = egui::ScrollArea::vertical().max_height(288.0);
     if moved {
@@ -468,34 +494,32 @@ fn picker_contents(
             (state.picker_index as f32 * style::ROW_HEIGHT - 140.0).max(0.0),
         );
     }
+    let mut clicked = None;
     scroll.show_rows(ui, style::ROW_HEIGHT, files.len(), |ui, range| {
         for i in range {
             let file = &files[i];
             let selected = state.selected == file.id && file.id.is_some();
-            if row(
-                ui,
-                file,
-                selected,
-                search.has_focus() && i == state.picker_index,
-            )
-            .selected
-            {
-                pick = Some(i);
+            if row(ui, file, selected, highlight && i == state.picker_index).selected {
+                clicked = Some(i);
             }
         }
     });
-    let mut reopen = None;
-    if let Some(file) = pick.and_then(|i| files.get(i)) {
-        if let Some(id) = file.id {
+    clicked
+}
+
+/// Selects an open file, or returns a closed one's archive to reopen, and closes the picker.
+fn choose(ui: &egui::Ui, state: &mut HistoryUi, file: &File) -> Option<ArchivedFile> {
+    let reopen = match file.id {
+        Some(id) => {
             state.selected = Some(id);
             state.file_picked = true;
-        } else {
-            reopen.clone_from(&file.token);
+            None
         }
-        state.search.clear();
-        ui.close();
-        ui.ctx().memory_mut(|m| m.request_focus(super::focus_id()));
-    }
+        None => file.token.clone(),
+    };
+    state.search.clear();
+    ui.close();
+    ui.ctx().memory_mut(|m| m.request_focus(super::focus_id()));
     reopen
 }
 

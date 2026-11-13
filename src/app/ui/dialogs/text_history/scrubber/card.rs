@@ -1,4 +1,5 @@
 use super::super::{presentation, style};
+use crate::app::ui::dialogs::scrubber_chrome::{self, Step};
 use crate::app::{domain::BufferState, theme, ui::widget_ids};
 use eframe::egui;
 use egui_phosphor::regular as icons;
@@ -112,55 +113,50 @@ pub(super) fn transport(
 ) -> (egui::Response, bool) {
     let len = buffer.document().history_route().len();
     let mut stepped = false;
-    let response = ui
-        .horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            let track_width = (ui.available_width() - 104.0).max(20.0);
-            for (key, icon, label, destination, allowed) in [
-                (
-                    "first",
-                    icons::SKIP_BACK,
-                    "Go to start (Home)",
-                    0,
-                    *position > 0,
-                ),
-                (
-                    "previous",
-                    icons::CARET_LEFT,
-                    "Previous change (←)",
-                    position.saturating_sub(1),
-                    *position > 0,
-                ),
-            ] {
-                if style::icon_button(ui, key, icon, label, allowed).clicked() {
-                    *position = destination;
-                    stepped = true;
-                }
-            }
-            let response = super::track::show(ui, buffer, position, track_width);
-            for (key, icon, label, destination, allowed) in [
-                (
-                    "next",
-                    icons::CARET_RIGHT,
-                    "Next change (→)",
-                    (*position + 1).min(len),
-                    *position < len,
-                ),
-                (
-                    "last",
-                    icons::SKIP_FORWARD,
-                    "Go to end (End)",
-                    len,
-                    *position < len,
-                ),
-            ] {
-                if style::icon_button(ui, key, icon, label, allowed).clicked() {
-                    *position = destination;
-                    stepped = true;
-                }
-            }
-            response
-        })
-        .inner;
+    let response = scrubber_chrome::transport(
+        ui,
+        position,
+        |&position| {
+            [
+                Step {
+                    key: "first",
+                    icon: icons::SKIP_BACK,
+                    label: "Go to start (Home)",
+                    target: 0,
+                    enabled: position > 0,
+                },
+                Step {
+                    key: "previous",
+                    icon: icons::CARET_LEFT,
+                    label: "Previous change (←)",
+                    target: position.saturating_sub(1),
+                    enabled: position > 0,
+                },
+            ]
+        },
+        |ui, position, width| super::track::show(ui, buffer, position, width),
+        |&position| {
+            [
+                Step {
+                    key: "next",
+                    icon: icons::CARET_RIGHT,
+                    label: "Next change (→)",
+                    target: (position + 1).min(len),
+                    enabled: position < len,
+                },
+                Step {
+                    key: "last",
+                    icon: icons::SKIP_FORWARD,
+                    label: "Go to end (End)",
+                    target: len,
+                    enabled: position < len,
+                },
+            ]
+        },
+        |position, target| {
+            *position = target;
+            stepped = true;
+        },
+    );
     (response, stepped)
 }

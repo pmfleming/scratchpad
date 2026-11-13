@@ -45,20 +45,10 @@ pub(super) fn show(ui: &mut egui::Ui, view: &ListView<'_>, actions: &mut Actions
         .ctx()
         .data(|d| d.get_temp::<Scroll>(scroll_key()))
         .unwrap_or_default();
-    let mut area = egui::ScrollArea::vertical()
+    let area = egui::ScrollArea::vertical()
         .id_salt(widget_ids::scroll_id(ui, "status_history_list"))
         .auto_shrink([false, false]);
-    let selected_id = view.selected.map(|index| rows[index].id);
-    if let Some(index) = view.selected
-        && scroll.revealed != selected_id
-    {
-        scroll.revealed = selected_id;
-        let top = index as f32 * ROW_HEIGHT;
-        if top < scroll.offset || top + ROW_HEIGHT > scroll.offset + scroll.viewport {
-            area =
-                area.vertical_scroll_offset((top - (scroll.viewport - ROW_HEIGHT) * 0.5).max(0.0));
-        }
-    }
+    let area = reveal_selection(area, view, &mut scroll);
     let output = ui
         .scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -86,25 +76,46 @@ pub(super) fn show(ui: &mut egui::Ui, view: &ListView<'_>, actions: &mut Actions
             theme::text_muted(ui),
         );
     }
-    // Focus-only, so rows keep their clicks; like History's list focus.
+    list_focus(ui, view, output.inner_rect);
+}
+
+/// Centres a newly selected row that is outside the last frame's viewport.
+fn reveal_selection(
+    area: egui::ScrollArea,
+    view: &ListView<'_>,
+    scroll: &mut Scroll,
+) -> egui::ScrollArea {
+    let Some(index) = view.selected else {
+        return area;
+    };
+    let selected_id = Some(view.rows[index].id);
+    if scroll.revealed == selected_id {
+        return area;
+    }
+    scroll.revealed = selected_id;
+    let top = index as f32 * ROW_HEIGHT;
+    if top < scroll.offset || top + ROW_HEIGHT > scroll.offset + scroll.viewport {
+        area.vertical_scroll_offset((top - (scroll.viewport - ROW_HEIGHT) * 0.5).max(0.0))
+    } else {
+        area
+    }
+}
+
+/// Focus-only, so rows keep their clicks; like History's list focus.
+fn list_focus(ui: &egui::Ui, view: &ListView<'_>, rect: egui::Rect) {
     let focus = widget_ids::interact(
         ui,
-        output.inner_rect,
+        rect,
         focus_id(),
         egui::Sense::focusable_noninteractive(),
         "status-history-focus",
     );
-    focus.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::Role::ListBox,
-            true,
-            if rows.is_empty() {
-                view.empty
-            } else {
-                "Status messages"
-            },
-        )
-    });
+    let name = if view.rows.is_empty() {
+        view.empty
+    } else {
+        "Status messages"
+    };
+    focus.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListBox, true, name));
     if view.take_focus {
         focus.request_focus();
     }

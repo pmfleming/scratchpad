@@ -108,3 +108,17 @@ pub(crate) fn wait_for_background_io(app: &mut ScratchpadApp) {
         "background work did not finish"
     );
 }
+
+/// The whole app UI at a desktop size, past first-frame layout.
+pub(crate) fn app_ui_harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
+    ui_harness(egui::vec2(1200.0, 850.0), app, |ui, app| {
+        App::ui(app, ui, &mut eframe::Frame::_new_kittest());
+    })
+}
+
+/// Opens `buffer` in a second tab after the existing ones, keeping the first active.
+pub(crate) fn add_tab(app: &mut ScratchpadApp, buffer: BufferState) {
+    let mut tabs = app.tab_manager.tabs.as_slice().to_vec();
+    tabs.push(crate::app::domain::WorkspaceTab::new(buffer));
+    app.tab_manager.set_tabs(tabs, 0);
+}

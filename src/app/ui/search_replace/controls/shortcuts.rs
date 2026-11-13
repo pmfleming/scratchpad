@@ -262,79 +262,49 @@ mod tests {
     }
 
     #[test]
-    fn global_navigation_shortcuts_require_matches() {
-        assert!(
-            !shortcut_actions(
-                action_availability(0, true, false),
-                SearchActionShortcut::Next
-            )
-            .next_requested
-        );
-        assert!(
-            shortcut_actions(
-                action_availability(1, true, false),
-                SearchActionShortcut::Next
-            )
-            .next_requested
-        );
-    }
-
-    #[test]
-    fn global_replace_shortcuts_require_allowed_replace_state() {
-        assert!(
-            !shortcut_actions(
-                action_availability(1, false, false),
+    fn global_shortcuts_require_matches_allowed_replace_and_no_text_focus() {
+        type Requested = fn(&SearchStripActions) -> bool;
+        let next: Requested = |a| a.next_requested;
+        let replace_all: Requested = |a| a.replace_all_requested;
+        let undo: Requested = |a| a.undo_requested;
+        let redo: Requested = |a| a.redo_requested;
+        // (matches, replace allowed, text focused, shortcut, requested flag, expected)
+        let cases = [
+            (0, true, false, SearchActionShortcut::Next, next, false),
+            (1, true, false, SearchActionShortcut::Next, next, true),
+            (
+                1,
+                false,
+                false,
                 SearchActionShortcut::ReplaceAll,
-            )
-            .replace_all_requested
-        );
-        assert!(
-            shortcut_actions(
-                action_availability(1, true, false),
+                replace_all,
+                false,
+            ),
+            (
+                1,
+                true,
+                false,
                 SearchActionShortcut::ReplaceAll,
-            )
-            .replace_all_requested
-        );
-    }
-
-    #[test]
-    fn undo_redo_shortcuts_do_not_steal_text_input_focus() {
-        assert!(
-            !shortcut_actions(
-                action_availability(1, true, true),
-                SearchActionShortcut::Undo
-            )
-            .undo_requested
-        );
-        assert!(
-            shortcut_actions(
-                action_availability(1, true, false),
-                SearchActionShortcut::Redo
-            )
-            .redo_requested
-        );
-    }
-
-    fn shortcut_actions(
-        availability: SearchActionAvailability,
-        shortcut: SearchActionShortcut,
-    ) -> SearchStripActions {
-        let mut actions = SearchStripActions::default();
-        apply_search_action_shortcut(&mut actions, availability, shortcut);
-        actions
-    }
-
-    fn action_availability(
-        match_count: usize,
-        replace_allowed: bool,
-        text_input_focused: bool,
-    ) -> SearchActionAvailability {
-        SearchActionAvailability {
-            match_count,
-            replace_allowed,
-            can_undo_text_operation: true,
-            can_redo_text_operation: true,
-            text_input_focused,
+                replace_all,
+                true,
+            ),
+            // Undo and redo leave a focused text field's own undo alone.
+            (1, true, true, SearchActionShortcut::Undo, undo, false),
+            (1, true, false, SearchActionShortcut::Redo, redo, true),
+        ];
+        for (case, (matches, allowed, focused, shortcut, requested, expected)) in
+            cases.into_iter().enumerate()
+        {
+            let mut actions = SearchStripActions::default();
+            let availability = SearchActionAvailability {
+                match_count: matches,
+                replace_allowed: allowed,
+                can_undo_text_operation: true,
+                can_redo_text_operation: true,
+                text_input_focused: focused,
+            };
+            apply_search_action_shortcut(&mut actions, availability, shortcut);
+            assert_eq!(requested(&actions), expected, "case {case}");
         }
     }
 

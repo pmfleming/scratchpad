@@ -13,6 +13,7 @@ use crate::app::{
     app_state::ScratchpadApp,
     services::session_store::{
         SessionStore,
+        activity::ActivityKind,
         timeline::{
             TIMELINE_PAGE_SIZE, TimelineCursor, TimelineId, TimelineKind, TimelinePage, TimelineRow,
         },
@@ -170,83 +171,11 @@ impl State {
         let (loaded, mut changed) = self.live.update(app, search);
         let source = Source::capture(app, search, loaded);
         if self.source.as_ref() != Some(&source) {
-            let preserve = self
-                .source
-                .as_ref()
-                .is_some_and(|old| old.epoch == source.epoch && old.search == source.search);
-            if self
-                .source
-                .as_ref()
-                .is_some_and(|old| old.epoch != source.epoch)
-            {
-                self.selected = None;
-                self.anchor = None;
-                self.overlay.clear();
-            }
-            self.overlay.retain(|_, row| {
-                row.name.to_lowercase().contains(search)
-                    || row.label().to_lowercase().contains(search)
-            });
-            if preserve {
-                self.persisted.append(&mut self.live.retired);
-                self.persisted.retain(|_, row| {
-                    row.node().is_none()
-                        || source.loaded.binary_search(&row.cursor.document).is_err()
-                });
-                if self.fetched {
-                    self.resume_older = Some(
-                        self.next
-                            .clone()
-                            .map_or(CachedTail::Complete, CachedTail::More),
-                    );
-                }
-            } else {
-                self.reveal_now = None;
-                self.jump_end = None;
-                self.persisted.clear();
-                self.live.retired.clear();
-                self.resume_older = None;
-            }
-            self.source = Some(source);
-            self.pending = None;
-            self.next = None;
-            self.fetched = false;
-            self.error = None;
+            self.restart(source, search);
             changed = true;
         }
-        for event in &app.state.persistence.pending_activity {
-            let row = event.timeline_row();
-            if (row.name.to_lowercase().contains(search)
-                || row.label().to_lowercase().contains(search))
-                && !self.overlay.contains_key(&row.cursor)
-            {
-                self.overlay.insert(row.cursor.clone(), row);
-                changed = true;
-            }
-        }
-        let reply = self
-            .pending
-            .as_ref()
-            .and_then(|p| p.lock().unwrap_or_else(|e| e.into_inner()).take());
-        if let Some(reply) = reply {
-            self.pending = None;
-            match reply {
-                Ok(page) => {
-                    for row in page.rows {
-                        self.overlay.remove(&row.cursor);
-                        self.persisted.insert(row.cursor.clone(), row);
-                    }
-                    self.next = match self.resume_older.take() {
-                        Some(CachedTail::Complete) => None,
-                        Some(CachedTail::More(old)) => page.older.map(|new| old.min(new)),
-                        None => page.older,
-                    };
-                    self.fetched = true;
-                    changed = true;
-                }
-                Err(error) => self.error = Some(error),
-            }
-        }
+        changed |= self.take_pending_activity(app, search);
+        changed |= self.receive_page();
         if !self.fetched && self.pending.is_none() && self.error.is_none() {
             self.fetch(app.state.persistence.session_store.clone(), ctx.clone());
         }
@@ -255,67 +184,108 @@ impl State {
         }
     }
 
+    /// Starts paging `source` from the newest row. Pages already loaded for the same
+    /// history and search are kept, and paging resumes below the oldest of them.
+    fn restart(&mut self, source: Source, search: &str) {
+        let old = self.source.as_ref();
+        let same_history = old.is_some_and(|old| old.epoch == source.epoch);
+        let preserve = same_history && old.is_some_and(|old| old.search == source.search);
+        if old.is_some() && !same_history {
+            self.selected = None;
+            self.anchor = None;
+            self.overlay.clear();
+        }
+        self.overlay.retain(|_, row| matches_search(row, search));
+        if preserve {
+            self.persisted.append(&mut self.live.retired);
+            self.persisted.retain(|_, row| {
+                row.node().is_none() || source.loaded.binary_search(&row.cursor.document).is_err()
+            });
+            if self.fetched {
+                self.resume_older = Some(
+                    self.next
+                        .clone()
+                        .map_or(CachedTail::Complete, CachedTail::More),
+                );
+            }
+        } else {
+            self.reveal_now = None;
+            self.jump_end = None;
+            self.persisted.clear();
+            self.live.retired.clear();
+            self.resume_older = None;
+        }
+        self.source = Some(source);
+        self.pending = None;
+        self.next = None;
+        self.fetched = false;
+        self.error = None;
+    }
+
+    /// Shows activity that is not yet saved. Returns true when a row was added.
+    fn take_pending_activity(&mut self, app: &ScratchpadApp, search: &str) -> bool {
+        let mut changed = false;
+        for event in &app.state.persistence.pending_activity {
+            let row = event.timeline_row();
+            if matches_search(&row, search) && !self.overlay.contains_key(&row.cursor) {
+                self.overlay.insert(row.cursor.clone(), row);
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// Merges a finished page fetch. Returns true when rows arrived.
+    fn receive_page(&mut self) -> bool {
+        let Some(reply) = self
+            .pending
+            .as_ref()
+            .and_then(|p| p.lock().unwrap_or_else(|e| e.into_inner()).take())
+        else {
+            return false;
+        };
+        self.pending = None;
+        let page = match reply {
+            Ok(page) => page,
+            Err(error) => {
+                self.error = Some(error);
+                return false;
+            }
+        };
+        for row in page.rows {
+            self.overlay.remove(&row.cursor);
+            self.persisted.insert(row.cursor.clone(), row);
+        }
+        self.next = match self.resume_older.take() {
+            Some(CachedTail::Complete) => None,
+            Some(CachedTail::More(old)) => page.older.map(|new| old.min(new)),
+            None => page.older,
+        };
+        self.fetched = true;
+        true
+    }
+
     fn rebuild(&mut self) {
         let operations: std::collections::HashSet<_> = self
             .overlay
             .values()
             .chain(self.persisted.values())
-            .filter_map(|r| {
-                if let TimelineKind::Activity(
-                    crate::app::services::session_store::activity::ActivityKind::ReplaceAll {
-                        operation_id,
-                        ..
-                    },
-                ) = r.kind
-                {
-                    Some(operation_id)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|row| replace_all(row).map(|(operation_id, _)| operation_id))
             .collect();
-        let mut memory = self.live.rows.iter().rev().peekable();
-        let mut disk = self.persisted.iter().rev().peekable();
-        let mut overlay = self.overlay.iter().rev().peekable();
+        // Live rows win over unsaved activity, which wins over saved pages.
+        let mut sources = [
+            self.live.rows.iter().rev().peekable(),
+            self.overlay.iter().rev().peekable(),
+            self.persisted.iter().rev().peekable(),
+        ];
         let mut rows = Vec::new();
         let mut count = 0;
         let mut anchored = self.anchor.is_none();
         while count < self.limit || !anchored || self.jump_end == Some(navigation::End::Oldest) {
-            let key = [
-                memory.peek().map(|(k, _)| *k),
-                overlay.peek().map(|(k, _)| *k),
-                disk.peek().map(|(k, _)| *k),
-            ]
-            .into_iter()
-            .flatten()
-            .max()
-            .cloned();
-            let Some(key) = key else {
+            let Some(row) = next_newest(&mut sources) else {
                 break;
             };
-            let mut row = None;
-            if memory.peek().is_some_and(|(k, _)| **k == key) {
-                row = memory.next().map(|(_, r)| r);
-            }
-            if overlay.peek().is_some_and(|(k, _)| **k == key) {
-                let pending = overlay.next().map(|(_, r)| r);
-                if row.is_none() {
-                    row = pending;
-                }
-            }
-            if disk.peek().is_some_and(|(k, _)| **k == key) {
-                let persisted = disk.next().map(|(_, r)| r);
-                if row.is_none() {
-                    row = persisted;
-                }
-            }
-            let Some(row) = row else {
-                break;
-            };
-            if row.node().is_some()
-                && operations.contains(&row.cursor.sequence)
-                && !self.expanded_operations.contains(&row.cursor.sequence)
-            {
+            if self.folded_into_operation(row, &operations) {
                 continue;
             }
             count += 1;
@@ -339,6 +309,53 @@ impl State {
         {
             self.offset = index as f32 * ROW_HEIGHT + fraction;
         }
+    }
+
+    /// An edit made by a Replace all stays hidden until its operation row is expanded.
+    fn folded_into_operation(
+        &self,
+        row: &TimelineRow,
+        operations: &std::collections::HashSet<u64>,
+    ) -> bool {
+        row.node().is_some()
+            && operations.contains(&row.cursor.sequence)
+            && !self.expanded_operations.contains(&row.cursor.sequence)
+    }
+}
+
+type NewestFirst<'a> = std::iter::Peekable<
+    std::iter::Rev<std::collections::btree_map::Iter<'a, TimelineCursor, TimelineRow>>,
+>;
+
+/// The newest row across `sources`; a row present in several is taken from the first.
+fn next_newest<'a>(sources: &mut [NewestFirst<'a>]) -> Option<&'a TimelineRow> {
+    let key = sources
+        .iter_mut()
+        .filter_map(|source| source.peek().map(|(key, _)| *key))
+        .max()?;
+    let mut newest = None;
+    for source in sources {
+        if source.peek().is_some_and(|(next, _)| *next == key) {
+            let row = source.next().map(|(_, row)| row);
+            newest = newest.or(row);
+        }
+    }
+    newest
+}
+
+fn matches_search(row: &TimelineRow, search: &str) -> bool {
+    row.name.to_lowercase().contains(search) || row.label().to_lowercase().contains(search)
+}
+
+/// The operation and file count of a Replace all row.
+fn replace_all(row: &TimelineRow) -> Option<(u64, usize)> {
+    match row.kind {
+        TimelineKind::Activity(ActivityKind::ReplaceAll {
+            operation_id,
+            files,
+            ..
+        }) => Some((operation_id, files)),
+        _ => None,
     }
 }
 
@@ -586,7 +603,6 @@ fn paint_visible(
     now: Option<&TimelineId>,
     app: &ScratchpadApp,
 ) -> Option<Action> {
-    let mut action = None;
     if state.rows.is_empty() {
         if state.fetched && state.error.is_none() {
             ui.label(if history.search.is_empty() {
@@ -597,81 +613,118 @@ fn paint_visible(
         }
         return None;
     }
+    let mut action = None;
     for index in range {
-        let row = &state.rows[index];
-        if let TimelineKind::Activity(
-            crate::app::services::session_store::activity::ActivityKind::ReplaceAll {
-                operation_id,
-                files,
-                ..
-            },
-        ) = row.kind
-        {
-            let row = row.clone();
-            let mut expanded = state.expanded_operations.contains(&operation_id);
-            let allowed = crate::app::app_state::search_replace::transaction::can_undo(
-                app,
-                operation_id,
-                files,
-            );
-            let undone = app
-                .tab_manager
-                .tabs
-                .as_slice()
-                .iter()
-                .flat_map(|t| t.buffers())
-                .filter_map(|b| {
-                    b.document()
-                        .history_entries()
-                        .iter()
-                        .find(|e| e.global_seq == operation_id)
-                        .map(|e| b.document().history_now() == e.parent_id)
-                })
-                .filter(|v| *v)
-                .count()
-                == files;
-            let mut toggle = false;
-            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), ROW_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                toggle = ui.selectable_label(expanded, format!("{} {}{}", if expanded { "▾" } else { "▸" }, row.summary, if undone { " · Undone" } else { "" })).clicked();
-                if ui.add_enabled(allowed, egui::Button::new("Undo all")).on_hover_text("All affected files must be open and at this edit. Later edits are kept; use per-file History to navigate them first.").clicked() {
-                    action = Some(Action { operation: Some((operation_id, files)), document: row.cursor.document.clone(), node: None, inspect: false });
-                }
-            });
-            if toggle {
-                expanded = !expanded;
-                if expanded {
-                    state.expanded_operations.insert(operation_id);
-                } else {
-                    state.expanded_operations.remove(&operation_id);
-                }
-                ui.ctx().request_repaint();
-                // Rebuild after the visible range has been consumed.
-                ui.data_mut(|d| {
-                    d.insert_temp(egui::Id::unique("history.operations.rebuild"), true)
-                });
+        let picked = match replace_all(&state.rows[index]) {
+            Some((operation, files)) => {
+                let row = state.rows[index].clone();
+                operation_row(ui, state, &row, (operation, files), app)
             }
-            continue;
-        }
-        let visuals = RowState {
-            selected: state.selected.as_ref() == Some(&row.id()),
-            closed: state
-                .source
-                .as_ref()
-                .is_none_or(|s| s.opened.binary_search(&row.cursor.document).is_err()),
-            current: now == Some(&row.id()),
-            previous_time: index.checked_sub(1).map(|i| state.rows[i].timestamp),
+            None => change_row(ui, state, index, now),
         };
-        if let Some(inspect) = paint_row(ui, row, &visuals) {
-            state.selected = Some(row.id());
-            action = Some(Action {
-                operation: None,
-                document: row.cursor.document.clone(),
-                node: if inspect { None } else { row.node() },
-                inspect,
-            });
-            state.jump_end = None;
-            state.reveal_now = None;
-        }
+        action = picked.or(action);
     }
     action
+}
+
+/// A Replace all row: expands to its edits and offers Undo all.
+fn operation_row(
+    ui: &mut egui::Ui,
+    state: &mut State,
+    row: &TimelineRow,
+    (operation_id, files): (u64, usize),
+    app: &ScratchpadApp,
+) -> Option<Action> {
+    let expanded = state.expanded_operations.contains(&operation_id);
+    let allowed =
+        crate::app::app_state::search_replace::transaction::can_undo(app, operation_id, files);
+    let undone = operation_undone(app, operation_id, files);
+    let mut toggle = false;
+    let mut action = None;
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), ROW_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            let marker = if expanded { "▾" } else { "▸" };
+            let suffix = if undone { " · Undone" } else { "" };
+            toggle = ui
+                .selectable_label(expanded, format!("{marker} {}{suffix}", row.summary))
+                .clicked();
+            if ui
+                .add_enabled(allowed, egui::Button::new("Undo all"))
+                .on_hover_text(UNDO_ALL_HINT)
+                .clicked()
+            {
+                action = Some(Action {
+                    operation: Some((operation_id, files)),
+                    document: row.cursor.document.clone(),
+                    node: None,
+                    inspect: false,
+                });
+            }
+        },
+    );
+    if toggle {
+        if expanded {
+            state.expanded_operations.remove(&operation_id);
+        } else {
+            state.expanded_operations.insert(operation_id);
+        }
+        ui.ctx().request_repaint();
+        // Rebuild after the visible range has been consumed.
+        ui.data_mut(|d| d.insert_temp(egui::Id::unique("history.operations.rebuild"), true));
+    }
+    action
+}
+
+const UNDO_ALL_HINT: &str = "All affected files must be open and at this edit. Later edits are kept; use per-file History to navigate them first.";
+
+/// Whether every file of the operation now sits just before its edit.
+fn operation_undone(app: &ScratchpadApp, operation_id: u64, files: usize) -> bool {
+    app.tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .flat_map(|tab| tab.buffers())
+        .filter(|buffer| {
+            let document = buffer.document();
+            document
+                .history_entries()
+                .iter()
+                .find(|entry| entry.global_seq == operation_id)
+                .is_some_and(|entry| document.history_now() == entry.parent_id)
+        })
+        .count()
+        == files
+}
+
+/// An edit or activity row. Clicking selects it and asks to show or inspect it.
+fn change_row(
+    ui: &mut egui::Ui,
+    state: &mut State,
+    index: usize,
+    now: Option<&TimelineId>,
+) -> Option<Action> {
+    let row = &state.rows[index];
+    let id = row.id();
+    let visuals = RowState {
+        selected: state.selected.as_ref() == Some(&id),
+        closed: state
+            .source
+            .as_ref()
+            .is_none_or(|s| s.opened.binary_search(&row.cursor.document).is_err()),
+        current: now == Some(&id),
+        previous_time: index.checked_sub(1).map(|i| state.rows[i].timestamp),
+    };
+    let inspect = paint_row(ui, row, &visuals)?;
+    let action = Action {
+        operation: None,
+        document: row.cursor.document.clone(),
+        node: if inspect { None } else { row.node() },
+        inspect,
+    };
+    state.selected = Some(id);
+    state.jump_end = None;
+    state.reveal_now = None;
+    Some(action)
 }

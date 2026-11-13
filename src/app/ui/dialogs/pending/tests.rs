@@ -10,7 +10,7 @@ use egui_kittest::{Harness, kittest::Queryable};
 
 fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
     ui_harness(egui::vec2(1100.0, 800.0), app, |ui, app| {
-        show_pending_action_modal(ui.ctx(), app)
+        show_pending_action_modal(ui.ctx(), app);
     })
 }
 

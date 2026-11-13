@@ -1,4 +1,9 @@
-use super::*;
+use super::super::{RowState, model, paint_row, presentation};
+use crate::app::{
+    services::session_store::timeline::TimelineRow, theme, ui::dialogs::text_history::tests::app,
+};
+use eframe::egui;
+use egui_kittest::kittest::Queryable;
 
 fn labels(h: &egui_kittest::Harness<'_, (TimelineRow, RowState)>) -> Vec<String> {
     h.output()
