@@ -35,7 +35,7 @@ fn format_stop(stop: u64) -> String {
 
 fn parse_stop(text: &str) -> Option<u64> {
     let text = text.trim().to_ascii_lowercase();
-    if text == "unlimited" || text == "∞" {
+    if is_unlimited(&text) {
         return Some(UNLIMITED);
     }
     let (number, factor) = if let Some(number) = text.strip_suffix('k') {
@@ -154,8 +154,20 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     group_heading(ui, "Review before replacing");
     let original = app.state.app_settings.search.clone();
     let mut value = original.clone();
-    threshold_row(ui, "Files changed", &mut value.review_files_above, 1);
-    threshold_row(ui, "Matches changed", &mut value.review_matches_above, 100);
+    threshold_row(
+        ui,
+        "Files changed",
+        "Reset file review threshold",
+        &mut value.review_files_above,
+        1,
+    );
+    threshold_row(
+        ui,
+        "Matches changed",
+        "Reset match review threshold",
+        &mut value.review_matches_above,
+        100,
+    );
     ui.label(
         egui::RichText::new(
             "Review when either threshold is exceeded. Unlimited disables that check.",
@@ -172,13 +184,21 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         settings::persist_settings_or_error(app);
     }
 }
-fn threshold_row(ui: &mut egui::Ui, label: &str, value: &mut ReviewThreshold, recommended: usize) {
-    const UNLIMITED_REVIEW: u64 = 1_000_001;
+
+/// Slider position past the largest count, meaning "never review".
+const UNLIMITED_REVIEW: u64 = 1_000_001;
+
+fn threshold_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    reset_label: &'static str,
+    value: &mut ReviewThreshold,
+    recommended: usize,
+) {
     let mut count = match value {
         ReviewThreshold::Count(n) => *n as u64,
         ReviewThreshold::Unlimited(_) => UNLIMITED_REVIEW,
     };
-    let custom = *value != ReviewThreshold::Count(recommended);
     let response = numeric_slider_row(
         ui,
         label,
@@ -188,32 +208,13 @@ fn threshold_row(ui: &mut egui::Ui, label: &str, value: &mut ReviewThreshold, re
             unit: "",
             reserve_reset: true,
             reset: Some(ResetButton {
-                label: if recommended == 1 {
-                    "Reset file review threshold"
-                } else {
-                    "Reset match review threshold"
-                },
-                enabled: custom,
+                label: reset_label,
+                enabled: *value != ReviewThreshold::Count(recommended),
                 tooltip: "Reset to recommended",
             }),
             format: Some(NumericFormat {
-                show: |v| {
-                    if v == UNLIMITED_REVIEW {
-                        "Unlimited".into()
-                    } else {
-                        v.to_string()
-                    }
-                },
-                parse: |s| {
-                    if s.trim().eq_ignore_ascii_case("unlimited") || s.trim() == "∞" {
-                        Some(UNLIMITED_REVIEW)
-                    } else {
-                        s.trim()
-                            .parse::<u64>()
-                            .ok()
-                            .filter(|v| *v < UNLIMITED_REVIEW)
-                    }
-                },
+                show: format_review_count,
+                parse: parse_review_count,
                 current_text: None,
             }),
         },
@@ -228,9 +229,35 @@ fn threshold_row(ui: &mut egui::Ui, label: &str, value: &mut ReviewThreshold, re
         };
     }
 }
+
+fn is_unlimited(text: &str) -> bool {
+    text.eq_ignore_ascii_case("unlimited") || text == "∞"
+}
+
+fn format_review_count(count: u64) -> String {
+    if count == UNLIMITED_REVIEW {
+        "Unlimited".into()
+    } else {
+        count.to_string()
+    }
+}
+
+fn parse_review_count(text: &str) -> Option<u64> {
+    let text = text.trim();
+    if is_unlimited(text) {
+        return Some(UNLIMITED_REVIEW);
+    }
+    text.parse::<u64>()
+        .ok()
+        .filter(|count| *count < UNLIMITED_REVIEW)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{UNLIMITED, format_stop, parse_stop};
+    use super::{
+        UNLIMITED, UNLIMITED_REVIEW, format_review_count, format_stop, parse_review_count,
+        parse_stop,
+    };
 
     #[test]
     fn search_values_accept_units_snap_and_reject_invalid_input() {
@@ -250,6 +277,20 @@ mod tests {
         }
         for stop in 0..=UNLIMITED {
             assert_eq!(parse_stop(&format_stop(stop)), Some(stop));
+        }
+        for (text, expected) in [
+            (" 0 ", Some(0)),
+            ("1000000", Some(1_000_000)),
+            ("UNLIMITED", Some(UNLIMITED_REVIEW)),
+            ("∞", Some(UNLIMITED_REVIEW)),
+            ("1000001", None),
+            ("-1", None),
+            ("many", None),
+        ] {
+            assert_eq!(parse_review_count(text), expected, "{text}");
+        }
+        for count in [0, 7, UNLIMITED_REVIEW] {
+            assert_eq!(parse_review_count(&format_review_count(count)), Some(count));
         }
     }
 }
