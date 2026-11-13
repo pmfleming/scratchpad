@@ -248,3 +248,36 @@ impl PaneNode {
         (*ratio - before).abs() > f32::EPSILON
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{PaneBranch, PaneNode, SplitAxis, TileDirection};
+
+    fn ratio_at(node: &PaneNode, path: &[PaneBranch]) -> Option<f32> {
+        match node.node_at_path(path)? {
+            PaneNode::Split { ratio, .. } => Some(*ratio),
+            PaneNode::Leaf { .. } => None,
+        }
+    }
+
+    #[test]
+    fn resizing_follows_split_paths_and_clamps_ratios() {
+        // View 1 beside a horizontal split of views 2 and 3.
+        let mut root = PaneNode::leaf(1);
+        assert!(root.split_view(1, SplitAxis::Vertical, 2, false, 0.5));
+        assert!(root.split_view(2, SplitAxis::Horizontal, 3, false, 0.5));
+
+        assert!(root.resize_split(&[PaneBranch::Second], 0.95));
+        assert_eq!(ratio_at(&root, &[PaneBranch::Second]), Some(0.8));
+        assert!(!root.resize_split(&[PaneBranch::First], 0.5));
+        assert!(!root.resize_split(&[PaneBranch::First, PaneBranch::Second], 0.5));
+
+        // Moving view 3 sideways adjusts the nearest vertical split: the root.
+        assert!(root.resize_view_in_direction(3, TileDirection::Left, 0.1));
+        assert!((ratio_at(&root, &[]).unwrap() - 0.4).abs() < 1e-6);
+        assert!(root.resize_view_in_direction(3, TileDirection::Left, 1.0));
+        assert!(!root.resize_view_in_direction(3, TileDirection::Left, 1.0));
+        assert!(!root.resize_view_in_direction(1, TileDirection::Up, 0.1));
+        assert!(!root.resize_view_in_direction(99, TileDirection::Right, 0.1));
+    }
+}
