@@ -62,7 +62,7 @@ pub(crate) fn apply(app: &mut ScratchpadApp, view_id: ViewId, change: ZoomChange
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{ZoomChange, apply};
     use crate::app::{
         app_state::test_support::test_app,
         domain::{BufferState, SplitAxis, WorkspaceTab},

@@ -307,7 +307,10 @@ fn search_target_parallelism(target_count: usize) -> usize {
 
 #[cfg(test)]
 mod partial_tests {
-    use super::*;
+    use super::{
+        AtomicU64, Ordering, SearchRequest, SearchStatus, SearchTargetSnapshot,
+        process_search_request_with_partials,
+    };
     use crate::app::app_state::search_state::worker::SearchFileIdentity;
     use crate::app::domain::TextDocument;
     use crate::app::services::search::SearchOptions;
@@ -396,7 +399,10 @@ mod partial_tests {
 
 #[cfg(test)]
 mod budget_tests {
-    use super::*;
+    use super::{
+        AtomicU64, SearchRequest, SearchStatus, SearchTargetSnapshot,
+        process_search_request_with_partials,
+    };
     use crate::app::app_state::search_state::worker::SearchFileIdentity;
     use crate::app::domain::TextDocument;
     use crate::app::services::search::SearchOptions;
