@@ -21,8 +21,23 @@ impl SettingsFixture {
         std::fs::write(self.directory.path().join(name), contents).unwrap();
     }
 
+    fn write_toml(&self, contents: &str) -> AppSettings {
+        self.write("settings.toml", contents);
+        self.load()
+    }
+
     fn load(&self) -> AppSettings {
         self.store.load().unwrap().unwrap()
+    }
+
+    fn round_trip(&self, settings: &AppSettings) -> AppSettings {
+        self.store.save(settings).unwrap();
+        self.load()
+    }
+
+    fn saved_table(&self) -> toml::Table {
+        let raw = std::fs::read_to_string(self.directory.path().join("settings.toml")).unwrap();
+        raw.parse().unwrap()
     }
 
     fn path_exists(&self, name: &str) -> bool {
@@ -30,36 +45,25 @@ impl SettingsFixture {
     }
 }
 
-fn assert_newer_settings_defaults(settings: &AppSettings) {
-    assert_eq!(settings.editor.editor_font, EditorFontPreset::default());
-    assert_eq!(
-        settings.editor.indentation_style,
-        IndentationStyle::TabCharacter
-    );
-    assert_eq!(settings.editor.tab_display, TabDisplayMode::Hidden);
-    assert_eq!(settings.workspace.tab_list_position, TabListPosition::Top);
-    assert_eq!(
-        settings.workspace.file_open_disposition,
-        FileOpenDisposition::NewTab
-    );
-    assert_eq!(settings.platform.profile, PlatformProfile::Auto);
-    assert!(settings.shortcuts.bindings.is_empty());
-}
-
 #[test]
-fn missing_settings_file_returns_none() {
-    let directory = tempfile::tempdir().unwrap();
-    let store = SettingsStore::new(directory.path().to_path_buf());
+fn loading_without_a_usable_toml_file_reports_none_or_invalid_data() {
+    let fixture = SettingsFixture::new();
+    assert!(fixture.store.load().unwrap().is_none());
 
-    assert!(store.load().unwrap().is_none());
+    // Legacy YAML is ignored rather than migrated.
+    fixture.write("settings.yaml", "editor:\n  font_size: 15.0\n");
+    assert!(fixture.store.load().unwrap().is_none());
+    assert!(!fixture.path_exists("settings.toml"));
+
+    fixture.write("settings.toml", "font_size = [");
+    let error = fixture.store.load().unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
 }
 
 #[test]
 fn documented_settings_example_stays_loadable() {
     let fixture = SettingsFixture::new();
-    fixture.write("settings.toml", include_str!("../examples/settings.toml"));
-
-    let settings = fixture.load();
+    let settings = fixture.write_toml(include_str!("../examples/settings.toml"));
 
     assert_eq!(settings.platform.profile, PlatformProfile::Auto);
     assert_eq!(settings.editor.editor_font, EditorFontPreset::Standard);
@@ -68,8 +72,7 @@ fn documented_settings_example_stays_loadable() {
 
 #[test]
 fn save_and_load_round_trip_toml_settings() {
-    let directory = tempfile::tempdir().unwrap();
-    let store = SettingsStore::new(directory.path().to_path_buf());
+    let fixture = SettingsFixture::new();
     let mut settings = AppSettings::default();
     settings.editor.font_size = 18.0;
     settings.editor.word_wrap = false;
@@ -79,9 +82,13 @@ fn save_and_load_round_trip_toml_settings() {
     settings.workspace.tab_list_position = TabListPosition::Left;
     settings.workspace.file_open_disposition = FileOpenDisposition::CurrentTab;
     settings.workspace.startup_session_behavior = StartupSessionBehavior::StartFreshSession;
+    settings.platform.profile = PlatformProfile::Hyprland;
+    settings
+        .shortcuts
+        .bindings
+        .insert("open_file".to_owned(), "ctrl+shift+p".to_owned());
 
-    store.save(&settings).unwrap();
-    let loaded = store.load().unwrap().unwrap();
+    let loaded = fixture.round_trip(&settings);
 
     assert_eq!(loaded.editor.font_size, 18.0);
     assert!(!loaded.editor.word_wrap);
@@ -97,12 +104,13 @@ fn save_and_load_round_trip_toml_settings() {
         loaded.workspace.startup_session_behavior,
         StartupSessionBehavior::StartFreshSession
     );
+    assert_eq!(loaded.platform.profile, PlatformProfile::Hyprland);
+    assert_eq!(loaded.shortcuts.binding("open_file"), Some("ctrl+shift+p"));
 }
 
 #[test]
 fn save_omits_ephemeral_tab_order_and_window_geometry() {
-    let directory = tempfile::tempdir().unwrap();
-    let store = SettingsStore::new(directory.path().to_path_buf());
+    let fixture = SettingsFixture::new();
     let mut settings = AppSettings::default();
     settings.workspace.custom_tab_order = vec![10, 20, 30];
     settings.ui.window_state = WindowState {
@@ -111,23 +119,17 @@ fn save_omits_ephemeral_tab_order_and_window_geometry() {
         maximized: true,
     };
 
-    store.save(&settings).unwrap();
+    fixture.store.save(&settings).unwrap();
 
-    let raw = std::fs::read_to_string(directory.path().join("settings.toml")).unwrap();
-    let table = raw.parse::<toml::Table>().unwrap();
-    let window_state = table
-        .get("ui")
-        .and_then(toml::Value::as_table)
+    let table = fixture.saved_table();
+    let section = |name: &str| table.get(name).and_then(toml::Value::as_table);
+    let window_state = section("ui")
         .and_then(|ui| ui.get("window_state"))
         .and_then(toml::Value::as_table)
         .unwrap();
-
     assert!(!table.contains_key("custom_tab_order"));
     assert!(
-        !table
-            .get("workspace")
-            .and_then(toml::Value::as_table)
-            .is_some_and(|workspace| workspace.contains_key("custom_tab_order"))
+        !section("workspace").is_some_and(|workspace| workspace.contains_key("custom_tab_order"))
     );
     assert!(!window_state.contains_key("position"));
     assert!(!window_state.contains_key("inner_size"));
@@ -139,9 +141,8 @@ fn save_omits_ephemeral_tab_order_and_window_geometry() {
 
 #[test]
 fn load_ignores_ephemeral_tab_order_and_window_geometry() {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::write(
-        directory.path().join("settings.toml"),
+    let fixture = SettingsFixture::new();
+    let loaded = fixture.write_toml(
         r##"
 [editor]
 font_size = 16.0
@@ -155,11 +156,7 @@ position = [40.0, 60.0]
 inner_size = [1024.0, 768.0]
 maximized = true
 "##,
-    )
-    .unwrap();
-    let store = SettingsStore::new(directory.path().to_path_buf());
-
-    let loaded = store.load().unwrap().unwrap();
+    );
 
     assert!(loaded.workspace.custom_tab_order.is_empty());
     assert_eq!(loaded.ui.window_state.position, None);
@@ -168,21 +165,9 @@ maximized = true
 }
 
 #[test]
-fn malformed_toml_returns_invalid_data() {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::write(directory.path().join("settings.toml"), "font_size = [").unwrap();
-    let store = SettingsStore::new(directory.path().to_path_buf());
-
-    let error = store.load().unwrap_err();
-
-    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-}
-
-#[test]
 fn older_toml_missing_newer_fields_uses_defaults() {
     let fixture = SettingsFixture::new();
-    fixture.write(
-        "settings.toml",
+    let settings = fixture.write_toml(
         r##"
 [editor]
 font_size = 16.0
@@ -203,76 +188,39 @@ status_bar_visible = true
 "##,
     );
 
-    assert_newer_settings_defaults(&fixture.load());
+    assert_eq!(settings.editor.editor_font, EditorFontPreset::default());
+    assert_eq!(
+        settings.editor.indentation_style,
+        IndentationStyle::TabCharacter
+    );
+    assert_eq!(settings.editor.tab_display, TabDisplayMode::Hidden);
+    assert_eq!(settings.workspace.tab_list_position, TabListPosition::Top);
+    assert_eq!(
+        settings.workspace.file_open_disposition,
+        FileOpenDisposition::NewTab
+    );
+    assert_eq!(settings.platform.profile, PlatformProfile::Auto);
+    assert!(settings.shortcuts.bindings.is_empty());
 }
 
 #[test]
 fn legacy_show_tab_characters_boolean_maps_to_character_mode() {
     let fixture = SettingsFixture::new();
-    fixture.write(
-        "settings.toml",
-        r#"
-[editor]
-show_tab_characters = true
-"#,
-    );
+    let settings = fixture.write_toml("[editor]\nshow_tab_characters = true\n");
 
-    assert_eq!(fixture.load().editor.tab_display, TabDisplayMode::Character);
-}
-
-#[test]
-fn legacy_yaml_is_ignored_when_toml_is_missing() {
-    let fixture = SettingsFixture::new();
-    fixture.write("settings.yaml", "editor:\n  font_size: 15.0\n");
-
-    assert!(fixture.store.load().unwrap().is_none());
-    assert!(!fixture.path_exists("settings.toml"));
-}
-
-#[test]
-fn platform_profile_round_trips_in_toml_settings() {
-    let directory = tempfile::tempdir().unwrap();
-    let store = SettingsStore::new(directory.path().to_path_buf());
-    let mut settings = AppSettings::default();
-    settings.platform.profile = PlatformProfile::Hyprland;
-
-    store.save(&settings).unwrap();
-    let loaded = store.load().unwrap().unwrap();
-
-    assert_eq!(loaded.platform.profile, PlatformProfile::Hyprland);
-}
-
-#[test]
-fn shortcut_overrides_round_trip_in_toml_settings() {
-    let directory = tempfile::tempdir().unwrap();
-    let store = SettingsStore::new(directory.path().to_path_buf());
-    let mut settings = AppSettings::default();
-    settings
-        .shortcuts
-        .bindings
-        .insert("open_file".to_owned(), "ctrl+shift+p".to_owned());
-
-    store.save(&settings).unwrap();
-    let loaded = store.load().unwrap().unwrap();
-
-    assert_eq!(loaded.shortcuts.binding("open_file"), Some("ctrl+shift+p"));
+    assert_eq!(settings.editor.tab_display, TabDisplayMode::Character);
 }
 
 #[test]
 fn shortcut_overrides_load_from_flat_toml_table() {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::write(
-        directory.path().join("settings.toml"),
+    let fixture = SettingsFixture::new();
+    let loaded = fixture.write_toml(
         r#"
 [shortcuts]
 open_file = "ctrl+shift+p"
 split_left = "ctrl+shift+left"
 "#,
-    )
-    .unwrap();
-    let store = SettingsStore::new(directory.path().to_path_buf());
-
-    let loaded = store.load().unwrap().unwrap();
+    );
 
     assert_eq!(loaded.shortcuts.binding("open_file"), Some("ctrl+shift+p"));
     assert_eq!(
