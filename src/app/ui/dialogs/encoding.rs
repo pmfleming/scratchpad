@@ -4,7 +4,7 @@ use crate::app::commands::{AppCommand, FileCommand};
 use crate::app::domain::EncodingSource;
 use crate::app::services::file_service::{COMMON_TEXT_ENCODINGS, EncodingOption, FileService};
 use crate::app::theme;
-use crate::app::ui::{callout, panel_style, settings, widget_ids};
+use crate::app::ui::{panel_style, panel_style::window, widget_ids};
 use eframe::egui;
 
 const ENCODING_PANEL_WIDTH: f32 = 400.0;
@@ -85,31 +85,21 @@ pub(crate) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp)
     }
     let facts = FileFacts::from_app(app);
     let mut actions = Actions::default();
-    let dismissible = panel_style::dismiss_on_outside_click(app);
-    let popup_open = egui::Popup::is_any_open(ctx);
     let layer = widget_ids::area_layer_id(egui::Order::Foreground, "encoding_window");
-    let was_visible = ctx.memory(|m| m.areas().visible_last_frame(&layer));
+    let outside = window::OutsideClick::before_show(ctx, app, layer);
     let frame = panel_style::window_frame(ctx, app.state.app_settings.editor_background_color());
-    let screen = ctx.content_rect();
+    let outer_width = ENCODING_PANEL_WIDTH + frame.total_margin().sum().x;
     let response = egui::Window::new("Encoding")
         .id(layer.id)
         .order(layer.order)
         .title_bar(false)
         .resizable(false)
         .frame(frame)
-        .default_pos(egui::pos2(
-            (screen.right() - ENCODING_PANEL_WIDTH - frame.total_margin().sum().x - 24.0)
-                .max(screen.left()),
-            screen.top() + 72.0,
-        ))
+        .default_pos(window::top_right(ctx.content_rect(), outer_width))
         .show(ctx, |ui| {
-            widget_ids::feature_scope(ui, "encoding_dialog", |ui| {
+            window::contents(ui, "encoding_dialog", frame.fill, |ui| {
                 ui.set_width(ENCODING_PANEL_WIDTH);
-                settings::apply_dialog_typography(ui);
-                callout::apply_spacing(ui);
-                panel_style::apply(ui);
-                ui.visuals_mut().panel_fill = frame.fill;
-                actions.close |= header(ui, app, !dismissible);
+                actions.close |= header(ui, app, outside.needs_close_button());
                 file_line(ui, &facts);
                 ui.separator();
                 list(ui, app, &facts, &mut actions);
@@ -118,14 +108,8 @@ pub(crate) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp)
             });
         });
     if let Some(response) = response {
-        callout::mark_scroll_blocker_if_hovered(ctx, &response.response);
         // Ignore the opening click and interactions with menus.
-        actions.close |= dismissible
-            && was_visible
-            && !popup_open
-            && !egui::Popup::is_any_open(ctx)
-            && workspace::accessors::pending_action(app).is_none()
-            && response.response.clicked_elsewhere();
+        actions.close |= outside.after_show(ctx, app, &response.response);
     }
     actions.close |= ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     if actions.apply && apply(app, &facts) {
@@ -139,41 +123,19 @@ pub(crate) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp)
 
 /// Title on the left; the Reopen │ Save switch on the right. Returns true on close.
 fn header(ui: &mut egui::Ui, app: &mut ScratchpadApp, show_close: bool) -> bool {
-    let mut close = false;
-    let height =
-        ui.spacing().interact_size.y.max(
-            ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y,
-        );
-    ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), height),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.label(
-                egui::RichText::new("Encoding")
-                    .size(14.0)
-                    .strong()
-                    .color(callout::text(ui)),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if show_close {
-                    close = panel_style::icon_button(
-                        ui,
-                        "encoding.close",
-                        egui_phosphor::regular::X,
-                        "Close encoding",
-                        true,
-                    )
-                    .clicked();
-                }
-                let mode = &mut app.state.dialogs.encoding.mode;
-                ui.selectable_value(mode, EncodingMode::Save, "Save")
-                    .on_hover_text("Write the file with the selected encoding");
-                ui.selectable_value(mode, EncodingMode::Reopen, "Reopen")
-                    .on_hover_text("Read the file from disk again with the selected encoding");
-            });
-        },
-    );
-    close
+    let close = show_close.then_some(("encoding.close", "Close encoding"));
+    window::header(ui, "Encoding", close, |switch| {
+        let mode = &mut app.state.dialogs.encoding.mode;
+        switch
+            .ui
+            .selectable_value(mode, EncodingMode::Save, "Save")
+            .on_hover_text("Write the file with the selected encoding");
+        switch
+            .ui
+            .selectable_value(mode, EncodingMode::Reopen, "Reopen")
+            .on_hover_text("Read the file from disk again with the selected encoding");
+    })
+    .close
 }
 
 fn file_line(ui: &mut egui::Ui, facts: &FileFacts) {

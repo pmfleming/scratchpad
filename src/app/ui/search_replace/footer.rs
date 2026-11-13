@@ -5,7 +5,7 @@ use crate::app::{
     app_state::{ScratchpadApp, SearchStatus, search_state::SEARCH_RESULT_LIMIT_MESSAGE},
     shortcut_tooltips, theme,
     theme::text_muted,
-    ui::panel_style,
+    ui::{panel_style, panel_style::window},
 };
 use eframe::egui;
 
@@ -15,25 +15,13 @@ pub(super) fn panel(
     state: &SearchStripState,
     actions: &mut SearchStripActions,
 ) {
-    let key = egui::Id::unique("search.footer.height");
-    let height = ui.ctx().data(|d| d.get_temp::<f32>(key)).unwrap_or(0.0);
-    let measured = egui::Panel::bottom(egui::Id::unique("search.footer"))
-        .resizable(false)
-        .show_separator_line(false)
-        .exact_size(height)
-        .frame(egui::Frame::NONE)
-        .show(ui, |ui| {
-            let top = ui.cursor().top();
-            show(ui, app, state, actions);
-            ui.cursor().top() - top
-        })
-        .inner;
-    // Measure real wrapped content; a discarded sizing pass fits the footer before painting.
-    if (measured - height).abs() > 0.5 {
-        ui.ctx().data_mut(|d| d.insert_temp(key, measured));
-        ui.ctx()
-            .request_discard("Search footer content changed size");
-    }
+    window::measured_footer(
+        ui,
+        "search.footer",
+        0.0,
+        "Search footer content changed size",
+        |ui| show(ui, app, state, actions),
+    );
 }
 
 const HINT_SIZE: f32 = 11.0;

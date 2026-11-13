@@ -1,4 +1,3 @@
-use super::callout;
 mod controls;
 mod footer;
 mod header;
@@ -7,9 +6,11 @@ mod results;
 mod state;
 mod summary;
 
-use crate::app::app_state::{ScratchpadApp, SearchFocusTarget, search_runtime, workspace};
+use crate::app::app_state::{
+    ScratchpadApp, SearchFocusTarget, search_runtime, search_state::SearchState,
+};
 use crate::app::commands::{AppCommand, EditCommand, SearchCommand};
-use crate::app::ui::{panel_style, settings, widget_ids};
+use crate::app::ui::{panel_style, panel_style::window, widget_ids};
 use eframe::egui;
 use state::{SearchStripActions, SearchStripState};
 
@@ -26,40 +27,20 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let find_input_id = widget_ids::local(ui, "search_find_input");
     let replace_input_id = widget_ids::local(ui, "search_replace_input");
     let ctx = ui.ctx().clone();
-    let screen = ctx.content_rect();
-    let dismissible = panel_style::dismiss_on_outside_click(app);
-    let popup_open = egui::Popup::is_any_open(&ctx);
     let layer = widget_ids::area_layer_id(egui::Order::Foreground, "search_window");
-    let was_visible = ctx.memory(|m| m.areas().visible_last_frame(&layer));
+    let outside = window::OutsideClick::before_show(&ctx, app, layer);
     let frame = panel_style::window_frame(&ctx, app.state.app_settings.editor_background_color());
     // Window sizes include the frame, so add its margin to the header content width.
     let min_size = egui::vec2(
-        header::min_width(&ctx) + frame.total_margin().sum().x,
+        header::WIDTH.get(&ctx) + frame.total_margin().sum().x,
         SEARCH_MIN_HEIGHT,
     );
 
-    let response = egui::Window::new("Search")
-        .id(layer.id)
-        .order(layer.order)
-        .title_bar(false)
-        .resizable(true)
-        .default_size(SEARCH_DEFAULT_SIZE.max(min_size))
-        .min_size(min_size)
-        .max_size((screen.size() - egui::vec2(24.0, 24.0)).max(min_size))
-        .frame(frame)
-        .default_pos(egui::pos2(
-            (screen.right() - SEARCH_DEFAULT_SIZE.x - 24.0).max(screen.left()),
-            screen.top() + 72.0,
-        ))
+    let response = window::resizable(&ctx, "Search", layer, frame, SEARCH_DEFAULT_SIZE, min_size)
         .show(&ctx, |ui| {
-            widget_ids::feature_scope(ui, "search_dialog", |ui| {
-                settings::apply_dialog_typography(ui);
-                callout::apply_spacing(ui);
-                panel_style::apply(ui);
-                ui.visuals_mut().panel_fill = frame.fill;
-                ui.visuals_mut().window_fill = frame.fill;
-
-                actions.close_requested |= header::show(ui, &mut state, &mut actions, !dismissible);
+            window::contents(ui, "search_dialog", frame.fill, |ui| {
+                let show_close = outside.needs_close_button();
+                actions.close_requested |= header::show(ui, &mut state, &mut actions, show_close);
                 controls::show_search_controls(
                     ui,
                     &mut state,
@@ -73,15 +54,9 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             });
         });
     if let Some(response) = response {
-        callout::mark_scroll_blocker_if_hovered(&ctx, &response.response);
         // Ignore the opening click and interactions with the panel's menus.
-        actions.close_requested |= dismissible
-            && was_visible
-            && !popup_open
-            && !egui::Popup::is_any_open(&ctx)
-            && !app.state.dialogs.any_modal_open()
-            && workspace::accessors::pending_action(app).is_none()
-            && response.response.clicked_elsewhere();
+        actions.close_requested |= outside.after_show(&ctx, app, &response.response)
+            && !app.state.dialogs.any_modal_open();
     }
 
     apply_search_inputs(app, &state);
@@ -161,6 +136,47 @@ fn apply_list_navigation(app: &mut ScratchpadApp, actions: &SearchStripActions) 
         search_runtime::request_search_focus(app, SearchFocusTarget::FindInput);
     }
 }
+/// A panel input that differs from the search state, as the command that applies it.
+type InputChange = fn(&SearchStripState, &SearchState) -> Option<SearchCommand>;
+
+/// Checked in order, each against the state the previous commands left behind.
+const INPUT_CHANGES: [InputChange; 7] = [
+    |strip, search| {
+        (strip.query != search.query()).then(|| SearchCommand::SetSearchQuery {
+            query: strip.query.clone(),
+        })
+    },
+    |strip, search| {
+        (strip.replacement != search.replacement()).then(|| SearchCommand::SetSearchReplacement {
+            replacement: strip.replacement.clone(),
+        })
+    },
+    |strip, search| {
+        (strip.replace_open != search.replace_open()).then_some(
+            SearchCommand::SetSearchReplaceOpen {
+                open: strip.replace_open,
+            },
+        )
+    },
+    |strip, search| {
+        (strip.scope != search.scope())
+            .then_some(SearchCommand::SetSearchScope { scope: strip.scope })
+    },
+    |strip, search| {
+        (strip.mode != search.mode()).then_some(SearchCommand::SetSearchMode { mode: strip.mode })
+    },
+    |strip, search| {
+        (strip.match_case != search.match_case()).then_some(SearchCommand::SetSearchMatchCase {
+            enabled: strip.match_case,
+        })
+    },
+    |strip, search| {
+        (strip.whole_word != search.whole_word()).then_some(SearchCommand::SetSearchWholeWord {
+            enabled: strip.whole_word,
+        })
+    },
+];
+
 fn apply_search_inputs(app: &mut ScratchpadApp, state: &SearchStripState) {
     if state.preserve_case != app.state.search_state.query.preserve_case {
         app.state.search_state.query.preserve_case = state.preserve_case;
@@ -171,57 +187,10 @@ fn apply_search_inputs(app: &mut ScratchpadApp, state: &SearchStripState) {
         app.state.search_state.replace.planning = None;
         crate::app::app_state::search_state::visual::refresh_search_visual_state(app);
     }
-    if state.query != app.state.search_state.query() {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Search(SearchCommand::SetSearchQuery {
-                query: state.query.clone(),
-            }),
-        );
-    }
-    if state.replacement != app.state.search_state.replacement() {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Search(SearchCommand::SetSearchReplacement {
-                replacement: state.replacement.clone(),
-            }),
-        );
-    }
-    if state.replace_open != app.state.search_state.replace_open() {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Search(SearchCommand::SetSearchReplaceOpen {
-                open: state.replace_open,
-            }),
-        );
-    }
-    if state.scope != app.state.search_state.scope() {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Search(SearchCommand::SetSearchScope { scope: state.scope }),
-        );
-    }
-    if state.mode != app.state.search_state.mode() {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Search(SearchCommand::SetSearchMode { mode: state.mode }),
-        );
-    }
-    if state.match_case != app.state.search_state.match_case() {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Search(SearchCommand::SetSearchMatchCase {
-                enabled: state.match_case,
-            }),
-        );
-    }
-    if state.whole_word != app.state.search_state.whole_word() {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Search(SearchCommand::SetSearchWholeWord {
-                enabled: state.whole_word,
-            }),
-        );
+    for change in INPUT_CHANGES {
+        if let Some(command) = change(state, &app.state.search_state) {
+            crate::app::commands::handle_command(app, AppCommand::Search(command));
+        }
     }
 }
 

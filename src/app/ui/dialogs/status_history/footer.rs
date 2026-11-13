@@ -1,7 +1,7 @@
 //! The selected message in full, with copy, measured like Search's footer.
 use super::Actions;
 use super::model::{self, StatusRow};
-use crate::app::theme;
+use crate::app::{theme, ui::panel_style::window};
 use eframe::egui;
 
 const TEXT_SIZE: f32 = 13.0;
@@ -10,25 +10,13 @@ const DETAIL_MAX_HEIGHT: f32 = 140.0;
 const KEY_HINTS: &str = "↑ ↓ Move   Ctrl+C Copy   Esc Close";
 
 pub(super) fn panel(ui: &mut egui::Ui, row: Option<&StatusRow>, actions: &mut Actions) {
-    let key = egui::Id::unique("status_history.footer.height");
-    let height = ui.ctx().data(|d| d.get_temp::<f32>(key)).unwrap_or(0.0);
-    let measured = egui::Panel::bottom(egui::Id::unique("status_history.footer"))
-        .resizable(false)
-        .show_separator_line(false)
-        .exact_size(height)
-        .frame(egui::Frame::NONE)
-        .show(ui, |ui| {
-            let top = ui.cursor().top();
-            show(ui, row, actions);
-            ui.cursor().top() - top
-        })
-        .inner;
-    // Measure real wrapped content; a discarded sizing pass fits the footer before painting.
-    if (measured - height).abs() > 0.5 {
-        ui.ctx().data_mut(|d| d.insert_temp(key, measured));
-        ui.ctx()
-            .request_discard("Status footer content changed size");
-    }
+    window::measured_footer(
+        ui,
+        "status_history.footer",
+        0.0,
+        "Status footer content changed size",
+        |ui| show(ui, row, actions),
+    );
 }
 
 fn show(ui: &mut egui::Ui, row: Option<&StatusRow>, actions: &mut Actions) {

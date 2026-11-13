@@ -2,6 +2,8 @@ use crate::app::{theme, ui::widget_ids};
 use eframe::egui;
 use std::hash::Hash;
 
+pub(crate) mod window;
+
 pub(crate) const ROW_HEIGHT: f32 = 30.0;
 
 pub(crate) fn on_accent(ui: &egui::Ui) -> egui::Color32 {

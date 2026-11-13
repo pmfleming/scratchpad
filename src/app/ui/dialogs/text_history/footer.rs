@@ -3,30 +3,14 @@ use crate::app::{app_state::ScratchpadApp, domain::BufferState, theme, ui::widge
 use eframe::egui;
 
 pub(super) fn panel(ui: &mut egui::Ui, app: &ScratchpadApp, state: &mut HistoryUi) -> Option<u64> {
-    let key = egui::Id::unique("history.footer.height");
-    let height = ui
-        .ctx()
-        .data(|d| d.get_temp::<f32>(key))
-        .unwrap_or(ui.spacing().interact_size.y);
-    let result = egui::Panel::bottom(egui::Id::unique("history.footer"))
-        .resizable(false)
-        .show_separator_line(false)
-        .exact_size(height)
-        .frame(egui::Frame::NONE)
-        .show(ui, |ui| {
-            let top = ui.cursor().top();
-            let action = show(ui, app, state);
-            (action, ui.cursor().top() - top)
-        })
-        .inner;
-    // Measure real wrapped content. A discarded sizing pass makes the footer
-    // fit before it is painted, preserving the user's window size in both states.
-    if (result.1 - height).abs() > 0.5 {
-        ui.ctx().data_mut(|d| d.insert_temp(key, result.1));
-        ui.ctx()
-            .request_discard("History footer content changed size");
-    }
-    result.0
+    let initial_height = ui.spacing().interact_size.y;
+    style::window::measured_footer(
+        ui,
+        "history.footer",
+        initial_height,
+        "History footer content changed size",
+        |ui| show(ui, app, state),
+    )
 }
 
 pub(super) fn visible(buffer: &BufferState, state: &HistoryUi) -> bool {

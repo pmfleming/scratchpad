@@ -820,7 +820,7 @@ fn confirmation_resizes_its_footer_without_resizing_history_or_leaving_a_gap() {
     let root = tempfile::tempdir().unwrap();
     let mut h = harness(app(root.path()));
     h.run_steps(3);
-    let key = egui::Id::unique("history.footer.height");
+    let key = style::window::footer_height_key("history.footer");
     let normal = h.ctx.data(|d| d.get_temp::<f32>(key)).unwrap();
     let window = h
         .ctx
