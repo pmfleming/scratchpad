@@ -1,4 +1,4 @@
-use crate::app::app_state::{ScratchpadApp, StatusDomain};
+use crate::app::app_state::{ScratchpadApp, StatusDomain, workspace::display_tabs};
 use crate::app::commands::{AppCommand, SettingsCommand, WorkspaceCommand};
 use crate::app::utils::pluralize;
 
@@ -14,9 +14,7 @@ pub(super) fn close_current_slot(app: &mut ScratchpadApp, slot_index: usize, is_
             app,
             AppCommand::Settings(SettingsCommand::CloseSettings),
         );
-    } else if let Some(index) =
-        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
-    {
+    } else if let Some(index) = display_tabs::workspace_index_for_slot(app, slot_index) {
         crate::app::commands::handle_command(
             app,
             AppCommand::Workspace(WorkspaceCommand::RequestCloseTab { index }),
@@ -33,9 +31,7 @@ pub(super) fn close_other_slots(app: &mut ScratchpadApp, current_slot: usize) {
 }
 
 pub(super) fn close_slots_after(app: &mut ScratchpadApp, current_slot: usize) {
-    let slots = ((current_slot + 1)
-        ..crate::app::app_state::workspace::display_tabs::total_tab_slots(app))
-        .collect::<Vec<_>>();
+    let slots = ((current_slot + 1)..display_tabs::total_tab_slots(app)).collect::<Vec<_>>();
     close_display_slots(app, slots, CloseDisplayTabs::SkipDirty, "Close tabs");
 }
 
@@ -50,7 +46,7 @@ pub(super) fn close_all_slots(app: &mut ScratchpadApp) {
 }
 
 fn tab_slots(app: &ScratchpadApp) -> Vec<usize> {
-    (0..crate::app::app_state::workspace::display_tabs::total_tab_slots(app)).collect()
+    (0..display_tabs::total_tab_slots(app)).collect()
 }
 
 fn close_display_slots(
@@ -105,14 +101,12 @@ fn collect_close_targets(
     let mut skipped_dirty = 0usize;
 
     for slot_index in slots {
-        if crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index) {
+        if display_tabs::tab_slot_is_settings(app, slot_index) {
             close_settings |= matches!(mode, CloseDisplayTabs::SkipDirty);
             continue;
         }
 
-        let Some(index) = crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
-            app, slot_index,
-        ) else {
+        let Some(index) = display_tabs::workspace_index_for_slot(app, slot_index) else {
             continue;
         };
         let is_dirty = app
@@ -123,10 +117,83 @@ fn collect_close_targets(
             .is_some_and(|tab| tab.buffers().any(|buffer| buffer.is_dirty));
         if !is_dirty {
             workspace_indices.push(index);
-        } else if matches!(mode, CloseDisplayTabs::SkipDirty) && is_dirty {
+        } else if matches!(mode, CloseDisplayTabs::SkipDirty) {
             skipped_dirty += 1;
         }
     }
 
     (workspace_indices, close_settings, skipped_dirty)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        close_all_slots, close_current_slot, close_other_slots, close_saved_slots,
+        close_slots_after,
+    };
+    use crate::app::app_state::{ScratchpadApp, settings_state, test_support::test_app};
+    use crate::app::domain::{BufferState, WorkspaceTab};
+
+    /// Slots: 0 `a`, 1 `b` (unsaved), 2 `c`, 3 Settings.
+    fn reset_slots(app: &mut ScratchpadApp) {
+        let tabs = ["a", "b", "c"].map(|name| {
+            let mut buffer = BufferState::new(name.into(), String::new(), None);
+            buffer.is_dirty = name == "b";
+            WorkspaceTab::new(buffer)
+        });
+        app.tab_manager.set_tabs(tabs.into(), 0);
+        app.state.app_settings.ui.settings_tab_open = true;
+        app.state.settings_tab_index = 3;
+        // Close synchronously in RAM instead of archiving through the session store.
+        app.state.persistence.session_restore_failed = true;
+        app.state.status.current = None;
+    }
+
+    #[test]
+    fn bulk_closes_skip_unsaved_tabs_and_report_them() {
+        type Close = fn(&mut ScratchpadApp);
+        let cases: [(Close, &[&str], bool, Option<&str>); 5] = [
+            (
+                |app| close_other_slots(app, 0),
+                &["a", "b"],
+                false,
+                Some("Close Others skipped 1 tab with unsaved changes."),
+            ),
+            (|app| close_slots_after(app, 1), &["a", "b"], false, None),
+            (close_saved_slots, &["b"], true, None),
+            (
+                close_all_slots,
+                &["b"],
+                false,
+                Some("Close All skipped 1 tab with unsaved changes."),
+            ),
+            (
+                |app| close_current_slot(app, 3, true),
+                &["a", "b", "c"],
+                false,
+                None,
+            ),
+        ];
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_app(root.path());
+        for (index, (close, remaining, settings_open, warning)) in cases.into_iter().enumerate() {
+            reset_slots(&mut app);
+            close(&mut app);
+            let names: Vec<_> = app
+                .tab_manager
+                .tabs
+                .as_slice()
+                .iter()
+                .map(|tab| tab.buffers.buffer.name.as_str())
+                .collect();
+            assert_eq!(names, remaining, "case {index}");
+            assert_eq!(
+                settings_state::settings_tab_open(&app),
+                settings_open,
+                "case {index}"
+            );
+            let status = app.state.status.current.as_ref();
+            assert_eq!(status.map(|s| s.text.as_str()), warning, "case {index}");
+        }
+    }
 }
