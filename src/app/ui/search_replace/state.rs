@@ -22,6 +22,10 @@ pub(super) struct SearchStripActions {
     pub(super) recent_index: Option<usize>,
     pub(super) recapture_selection: bool,
     pub(super) selected_match_index: Option<usize>,
+    /// Moves the active match while keyboard focus stays in the results list.
+    pub(super) preview_match_index: Option<usize>,
+    pub(super) focus_results: bool,
+    pub(super) focus_find: bool,
 }
 
 pub(super) struct SearchStripState {

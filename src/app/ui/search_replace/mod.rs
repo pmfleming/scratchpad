@@ -71,7 +71,7 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 );
                 summary::show(ui, app, &state, &mut actions);
                 footer::panel(ui, app, &state, &mut actions);
-                results::show_search_results(ui, app, &state, &mut actions);
+                results::show_search_results(ui, app, &mut state, &mut actions);
             });
         });
     if let Some(response) = response {
@@ -131,6 +131,7 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     if actions.next_requested || actions.previous_requested {
         crate::app::app_state::search_state::recent::commit(app);
     }
+    apply_list_navigation(app, &actions);
     if actions.close_requested {
         crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Close));
         return;
@@ -139,6 +140,23 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     dispatch_search_actions(app, state.target_focus(), actions);
 }
 
+/// Keyboard moves through results keep focus in the list; only Enter goes to the editor.
+fn apply_list_navigation(app: &mut ScratchpadApp, actions: &SearchStripActions) {
+    use crate::app::app_state::search_controller::activate_search_match_at;
+    if let Some(index) = actions.preview_match_index {
+        activate_search_match_at(app, index);
+        search_runtime::request_search_focus(app, SearchFocusTarget::Results);
+    }
+    if actions.focus_results {
+        if app.state.search_state.active_match_index().is_none() {
+            activate_search_match_at(app, 0);
+        }
+        search_runtime::request_search_focus(app, SearchFocusTarget::Results);
+    }
+    if actions.focus_find {
+        search_runtime::request_search_focus(app, SearchFocusTarget::FindInput);
+    }
+}
 fn apply_search_inputs(app: &mut ScratchpadApp, state: &SearchStripState) {
     if state.preserve_case != app.state.search_state.query.preserve_case {
         app.state.search_state.query.preserve_case = state.preserve_case;

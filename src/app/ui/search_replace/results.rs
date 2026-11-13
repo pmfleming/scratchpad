@@ -1,7 +1,9 @@
 //! A flat, virtualized list of matches on History's rail.
 use super::result_model::{empty_message, match_preview};
 use super::state::{SearchStripActions, SearchStripState};
-use crate::app::app_state::{ScratchpadApp, SearchResultEntry, SearchResultGroup, SearchStatus};
+use crate::app::app_state::{
+    ScratchpadApp, SearchFocusTarget, SearchResultEntry, SearchResultGroup, SearchStatus,
+};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme;
 use crate::app::ui::{panel_style, widget_ids};
@@ -55,10 +57,76 @@ pub(super) fn reviewing(app: &ScratchpadApp) -> bool {
         && app.state.search_state.runtime.status == SearchStatus::Ready
 }
 
+pub(super) fn list_focus_id() -> egui::Id {
+    egui::Id::unique("search.results.focus")
+}
+
+/// ↑ ↓ move, Home/End jump, Enter goes to the match and Space toggles inclusion.
+/// ↑ on the first row returns to Find.
+fn keyboard(
+    ui: &egui::Ui,
+    app: &mut ScratchpadApp,
+    state: &SearchStripState,
+    total: usize,
+    replacing: bool,
+    actions: &mut SearchStripActions,
+) {
+    if total == 0 || !ui.memory(|m| m.has_focus(list_focus_id())) {
+        return;
+    }
+    let consume = |modifiers, key| ui.input_mut(|i| i.consume_key(modifiers, key));
+    let active = state.active_match_index.filter(|&i| i < total);
+    let last = total - 1;
+    if consume(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+        actions.preview_match_index = Some(active.map_or(0, |i| (i + 1).min(last)));
+    }
+    if consume(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+        match active {
+            Some(i) if i > 0 => actions.preview_match_index = Some(i - 1),
+            _ => actions.focus_find = true,
+        }
+    }
+    if consume(egui::Modifiers::NONE, egui::Key::Home) {
+        actions.preview_match_index = Some(0);
+    }
+    if consume(egui::Modifiers::NONE, egui::Key::End) {
+        actions.preview_match_index = Some(last);
+    }
+    if consume(egui::Modifiers::NONE, egui::Key::Enter) {
+        actions.selected_match_index = Some(active.unwrap_or(0));
+    }
+    if replacing && let Some(index) = active {
+        // Shift first: an unmodified shortcut also matches Shift.
+        let whole_file = consume(egui::Modifiers::SHIFT, egui::Key::Space);
+        if whole_file || consume(egui::Modifiers::NONE, egui::Key::Space) {
+            toggle_inclusion(app, &state.result_groups, index, whole_file);
+        }
+    }
+}
+
+fn toggle_inclusion(
+    app: &mut ScratchpadApp,
+    groups: &[SearchResultGroup],
+    match_index: usize,
+    whole_file: bool,
+) {
+    let included = !app
+        .state
+        .search_state
+        .replace
+        .excluded
+        .contains(&match_index);
+    let indices = match group_for(groups, match_index).filter(|_| whole_file) {
+        Some(group) => group.first_match_index..group.first_match_index + group.total_match_count,
+        None => match_index..match_index + 1,
+    };
+    set_included(app, indices, !included);
+}
+
 pub(super) fn show_search_results(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
-    state: &SearchStripState,
+    state: &mut SearchStripState,
     actions: &mut SearchStripActions,
 ) {
     if let Some(message) = empty_message(state) {
@@ -91,6 +159,7 @@ pub(super) fn show_search_results(
         }
     }
     let replacing = reviewing(app);
+    keyboard(ui, app, state, total, replacing, actions);
     let output = ui
         .scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -109,6 +178,19 @@ pub(super) fn show_search_results(
     scroll.offset = output.state.clamped_offset().y;
     scroll.viewport = output.inner_rect.height();
     ui.ctx().data_mut(|d| d.insert_temp(scroll_key(), scroll));
+    // Focus-only, so rows keep their clicks; like History's list focus.
+    let focus = widget_ids::interact(
+        ui,
+        output.inner_rect,
+        list_focus_id(),
+        egui::Sense::focusable_noninteractive(),
+        "search-results-focus",
+    );
+    focus.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListBox, true, "Search results"));
+    state.sync_focus(&focus, SearchFocusTarget::Results);
+    if focus.has_focus() {
+        panel_style::lock_navigation_focus(ui.ctx(), list_focus_id());
+    }
 }
 
 fn show_row(
@@ -242,13 +324,7 @@ fn show_row(
         );
         if toggle.clicked() {
             let whole_file = ui.input(|i| i.modifiers.shift);
-            let indices = match group.filter(|_| whole_file) {
-                Some(group) => {
-                    group.first_match_index..group.first_match_index + group.total_match_count
-                }
-                None => match_index..match_index + 1,
-            };
-            set_included(app, indices, !included);
+            toggle_inclusion(app, &state.result_groups, match_index, whole_file);
         }
     }
     let response = response.on_hover_text(match group {

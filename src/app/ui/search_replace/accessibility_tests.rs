@@ -1,5 +1,11 @@
 use super::*;
+use crate::app::{
+    app_state::test_support::test_app,
+    commands::{AppCommand, SearchCommand},
+    domain::{BufferState, WorkspaceTab},
+};
 use egui_kittest::{Harness, kittest::Queryable};
+use std::time::{Duration, Instant};
 
 pub(super) fn harness(size: egui::Vec2, app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
     Harness::builder()
@@ -116,4 +122,117 @@ fn resizing_cannot_wrap_or_overlap_the_header() {
         assert!(rect.right() <= after.right(), "{scope} is clipped");
         previous_right = rect.right();
     }
+}
+
+pub(super) fn searched_app(root: &std::path::Path, lines: usize) -> ScratchpadApp {
+    let mut app = test_app(root);
+    let text = (0..lines)
+        .map(|i| format!("line {i} has a needle"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    app.tab_manager.tabs.as_mut_slice()[0] =
+        WorkspaceTab::new(BufferState::new("needles.txt".into(), text, None));
+    for command in [
+        SearchCommand::Open,
+        SearchCommand::SetSearchQuery {
+            query: "needle".into(),
+        },
+    ] {
+        crate::app::commands::handle_command(&mut app, AppCommand::Search(command));
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.state.search_state.runtime.searching || app.state.search_state.runtime.dirty {
+        assert!(Instant::now() < deadline, "search did not settle");
+        app.poll_search();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app
+}
+
+fn find_focused(harness: &Harness<'static, ScratchpadApp>) -> bool {
+    harness
+        .get_by_role_and_label(egui::Role::TextInput, "Find")
+        .is_focused()
+}
+
+fn list_focused(harness: &Harness<'static, ScratchpadApp>) -> bool {
+    harness
+        .get_by_role_and_label(egui::Role::ListBox, "Search results")
+        .is_focused()
+}
+
+fn press(
+    harness: &mut Harness<'static, ScratchpadApp>,
+    modifiers: egui::Modifiers,
+    key: egui::Key,
+) {
+    harness.key_press_modifiers(modifiers, key);
+    harness.run_steps(3);
+}
+
+#[test]
+fn arrows_move_between_find_and_the_results_list() {
+    let root = tempfile::tempdir().unwrap();
+    let mut harness = harness(egui::vec2(1100.0, 900.0), searched_app(root.path(), 5));
+    harness.run_steps(3);
+    assert!(find_focused(&harness));
+
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::ArrowDown);
+    assert!(list_focused(&harness), "↓ in Find enters the results");
+    let first = harness.state().search_active_match_index().unwrap();
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::ArrowDown);
+    assert_eq!(harness.state().search_active_match_index(), Some(first + 1));
+    assert!(list_focused(&harness), "moving keeps focus in the list");
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::End);
+    assert_eq!(harness.state().search_active_match_index(), Some(4));
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::ArrowDown);
+    assert_eq!(harness.state().search_active_match_index(), Some(4));
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::Home);
+    assert_eq!(harness.state().search_active_match_index(), Some(0));
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::ArrowUp);
+    assert!(find_focused(&harness), "↑ on the first row returns to Find");
+}
+
+#[test]
+fn enter_in_the_results_list_goes_to_the_editor() {
+    let root = tempfile::tempdir().unwrap();
+    let mut harness = harness(egui::vec2(1100.0, 900.0), searched_app(root.path(), 5));
+    harness.run_steps(3);
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::ArrowDown);
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::End);
+    harness.state_mut().state.focus.clear();
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::Enter);
+    let app = harness.state();
+    let view = app
+        .tab_manager
+        .active_tab()
+        .unwrap()
+        .layout
+        .active_view_id();
+    assert_eq!(app.search_active_match_index(), Some(4));
+    assert!(crate::app::app_state::workspace::accessors::should_focus_view(app, view));
+}
+
+#[test]
+fn alt_arrows_step_through_recent_searches_in_find() {
+    use crate::app::app_state::search_state::recent::RecentSearch;
+    let root = tempfile::tempdir().unwrap();
+    let mut app = searched_app(root.path(), 5);
+    app.state.search_state.recent = ["newest", "older"]
+        .map(|query| RecentSearch {
+            query: query.into(),
+            regex: false,
+            match_case: false,
+            whole_word: false,
+        })
+        .to_vec();
+    let mut harness = harness(egui::vec2(1100.0, 900.0), app);
+    harness.run_steps(3);
+    press(&mut harness, egui::Modifiers::ALT, egui::Key::ArrowUp);
+    assert_eq!(harness.state().state.search_state.query(), "newest");
+    press(&mut harness, egui::Modifiers::ALT, egui::Key::ArrowUp);
+    assert_eq!(harness.state().state.search_state.query(), "older");
+    press(&mut harness, egui::Modifiers::ALT, egui::Key::ArrowDown);
+    assert_eq!(harness.state().state.search_state.query(), "newest");
+    assert!(find_focused(&harness));
 }

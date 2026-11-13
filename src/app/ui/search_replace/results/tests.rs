@@ -1,11 +1,7 @@
 use super::*;
-use crate::app::{
-    app_state::test_support::test_app,
-    commands::{AppCommand, SearchCommand},
-    domain::{BufferState, WorkspaceTab},
-};
+use crate::app::commands::{AppCommand, SearchCommand};
+use crate::app::ui::search_replace::accessibility_tests::searched_app;
 use egui_kittest::{Harness, kittest::Queryable};
-use std::time::{Duration, Instant};
 
 fn group(first_match_index: usize, total_match_count: usize) -> SearchResultGroup {
     SearchResultGroup {
@@ -43,31 +39,6 @@ fn hit_span_finds_the_match_in_a_trimmed_preview() {
     assert_eq!(hit_span(preview, "absent", 1), None);
 }
 
-fn searched_app(root: &std::path::Path, lines: usize) -> ScratchpadApp {
-    let mut app = test_app(root);
-    let text = (0..lines)
-        .map(|i| format!("line {i} has a needle"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    app.tab_manager.tabs.as_mut_slice()[0] =
-        WorkspaceTab::new(BufferState::new("needles.txt".into(), text, None));
-    for command in [
-        SearchCommand::Open,
-        SearchCommand::SetSearchQuery {
-            query: "needle".into(),
-        },
-    ] {
-        crate::app::commands::handle_command(&mut app, AppCommand::Search(command));
-    }
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while app.state.search_state.runtime.searching || app.state.search_state.runtime.dirty {
-        assert!(Instant::now() < deadline, "search did not settle");
-        app.poll_search();
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    app
-}
-
 fn list_harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
     Harness::builder()
         .with_size(egui::vec2(480.0, 400.0))
@@ -83,9 +54,9 @@ fn list_harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
         })
         .build_ui_state(
             |ui, app| {
-                let state = SearchStripState::from_app(app);
+                let mut state = SearchStripState::from_app(app);
                 let mut actions = SearchStripActions::default();
-                show_search_results(ui, app, &state, &mut actions);
+                show_search_results(ui, app, &mut state, &mut actions);
                 if let Some(index) = actions.selected_match_index {
                     crate::app::commands::handle_command(
                         app,
@@ -131,4 +102,37 @@ fn shift_clicking_a_dot_toggles_every_match_in_the_file() {
         .click_modifiers(egui::Modifiers::SHIFT);
     harness.run_steps(2);
     assert_eq!(harness.state().state.search_state.replace.excluded.len(), 6);
+}
+
+#[test]
+fn space_toggles_the_active_match_and_shift_space_its_file() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = searched_app(root.path(), 4);
+    crate::app::app_state::search_state::api::set_search_replace_open(&mut app, true);
+    crate::app::app_state::search_controller::activate_search_match_at(&mut app, 1);
+    let mut harness = list_harness(app);
+    harness.run_steps(2);
+    harness.ctx.memory_mut(|m| m.request_focus(list_focus_id()));
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Space);
+    harness.run_steps(2);
+    assert_eq!(
+        harness.state().state.search_state.replace.excluded,
+        [1].into_iter().collect()
+    );
+    // The active match is now excluded, so Shift+Space includes the whole file.
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Space);
+    harness.run_steps(2);
+    assert!(
+        harness
+            .state()
+            .state
+            .search_state
+            .replace
+            .excluded
+            .is_empty()
+    );
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Space);
+    harness.run_steps(2);
+    assert_eq!(harness.state().state.search_state.replace.excluded.len(), 4);
 }

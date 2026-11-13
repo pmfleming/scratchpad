@@ -34,6 +34,7 @@ pub(crate) enum SearchScopeOrigin {
 pub(crate) enum SearchFocusTarget {
     FindInput,
     ReplaceInput,
+    Results,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -49,19 +49,6 @@ fn active_buffer(app: &ScratchpadApp) -> Option<u64> {
         .active_tab()
         .map(|tab| tab.active_buffer().id)
 }
-fn lock_navigation_focus(ctx: &egui::Context, id: egui::Id) {
-    ctx.memory_mut(|m| {
-        m.set_focus_lock_filter(
-            id,
-            egui::EventFilter {
-                horizontal_arrows: true,
-                vertical_arrows: true,
-                tab: false,
-                escape: true,
-            },
-        );
-    });
-}
 fn close(ctx: &egui::Context, app: &mut ScratchpadApp) {
     app.state.dialogs.text_history.close();
     ctx.data_mut(|d| {
@@ -368,7 +355,7 @@ fn history_focus(
         response.request_focus();
     }
     if response.has_focus() {
-        lock_navigation_focus(ctx, focus_id());
+        style::lock_navigation_focus(ctx, focus_id());
     }
 }
 

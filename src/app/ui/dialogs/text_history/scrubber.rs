@@ -103,7 +103,7 @@ fn transport(ui: &mut egui::Ui, buffer: &BufferState) -> Option<u64> {
         .add_enabled_ui(enabled, |ui| card::transport(ui, buffer, &mut position))
         .inner;
     if response.has_focus() {
-        super::lock_navigation_focus(&ctx, focus_id());
+        super::style::lock_navigation_focus(&ctx, focus_id());
     }
     if stepped {
         ctx.memory_mut(|m| m.request_focus(focus_id()));

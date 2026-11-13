@@ -230,3 +230,18 @@ pub(crate) fn dismiss_on_outside_click(app: &crate::app::app_state::ScratchpadAp
         PlatformProfile::LinuxGeneric | PlatformProfile::Hyprland
     )
 }
+
+/// Keeps arrow keys and Escape with a focused list instead of moving egui focus.
+pub(crate) fn lock_navigation_focus(ctx: &egui::Context, id: egui::Id) {
+    ctx.memory_mut(|m| {
+        m.set_focus_lock_filter(
+            id,
+            egui::EventFilter {
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                tab: false,
+                escape: true,
+            },
+        );
+    });
+}

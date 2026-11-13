@@ -17,7 +17,7 @@ pub(super) fn show_search_controls(
     find_id: egui::Id,
     replace_id: egui::Id,
 ) {
-    recent_keys(ui, state, actions, find_id);
+    find_keys(ui, state, actions, find_id);
     let (caret_width, find) = ui
         .horizontal(|ui| {
             let caret = replace_caret(ui, state);
@@ -231,11 +231,12 @@ fn recent_menu(
     recent: &[crate::app::app_state::search_state::recent::RecentSearch],
     actions: &mut SearchStripActions,
 ) {
-    let button = panel_style::icon_button(
+    let button = panel_style::icon_button_with_hint(
         ui,
         "search.recent",
         icons::CLOCK_COUNTER_CLOCKWISE,
         "Recent searches",
+        "Recent searches (Alt+↑ ↓ in Find)",
         true,
     );
     egui::Popup::menu(&button)
@@ -253,7 +254,8 @@ fn recent_menu(
         });
 }
 
-fn recent_keys(
+/// In a single-line Find field, Alt+↑ ↓ step through recent searches and ↓ enters the results.
+fn find_keys(
     ui: &mut egui::Ui,
     state: &SearchStripState,
     actions: &mut SearchStripActions,
@@ -262,12 +264,17 @@ fn recent_keys(
     if !ui.memory(|m| m.has_focus(find_id)) || state.query.contains('\n') {
         return;
     }
-    let history_id = find_id.with("recent_position");
-    let down = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
-    let up = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp));
-    if (up || down) && !state.recent.is_empty() {
+    let consume = |modifiers, key| ui.input_mut(|i| i.consume_key(modifiers, key));
+    // Alt first: an unmodified shortcut also matches Alt.
+    let older = consume(egui::Modifiers::ALT, egui::Key::ArrowUp);
+    let newer = consume(egui::Modifiers::ALT, egui::Key::ArrowDown);
+    if !older && !newer && consume(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+        actions.focus_results = state.match_count > 0;
+    }
+    if (older || newer) && !state.recent.is_empty() {
+        let history_id = find_id.with("recent_position");
         let current = ui.data(|d| d.get_temp::<usize>(history_id));
-        let index = if up {
+        let index = if older {
             current.map_or(0, |i| (i + 1).min(state.recent.len() - 1))
         } else {
             current.unwrap_or(1).saturating_sub(1)
