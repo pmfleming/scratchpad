@@ -111,10 +111,6 @@ impl FileController {
     }
 
     external_open_methods! {
-        pub fn open_paths => (
-            "Open requested for",
-            Self::open_selected_paths_background_blocking
-        );
         pub fn open_paths_async => (
             "Background open requested for",
             Self::open_selected_paths_async
@@ -134,6 +130,17 @@ impl FileController {
         pub fn open_external_paths_here_async => (
             "Background workspace-open requested for",
             Self::open_selected_paths_here_async
+        );
+    }
+
+    /// Blocking open used by tests that need the files installed on return.
+    #[cfg(test)]
+    pub(crate) fn open_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::handle_external_paths(
+            app,
+            paths,
+            "Open requested for",
+            Self::open_selected_paths_background_blocking,
         );
     }
 
