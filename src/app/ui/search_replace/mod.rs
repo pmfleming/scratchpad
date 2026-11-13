@@ -34,7 +34,11 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let layer = widget_ids::area_layer_id(egui::Order::Foreground, "search_window");
     let was_visible = ctx.memory(|m| m.areas().visible_last_frame(&layer));
     let frame = panel_style::window_frame(&ctx, app.state.app_settings.editor_background_color());
-    let min_size = egui::vec2(header::min_width(&ctx), SEARCH_MIN_HEIGHT);
+    // Window sizes include the frame, so add its margin to the header content width.
+    let min_size = egui::vec2(
+        header::min_width(&ctx) + frame.total_margin().sum().x,
+        SEARCH_MIN_HEIGHT,
+    );
 
     let response = egui::Window::new("Search")
         .id(layer.id)
@@ -262,46 +266,4 @@ fn dispatch_requested_command(
 }
 
 #[cfg(test)]
-mod accessibility_tests {
-    use super::*;
-    use egui_kittest::{Harness, kittest::Queryable};
-    #[test]
-    fn redesigned_fields_and_actions_are_named_and_replace_can_collapse() {
-        let root = tempfile::tempdir().unwrap();
-        let mut app = crate::app::app_state::test_support::test_app(root.path());
-        app.open_search_and_replace();
-        let mut harness = Harness::builder()
-            .with_size(egui::vec2(1100.0, 1000.0))
-            .with_context_setup(|ctx| {
-                crate::app::fonts::apply_editor_fonts(
-                    ctx,
-                    &crate::app::fonts::EditorFontSelection::scratchpad(
-                        crate::app::fonts::EditorFontPreset::Standard,
-                    ),
-                    4.0,
-                )
-                .unwrap();
-                ctx.options_mut(|o| o.warn_on_id_clash = true);
-            })
-            .build_ui_state(
-                |ui, app| {
-                    app.poll_search();
-                    show_search_strip(ui, app);
-                },
-                app,
-            );
-        harness.run_steps(3);
-        harness.get_by_role_and_label(egui::Role::TextInput, "Find");
-        harness.get_by_role_and_label(egui::Role::TextInput, "Replace with");
-        harness.get_by_role_and_label(egui::Role::Button, "Replace all included matches");
-        harness
-            .get_by_role_and_label(egui::Role::Button, "▾ Replace")
-            .click();
-        harness.run_steps(3);
-        assert!(
-            harness
-                .query_by_role_and_label(egui::Role::TextInput, "Replace with")
-                .is_none()
-        );
-    }
-}
+mod accessibility_tests;

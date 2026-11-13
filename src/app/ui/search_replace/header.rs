@@ -53,45 +53,54 @@ pub(super) fn show(
     let spacing = ui.spacing().item_spacing.x;
     let mut close = false;
     let mut required = TITLE_GAP;
-    ui.horizontal(|ui| {
-        required += ui
-            .label(
-                egui::RichText::new("Search")
-                    .size(14.0)
-                    .strong()
-                    .color(callout::text(ui)),
-            )
-            .rect
-            .width();
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if show_close {
-                let button = panel_style::icon_button(
-                    ui,
-                    "search.close",
-                    egui_phosphor::regular::X,
-                    "Close search",
-                    true,
-                );
-                required += button.rect.width() + spacing;
-                close = button.clicked();
-            }
-            for (scope, label, hint) in SCOPES.into_iter().rev() {
-                let selected = state.scope == scope;
-                let response = ui.selectable_label(selected, label).on_hover_text(
-                    if scope == SearchScope::SelectionOnly && selected {
-                        shortcut_tooltips::SEARCH_SCOPE_SELECTION_DEFAULT
-                    } else {
-                        hint
-                    },
-                );
-                required += response.rect.width() + spacing;
-                if response.clicked() {
-                    state.scope = scope;
-                    actions.recapture_selection = scope == SearchScope::SelectionOnly;
+    // Size the row for the scope buttons first so the title centres against them.
+    let height =
+        ui.spacing().interact_size.y.max(
+            ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y,
+        );
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            required += ui
+                .label(
+                    egui::RichText::new("Search")
+                        .size(14.0)
+                        .strong()
+                        .color(callout::text(ui)),
+                )
+                .rect
+                .width();
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if show_close {
+                    let button = panel_style::icon_button(
+                        ui,
+                        "search.close",
+                        egui_phosphor::regular::X,
+                        "Close search",
+                        true,
+                    );
+                    required += button.rect.width() + spacing;
+                    close = button.clicked();
                 }
-            }
-        });
-    });
+                for (scope, label, hint) in SCOPES.into_iter().rev() {
+                    let selected = state.scope == scope;
+                    let response = ui.selectable_label(selected, label).on_hover_text(
+                        if scope == SearchScope::SelectionOnly && selected {
+                            shortcut_tooltips::SEARCH_SCOPE_SELECTION_DEFAULT
+                        } else {
+                            hint
+                        },
+                    );
+                    required += response.rect.width() + spacing;
+                    if response.clicked() {
+                        state.scope = scope;
+                        actions.recapture_selection = scope == SearchScope::SelectionOnly;
+                    }
+                }
+            });
+        },
+    );
     remember_min_width(ui.ctx(), required.ceil());
     close
 }
