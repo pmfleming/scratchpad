@@ -1,8 +1,10 @@
-use super::*;
-use crate::app::app_state::test_support::{
-    disk_buffer, test_app, ui_harness, wait_for_background_io, write_file,
+use super::show_encoding_window;
+use crate::app::app_state::{
+    ScratchpadApp, frame,
+    test_support::{disk_buffer, test_app, ui_harness, wait_for_background_io, write_file},
 };
 use crate::app::domain::WorkspaceTab;
+use eframe::egui;
 use egui_kittest::{
     Harness,
     kittest::{NodeT, Queryable},
@@ -26,7 +28,7 @@ fn app_with_file(dirty: bool) -> (Fixture, ScratchpadApp) {
 
 fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
     ui_harness(egui::vec2(1100.0, 900.0), app, |ui, app| {
-        show_encoding_window(ui.ctx(), app)
+        show_encoding_window(ui.ctx(), app);
     })
 }
 

@@ -1,42 +1,31 @@
-use super::*;
+use super::show_search_strip;
 use crate::app::{
-    app_state::test_support::test_app,
+    app_state::{
+        ScratchpadApp,
+        test_support::{test_app, ui_harness},
+    },
     commands::{AppCommand, SearchCommand},
     domain::{BufferState, WorkspaceTab},
+    ui::widget_ids,
 };
+use eframe::egui;
 use egui_kittest::{Harness, kittest::Queryable};
 use std::time::{Duration, Instant};
 
+/// The search window, polling the search worker each frame, past first-frame layout.
 pub(super) fn harness(size: egui::Vec2, app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
-    Harness::builder()
-        .with_size(size)
-        .with_context_setup(|ctx| {
-            crate::app::fonts::apply_editor_fonts(
-                ctx,
-                &crate::app::fonts::EditorFontSelection::scratchpad(
-                    crate::app::fonts::EditorFontPreset::Standard,
-                ),
-                4.0,
-            )
-            .unwrap();
-            ctx.options_mut(|o| o.warn_on_id_clash = true);
-        })
-        .build_ui_state(
-            |ui, app| {
-                app.poll_search();
-                show_search_strip(ui, app);
-            },
-            app,
-        )
+    ui_harness(size, app, |ui, app| {
+        app.poll_search();
+        show_search_strip(ui, app);
+    })
 }
 
 #[test]
 fn redesigned_fields_and_actions_are_named_and_replace_can_collapse() {
     let root = tempfile::tempdir().unwrap();
-    let mut app = crate::app::app_state::test_support::test_app(root.path());
+    let mut app = test_app(root.path());
     app.open_search_and_replace();
     let mut harness = harness(egui::vec2(1100.0, 1000.0), app);
-    harness.run_steps(3);
     harness.get_by_role_and_label(egui::Role::TextInput, "Find");
     harness.get_by_role_and_label(egui::Role::TextInput, "Replace with");
     harness.get_by_role_and_label(egui::Role::Button, "Replace all included matches");
@@ -88,10 +77,10 @@ fn drag(harness: &mut Harness<'static, ScratchpadApp>, from: egui::Pos2, to: egu
 #[test]
 fn resizing_cannot_wrap_or_overlap_the_header() {
     let root = tempfile::tempdir().unwrap();
-    let mut app = crate::app::app_state::test_support::test_app(root.path());
+    let mut app = test_app(root.path());
     app.open_search_and_replace();
     let mut harness = harness(egui::vec2(1100.0, 900.0), app);
-    harness.run_steps(4);
+    harness.run_steps(1);
     let before = window_rect(&harness);
     let corner = before.max - egui::vec2(3.0, 3.0);
     drag(
@@ -174,7 +163,6 @@ fn press(
 fn arrows_move_between_find_and_the_results_list() {
     let root = tempfile::tempdir().unwrap();
     let mut harness = harness(egui::vec2(1100.0, 900.0), searched_app(root.path(), 5));
-    harness.run_steps(3);
     assert!(find_focused(&harness));
 
     press(&mut harness, egui::Modifiers::NONE, egui::Key::ArrowDown);
@@ -197,7 +185,6 @@ fn arrows_move_between_find_and_the_results_list() {
 fn enter_in_the_results_list_goes_to_the_editor() {
     let root = tempfile::tempdir().unwrap();
     let mut harness = harness(egui::vec2(1100.0, 900.0), searched_app(root.path(), 5));
-    harness.run_steps(3);
     press(&mut harness, egui::Modifiers::NONE, egui::Key::ArrowDown);
     press(&mut harness, egui::Modifiers::NONE, egui::Key::End);
     harness.state_mut().state.focus.clear();
@@ -227,7 +214,6 @@ fn alt_arrows_step_through_recent_searches_in_find() {
         })
         .to_vec();
     let mut harness = harness(egui::vec2(1100.0, 900.0), app);
-    harness.run_steps(3);
     press(&mut harness, egui::Modifiers::ALT, egui::Key::ArrowUp);
     assert_eq!(harness.state().state.search_state.query(), "newest");
     press(&mut harness, egui::Modifiers::ALT, egui::Key::ArrowUp);
@@ -245,7 +231,6 @@ fn replace_all_review_replaces_the_footer_until_cancelled() {
     app.state.app_settings.search.review_matches_above = ReviewThreshold::Count(1);
     crate::app::app_state::search_state::api::set_search_replace_open(&mut app, true);
     let mut harness = harness(egui::vec2(1100.0, 900.0), app);
-    harness.run_steps(3);
     harness.get_by_label("5 included");
     harness
         .get_by_role_and_label(egui::Role::Button, "Replace all included matches")

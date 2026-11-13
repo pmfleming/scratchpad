@@ -208,11 +208,14 @@ pub(super) fn text_preview(ui: &mut egui::Ui, title: &str, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{ViewState, render_preview};
     use crate::app::{
-        app_state::test_support::test_app, services::session_store::recovery::RecoveryItem,
+        app_state::test_support::{test_app, ui_harness},
+        services::session_store::recovery::{RecoveryItem, RecoveryPreview},
     };
-    use egui_kittest::{Harness, kittest::Queryable};
+    use eframe::egui;
+    use egui_kittest::kittest::Queryable;
+    use std::sync::Arc;
 
     #[test]
     fn partial_recovery_ui_opens_a_separate_dirty_copy_with_gap_markers() {
@@ -232,14 +235,9 @@ mod tests {
         let expected = preview.text.clone();
         let mut state = ViewState::default();
         let path = root.path().to_owned();
-        let mut harness = Harness::builder()
-            .with_size(egui::vec2(1100., 700.))
-            .allow_missing_glyphs()
-            .build_ui_state(
-                move |ui, app| render_preview(ui, app, &preview, &mut state, &path),
-                app,
-            );
-        harness.run();
+        let mut harness = ui_harness(egui::vec2(1100., 700.), app, move |ui, app| {
+            render_preview(ui, app, &preview, &mut state, &path);
+        });
         harness.get_by_label("Partial recovery: 1 marked gap(s). Copies include these markers; review them before use.");
         harness.get_by_label("Open editable recovered copy").click();
         harness.run_steps(2);

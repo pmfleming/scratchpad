@@ -1,12 +1,18 @@
-use super::*;
+use super::{focus_id, open};
 use crate::app::{
-    app_state::test_support::test_app,
-    domain::{BufferState, SplitAxis, WorkspaceTab},
-    fonts::{EditorFontPreset, EditorFontSelection, apply_editor_fonts},
+    app_state::{
+        ScratchpadApp,
+        test_support::{app_ui_harness, test_app},
+    },
+    domain::{
+        BufferState, SplitAxis, WorkspaceTab,
+        view::{MAX_ZOOM_FACTOR, MIN_ZOOM_FACTOR},
+    },
 };
-use eframe::App;
+use eframe::egui;
 use egui_kittest::{Harness, kittest::Queryable};
 
+/// The app with one small file; Ctrl+= and Ctrl+- reach the app, not egui's own zoom.
 fn harness(root: &std::path::Path) -> Harness<'static, ScratchpadApp> {
     let mut app = test_app(root);
     app.tab_manager.set_tabs(
@@ -17,22 +23,11 @@ fn harness(root: &std::path::Path) -> Harness<'static, ScratchpadApp> {
         ))],
         0,
     );
-    Harness::builder()
-        .allow_missing_glyphs()
-        .with_size(egui::vec2(1200.0, 850.0))
-        .with_context_setup(|ctx| {
-            apply_editor_fonts(
-                ctx,
-                &EditorFontSelection::scratchpad(EditorFontPreset::Standard),
-                4.0,
-            )
-            .unwrap();
-            ctx.options_mut(|options| options.zoom_with_keyboard = false);
-        })
-        .build_ui_state(
-            |ui, app| App::ui(app, ui, &mut eframe::Frame::_new_kittest()),
-            app,
-        )
+    let harness = app_ui_harness(app);
+    harness
+        .ctx
+        .options_mut(|options| options.zoom_with_keyboard = false);
+    harness
 }
 
 fn factor(h: &Harness<'_, ScratchpadApp>) -> f32 {
@@ -68,7 +63,6 @@ fn shortcut(h: &mut Harness<'_, ScratchpadApp>, key: egui::Key) {
 fn status_click_opens_without_changing_zoom_and_shortcuts_open_even_at_limits() {
     let root = tempfile::tempdir().unwrap();
     let mut h = harness(root.path());
-    h.run_steps(3);
     h.get_by_label("100%").click();
     h.run_steps(3);
     assert_eq!(factor(&h), 1.0);
