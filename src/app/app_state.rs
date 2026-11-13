@@ -247,12 +247,7 @@ impl StatusState {
         domain: StatusDomain,
         message: impl Into<String>,
     ) {
-        self.set_status(
-            StatusSeverity::Info,
-            domain,
-            message,
-            Option::<String>::None,
-        );
+        self.set_status(StatusSeverity::Info, domain, message, None);
     }
 
     pub(crate) fn set_warning_status_in_domain(
@@ -260,12 +255,7 @@ impl StatusState {
         domain: StatusDomain,
         message: impl Into<String>,
     ) {
-        self.set_status(
-            StatusSeverity::Warning,
-            domain,
-            message,
-            Option::<String>::None,
-        );
+        self.set_status(StatusSeverity::Warning, domain, message, None);
     }
 
     pub(crate) fn set_error_status_in_domain(
@@ -273,12 +263,7 @@ impl StatusState {
         domain: StatusDomain,
         message: impl Into<String>,
     ) {
-        self.set_status(
-            StatusSeverity::Error,
-            domain,
-            message,
-            Option::<String>::None,
-        );
+        self.set_status(StatusSeverity::Error, domain, message, None);
     }
 
     pub(crate) fn set_warning_status_with_detail(
@@ -416,121 +401,64 @@ impl StatusState {
 
 #[cfg(test)]
 mod tests {
-    use super::{STATUS_HISTORY_LIMIT, ScratchpadApp, StatusSeverity, StatusState};
+    use super::{STATUS_HISTORY_LIMIT, ScratchpadApp, StatusDomain, StatusSeverity, StatusState};
 
-    fn app_without_startup_status() -> ScratchpadApp {
-        let mut app = ScratchpadApp::default();
-        app.state.status = StatusState::default();
-        app
+    fn current_text(status: &StatusState) -> Option<(&str, Option<&str>)> {
+        status
+            .current
+            .as_ref()
+            .map(|current| (current.text.as_str(), current.detail.as_deref()))
     }
 
-    fn primary_texts_are_clean(messages: &[&str]) -> bool {
-        const FRAGILE_TEXT: [&str; 7] = [
-            "file(s)",
-            "tab(s)",
-            "conflict(s)",
-            "1 files",
-            "1 tabs",
-            "1 conflicts",
-            "Control characters detected: Control characters detected",
+    #[test]
+    fn status_setters_preserve_severity_and_push_history() {
+        let mut status = StatusState::default();
+        let cases = [
+            (StatusSeverity::Info, "Saved."),
+            (StatusSeverity::Warning, "Changed on disk."),
+            (StatusSeverity::Error, "Could not save."),
         ];
-        messages
-            .iter()
-            .all(|message| FRAGILE_TEXT.iter().all(|text| !message.contains(text)))
-    }
-
-    #[test]
-    fn status_setters_preserve_severity() {
-        let mut app = app_without_startup_status();
-
-        app.state
-            .status
-            .set_info_status_in_domain(super::StatusDomain::Disk, "Saved.");
-        assert_eq!(
-            app.state
-                .status
-                .current
-                .as_ref()
-                .map(|status| status.severity),
-            Some(StatusSeverity::Info)
-        );
-
-        app.state
-            .status
-            .set_warning_status_in_domain(super::StatusDomain::Disk, "Changed on disk.");
-        assert_eq!(
-            app.state
-                .status
-                .current
-                .as_ref()
-                .map(|status| status.severity),
-            Some(StatusSeverity::Warning)
-        );
-
-        app.state
-            .status
-            .set_error_status_in_domain(super::StatusDomain::Disk, "Could not save.");
-        assert_eq!(
-            app.state
-                .status
-                .current
-                .as_ref()
-                .map(|status| status.severity),
-            Some(StatusSeverity::Error)
-        );
-    }
-
-    #[test]
-    fn setting_status_pushes_to_history() {
-        let mut app = app_without_startup_status();
-
-        app.state
-            .status
-            .set_info_status_in_domain(super::StatusDomain::Disk, "Saved.");
-        app.state
-            .status
-            .set_warning_status_in_domain(super::StatusDomain::Disk, "Changed on disk.");
-
-        assert_eq!(app.state.status.history.len(), 2);
-        assert_eq!(app.state.status.history[0].text, "Saved.");
-        assert_eq!(app.state.status.history[1].text, "Changed on disk.");
-        assert_eq!(
-            app.state
-                .status
-                .current
-                .as_ref()
-                .map(|status| status.text.as_str()),
-            Some("Changed on disk.")
-        );
+        for (count, (severity, message)) in cases.into_iter().enumerate() {
+            match severity {
+                StatusSeverity::Info => {
+                    status.set_info_status_in_domain(StatusDomain::Disk, message);
+                }
+                StatusSeverity::Warning => {
+                    status.set_warning_status_in_domain(StatusDomain::Disk, message);
+                }
+                StatusSeverity::Error => {
+                    status.set_error_status_in_domain(StatusDomain::Disk, message);
+                }
+            }
+            assert_eq!(status.current.as_ref().map(|s| s.severity), Some(severity));
+            assert_eq!(current_text(&status), Some((message, None)));
+            assert_eq!(status.history.len(), count + 1);
+            assert_eq!(status.history[count].text, message);
+        }
     }
 
     #[test]
     fn status_history_is_capped() {
-        let mut app = app_without_startup_status();
-
+        let mut status = StatusState::default();
         for index in 0..(STATUS_HISTORY_LIMIT + 5) {
-            app.state
-                .status
-                .set_info_status_in_domain(super::StatusDomain::Disk, format!("Message {index}."));
+            status.set_info_status_in_domain(StatusDomain::Disk, format!("Message {index}."));
         }
 
-        assert_eq!(app.state.status.history.len(), STATUS_HISTORY_LIMIT);
+        assert_eq!(status.history.len(), STATUS_HISTORY_LIMIT);
+        assert_eq!(status.history.front().map(|status| status.id), Some(5));
         assert_eq!(
-            app.state.status.history.front().map(|status| status.id),
-            Some(5)
-        );
-        assert_eq!(
-            app.state.status.history.back().map(|status| status.id),
+            status.history.back().map(|status| status.id),
             Some((STATUS_HISTORY_LIMIT + 4) as u64)
         );
     }
 
     #[test]
     fn clearing_current_status_keeps_history() {
-        let mut app = app_without_startup_status();
+        let mut app = ScratchpadApp::default();
+        app.state.status = StatusState::default();
         app.state
             .status
-            .set_error_status_in_domain(super::StatusDomain::Disk, "Could not save.");
+            .set_error_status_in_domain(StatusDomain::Disk, "Could not save.");
 
         crate::app::app_state::workspace::accessors::clear_status_message(&mut app);
 
@@ -540,65 +468,38 @@ mod tests {
     }
 
     #[test]
-    fn common_status_helpers_keep_raw_errors_in_detail() {
-        let mut app = app_without_startup_status();
-
-        app.state.status.report_session_save_failed("access denied");
-        assert_eq!(
-            app.state
-                .status
-                .current
-                .as_ref()
-                .map(|status| status.text.as_str()),
-            Some("Could not save your session.")
-        );
-        assert_eq!(
-            app.state
-                .status
-                .current
-                .as_ref()
-                .and_then(|status| status.detail.as_deref()),
-            Some("access denied")
-        );
-
-        app.state
-            .status
-            .report_settings_toml_parse_failed("expected key");
-        assert_eq!(
-            app.state
-                .status
-                .current
-                .as_ref()
-                .map(|status| status.text.as_str()),
-            Some("Could not apply settings.toml.")
-        );
-        assert_eq!(
-            app.state
-                .status
-                .current
-                .as_ref()
-                .and_then(|status| status.detail.as_deref()),
-            Some("expected key")
-        );
-    }
-
-    #[test]
-    fn common_status_helpers_avoid_fragile_vocabulary() {
-        let mut app = app_without_startup_status();
-
-        app.state.status.report_session_save_failed("disk full");
-        let session_save = app.state.status.current.as_ref().unwrap().text.clone();
-        app.state
-            .status
-            .report_settings_toml_parse_failed("bad toml");
-        let settings_toml = app.state.status.current.as_ref().unwrap().text.clone();
-        app.state.status.report_search_results_stale_for_replace();
-        let stale_search = app.state.status.current.as_ref().unwrap().text.clone();
-
-        assert!(primary_texts_are_clean(&[
-            &session_save,
-            &settings_toml,
-            &stale_search
-        ]));
+    fn common_status_helpers_keep_raw_errors_in_detail_and_avoid_fragile_vocabulary() {
+        const FRAGILE_TEXT: [&str; 7] = [
+            "file(s)",
+            "tab(s)",
+            "conflict(s)",
+            "1 files",
+            "1 tabs",
+            "1 conflicts",
+            "Control characters detected: Control characters detected",
+        ];
+        let cases: [(fn(&mut StatusState), _, _); 3] = [
+            (
+                |s| s.report_session_save_failed("access denied"),
+                "Could not save your session.",
+                Some("access denied"),
+            ),
+            (
+                |s| s.report_settings_toml_parse_failed("expected key"),
+                "Could not apply settings.toml.",
+                Some("expected key"),
+            ),
+            (
+                StatusState::report_search_results_stale_for_replace,
+                "Search results changed. Run search again before replacing.",
+                None,
+            ),
+        ];
+        let mut status = StatusState::default();
+        for (report, text, detail) in cases {
+            report(&mut status);
+            assert_eq!(current_text(&status), Some((text, detail)));
+            assert!(FRAGILE_TEXT.iter().all(|fragile| !text.contains(fragile)));
+        }
     }
 }

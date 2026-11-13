@@ -151,17 +151,21 @@ fn search_fragmented(
                     .filter_map(|matched| {
                         let start = window_offset + matched.start;
                         let end = window_offset + matched.end;
-                        let in_core = chunk.core_range.contains(&start);
-                        let at_final_boundary = final_boundary.is_some_and(|boundary| {
-                            chunk.core_range.end == boundary && start == boundary
-                        });
-                        (in_core || at_final_boundary).then_some(start..end)
+                        chunk_owns_match(chunk, start, final_boundary).then_some(start..end)
                     })
                     .collect(),
             )
         },
     )
     .filter(|matches| context.program.accept_match_count(matches.len()))
+}
+
+/// Overlapping windows report a match only from the chunk whose core owns its
+/// start; a regex match starting exactly at the range end belongs to the last chunk.
+fn chunk_owns_match(chunk: &DocumentChunk, start: usize, final_boundary: Option<usize>) -> bool {
+    chunk.core_range.contains(&start)
+        || final_boundary
+            .is_some_and(|boundary| chunk.core_range.end == boundary && start == boundary)
 }
 
 fn next_chunk_batch(chunks: &mut impl Iterator<Item = DocumentChunk>) -> Vec<DocumentChunk> {
@@ -315,6 +319,53 @@ fn generation_is_current(
     !stale.load(Ordering::Relaxed) && latest_generation.load(Ordering::Relaxed) == generation
 }
 
+/// A bounded prefix for display after the normal global budget is exceeded.
+/// Each scan window remains bounded; overlapping chunks never duplicate hits.
+pub(super) fn search_target_prefix(
+    snapshot: &DocumentSnapshot,
+    search_range: Option<Range<usize>>,
+    program: &SearchProgram,
+    generation: u64,
+    latest_generation: &AtomicU64,
+    limit: usize,
+) -> Option<Vec<Range<usize>>> {
+    let range = search_range.unwrap_or(0..snapshot.document_length().chars);
+    let context = FragmentSearchContext {
+        snapshot,
+        program,
+        generation,
+        latest_generation,
+        intra_parallelism: 1,
+    };
+    let plan = fragment_search_plan(&context, range);
+    let mut matches = Vec::new();
+    for chunk in plan.chunks {
+        if latest_generation.load(Ordering::Relaxed) != generation {
+            return None;
+        }
+        let (text, offset) = snapshot
+            .try_search_text(Some(chunk.window_range.clone()))
+            .ok()?;
+        let outcome = search::search_program_interruptible(&text, program, || {
+            latest_generation.load(Ordering::Relaxed) == generation
+        })?;
+        for range in outcome.matches {
+            let range = range.start + offset..range.end + offset;
+            if chunk_owns_match(&chunk, range.start, plan.final_boundary)
+                && matches
+                    .last()
+                    .is_none_or(|previous: &Range<usize>| previous.end <= range.start)
+            {
+                if matches.len() == limit {
+                    return Some(matches);
+                }
+                matches.push(range);
+            }
+        }
+    }
+    Some(matches)
+}
+
 #[cfg(test)]
 mod batching_tests {
     use super::{DocumentChunk, process_chunks_concurrent, search_target_ranges};
@@ -435,55 +486,4 @@ mod batching_tests {
             assert!(search_target_ranges(&snapshot, None, &program, 1, &generation, 4).is_none());
         }
     }
-}
-
-/// A bounded prefix for display after the normal global budget is exceeded.
-/// Each scan window remains bounded; overlapping chunks never duplicate hits.
-pub(super) fn search_target_prefix(
-    snapshot: &DocumentSnapshot,
-    search_range: Option<Range<usize>>,
-    program: &SearchProgram,
-    generation: u64,
-    latest_generation: &AtomicU64,
-    limit: usize,
-) -> Option<Vec<Range<usize>>> {
-    let range = search_range.unwrap_or(0..snapshot.document_length().chars);
-    let context = FragmentSearchContext {
-        snapshot,
-        program,
-        generation,
-        latest_generation,
-        intra_parallelism: 1,
-    };
-    let plan = fragment_search_plan(&context, range);
-    let mut matches = Vec::new();
-    for chunk in plan.chunks {
-        if latest_generation.load(Ordering::Relaxed) != generation {
-            return None;
-        }
-        let (text, offset) = snapshot
-            .try_search_text(Some(chunk.window_range.clone()))
-            .ok()?;
-        let outcome = search::search_program_interruptible(&text, program, || {
-            latest_generation.load(Ordering::Relaxed) == generation
-        })?;
-        for range in outcome.matches {
-            let range = range.start + offset..range.end + offset;
-            let in_core = chunk.core_range.contains(&range.start)
-                || plan
-                    .final_boundary
-                    .is_some_and(|end| chunk.core_range.end == end && range.start == end);
-            if in_core
-                && matches
-                    .last()
-                    .is_none_or(|previous: &Range<usize>| previous.end <= range.start)
-            {
-                if matches.len() == limit {
-                    return Some(matches);
-                }
-                matches.push(range);
-            }
-        }
-    }
-    Some(matches)
 }
