@@ -3,6 +3,8 @@ use super::{
     WorkspaceTab,
 };
 use crate::app::domain::DocumentSnapshot;
+use crate::app::domain::buffer::HistorySnapshot;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_CAPTURE: AtomicU64 = AtomicU64::new(1);
@@ -49,15 +51,20 @@ pub(super) struct CapturedSessionBuffer {
 }
 
 impl SessionPersistRequest {
+    /// Live tabs followed by the closed-tab archives captured with them.
+    pub(super) fn all_tabs(&self) -> impl Iterator<Item = &CapturedSessionTab> {
+        let closed = self.closed_tabs.iter().map(|closed| &closed.tab);
+        self.tabs.iter().chain(closed)
+    }
+    pub(super) fn all_tabs_mut(&mut self) -> impl Iterator<Item = &mut CapturedSessionTab> {
+        let closed = self.closed_tabs.iter_mut().map(|closed| &mut closed.tab);
+        self.tabs.iter_mut().chain(closed)
+    }
     pub(crate) fn copy_to_store(
         &mut self,
         copy: &mut crate::app::services::chunk_store::Rebind,
     ) -> std::io::Result<()> {
-        for tab in self
-            .tabs
-            .iter_mut()
-            .chain(self.closed_tabs.iter_mut().map(|c| &mut c.tab))
-        {
+        for tab in self.all_tabs_mut() {
             for buffer in &mut tab.session_tab.buffers {
                 if let Some(history) = &buffer.history_capture {
                     let history = history.copy_to_store(copy)?;
@@ -84,9 +91,7 @@ impl SessionPersistRequest {
     pub(crate) fn acknowledgement(&self) -> SessionCaptureAck {
         SessionCaptureAck {
             revisions: self
-                .tabs
-                .iter()
-                .chain(self.closed_tabs.iter().map(|closed| &closed.tab))
+                .all_tabs()
                 .flat_map(|tab| &tab.buffer_snapshots)
                 .map(|buffer| (buffer.temp_id.clone(), buffer.snapshot.revision_key()))
                 .collect(),
@@ -334,6 +339,28 @@ impl CapturedSessionTab {
             buffer_snapshots,
             preserve_existing: !imported,
         }
+    }
+
+    /// Supplies a preserved tab's histories from `cached` once every buffer is cached,
+    /// so the tab no longer needs hydrating from the database.
+    pub(super) fn restore_cached_histories(&mut self, cached: &HashMap<String, HistorySnapshot>) {
+        let all_cached = self
+            .session_tab
+            .buffers
+            .iter()
+            .all(|b| cached.contains_key(&b.temp_id));
+        if !self.preserve_existing || !all_cached {
+            return;
+        }
+        for buffer in &mut self.session_tab.buffers {
+            let history = cached[&buffer.temp_id].clone();
+            self.buffer_snapshots.push(CapturedSessionBuffer {
+                temp_id: buffer.temp_id.clone(),
+                snapshot: history.snapshot(),
+            });
+            buffer.history_capture = Some(history);
+        }
+        self.preserve_existing = false;
     }
 
     fn capture(tab: &WorkspaceTab) -> Self {

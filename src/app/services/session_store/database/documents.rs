@@ -165,11 +165,7 @@ impl Database {
         &self,
         mut request: crate::app::services::session_store::SessionPersistRequest,
     ) -> io::Result<crate::app::services::session_store::SessionPersistRequest> {
-        for tab in request
-            .tabs
-            .iter_mut()
-            .chain(request.closed_tabs.iter_mut().map(|closed| &mut closed.tab))
-        {
+        for tab in request.all_tabs_mut() {
             if !tab.preserve_existing {
                 continue;
             }

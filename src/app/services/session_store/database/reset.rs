@@ -36,11 +36,7 @@ pub(in crate::app::services::session_store) fn start_new_session(
     mut request: SessionPersistRequest,
 ) -> io::Result<(DatabaseWorker, PathBuf)> {
     if let Some(worker) = worker
-        && request
-            .tabs
-            .iter()
-            .chain(request.closed_tabs.iter().map(|closed| &closed.tab))
-            .any(|tab| tab.preserve_existing)
+        && request.all_tabs().any(|tab| tab.preserve_existing)
     {
         request = worker.prepare_reset_request(request)?;
     }
