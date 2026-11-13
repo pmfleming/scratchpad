@@ -2,7 +2,7 @@
 use super::{BufferState, TextDocument, TextFormatMetadata};
 use crate::app::capacity_metrics::{PreparationPhase, record_preparation};
 use crate::app::domain::buffer::{
-    BufferTextMetadata, HistoryToken, PieceSource, metadata_after_replacements,
+    BufferTextMetadata, DocumentSnapshot, HistoryToken, PieceSource, metadata_after_replacements,
     normalize_inserted_text_line_endings, try_analyze_piece_tree_text,
 };
 use crate::app::domain::{CharCursor, CursorRange};
@@ -74,9 +74,43 @@ impl PrepareTextRequest {
     pub(crate) fn prepare(mut self) -> io::Result<PreparedText> {
         let total = Instant::now();
         let adds_text = self.adds_text();
-        let mut changes_document = true;
-        let mut transform_changes = None;
         let normalization = Instant::now();
+        self.normalize_replacements();
+        record_preparation(PreparationPhase::Normalize, normalization.elapsed());
+        let replacement_base = (self.transform.is_none() && self.history_target.is_none())
+            .then(|| self.document.snapshot());
+        let mutation = Instant::now();
+        let edit = self.apply_edit()?;
+        self.finish_intake(adds_text)?;
+        self.document.piece_tree_mut().clear_anchors();
+        record_preparation(PreparationPhase::Mutate, mutation.elapsed());
+        let inspection = Instant::now();
+        let metadata = self.measure(replacement_base, edit.changes_document)?;
+        record_preparation(PreparationPhase::Inspect, inspection.elapsed());
+        let changes = edit.changes.unwrap_or_else(|| {
+            self.replacements
+                .iter()
+                .map(|(range, text)| (range.clone(), text.chars().count()))
+                .collect()
+        });
+        let prepared = PreparedText {
+            base: self.base,
+            changes_document: edit.changes_document,
+            event: self.event,
+            document: self.document,
+            format: self.format,
+            metadata,
+            selection: edit.selection,
+            origin_view: self.origin_view,
+            previous: self.previous,
+            changes,
+        };
+        record_preparation(PreparationPhase::Total, total.elapsed());
+        Ok(prepared)
+    }
+    /// Rewrites inserted text to the document's line endings, keeping
+    /// already-conforming strings untouched.
+    fn normalize_replacements(&mut self) {
         for (_, text) in &mut self.replacements {
             let normalized = normalize_inserted_text_line_endings(
                 text,
@@ -86,50 +120,58 @@ impl PrepareTextRequest {
                 *text = normalized.into_owned();
             }
         }
-        record_preparation(PreparationPhase::Normalize, normalization.elapsed());
-        let replacement_base = (self.transform.is_none() && self.history_target.is_none())
-            .then(|| self.document.snapshot());
-        let mutation = Instant::now();
-        let next = if let Some((changes, _, transform)) = self.transform.take() {
-            changes_document = changes;
-            let (document, format, selection, updates) = std::panic::catch_unwind(
+    }
+    /// Runs the queued transform, history navigation or replacements.
+    fn apply_edit(&mut self) -> io::Result<AppliedEdit> {
+        if let Some((changes_document, _, transform)) = self.transform.take() {
+            let (document, format, selection, changes) = std::panic::catch_unwind(
                 std::panic::AssertUnwindSafe(transform),
             )
             .map_err(|_| io::Error::other("Text became unreadable while preparing the edit"))??;
             self.document = document;
             self.format = format;
-            transform_changes = Some(updates);
-            selection
-        } else if let Some(target) = self.history_target {
+            return Ok(AppliedEdit {
+                selection,
+                changes_document,
+                changes: Some(changes),
+            });
+        }
+        let selection = if let Some(target) = self.history_target {
             self.document.navigate_history(target).map_err(|cause| {
                 io::Error::other(format!("Could not prepare history: {cause:?}"))
             })?
         } else {
-            let next = self.next.unwrap_or_else(|| {
-                let (range, text) = &self.replacements[0];
-                CursorRange::one(CharCursor::new(range.start + text.chars().count()))
-            });
-            self.document.set_bulk_intake(true);
-            self.document
-                .replace_char_ranges_with_source(
-                    &self.replacements,
-                    self.previous,
-                    next,
-                    self.source,
-                )
-                .map_err(|cause| {
-                    if cause == crate::app::domain::buffer::TextReplacementError::BulkRefused {
-                        return io::Error::other("Memory limit reached. Large paste or replacement refused; current text was kept.");
-                    }
-                    io::Error::other(
-                        self.document
-                            .piece_tree()
-                            .intake_error()
-                            .unwrap_or_else(|| format!("Could not prepare text: {cause:?}")),
-                    )
-                })?;
-            next
+            self.apply_replacements()?
         };
+        Ok(AppliedEdit {
+            selection,
+            changes_document: true,
+            changes: None,
+        })
+    }
+    fn apply_replacements(&mut self) -> io::Result<CursorRange> {
+        let next = self.next.unwrap_or_else(|| {
+            let (range, text) = &self.replacements[0];
+            CursorRange::one(CharCursor::new(range.start + text.chars().count()))
+        });
+        self.document.set_bulk_intake(true);
+        self.document
+            .replace_char_ranges_with_source(&self.replacements, self.previous, next, self.source)
+            .map_err(|cause| {
+                if cause == crate::app::domain::buffer::TextReplacementError::BulkRefused {
+                    return io::Error::other("Memory limit reached. Large paste or replacement refused; current text was kept.");
+                }
+                io::Error::other(
+                    self.document
+                        .piece_tree()
+                        .intake_error()
+                        .unwrap_or_else(|| format!("Could not prepare text: {cause:?}")),
+                )
+            })?;
+        Ok(next)
+    }
+    /// Ends bulk intake and rejects text the store refused or could not read.
+    fn finish_intake(&mut self, adds_text: bool) -> io::Result<()> {
         self.document.set_bulk_intake(false);
         if let Some(cause) = self.document.piece_tree().intake_error() {
             return Err(io::Error::other(cause));
@@ -142,37 +184,36 @@ impl PrepareTextRequest {
                 "Text became unreadable during preparation",
             ));
         }
-        self.document.piece_tree_mut().clear_anchors();
-        record_preparation(PreparationPhase::Mutate, mutation.elapsed());
-        let inspection = Instant::now();
-        let metadata = if let Some(base) = replacement_base {
-            metadata_after_replacements(base.piece_tree(), &self.replacements, &mut self.format)?
-        } else if changes_document {
-            try_analyze_piece_tree_text(self.document.piece_tree(), &mut self.format)?.metadata
-        } else {
-            self.copy_metadata.take().expect("copy metadata captured")
-        };
-        record_preparation(PreparationPhase::Inspect, inspection.elapsed());
-        let prepared = PreparedText {
-            base: self.base,
-            changes_document,
-            event: self.event,
-            document: self.document,
-            format: self.format,
-            metadata,
-            selection: next,
-            origin_view: self.origin_view,
-            previous: self.previous,
-            changes: transform_changes.unwrap_or_else(|| {
-                self.replacements
-                    .iter()
-                    .map(|(range, text)| (range.clone(), text.chars().count()))
-                    .collect()
-            }),
-        };
-        record_preparation(PreparationPhase::Total, total.elapsed());
-        Ok(prepared)
+        Ok(())
     }
+    /// Metadata for the edited text. Plain replacements update the metadata of
+    /// the snapshot they started from instead of rescanning the document.
+    fn measure(
+        &mut self,
+        replacement_base: Option<DocumentSnapshot>,
+        changes_document: bool,
+    ) -> io::Result<BufferTextMetadata> {
+        if let Some(base) = replacement_base {
+            return metadata_after_replacements(
+                base.piece_tree(),
+                &self.replacements,
+                &mut self.format,
+            );
+        }
+        if changes_document {
+            return Ok(
+                try_analyze_piece_tree_text(self.document.piece_tree(), &mut self.format)?.metadata,
+            );
+        }
+        Ok(self.copy_metadata.take().expect("copy metadata captured"))
+    }
+}
+/// The outcome of the mutation step of a preparation.
+struct AppliedEdit {
+    selection: CursorRange,
+    changes_document: bool,
+    /// Change ranges reported by a transform; replacements derive their own.
+    changes: Option<Vec<(Range<usize>, usize)>>,
 }
 impl BufferState {
     pub(crate) fn queue_edit_transform(
@@ -412,7 +453,10 @@ impl PreparedText {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        BufferState, CharCursor, CursorRange, PieceSource, TextDocument,
+        normalize_inserted_text_line_endings, try_analyze_piece_tree_text,
+    };
     use crate::app::services::session_store::SessionStore;
     #[test]
     fn preparation_inspects_owned_input_without_reading_newly_sealed_bodies() {
@@ -525,7 +569,7 @@ mod tests {
 
 #[cfg(test)]
 mod history_preparation_tests {
-    use super::*;
+    use super::{BufferState, CursorRange, PieceSource};
     use crate::app::services::session_store::SessionStore;
     #[test]
     fn prepared_history_is_atomic_and_reuses_existing_text_without_new_body_writes() {

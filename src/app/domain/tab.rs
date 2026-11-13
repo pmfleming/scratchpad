@@ -99,25 +99,6 @@ impl WorkspaceTab {
         self.sync_active_buffer_to_active_view()
     }
 
-    #[must_use]
-    pub fn describe(&self) -> String {
-        let path = self
-            .buffers
-            .active()
-            .path
-            .as_ref()
-            .map_or_else(|| "<unsaved>".to_owned(), |path| path.display().to_string());
-        let active_buffer = self.buffers.active();
-        format!(
-            "{} [path={}, dirty={}, views={}, active_view={}]",
-            active_buffer.name,
-            path,
-            active_buffer.is_dirty,
-            self.layout.view_count(),
-            self.layout.active_view_id()
-        )
-    }
-
     fn push_buffer_if_missing(&mut self, buffer: BufferState) {
         self.buffers.push_if_missing(buffer);
     }

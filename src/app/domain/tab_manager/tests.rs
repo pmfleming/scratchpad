@@ -1,4 +1,5 @@
 use super::{TabManager, WorkspaceTab};
+use crate::app::app_state::test_support::{disk_buffer, write_file};
 use crate::app::domain::{BufferId, BufferState, SplitAxis};
 
 fn tab(name: &str) -> WorkspaceTab {
@@ -6,19 +7,14 @@ fn tab(name: &str) -> WorkspaceTab {
 }
 
 fn disk_tab(path: &std::path::Path, text: &str) -> WorkspaceTab {
-    WorkspaceTab::new(BufferState::new(
-        path.file_name().unwrap().to_string_lossy().into_owned(),
-        text.to_owned(),
-        Some(path.to_path_buf()),
-    ))
+    WorkspaceTab::new(disk_buffer(path, text))
 }
 
 #[test]
 fn path_owner_rechecks_hard_links_after_replacement() {
     let root = tempfile::tempdir().unwrap();
-    let original = root.path().join("original");
+    let original = write_file(root.path(), "original", "original");
     let alias = root.path().join("alias");
-    std::fs::write(&original, "original").unwrap();
     std::fs::hard_link(&original, &alias).unwrap();
     let mut manager = TabManager::new();
     manager.set_tabs(vec![disk_tab(&original, "original")], 0);
@@ -32,9 +28,8 @@ fn path_owner_rechecks_hard_links_after_replacement() {
 #[test]
 fn restored_aliases_keep_independent_edits_as_recovered_copies() {
     let root = tempfile::tempdir().unwrap();
-    let a = root.path().join("a");
+    let a = write_file(root.path(), "a", "disk");
     let b = root.path().join("b");
-    std::fs::write(&a, "disk").unwrap();
     std::fs::hard_link(&a, &b).unwrap();
     let mut manager = TabManager::new();
     manager.set_tabs(
@@ -54,11 +49,9 @@ fn restored_aliases_keep_independent_edits_as_recovered_copies() {
 #[test]
 fn path_owner_does_not_trust_a_retargeted_symlink_cache() {
     let root = tempfile::tempdir().unwrap();
-    let a = root.path().join("a");
-    let b = root.path().join("b");
+    let a = write_file(root.path(), "a", "a");
+    let b = write_file(root.path(), "b", "b");
     let link = root.path().join("link");
-    std::fs::write(&a, "a").unwrap();
-    std::fs::write(&b, "b").unwrap();
     std::os::unix::fs::symlink(&a, &link).unwrap();
     let mut manager = TabManager::new();
     manager.set_tabs(vec![disk_tab(&link, "a")], 0);
@@ -148,10 +141,8 @@ fn closing_last_tab_leaves_empty_workspace_and_indices() {
 #[test]
 fn path_index_tracks_open_file_owners() {
     let directory = tempfile::tempdir().unwrap();
-    let first_path = directory.path().join("first.txt");
-    let second_path = directory.path().join("second.txt");
-    std::fs::write(&first_path, "first").unwrap();
-    std::fs::write(&second_path, "second").unwrap();
+    let first_path = write_file(directory.path(), "first.txt", "first");
+    let second_path = write_file(directory.path(), "second.txt", "second");
 
     let first = disk_tab(&first_path, "first");
     let first_view = first.layout.active_view_id();
@@ -186,8 +177,7 @@ fn path_index_tracks_open_file_owners() {
 #[test]
 fn set_tabs_dedupes_duplicate_restored_paths() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("shared.txt");
-    std::fs::write(&path, "shared").unwrap();
+    let path = write_file(directory.path(), "shared.txt", "shared");
     let first = disk_tab(&path, "first");
     let first_view = first.layout.active_view_id();
     let second = disk_tab(&path, "second");

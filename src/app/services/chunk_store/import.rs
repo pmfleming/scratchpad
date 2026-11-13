@@ -146,7 +146,7 @@ impl<R: Read> Iterator for Utf8Chunks<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{MAX_BYTES, Utf8Chunks, io};
     #[test]
     fn sized_capture_preserves_streaming_chunk_boundaries() {
         for len in [

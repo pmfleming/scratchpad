@@ -76,7 +76,9 @@ fn available_memory_bytes() -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        DEFAULT_REFRESH_INTERVAL, Duration, Instant, MIB, Mutex, TextHistoryBudget, cached_default,
+    };
     #[test]
     fn construction_bursts_share_memory_sampling_but_later_buffers_refresh() {
         let cache = Mutex::new(None);

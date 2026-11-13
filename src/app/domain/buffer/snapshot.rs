@@ -1,7 +1,4 @@
-use super::{
-    BufferLength, PieceTreeLineInfo, PieceTreeLite, PieceTreeSlice,
-    display_line_count_from_piece_tree,
-};
+use super::{BufferLength, PieceTreeLineInfo, PieceTreeLite, display_line_count_from_piece_tree};
 use crate::app::capacity_metrics;
 use std::borrow::Cow;
 use std::ops::Range;
@@ -117,12 +114,6 @@ impl DocumentSnapshot {
     }
 
     #[must_use]
-    pub fn line_char_range(&self, line_index: usize) -> Range<usize> {
-        let line = self.line_info(line_index);
-        line.start_char..line.start_char + line.char_len
-    }
-
-    #[must_use]
     pub fn normalize_char_range(&self, range_chars: Range<usize>) -> Range<usize> {
         self.piece_tree.normalize_char_range(range_chars)
     }
@@ -147,11 +138,6 @@ impl DocumentSnapshot {
     }
 
     #[must_use]
-    pub fn extract_range(&self, range_chars: Range<usize>) -> String {
-        self.flatten_range(range_chars)
-    }
-
-    #[must_use]
     pub fn extract_range_bounded(
         &self,
         range_chars: Range<usize>,
@@ -159,33 +145,6 @@ impl DocumentSnapshot {
     ) -> (String, bool) {
         self.piece_tree
             .extract_range_bounded(range_chars, max_chars)
-    }
-
-    #[must_use]
-    pub fn spans_for_range(&self, range_chars: Range<usize>) -> PieceTreeSlice<'_> {
-        self.piece_tree.spans_for_range(range_chars)
-    }
-
-    #[must_use]
-    pub fn spans_for_line(&self, line_index: usize) -> PieceTreeSlice<'_> {
-        self.piece_tree.spans_for_line(line_index)
-    }
-
-    #[must_use]
-    pub fn chunks_for_range(
-        &self,
-        range_chars: Range<usize>,
-        target_chunk_chars: usize,
-        leading_context_chars: usize,
-        trailing_context_chars: usize,
-    ) -> Vec<DocumentChunk> {
-        self.chunk_iter_for_range(
-            range_chars,
-            target_chunk_chars,
-            leading_context_chars,
-            trailing_context_chars,
-        )
-        .collect()
     }
 
     /// Plan line-aligned windows on demand so a bounded scan can reuse the
@@ -207,26 +166,6 @@ impl DocumentSnapshot {
             leading: leading_context_chars,
             trailing: trailing_context_chars,
         }
-    }
-
-    #[must_use]
-    pub fn preview_for_match(&self, range_chars: &Range<usize>) -> (usize, usize, String) {
-        super::piece_tree::preview::preview_for_match(&self.piece_tree, range_chars)
-    }
-
-    #[must_use]
-    pub fn previews_for_matches(
-        &self,
-        ranges: &[Range<usize>],
-        limit: usize,
-    ) -> Vec<(usize, usize, String)> {
-        super::piece_tree::preview::previews_for_matches(&self.piece_tree, ranges, limit)
-    }
-
-    #[must_use]
-    pub fn search_text(&self, range_chars: Option<Range<usize>>) -> (String, usize) {
-        let (text, start) = self.search_text_cow(range_chars);
-        (text.into_owned(), start)
     }
 
     #[must_use]

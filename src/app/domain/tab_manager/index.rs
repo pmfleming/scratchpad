@@ -2,7 +2,7 @@ use super::TabManager;
 use crate::app::CanonicalPathKey;
 use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
 use crate::app::services::session_store::ColdSessionTab;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 fn next_path_index_generation() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,7 +32,7 @@ impl TabManager {
         self.cold_session_tabs.remove(&index)
     }
 
-    pub(crate) fn cold_session_tabs(&self) -> &std::collections::HashMap<usize, ColdSessionTab> {
+    pub(crate) fn cold_session_tabs(&self) -> &HashMap<usize, ColdSessionTab> {
         &self.cold_session_tabs
     }
 
@@ -58,35 +58,24 @@ impl TabManager {
         self.buffer_tab_index.clear();
         self.path_tab_index.clear();
         for (tab_index, tab) in self.tabs.iter().enumerate() {
-            for buffer in tab.buffers() {
-                self.buffer_tab_index.insert(buffer.id, tab_index);
-            }
-            for (key, owner) in tab_path_entries(tab_index, tab) {
-                let previous = self.path_tab_index.insert(key.clone(), owner);
-                debug_assert!(
-                    previous.is_none() || previous == Some(owner),
-                    "duplicate CanonicalPathKey indexed for {}",
-                    key.as_path().display()
-                );
-            }
+            index_tab(
+                &mut self.buffer_tab_index,
+                &mut self.path_tab_index,
+                tab_index,
+                tab,
+            );
         }
     }
 
     pub(super) fn index_tab_buffers(&mut self, tab_index: usize) {
         self.path_index_generation = next_path_index_generation();
         if let Some(tab) = self.tabs.get(tab_index) {
-            for buffer in tab.buffers() {
-                self.buffer_tab_index.insert(buffer.id, tab_index);
-            }
-            let path_entries = tab_path_entries(tab_index, tab);
-            for (key, owner) in path_entries {
-                let previous = self.path_tab_index.insert(key.clone(), owner);
-                debug_assert!(
-                    previous.is_none() || previous == Some(owner),
-                    "duplicate CanonicalPathKey indexed for {}",
-                    key.as_path().display()
-                );
-            }
+            index_tab(
+                &mut self.buffer_tab_index,
+                &mut self.path_tab_index,
+                tab_index,
+                tab,
+            );
         }
     }
 
@@ -102,25 +91,13 @@ impl TabManager {
 
     pub(super) fn shift_buffer_tab_indices(&mut self, start_index: usize, delta: isize) {
         for tab_index in self.buffer_tab_index.values_mut() {
-            if *tab_index >= start_index {
-                if delta.is_positive() {
-                    *tab_index += delta as usize;
-                } else {
-                    *tab_index = tab_index.saturating_sub(delta.unsigned_abs());
-                }
-            }
+            *tab_index = shifted_tab_index(*tab_index, start_index.., delta);
         }
     }
 
     pub(super) fn shift_path_tab_indices(&mut self, start_index: usize, delta: isize) {
         for (_, tab_index, _) in self.path_tab_index.values_mut() {
-            if *tab_index >= start_index {
-                if delta.is_positive() {
-                    *tab_index += delta as usize;
-                } else {
-                    *tab_index = tab_index.saturating_sub(delta.unsigned_abs());
-                }
-            }
+            *tab_index = shifted_tab_index(*tab_index, start_index.., delta);
         }
     }
 
@@ -196,6 +173,26 @@ impl TabManager {
 
         self.tabs = deduped_tabs;
         self.active_tab_index = self.active_tab_index.min(self.tabs.len().saturating_sub(1));
+    }
+}
+
+/// Records the buffers and file paths `tab` owns at `tab_index`.
+fn index_tab(
+    buffer_tab_index: &mut HashMap<BufferId, usize>,
+    path_tab_index: &mut HashMap<CanonicalPathKey, (BufferId, usize, ViewId)>,
+    tab_index: usize,
+    tab: &WorkspaceTab,
+) {
+    for buffer in tab.buffers() {
+        buffer_tab_index.insert(buffer.id, tab_index);
+    }
+    for (key, owner) in tab_path_entries(tab_index, tab) {
+        let previous = path_tab_index.insert(key.clone(), owner);
+        debug_assert!(
+            previous.is_none() || previous == Some(owner),
+            "duplicate CanonicalPathKey indexed for {}",
+            key.as_path().display()
+        );
     }
 }
 

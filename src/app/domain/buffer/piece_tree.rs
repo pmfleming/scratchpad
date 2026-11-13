@@ -10,7 +10,7 @@ pub(super) mod preview;
 pub(crate) mod query;
 mod runtime;
 mod slice;
-pub use slice::{PieceTreeSlice, TryPieceTreeSlice};
+pub use slice::PieceTreeSlice;
 pub use storage::TextPin;
 mod persistence;
 mod storage;
@@ -232,6 +232,15 @@ struct PieceLineSample {
 }
 
 impl Piece {
+    fn byte_span(&self) -> ByteSpan {
+        ByteSpan {
+            buffer: self.buffer,
+            start_byte: self.start_byte as u64,
+            byte_len: self.byte_len as u64,
+            char_len: self.char_len as u64,
+        }
+    }
+
     fn from_slice(buffer: PieceBuffer, start_byte: usize, text: &str) -> Self {
         let metrics = measure_text(text);
         Self {

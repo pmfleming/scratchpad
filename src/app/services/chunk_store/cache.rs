@@ -121,7 +121,7 @@ impl Cache {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Arc, Cache, HashMap};
     #[test]
     fn indexed_cache_matches_reference_lru_under_touches_and_budget_changes() {
         let mut cache = Cache {

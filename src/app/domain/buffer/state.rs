@@ -192,23 +192,13 @@ impl BufferState {
     ) -> Self {
         let document =
             TextDocument::with_preferred_line_ending(content, text_metadata.preferred_line_ending);
-        Self::build(
-            next_buffer_id(),
+        Self::with_document_text_metadata_refresh_state(
+            name,
             document,
+            path,
+            format,
             text_metadata,
-            BufferBuildState {
-                path_key: path.as_deref().map(CanonicalPathKey::from_path),
-                name,
-                path,
-                is_dirty: false,
-                temp_id: next_temp_id(),
-                format,
-                disk_state: None,
-                freshness: BufferFreshness::InSync,
-                show_control_chars: false,
-                right_to_left_reading_order: false,
-                text_metadata_refresh_stale: false,
-            },
+            false,
         )
     }
 
@@ -499,10 +489,22 @@ impl BufferState {
     }
 
     pub fn undo_last_text_operation(&mut self) -> Option<CursorRange> {
+        self.replay_text_operation(TextDocument::undo_last_operation)
+    }
+
+    pub fn redo_last_text_operation(&mut self) -> Option<CursorRange> {
+        self.replay_text_operation(TextDocument::redo_last_operation)
+    }
+
+    /// Undoes or redoes one operation unless text preparation owns the document.
+    fn replay_text_operation(
+        &mut self,
+        replay: impl FnOnce(&mut TextDocument) -> Option<CursorRange>,
+    ) -> Option<CursorRange> {
         if self.is_preparing_text() {
             return None;
         }
-        let selection = self.document.undo_last_operation()?;
+        let selection = replay(&mut self.document)?;
         self.note_text_history_event(TextHistoryEvent::Replay);
         let latest_edit = self.document.latest_operation_record().cloned();
         self.refresh_text_metadata_after_operation(latest_edit.as_ref());
@@ -521,17 +523,6 @@ impl BufferState {
         self.refresh_text_metadata();
         self.mark_dirty_after_local_edit();
         Ok(selection)
-    }
-
-    pub fn redo_last_text_operation(&mut self) -> Option<CursorRange> {
-        if self.is_preparing_text() {
-            return None;
-        }
-        let selection = self.document.redo_last_operation()?;
-        self.note_text_history_event(TextHistoryEvent::Replay);
-        let latest_edit = self.document.latest_operation_record().cloned();
-        self.refresh_text_metadata_after_operation(latest_edit.as_ref());
-        Some(selection)
     }
 
     #[must_use]
@@ -597,20 +588,7 @@ fn next_buffer_id() -> BufferId {
 }
 
 pub(crate) fn register_existing_buffer_id(id: BufferId) {
-    let next_id = id.saturating_add(1);
-    let mut current = NEXT_BUFFER_ID.load(Ordering::Relaxed);
-
-    while current < next_id {
-        match NEXT_BUFFER_ID.compare_exchange(
-            current,
-            next_id,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => break,
-            Err(observed) => current = observed,
-        }
-    }
+    NEXT_BUFFER_ID.fetch_max(id.saturating_add(1), Ordering::Relaxed);
 }
 
 fn next_temp_id() -> String {
