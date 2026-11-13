@@ -22,27 +22,22 @@ impl TextDocument {
             return true;
         }
         let mut cost = 0usize;
-        for id in transition.undo.iter().chain(&transition.redo) {
-            if let Ok(index) = self.history.entries.binary_search_by_key(id, |e| e.id) {
-                let entry = &self.history.entries[index];
-                let mut spans = 0usize;
-                if entry.edits.iter().any(|edit| {
-                    spans = spans.saturating_add(match edit {
-                        PieceHistoryEdit::Inserted { .. } => 1,
-                        PieceHistoryEdit::Deleted { spans, .. } => spans.len(),
-                        PieceHistoryEdit::Replaced { deleted, .. } => deleted.len() + 1,
-                    });
-                    spans > 256
-                }) {
-                    return true;
-                }
+        transition
+            .undo
+            .iter()
+            .chain(&transition.redo)
+            .filter_map(|id| {
+                let index = self
+                    .history
+                    .entries
+                    .binary_search_by_key(id, |e| e.id)
+                    .ok()?;
+                Some(&self.history.entries[index])
+            })
+            .any(|entry| {
                 cost = cost.saturating_add(entry.byte_cost());
-                if cost >= 256 * 1024 {
-                    return true;
-                }
-            }
-        }
-        false
+                replay_span_count(entry) > 256 || cost >= 256 * 1024
+            })
     }
 
     #[must_use]
@@ -331,4 +326,15 @@ impl TextDocument {
         self.seal_history_group();
         true
     }
+}
+
+/// Stored spans an entry's replay must visit.
+fn replay_span_count(entry: &PieceHistoryEntry) -> usize {
+    entry.edits.iter().fold(0usize, |spans, edit| {
+        spans.saturating_add(match edit {
+            PieceHistoryEdit::Inserted { .. } => 1,
+            PieceHistoryEdit::Deleted { spans, .. } => spans.len(),
+            PieceHistoryEdit::Replaced { deleted, .. } => deleted.len() + 1,
+        })
+    })
 }

@@ -1,6 +1,6 @@
 use super::{
     ByteSpan, Piece, PieceBuffer, PieceTreeAnchorState, PieceTreeLite, PieceTreeRuntime,
-    PieceTreeStorage, StorageBlock, StorageCapture, build_root_from_pieces, io,
+    PieceTreeStorage, StorageBlock, StorageCapture, build_root_from_pieces, io, slice::Pieces,
 };
 use crate::app::services::chunk_store::ChunkStoreHandle;
 
@@ -46,42 +46,12 @@ impl PieceTreeLite {
         let address = self.find_leaf_for_char_offset(range.start);
         let mut position = address.leaf_start_char;
         let mut spans = Vec::new();
-        for piece in self
-            .root
-            .nodes
-            .iter()
-            .enumerate()
-            .skip(address.node_index)
-            .flat_map(|(index, n)| {
-                n.leaves.iter().skip(if index == address.node_index {
-                    address.leaf_index
-                } else {
-                    0
-                })
-            })
-            .flat_map(|l| &l.pieces)
-        {
+        for piece in Pieces::new(self, address.node_index, address.leaf_index) {
             let end = position + piece.char_len;
             let lo = range.start.max(position);
             let hi = range.end.min(end);
             if lo < hi {
-                let (start, bytes) = if lo == position && hi == end {
-                    (piece.start_byte, piece.byte_len)
-                } else if piece.is_ascii {
-                    (piece.start_byte + lo - position, hi - lo)
-                } else {
-                    let text = self.storage.try_text_for_span(piece.byte_span(), false)?;
-                    let boundary = |n| text.char_indices().nth(n).map_or(text.len(), |(b, _)| b);
-                    let a = boundary(lo - position);
-                    let b = boundary(hi - position);
-                    (piece.start_byte + a, b - a)
-                };
-                spans.push(ByteSpan {
-                    buffer: piece.buffer,
-                    start_byte: start as u64,
-                    byte_len: bytes as u64,
-                    char_len: (hi - lo) as u64,
-                });
+                spans.push(self.piece_reference_span(piece, lo - position..hi - position)?);
             }
             position = end;
             if position >= range.end {
@@ -89,6 +59,31 @@ impl PieceTreeLite {
             }
         }
         Ok(spans)
+    }
+
+    /// The stored bytes behind the piece-relative character range `chars`.
+    /// Only a partial non-ASCII piece has to read its text to find them.
+    fn piece_reference_span(
+        &self,
+        piece: &Piece,
+        chars: std::ops::Range<usize>,
+    ) -> io::Result<ByteSpan> {
+        let (offset, byte_len) = if chars == (0..piece.char_len) {
+            (0, piece.byte_len)
+        } else if piece.is_ascii {
+            (chars.start, chars.len())
+        } else {
+            let text = self.storage.try_text_for_span(piece.byte_span(), false)?;
+            let boundary = |n| text.char_indices().nth(n).map_or(text.len(), |(b, _)| b);
+            let start = boundary(chars.start);
+            (start, boundary(chars.end) - start)
+        };
+        Ok(ByteSpan {
+            buffer: piece.buffer,
+            start_byte: (piece.start_byte + offset) as u64,
+            byte_len: byte_len as u64,
+            char_len: chars.len() as u64,
+        })
     }
 
     pub(crate) fn display_line_count(&self) -> usize {
