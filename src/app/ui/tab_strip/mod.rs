@@ -9,7 +9,6 @@ mod top_drag;
 
 use crate::app::app_state::{ScratchpadApp, frame};
 use eframe::egui;
-use std::collections::HashSet;
 
 pub(crate) use layout::HeaderLayout;
 pub(crate) use tab_cell::{TabInteraction, render_tab_cell_sized};
@@ -109,17 +108,6 @@ pub(crate) fn maybe_scroll_to_active_tab(
     if index == active_tab_index && pending_scroll_to_active {
         ui.scroll_to_rect(rect, Some(egui::Align::Center));
         outcome.consumed_scroll_request = true;
-    }
-}
-
-pub(crate) fn record_visible_tab(
-    index: usize,
-    rect: egui::Rect,
-    viewport_rect: egui::Rect,
-    visible_tab_indices: &mut HashSet<usize>,
-) {
-    if viewport_rect.intersects(rect) {
-        visible_tab_indices.insert(index);
     }
 }
 
