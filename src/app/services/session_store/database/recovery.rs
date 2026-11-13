@@ -1,5 +1,7 @@
+use super::recovery_text::RecoveredText;
 use super::{Database, error, invalid, quarantine::length_damage_id};
 use crate::app::domain::TextDocument;
+use crate::app::domain::buffer::{PieceHistoryEdit, PieceHistoryEntry};
 use crate::app::services::session_store::{
     RestoreStatus, RestoreStatusLevel,
     recovery::{RECOVERY_LIMIT, RecoveryItem, RecoveryPreview},
@@ -116,20 +118,7 @@ impl Database {
             u64::try_from(now).map_err(invalid)?,
             u64::try_from(tip).map_err(invalid)?,
         )?;
-        let mut verified_bytes = 0u64;
-        for span in entries
-            .iter()
-            .flat_map(|e| &e.edits)
-            .flat_map(|e| e.spans())
-        {
-            verified_bytes = verified_bytes.saturating_add(span.byte_len);
-            if verified_bytes > (RECOVERY_LIMIT * 32) as u64 {
-                return Err(invalid("history verification budget exceeded"));
-            }
-            recovered
-                .span(span)
-                .ok_or_else(|| invalid("history text could not be verified"))?;
-        }
+        verify_history_spans(&recovered, &entries)?;
         verify_replay(&recovered, &entries, now as u64)?;
         Ok(recovered.text.len() as i64)
     }
@@ -171,13 +160,60 @@ impl Database {
     }
 }
 
+/// Bounds the total bytes read while verifying or replaying one document's history.
+const VERIFICATION_BUDGET: usize = RECOVERY_LIMIT * 32;
+
+/// Every span referenced by the history must be present as verified text.
+fn verify_history_spans(
+    recovered: &RecoveredText,
+    entries: &[PieceHistoryEntry],
+) -> io::Result<()> {
+    let mut verified_bytes = 0u64;
+    for span in entries
+        .iter()
+        .flat_map(|e| &e.edits)
+        .flat_map(|e| e.spans())
+    {
+        verified_bytes = verified_bytes.saturating_add(span.byte_len);
+        if verified_bytes > VERIFICATION_BUDGET as u64 {
+            return Err(invalid("history verification budget exceeded"));
+        }
+        recovered
+            .span(span)
+            .ok_or_else(|| invalid("history text could not be verified"))?;
+    }
+    Ok(())
+}
+
 fn verify_replay(
-    recovered: &super::recovery_text::RecoveredText,
-    entries: &[crate::app::domain::buffer::PieceHistoryEntry],
+    recovered: &RecoveredText,
+    entries: &[PieceHistoryEntry],
     now: u64,
 ) -> io::Result<()> {
     // Independently replay the route from the empty root to Now. This rules out a
     // missing final metadata part that happens to leave structurally valid pieces.
+    let mut text = String::new();
+    let mut work = 0usize;
+    for entry in route_to(entries, now)?.into_iter().rev() {
+        if !entry.flags.replayable {
+            return Err(invalid("history is not replayable"));
+        }
+        for edit in &entry.edits {
+            work = work.saturating_add(text.len());
+            if work > VERIFICATION_BUDGET {
+                return Err(invalid("history verification budget exceeded"));
+            }
+            replay_edit(recovered, &mut text, edit)?;
+        }
+    }
+    if text != recovered.text {
+        return Err(invalid("history and current text disagree"));
+    }
+    Ok(())
+}
+
+/// Entries from `now` back to (excluding) the empty root.
+fn route_to(entries: &[PieceHistoryEntry], now: u64) -> io::Result<Vec<&PieceHistoryEntry>> {
     let by_id: HashMap<_, _> = entries.iter().map(|e| (e.id, e)).collect();
     let mut route = Vec::new();
     let mut at = now;
@@ -191,58 +227,46 @@ fn verify_replay(
         route.push(*entry);
         at = entry.parent_id;
     }
-    let mut text = String::new();
-    let mut work = 0usize;
-    for entry in route.into_iter().rev() {
-        if !entry.flags.replayable {
-            return Err(invalid("history is not replayable"));
-        }
-        for edit in &entry.edits {
-            work = work.saturating_add(text.len());
-            if work > RECOVERY_LIMIT * 32 {
-                return Err(invalid("history verification budget exceeded"));
-            }
-            let mut deleted = String::new();
-            for span in edit.deleted_spans() {
-                deleted.push_str(
-                    &recovered
-                        .span(*span)
-                        .ok_or_else(|| invalid("missing deleted text"))?,
-                );
-                if deleted.len() > RECOVERY_LIMIT {
-                    return Err(invalid("history edit exceeds recovery limit"));
-                }
-            }
-            let inserted = edit
-                .inserted_span()
-                .map(|s| {
-                    recovered
-                        .span(s)
-                        .ok_or_else(|| invalid("missing inserted text"))
-                })
-                .transpose()?
-                .unwrap_or_default();
-            let char_start = usize::try_from(edit.start_char()).map_err(invalid)?;
-            let start = text
-                .char_indices()
-                .map(|(i, _)| i)
-                .chain(std::iter::once(text.len()))
-                .nth(char_start)
-                .ok_or_else(|| invalid("history range outside text"))?;
-            let end = start
-                .checked_add(deleted.len())
-                .ok_or_else(|| invalid("history range overflow"))?;
-            if text.get(start..end) != Some(deleted.as_str()) {
-                return Err(invalid("history does not match text"));
-            }
-            if text.len() - deleted.len() + inserted.len() > RECOVERY_LIMIT {
-                return Err(invalid("history exceeds recovery limit"));
-            }
-            text.replace_range(start..end, &inserted);
+    Ok(route)
+}
+
+fn replay_edit(
+    recovered: &RecoveredText,
+    text: &mut String,
+    edit: &PieceHistoryEdit,
+) -> io::Result<()> {
+    let mut deleted = String::new();
+    for span in edit.deleted_spans() {
+        let part = recovered
+            .span(*span)
+            .ok_or_else(|| invalid("missing deleted text"))?;
+        deleted.push_str(&part);
+        if deleted.len() > RECOVERY_LIMIT {
+            return Err(invalid("history edit exceeds recovery limit"));
         }
     }
-    if text != recovered.text {
-        return Err(invalid("history and current text disagree"));
+    let inserted = match edit.inserted_span() {
+        Some(span) => recovered
+            .span(span)
+            .ok_or_else(|| invalid("missing inserted text"))?,
+        None => String::new(),
+    };
+    let char_start = usize::try_from(edit.start_char()).map_err(invalid)?;
+    let start = text
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain(std::iter::once(text.len()))
+        .nth(char_start)
+        .ok_or_else(|| invalid("history range outside text"))?;
+    let end = start
+        .checked_add(deleted.len())
+        .ok_or_else(|| invalid("history range overflow"))?;
+    if text.get(start..end) != Some(deleted.as_str()) {
+        return Err(invalid("history does not match text"));
     }
+    if text.len() - deleted.len() + inserted.len() > RECOVERY_LIMIT {
+        return Err(invalid("history exceeds recovery limit"));
+    }
+    text.replace_range(start..end, &inserted);
     Ok(())
 }
