@@ -118,17 +118,9 @@ impl TextDocument {
         text: &str,
         context: &crate::app::services::chunk_store::ImportContext,
     ) -> io::Result<Self> {
-        let tree = PieceTreeLite::import_utf8_text(text, context)?;
-        let mut document = Self {
-            identity: next_document_identity(),
-            content: TextDocumentContentState {
-                piece_tree: Arc::new(tree),
-                preferred_line_ending: platform_default_line_ending(),
-            },
-            history: TextDocumentHistoryState::default(),
-        };
-        document.record_initial_content();
-        Ok(document)
+        Ok(Self::from_imported_tree(PieceTreeLite::import_utf8_text(
+            text, context,
+        )?))
     }
 
     pub(crate) fn import_utf8_file(
@@ -137,6 +129,11 @@ impl TextDocument {
         context: &crate::app::services::chunk_store::ImportContext,
     ) -> io::Result<(Self, super::StreamedTextInspection)> {
         let (piece_tree, inspection) = PieceTreeLite::import_utf8_file(path, offset, context)?;
+        Ok((Self::from_imported_tree(piece_tree), inspection))
+    }
+
+    /// A new document over imported text, with that text as its initial history.
+    fn from_imported_tree(piece_tree: PieceTreeLite) -> Self {
         let mut document = Self {
             identity: next_document_identity(),
             content: TextDocumentContentState {
@@ -146,7 +143,7 @@ impl TextDocument {
             history: TextDocumentHistoryState::default(),
         };
         document.record_initial_content();
-        Ok((document, inspection))
+        document
     }
     pub fn bind_store(
         &mut self,

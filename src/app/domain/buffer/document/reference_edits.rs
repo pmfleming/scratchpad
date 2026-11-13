@@ -1,11 +1,8 @@
 //! Bulk edits retain references and small labels; deleted text is never flattened.
-use super::super::{
-    ByteSpan, PieceHistoryEdits, PieceHistoryFlags, next_text_history_global_seq,
-    normalize_inserted_text_line_endings,
-};
+use super::super::{ByteSpan, PieceHistoryEdits, normalize_inserted_text_line_endings};
 use super::{
-    CursorRange, PieceHistoryEdit, PieceHistoryEntry, PieceSource, TextDocument,
-    TextDocumentEditOperation, TextDocumentOperationRecord, TextReplacementError, TextReplacements,
+    CursorRange, PieceHistoryEdit, PieceSource, TextDocument, TextDocumentEditOperation,
+    TextDocumentOperationRecord, TextReplacementError, TextReplacements,
 };
 use std::ops::Range;
 impl TextDocument {
@@ -145,25 +142,7 @@ impl TextDocument {
         source: PieceSource,
         summary: String,
     ) {
-        let entry = PieceHistoryEntry {
-            id: self.history.next_id,
-            parent_id: self.history.tree.now(),
-            edited_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            global_seq: next_text_history_global_seq(),
-            source,
-            summary,
-            edits,
-            flags: PieceHistoryFlags {
-                undone: false,
-                replayable: true,
-            },
-            previous_selection: previous,
-            next_selection: next,
-        };
-        self.history.next_id = self.history.next_id.saturating_add(1);
+        let entry = self.new_history_entry(source, summary, edits, previous, next);
         self.history.byte_usage += entry.byte_cost();
         assert!(self.history.tree.append(entry.id));
         self.history.entries.push(entry);

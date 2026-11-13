@@ -158,28 +158,26 @@ impl TextFormatMetadata {
 mod tests {
     use super::{EncodingSource, TextFormatMetadata};
 
-    #[test]
-    fn encoding_label_names_known_windows_ansi_encoding() {
-        let format = TextFormatMetadata::detected(
-            "plain",
-            "windows-1252".to_owned(),
+    fn heuristic(text: &str, encoding: &str, decoding_warnings: bool) -> TextFormatMetadata {
+        TextFormatMetadata::detected(
+            text,
+            encoding.to_owned(),
             false,
             EncodingSource::Heuristic,
-            false,
-        );
+            decoding_warnings,
+        )
+    }
+
+    #[test]
+    fn encoding_label_names_known_windows_ansi_encoding() {
+        let format = heuristic("plain", "windows-1252", false);
 
         assert_eq!(format.encoding_label(), "Windows-1252 (ANSI)");
     }
 
     #[test]
     fn format_warning_text_combines_format_warnings() {
-        let format = TextFormatMetadata::detected(
-            "a\r\nb\n",
-            "UTF-8".to_owned(),
-            false,
-            EncodingSource::Heuristic,
-            true,
-        );
+        let format = heuristic("a\r\nb\n", "UTF-8", true);
 
         assert_eq!(
             format.format_warning_text(),
