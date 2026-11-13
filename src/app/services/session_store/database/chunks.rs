@@ -277,8 +277,11 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::super::{DatabaseWorker, ReadScope};
-    use super::*;
+    use super::MAX_CHUNK_BATCH_BYTES;
+    use crate::app::services::chunk_store::Health;
     use futures_lite::future::block_on;
+    use std::sync::Arc;
+    use turso::params;
 
     #[test]
     fn bounded_scan_cache_keeps_viewport_separate_and_eviction_preserves_pins() {

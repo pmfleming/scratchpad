@@ -156,9 +156,10 @@ fn write_buffer(writer: &mut impl Write, buffer: &SessionBuffer) -> io::Result<(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::SessionStore;
     use crate::app::domain::{BufferState, PersistedHistoryEntry, WorkspaceTab};
     use crate::app::services::session_store::{CapturedClosedTab, SessionPersistRequest};
+    use std::fs;
     #[test]
     fn export_includes_closed_retained_text_and_exact_history_without_consuming_the_archive() {
         let root = tempfile::tempdir().unwrap();

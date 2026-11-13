@@ -143,7 +143,10 @@ fn length_mismatch_with_damaged_or_disagreeing_history_is_not_repaired() {
             exec(&db, "UPDATE document_pieces SET bytes=90").await;
             exec(&db, history_damage).await;
             let error = damaged(&id, LENGTH_MISMATCH);
-            assert!(!db.repair_length_error(&error).await.unwrap(), "{history_damage}");
+            assert!(
+                !db.repair_length_error(&error).await.unwrap(),
+                "{history_damage}"
+            );
             assert_eq!(scalar(&db, "SELECT bytes FROM document_pieces").await, 90);
             assert!(db.startup_notices.is_empty());
         }

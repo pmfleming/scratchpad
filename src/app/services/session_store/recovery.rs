@@ -83,7 +83,7 @@ impl SessionStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{RecoveryItem, RecoveryPreview};
 
     #[test]
     fn exports_are_exclusive_and_disk_comparison_preserves_both_versions() {

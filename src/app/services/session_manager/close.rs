@@ -165,8 +165,8 @@ pub(super) fn retain_ram_close(app: &mut ScratchpadApp, index: usize, view: Opti
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::app::app_state::{test_support, workspace::lifecycle};
+    use crate::app::domain::WorkspaceTab;
     #[test]
     fn close_during_a_writer_pause_keeps_a_newer_edit_and_a_later_close_commits_it() {
         let root = tempfile::tempdir().unwrap();
