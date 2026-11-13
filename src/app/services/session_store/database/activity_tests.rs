@@ -1,6 +1,6 @@
 use super::{
     Database, error,
-    tests::{database, request, tab},
+    test_fixture::{database, request, scalar, tab},
 };
 use crate::app::{
     app_state::{test_support, workspace_controller},
@@ -33,14 +33,9 @@ fn activity_alone_commits_and_repeated_captures_are_idempotent() {
             assert!(profile.manifest_write_ns > 0);
             assert_eq!(profile.snapshot_bytes_read, 0);
             assert_eq!(profile.snapshot_bytes_hashed, 0);
+            assert_eq!(scalar(&db, "SELECT count(*) FROM activity").await, 1);
             assert_eq!(
-                db.integer("SELECT count(*) FROM activity").await.unwrap(),
-                1
-            );
-            assert_eq!(
-                db.integer("SELECT edit_seq FROM document_history")
-                    .await
-                    .unwrap(),
+                scalar(&db, "SELECT edit_seq FROM document_history").await,
                 recency
             );
         }
@@ -71,10 +66,7 @@ fn activity_and_document_changes_roll_back_together_when_a_reference_is_missing(
         let mut save = request(&tabs);
         save.activity.push(event);
         assert!(db.persist(save, 2).await.is_err());
-        assert_eq!(
-            db.integer("SELECT count(*) FROM activity").await.unwrap(),
-            0
-        );
+        assert_eq!(scalar(&db, "SELECT count(*) FROM activity").await, 0);
         assert_eq!(
             db.read_all_contents().await.unwrap()[&tabs[0].active_buffer().temp_id],
             "before"
@@ -412,9 +404,7 @@ fn replace_operation_and_group_members_survive_database_reopen() {
         );
         assert_eq!(rows[0].summary, "Replace all · 3 matches in 2 files");
         assert_eq!(
-            db.integer("SELECT count(*) FROM replace_operations")
-                .await
-                .unwrap(),
+            scalar(&db, "SELECT count(*) FROM replace_operations").await,
             1
         );
     });

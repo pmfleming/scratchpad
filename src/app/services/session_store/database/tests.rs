@@ -1,43 +1,8 @@
+use super::test_fixture::{database, exec, insert, request, scalar, tab};
 use super::{Database, DatabaseWorker, ReadScope};
-use crate::app::domain::{BufferState, CharCursor, CursorRange, SplitAxis, WorkspaceTab};
+use crate::app::domain::SplitAxis;
 use crate::app::services::session_store::{SessionPersistRequest, model::SessionPaneNode};
 use futures_lite::future::block_on;
-
-pub(super) fn tab(text: &str) -> WorkspaceTab {
-    WorkspaceTab::new(BufferState::new("note".into(), text.into(), None))
-}
-pub(super) fn request(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
-    let mut request = SessionPersistRequest::capture(tabs, 0, 16.0, false);
-    // Materialize test fixtures explicitly so malformed-row tests can alter them.
-    for buffer in request
-        .tabs
-        .iter_mut()
-        .flat_map(|tab| &mut tab.session_tab.buffers)
-    {
-        if let Some(capture) = buffer.history_capture.take() {
-            buffer.text_history = (0..capture.len())
-                .map(|i| capture.entry(i).unwrap())
-                .collect();
-        }
-    }
-    request
-}
-pub(super) fn insert(tab: &mut WorkspaceTab, at: usize, text: &str) {
-    tab.buffers
-        .buffer
-        .document_mut()
-        .replace_char_ranges_with_undo(
-            &[(at..at, text.into())],
-            CursorRange::one(CharCursor::new(at)),
-            CursorRange::one(CharCursor::new(at + text.chars().count())),
-        )
-        .unwrap();
-}
-pub(super) async fn database() -> (tempfile::TempDir, Database) {
-    let root = tempfile::tempdir().unwrap();
-    let db = Database::open(root.path()).await.unwrap();
-    (root, db)
-}
 
 #[test]
 fn writer_retries_a_busy_transaction_until_the_other_connection_releases_it() {
@@ -49,7 +14,7 @@ fn writer_retries_a_busy_transaction_until_the_other_connection_releases_it() {
         assert!(futures_lite::future::poll_once(&mut begin).await.is_none());
         other.execute("ROLLBACK", ()).await.unwrap();
         begin.await.unwrap();
-        db.conn.execute("ROLLBACK", ()).await.unwrap();
+        exec(&db, "ROLLBACK").await;
         assert!(db.conn.is_autocommit().unwrap());
     });
 }
@@ -75,8 +40,8 @@ fn writer_busy_wait_is_bounded_and_can_be_retried_after_timeout() {
         );
         assert!(db.conn.is_autocommit().unwrap());
         other.execute("ROLLBACK", ()).await.unwrap();
-        db.conn.execute("BEGIN IMMEDIATE", ()).await.unwrap();
-        db.conn.execute("ROLLBACK", ()).await.unwrap();
+        exec(&db, "BEGIN IMMEDIATE").await;
+        exec(&db, "ROLLBACK").await;
     });
 }
 
@@ -154,9 +119,9 @@ fn unchanged_and_metadata_only_commits_never_rewrite_content_or_history() {
         let mut tabs = vec![tab("unchanged")];
         insert(&mut tabs[0], 0, "history");
         db.persist(request(&tabs), 1).await.unwrap();
-        db.conn.execute_batch("CREATE TRIGGER no_content_write BEFORE INSERT ON chunk_bodies BEGIN SELECT RAISE(ABORT, 'content rewritten'); END;
+        exec(&db, "CREATE TRIGGER no_content_write BEFORE INSERT ON chunk_bodies BEGIN SELECT RAISE(ABORT, 'content rewritten'); END;
             CREATE TRIGGER no_history_write BEFORE INSERT ON history BEGIN SELECT RAISE(ABORT, 'history rewritten'); END;
-            CREATE TRIGGER no_tab_write BEFORE INSERT ON tabs BEGIN SELECT RAISE(ABORT, 'tab rewritten'); END;").await.unwrap();
+            CREATE TRIGGER no_tab_write BEFORE INSERT ON tabs BEGIN SELECT RAISE(ABORT, 'tab rewritten'); END;").await;
         let unchanged = db.persist(request(&tabs), 2).await.unwrap();
         assert_eq!(unchanged.manifest_write_ns, 0);
         let mut captured = request(&tabs);
@@ -327,7 +292,7 @@ fn existing_page_formats_preserve_exact_reopen() {
             }
             let mut db = Database::open(root.path()).await.unwrap();
             let expected = seeded_page_size.unwrap_or(4096);
-            assert_eq!(db.integer("PRAGMA page_size").await.unwrap(), expected);
+            assert_eq!(scalar(&db, "PRAGMA page_size").await, expected);
             let text = "café 東京\n".repeat(50_000);
             let mut tabs = vec![tab(&text)];
             insert(&mut tabs[0], 0, "recorded edit\n");
@@ -349,10 +314,7 @@ fn existing_page_formats_preserve_exact_reopen() {
             db.checkpoint().await.unwrap();
             drop(db);
             let mut reopened = Database::open(root.path()).await.unwrap();
-            assert_eq!(
-                reopened.integer("PRAGMA page_size").await.unwrap(),
-                expected
-            );
+            assert_eq!(scalar(&reopened, "PRAGMA page_size").await, expected);
             assert_eq!(
                 reopened
                     .load(ReadScope::All)

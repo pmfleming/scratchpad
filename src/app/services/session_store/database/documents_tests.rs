@@ -1,6 +1,6 @@
 use super::{
     Database, ReadScope,
-    tests::{database, insert, request, tab},
+    test_fixture::{database, exec, insert, request, scalar, tab},
 };
 use crate::app::{domain::SplitAxis, services::session_store::CapturedClosedTab};
 use futures_lite::future::block_on;
@@ -170,10 +170,7 @@ fn warm_saves_do_not_read_unrelated_closed_layout_payloads() {
             .closed_tabs
             .push(CapturedClosedTab::capture(&tab("closed"), None));
         db.persist(close, 1).await.unwrap();
-        db.conn
-            .execute("UPDATE layouts SET root_pane='bad'", ())
-            .await
-            .unwrap();
+        exec(&db, "UPDATE layouts SET root_pane='bad'").await;
         // An unrelated corrupt archive is preserved; selecting it reports its error.
         db.persist(request(&[tab("live")]), 2).await.unwrap();
         assert!(db.closed_rows().await.is_err());
@@ -188,9 +185,7 @@ fn root_and_nonroot_references_are_constrained_and_layout_indexes_are_validated(
         let id = live.active_buffer().temp_id.clone();
         db.persist(request(&[live]), 1).await.unwrap();
         assert_eq!(
-            db.integer("SELECT count(*) FROM history_nodes WHERE node_id=0")
-                .await
-                .unwrap(),
+            scalar(&db, "SELECT count(*) FROM history_nodes WHERE node_id=0").await,
             1
         );
         assert!(
@@ -311,38 +306,34 @@ fn a_cursor_move_updates_one_view_and_closing_the_first_tab_preserves_layouts() 
         let mut tabs = vec![tab("one"), tab("two"), tab("three")];
         db.persist(request(&tabs), 1).await.unwrap();
         let ids: Vec<_> = tabs.iter().map(|t| t.layout_id).collect();
-        db.conn.execute_batch("CREATE TABLE metadata_writes(kind TEXT) STRICT;
+        exec(&db, "CREATE TABLE metadata_writes(kind TEXT) STRICT;
             CREATE TRIGGER layout_update AFTER UPDATE ON layouts BEGIN INSERT INTO metadata_writes VALUES('layout'); END;
             CREATE TRIGGER view_update AFTER UPDATE ON layout_views BEGIN INSERT INTO metadata_writes VALUES('view'); END;
             CREATE TRIGGER document_update AFTER UPDATE ON documents BEGIN INSERT INTO metadata_writes VALUES('document'); END;
-            CREATE TRIGGER state_update AFTER UPDATE ON session_state BEGIN INSERT INTO metadata_writes VALUES('state'); END;").await.unwrap();
+            CREATE TRIGGER state_update AFTER UPDATE ON session_state BEGIN INSERT INTO metadata_writes VALUES('state'); END;").await;
         tabs[1].layout.views_mut()[0].cursor_range = Some(CursorRange::one(CharCursor::new(2)));
         db.persist(request(&tabs), 2).await.unwrap();
+        assert_eq!(scalar(&db, "SELECT count(*) FROM metadata_writes").await, 1);
         assert_eq!(
-            db.integer("SELECT count(*) FROM metadata_writes")
-                .await
-                .unwrap(),
+            scalar(
+                &db,
+                "SELECT count(*) FROM metadata_writes WHERE kind='view'"
+            )
+            .await,
             1
         );
-        assert_eq!(
-            db.integer("SELECT count(*) FROM metadata_writes WHERE kind='view'")
-                .await
-                .unwrap(),
-            1
-        );
-        db.conn
-            .execute("DELETE FROM metadata_writes", ())
-            .await
-            .unwrap();
+        exec(&db, "DELETE FROM metadata_writes").await;
         let closed = tabs.remove(0);
         let mut save = request(&tabs);
         save.closed_tabs
             .push(CapturedClosedTab::capture(&closed, None));
         db.persist(save, 3).await.unwrap();
         assert_eq!(
-            db.integer("SELECT count(*) FROM metadata_writes WHERE kind<>'state'")
-                .await
-                .unwrap(),
+            scalar(
+                &db,
+                "SELECT count(*) FROM metadata_writes WHERE kind<>'state'"
+            )
+            .await,
             0
         );
         let restored = db.load(ReadScope::All).await.unwrap().unwrap();

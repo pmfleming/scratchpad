@@ -50,6 +50,8 @@ mod schema_reset_tests;
 #[cfg(test)]
 mod size_tests;
 #[cfg(test)]
+mod test_fixture;
+#[cfg(test)]
 mod tests;
 mod timeline;
 #[cfg(test)]

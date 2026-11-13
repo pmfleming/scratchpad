@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn bounded_scan_cache_keeps_viewport_separate_and_eviction_preserves_pins() {
         block_on(async {
-            let (_root, mut db) = super::super::tests::database().await;
+            let (_root, mut db) = super::super::test_fixture::database().await;
             let store = db.chunk_store().unwrap();
             store.set_limits(0, 0);
             store.set_scan_limits(8192, 8192);
@@ -316,7 +316,7 @@ mod tests {
     #[test]
     fn mixed_chunk_batches_preserve_fifo_and_bound_committed_bytes() {
         block_on(async {
-            let (_root, mut db) = super::super::tests::database().await;
+            let (_root, mut db) = super::super::test_fixture::database().await;
             let store = db.chunk_store().unwrap();
             let chunks: Vec<_> = (0..20)
                 .map(|index| {
@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn deduplication_never_releases_accepted_ram_against_a_corrupt_body() {
         block_on(async {
-            let (_root, mut db) = super::super::tests::database().await;
+            let (_root, mut db) = super::super::test_fixture::database().await;
             let store = db.chunk_store().unwrap();
             store.set_limits(0, 0);
             let text = "accepted λ🦀".repeat(4096);

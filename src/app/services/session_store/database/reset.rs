@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn newer_session_is_backed_up_and_replaced_only_on_request() {
-        use super::super::tests::{request, tab};
+        use super::super::test_fixture::{request, tab};
         use crate::app::services::session_store::SessionStore;
         let root = tempfile::tempdir().unwrap();
         let store = SessionStore::new(root.path().to_owned());
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn replacing_an_open_store_retires_stale_clones_and_retains_ownership() {
-        use super::super::tests::{request, tab};
+        use super::super::test_fixture::{request, tab};
         use crate::app::services::session_store::SessionStore;
         let root = tempfile::tempdir().unwrap();
         let mut store = SessionStore::new(root.path().to_owned());
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn another_owner_prevents_reset() {
-        use super::super::tests::{request, tab};
+        use super::super::test_fixture::{request, tab};
         use crate::app::services::session_store::SessionStore;
         let root = tempfile::tempdir().unwrap();
         let owner = SessionStore::new(root.path().to_owned());

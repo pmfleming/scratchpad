@@ -1,22 +1,21 @@
 use super::{
     Database,
-    tests::{database, insert, tab},
+    test_fixture::{capture, database, insert, scalar, tab},
 };
-use crate::app::services::session_store::{CapturedClosedTab, SessionPersistRequest};
+use crate::app::services::session_store::CapturedClosedTab;
 use futures_lite::future::block_on;
-fn request(tabs: &[crate::app::domain::WorkspaceTab]) -> SessionPersistRequest {
-    SessionPersistRequest::capture(tabs, 0, 14.0, false)
-}
 async fn assert_sizes(db: &Database) {
-    assert_eq!(db.integer("SELECT count(*) FROM chunks c JOIN chunk_bodies b ON b.chunk_id=c.id WHERE c.byte_len!=length(b.body)").await.unwrap(),0);
+    assert_eq!(scalar(db, "SELECT count(*) FROM chunks c JOIN chunk_bodies b ON b.chunk_id=c.id WHERE c.byte_len!=length(b.body)").await,0);
     let usage = db.stored_usage().await.unwrap();
     assert_eq!(
         usage.undo,
-        db.integer("SELECT coalesce(sum(bytes),0) FROM history INDEXED BY history_sizes")
-            .await
-            .unwrap() as u64
+        scalar(
+            db,
+            "SELECT coalesce(sum(bytes),0) FROM history INDEXED BY history_sizes"
+        )
+        .await as u64
     );
-    assert_eq!(usage.live_text+usage.unreferenced_text,db.integer("SELECT (SELECT coalesce(sum(byte_len),0) FROM chunks INDEXED BY chunk_sizes)+(SELECT coalesce(sum(length(body)),0) FROM document_tail)").await.unwrap() as u64);
+    assert_eq!(usage.live_text+usage.unreferenced_text,scalar(db, "SELECT (SELECT coalesce(sum(byte_len),0) FROM chunks INDEXED BY chunk_sizes)+(SELECT coalesce(sum(length(body)),0) FROM document_tail)").await as u64);
 }
 #[test]
 fn sizes_track_writes_coalescing_undo_and_shared_recovery_chunks() {
@@ -25,7 +24,7 @@ fn sizes_track_writes_coalescing_undo_and_shared_recovery_chunks() {
         let mut live = vec![tab("base")];
         for generation in 1..=3 {
             insert(&mut live[0], 0, &"λ".repeat(generation as usize * 10_000));
-            db.persist(request(&live), generation).await.unwrap();
+            db.persist(capture(&live), generation).await.unwrap();
             assert_sizes(&db).await;
         }
         live[0]
@@ -33,9 +32,9 @@ fn sizes_track_writes_coalescing_undo_and_shared_recovery_chunks() {
             .document_mut()
             .undo_last_operation()
             .unwrap();
-        db.persist(request(&live), 4).await.unwrap();
+        db.persist(capture(&live), 4).await.unwrap();
         assert_sizes(&db).await;
-        let mut close = request(&[]);
+        let mut close = capture(&[]);
         close
             .closed_tabs
             .push(CapturedClosedTab::capture(&live[0], None));
@@ -48,8 +47,8 @@ fn bulk_usage_matches_reference_accounting_for_archives_and_all_chunk_classes() 
     block_on(async {
         let (_root, mut db) = database().await;
         let live = vec![tab("live"), tab("archived")];
-        db.persist(request(&live), 1).await.unwrap();
-        let mut close = request(&live[..1]);
+        db.persist(capture(&live), 1).await.unwrap();
+        let mut close = capture(&live[..1]);
         close
             .closed_tabs
             .push(CapturedClosedTab::capture(&live[1], None));
@@ -108,7 +107,7 @@ fn profile_payload_lengths_against_covering_byte_counts() {
     block_on(async {
         let (_root, mut db) = database().await;
         let tabs = vec![tab(&"abcdefgh".repeat(8 * 1024 * 1024))];
-        db.persist(request(&tabs), 1).await.unwrap();
+        db.persist(capture(&tabs), 1).await.unwrap();
         let start = std::time::Instant::now();
         let usage = db.stored_usage().await.unwrap();
         eprintln!(
