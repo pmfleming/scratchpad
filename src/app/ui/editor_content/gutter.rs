@@ -191,21 +191,59 @@ fn max_gutter_line_number(
 
 #[cfg(test)]
 mod tests {
-    use super::{fallback_gutter_row_range, gutter_digit_count};
+    use super::{
+        fallback_gutter_row_range, gutter_digit_count, max_gutter_line_number,
+        render_line_number_gutter, snapshot_gutter_rows,
+    };
+    use crate::app::domain::BufferState;
+    use crate::app::ui::scrolling::DisplaySnapshot;
     use eframe::egui;
 
     #[test]
-    fn fallback_gutter_rows_are_limited_to_visible_viewport() {
-        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 200.0), egui::pos2(400.0, 260.0));
+    fn wrapped_lines_are_numbered_once_on_their_first_display_row() {
+        let ctx = egui::Context::default();
+        let font = egui::FontId::monospace(14.0);
+        let text = "one\ntwo two two\nthree";
+        let buffer = BufferState::new("gutter".into(), text.into(), None);
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let row_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
+            let galley = ui.fonts_mut(|fonts| {
+                fonts.layout(text.into(), font.clone(), egui::Color32::WHITE, 40.0)
+            });
+            let snapshot = DisplaySnapshot::from_galley(&galley, row_height, 0, 0);
+            assert!(snapshot.row_count() > 3, "the middle line should wrap");
+            let numbers = snapshot_gutter_rows(&snapshot)
+                .map(|(_, number)| number)
+                .collect::<Vec<_>>();
+            assert_eq!(numbers, [1, 2, 3]);
+            assert_eq!(max_gutter_line_number(Some(&snapshot), 2), 3);
+            assert_eq!(max_gutter_line_number(None, 2), 2);
 
-        let rows = fallback_gutter_row_range(10_000, 20.0, Some(viewport));
-
-        assert_eq!(rows, 8..15);
+            let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 40.0));
+            for (viewport, snapshot) in [(None, Some(&snapshot)), (Some(viewport), None)] {
+                render_line_number_gutter(
+                    ui,
+                    &buffer,
+                    viewport,
+                    snapshot,
+                    &font,
+                    egui::Color32::WHITE,
+                    egui::Color32::BLACK,
+                );
+            }
+        })
+        .drop_without_applying_deltas();
     }
 
     #[test]
-    fn fallback_gutter_rows_keep_legacy_full_range_without_viewport() {
+    fn fallback_gutter_rows_cover_the_viewport_or_the_whole_buffer() {
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 200.0), egui::pos2(400.0, 260.0));
+        assert_eq!(
+            fallback_gutter_row_range(10_000, 20.0, Some(viewport)),
+            8..15
+        );
         assert_eq!(fallback_gutter_row_range(12, 20.0, None), 0..12);
+        assert_eq!(fallback_gutter_row_range(12, 0.0, Some(viewport)), 0..1);
     }
 
     #[test]
