@@ -231,11 +231,17 @@ fn tile_header_rects(
     metrics: &TileControlMetrics,
 ) -> TileHeaderRects {
     let control_y = tile_rect.top() + metrics.padding;
-    let step = metrics.spacing + metrics.button_size;
-    let close_hit_x =
-        tile_rect.right() - TILE_CONTROL_RIGHT_INSET - metrics.button_size - metrics.padding;
-    let split_hit_x = close_hit_x - if can_close { step } else { 0.0 };
-    let promote_hit_x = split_hit_x - if can_promote { step } else { 0.0 };
+    let right_edge = tile_rect.right() - TILE_CONTROL_RIGHT_INSET;
+    let close_hit_x = right_edge - metrics.button_size - metrics.padding;
+    let left_of = |x: f32, occupied: bool| {
+        if occupied {
+            x - metrics.spacing - metrics.button_size
+        } else {
+            x
+        }
+    };
+    let split_hit_x = left_of(close_hit_x, can_close);
+    let promote_hit_x = left_of(split_hit_x, can_promote);
     let button_at = |x: f32| {
         egui::Rect::from_min_size(
             egui::pos2(x, control_y),
@@ -250,6 +256,23 @@ fn tile_header_rects(
     }
 }
 
+/// The area a tile's visible header controls occupy, so overlays can avoid them.
+pub(crate) fn tile_controls_bounds(
+    tile_rect: egui::Rect,
+    can_promote: bool,
+    can_close: bool,
+) -> egui::Rect {
+    let metrics = tile_control_metrics(tile_rect, can_close);
+    let rects = tile_header_rects(tile_rect, can_promote, can_close, &metrics);
+    let leftmost = if can_promote {
+        rects.promote_hit
+    } else {
+        rects.split_hit
+    };
+    // Without a close button the close slot coincides with the split button.
+    leftmost.union(rects.close_hit)
+}
+
 fn tile_control_metrics(tile_rect: egui::Rect, can_close: bool) -> TileControlMetrics {
     let width_share = if can_close { 0.12 } else { 0.15 };
     let button_size =
@@ -261,5 +284,28 @@ fn tile_control_metrics(tile_rect: egui::Rect, can_close: bool) -> TileControlMe
         padding: (TILE_CONTROL_PADDING * scale).clamp(3.0, TILE_CONTROL_PADDING),
         spacing: (4.0 * scale).clamp(2.0, 4.0),
         font_size: (button_size * 0.55).clamp(12.0, 16.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tile_controls_bounds;
+    use eframe::egui;
+
+    #[test]
+    fn control_bounds_cover_only_the_buttons_a_tile_shows() {
+        let tile = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
+        for (can_promote, can_close, left) in [
+            (true, true, 282.0),
+            (false, true, 316.0),
+            (true, false, 316.0),
+            (false, false, 350.0),
+        ] {
+            assert_eq!(
+                tile_controls_bounds(tile, can_promote, can_close),
+                egui::Rect::from_min_max(egui::pos2(left, 6.0), egui::pos2(380.0, 36.0)),
+                "promote {can_promote}, close {can_close}"
+            );
+        }
     }
 }
