@@ -1,5 +1,5 @@
 use super::result_model::{
-    active_match_local_row, empty_message, file_match_count_label, match_preview,
+    active_match_local_row, empty_message, match_count_label, match_preview,
     search_result_group_key,
 };
 use super::state::{
@@ -368,7 +368,7 @@ fn show_group_body(
 fn show_group_match_count(ui: &mut egui::Ui, match_count: usize) {
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.label(
-            egui::RichText::new(file_match_count_label(match_count))
+            egui::RichText::new(match_count_label(match_count))
                 .size(12.0)
                 .color(text_muted(ui)),
         );

@@ -94,6 +94,18 @@ pub(crate) fn icon_button(
     label: &str,
     enabled: bool,
 ) -> egui::Response {
+    icon_button_with_hint(ui, key, icon, label, label, enabled)
+}
+
+/// An icon button whose tooltip says more than its accessible name, such as a shortcut.
+pub(crate) fn icon_button_with_hint(
+    ui: &mut egui::Ui,
+    key: impl Hash,
+    icon: &str,
+    label: &str,
+    hint: &str,
+    enabled: bool,
+) -> egui::Response {
     widget_ids::scope(ui, key, |ui| {
         ui.spacing_mut().button_padding = egui::Vec2::ZERO;
         let response = ui.add_enabled(
@@ -103,7 +115,7 @@ pub(crate) fn icon_button(
                 .min_size(egui::vec2(26.0, 26.0)),
         );
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
-        response.on_hover_text(label)
+        response.on_hover_text(hint)
     })
     .inner
 }

@@ -18,7 +18,7 @@ pub(super) fn search_result_group_key(group: &SearchResultGroup) -> SearchResult
     (group.tab_index, group.buffer_id, group.first_match_index)
 }
 
-pub(super) fn file_match_count_label(match_count: usize) -> String {
+pub(super) fn match_count_label(match_count: usize) -> String {
     if match_count == 1 {
         "1 match".to_owned()
     } else {
@@ -75,7 +75,7 @@ fn empty_message_from_parts(
 #[cfg(test)]
 mod tests {
     use super::{
-        active_match_local_row, empty_message_from_parts, file_match_count_label, match_preview,
+        active_match_local_row, empty_message_from_parts, match_count_label, match_preview,
         search_result_group_key,
     };
     use crate::app::app_state::{SearchResultEntry, SearchResultGroup};
@@ -121,10 +121,10 @@ mod tests {
     }
 
     #[test]
-    fn file_match_count_label_pluralizes_only_non_one_counts() {
-        assert_eq!(file_match_count_label(0), "0 matches");
-        assert_eq!(file_match_count_label(1), "1 match");
-        assert_eq!(file_match_count_label(2), "2 matches");
+    fn match_count_label_pluralizes_only_non_one_counts() {
+        assert_eq!(match_count_label(0), "0 matches");
+        assert_eq!(match_count_label(1), "1 match");
+        assert_eq!(match_count_label(2), "2 matches");
     }
 
     #[test]
