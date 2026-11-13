@@ -91,7 +91,9 @@ fn write_text(file: &mut impl Write, buffer: &SessionBuffer) -> io::Result<()> {
     Ok(())
 }
 
-fn write_new(
+/// Creates `path` exclusively (never following or replacing an existing link),
+/// private to the user on Unix, and syncs what `write` produced.
+pub(super) fn write_new(
     path: &Path,
     write: impl FnOnce(&mut BufWriter<File>) -> io::Result<()>,
 ) -> io::Result<()> {

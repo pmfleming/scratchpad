@@ -15,26 +15,25 @@ impl MetadataRow<'_> {
     pub fn boolean(&self, index: usize) -> io::Result<bool> {
         boolean(self.0.get(index).map_err(error)?)
     }
-    pub fn optional_index(&self, index: usize) -> io::Result<Option<usize>> {
+    fn optional<T>(
+        &self,
+        index: usize,
+        convert: impl FnOnce(i64) -> io::Result<T>,
+    ) -> io::Result<Option<T>> {
         self.0
             .get::<Option<i64>>(index)
             .map_err(error)?
-            .map(|value| usize::try_from(value).map_err(invalid))
+            .map(convert)
             .transpose()
+    }
+    pub fn optional_index(&self, index: usize) -> io::Result<Option<usize>> {
+        self.optional(index, |value| usize::try_from(value).map_err(invalid))
     }
     pub fn optional_boolean(&self, index: usize) -> io::Result<Option<bool>> {
-        self.0
-            .get::<Option<i64>>(index)
-            .map_err(error)?
-            .map(boolean)
-            .transpose()
+        self.optional(index, boolean)
     }
     pub fn optional_unsigned(&self, index: usize) -> io::Result<Option<u64>> {
-        self.0
-            .get::<Option<i64>>(index)
-            .map_err(error)?
-            .map(unsigned)
-            .transpose()
+        self.optional(index, unsigned)
     }
 }
 

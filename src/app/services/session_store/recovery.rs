@@ -38,16 +38,7 @@ impl RecoveryPreview {
 
     /// Exclusive creation also prevents overwriting a symlink or hard link to the original.
     pub fn save_copy(&self, path: &Path) -> io::Result<()> {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(path)?;
-        file.write_all(self.text.as_bytes())?;
-        file.sync_all()
+        super::recovery_export::write_new(path, |file| file.write_all(self.text.as_bytes()))
     }
 
     pub fn disk_text(&self) -> io::Result<String> {
