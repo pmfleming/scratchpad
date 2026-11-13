@@ -27,7 +27,25 @@ fn build(buffer: &BufferState) -> TreeRows {
     for entry in entries.iter() {
         children.entry(entry.parent_id).or_default().push(entry.id);
     }
-    let mut rows: Vec<Row> = Vec::with_capacity(entries.len() + 1);
+    let (mut rows, positions) = preorder(&children, entries.len() + 1);
+    let lanes = assign_lanes(&mut rows, &positions, &children);
+    TreeRows {
+        structure: buffer.document().history_structure_key(),
+        rows,
+        positions,
+        max_lane: lanes - 1,
+        forks: Arc::new(
+            children
+                .into_iter()
+                .filter_map(|(id, children)| (children.len() > 1).then_some(id))
+                .collect(),
+        ),
+    }
+}
+
+/// Rows in depth-first order from the root, each knowing the last row of its subtree.
+fn preorder(children: &HashMap<u64, Vec<u64>>, capacity: usize) -> (Vec<Row>, HashMap<u64, usize>) {
+    let mut rows: Vec<Row> = Vec::with_capacity(capacity);
     let mut positions: HashMap<u64, usize> = HashMap::new();
     let mut pending = vec![(0, 0, false)];
     // Iterative enter/leave traversal also handles very deep linear histories.
@@ -50,10 +68,21 @@ fn build(buffer: &BufferState) -> TreeRows {
             pending.extend(next.iter().rev().map(|&child| (child, id, false)));
         }
     }
+    (rows, positions)
+}
+
+/// A first child continues its parent's lane; later children take the lowest lane free
+/// for their whole subtree. Returns how many lanes are used.
+fn assign_lanes(
+    rows: &mut [Row],
+    positions: &HashMap<u64, usize>,
+    children: &HashMap<u64, Vec<u64>>,
+) -> usize {
     let mut occupied = BinaryHeap::new();
     let mut free = BTreeSet::new();
     let mut lanes = 1;
     for index in 0..rows.len() {
+        // Lanes whose subtree ended above this row are free again.
         while occupied
             .peek()
             .is_some_and(|Reverse((end, _))| *end < index)
@@ -62,36 +91,26 @@ fn build(buffer: &BufferState) -> TreeRows {
                 free.insert(lane);
             }
         }
-        if let Some(next) = children.get(&rows[index].id) {
-            for (n, child) in next.iter().enumerate() {
-                let child_index = positions[child];
-                let lane = if n == 0 {
-                    rows[index].lane
-                } else {
-                    let lane = free.pop_first().unwrap_or_else(|| {
-                        let lane = lanes;
-                        lanes += 1;
-                        lane
-                    });
-                    occupied.push(Reverse((rows[child_index].end, lane)));
-                    lane
-                };
-                rows[child_index].lane = lane;
-            }
+        let Some(next) = children.get(&rows[index].id) else {
+            continue;
+        };
+        let parent_lane = rows[index].lane;
+        for (n, child) in next.iter().enumerate() {
+            let child_index = positions[child];
+            let lane = if n == 0 {
+                parent_lane
+            } else {
+                let lane = free.pop_first().unwrap_or_else(|| {
+                    lanes += 1;
+                    lanes - 1
+                });
+                occupied.push(Reverse((rows[child_index].end, lane)));
+                lane
+            };
+            rows[child_index].lane = lane;
         }
     }
-    TreeRows {
-        structure: buffer.document().history_structure_key(),
-        rows,
-        positions,
-        max_lane: lanes - 1,
-        forks: Arc::new(
-            children
-                .into_iter()
-                .filter_map(|(id, children)| (children.len() > 1).then_some(id))
-                .collect(),
-        ),
-    }
+    lanes
 }
 
 pub(super) fn prepare(ctx: &egui::Context, buffer: &BufferState) -> Prepared {

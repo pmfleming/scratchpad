@@ -2,7 +2,7 @@
 mod track;
 
 use super::scrubber_chrome::{self, Step};
-use super::text_history::editor_input_requested;
+use super::text_history::{editor_input_requested, keys_belong_elsewhere};
 use crate::app::{
     app_state::{
         ScratchpadApp, settings_state,
@@ -59,10 +59,7 @@ pub(crate) fn handle_input(ctx: &egui::Context, app: &mut ScratchpadApp) {
         close(ctx, app);
         return;
     }
-    if app.state.dialogs.any_modal_open()
-        || egui::Popup::is_any_open(ctx)
-        || accessors::pending_action(app).is_some()
-    {
+    if keys_belong_elsewhere(ctx, app) {
         return;
     }
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
