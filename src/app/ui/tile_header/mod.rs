@@ -34,10 +34,8 @@ pub(crate) fn render_tile_header(
     let split_handler =
         TileSplitHandler::new(&request.pane_path, request.view_id, request.tile_rect);
     let controls_visible = control_visibility(ui, &split_handler, request.tile_rect);
-    let can_promote = crate::app::domain::tab::summary::can_promote_view(
-        &app.tab_manager.tabs.as_slice()[request.tab_index],
-        request.view_id,
-    );
+    let tab = &app.tab_manager.tabs.as_slice()[request.tab_index];
+    let can_promote = crate::app::domain::tab::summary::can_promote_view(tab, request.view_id);
     let layout = pass_stable_header_layout(
         ui,
         request.tab_index,
@@ -63,23 +61,7 @@ pub(crate) fn render_tile_header(
         font_size: metrics.font_size,
         visibility: controls_visible,
     };
-    if layout.can_promote
-        && show_control(
-            ui,
-            &control,
-            rects.promote_hit,
-            TileControlSpec {
-                label: egui_phosphor::regular::ARROW_LINE_UP,
-                tooltip: Some(shortcut_tooltips::action(
-                    ui.ctx(),
-                    ShortcutAction::PromoteTileToTab,
-                    "Promote Tile",
-                )),
-                style: TileControlStyle::Default,
-                sense: egui::Sense::click(),
-            },
-        )
-        .clicked()
+    if layout.can_promote && header_button_clicked(ui, &control, rects.promote_hit, &PROMOTE_BUTTON)
     {
         state.actions.push(TileAction::Promote(request.view_id));
     }
@@ -92,42 +74,30 @@ pub(crate) fn render_tile_header(
     if let Some(preview_state) =
         split_handler.handle_interaction(ui, &split_response, state.actions)
     {
-        let tab = &app.tab_manager.tabs.as_slice()[request.tab_index];
-        let title = tab.buffer_for_view(request.view_id).map_or_else(
-            || crate::app::domain::tab::summary::display_name(tab),
-            |buffer| buffer.display_name(),
-        );
-        let preview_lines = preview_lines_for_view(tab, request.view_id);
+        let (title, preview_lines) = preview_content_for_view(tab, request.view_id);
         *state.preview_overlay =
             Some(split_handler.make_preview(preview_state, title, preview_lines, rects.split_hit));
     }
-    if layout.can_close
-        && show_control(
-            ui,
-            &control,
-            rects.close_hit,
-            TileControlSpec {
-                label: egui_phosphor::regular::X,
-                tooltip: Some(shortcut_tooltips::action(
-                    ui.ctx(),
-                    ShortcutAction::CloseTile,
-                    "Close Tile",
-                )),
-                style: TileControlStyle::Danger,
-                sense: egui::Sense::click(),
-            },
-        )
-        .clicked()
-    {
+    if layout.can_close && header_button_clicked(ui, &control, rects.close_hit, &CLOSE_BUTTON) {
         state.actions.push(TileAction::Close(request.view_id));
     }
 }
 
-fn preview_lines_for_view(tab: &crate::app::domain::WorkspaceTab, view_id: ViewId) -> Vec<String> {
-    tab.buffer_for_view(view_id).map_or_else(
-        || split::build_preview_lines(""),
-        |buffer| split::build_preview_lines(&buffer.text()),
-    )
+/// Title and first lines of the view's buffer, shown in the floating split preview.
+fn preview_content_for_view(
+    tab: &crate::app::domain::WorkspaceTab,
+    view_id: ViewId,
+) -> (String, Vec<String>) {
+    match tab.buffer_for_view(view_id) {
+        Some(buffer) => (
+            buffer.display_name(),
+            split::build_preview_lines(&buffer.text()),
+        ),
+        None => (
+            crate::app::domain::tab::summary::display_name(tab),
+            split::build_preview_lines(""),
+        ),
+    }
 }
 
 struct TileHeaderRects {
@@ -155,12 +125,27 @@ struct TileControlContext {
     visibility: f32,
 }
 
-struct TileControlSpec {
+/// A click-only header button whose tooltip names its shortcut.
+struct HeaderButton {
+    icon: &'static str,
+    action: ShortcutAction,
     label: &'static str,
-    tooltip: Option<String>,
     style: TileControlStyle,
-    sense: egui::Sense,
 }
+
+const PROMOTE_BUTTON: HeaderButton = HeaderButton {
+    icon: egui_phosphor::regular::ARROW_LINE_UP,
+    action: ShortcutAction::PromoteTileToTab,
+    label: "Promote Tile",
+    style: TileControlStyle::Default,
+};
+
+const CLOSE_BUTTON: HeaderButton = HeaderButton {
+    icon: egui_phosphor::regular::X,
+    action: ShortcutAction::CloseTile,
+    label: "Close Tile",
+    style: TileControlStyle::Danger,
+};
 
 const TILE_CONTROL_PADDING: f32 = 6.0;
 const TILE_CONTROL_MIN_SIZE: f32 = 18.0;
@@ -192,11 +177,9 @@ fn control_visibility(
     split_handler: &TileSplitHandler,
     tile_rect: egui::Rect,
 ) -> f32 {
-    if !split_handler.is_dragging(ui) && transition::suppress_interactive_chrome(ui.ctx()) {
-        return 0.0;
-    }
-
-    if split_handler.is_dragging(ui) || tile_rect.contains(pointer_hover_pos(ui)) {
+    let hovered = !transition::suppress_interactive_chrome(ui.ctx())
+        && tile_rect.contains(pointer_hover_pos(ui));
+    if split_handler.is_dragging(ui) || hovered {
         1.0
     } else {
         0.0
@@ -225,20 +208,20 @@ fn show_split_control(
         .show(ui, split_hit, egui::Sense::click_and_drag())
 }
 
-fn show_control(
+fn header_button_clicked(
     ui: &mut egui::Ui,
     control: &TileControlContext,
     hit_rect: egui::Rect,
-    spec: TileControlSpec,
-) -> egui::Response {
-    let mut tile_control = TileControl::new(spec.label)
-        .style(spec.style)
+    button: &HeaderButton,
+) -> bool {
+    let tooltip = shortcut_tooltips::action(ui.ctx(), button.action, button.label);
+    TileControl::new(button.icon)
+        .style(button.style)
         .visibility(control.visibility)
-        .font_size(control.font_size);
-    if let Some(tooltip) = &spec.tooltip {
-        tile_control = tile_control.tooltip(tooltip);
-    }
-    tile_control.show(ui, hit_rect, spec.sense)
+        .font_size(control.font_size)
+        .tooltip(&tooltip)
+        .show(ui, hit_rect, egui::Sense::click())
+        .clicked()
 }
 
 fn tile_header_rects(
@@ -250,42 +233,50 @@ fn tile_header_rects(
     let control_y = tile_rect.top() + metrics.padding;
     let right_edge = tile_rect.right() - TILE_CONTROL_RIGHT_INSET;
     let close_hit_x = right_edge - metrics.button_size - metrics.padding;
-    let split_hit_x = if can_close {
-        close_hit_x - metrics.spacing - metrics.button_size
-    } else {
-        close_hit_x
+    let left_of = |x: f32, occupied: bool| {
+        if occupied {
+            x - metrics.spacing - metrics.button_size
+        } else {
+            x
+        }
     };
-    let promote_hit_x = if can_promote {
-        split_hit_x - metrics.spacing - metrics.button_size
-    } else {
-        split_hit_x
+    let split_hit_x = left_of(close_hit_x, can_close);
+    let promote_hit_x = left_of(split_hit_x, can_promote);
+    let button_at = |x: f32| {
+        egui::Rect::from_min_size(
+            egui::pos2(x, control_y),
+            egui::Vec2::splat(metrics.button_size),
+        )
     };
-    let promote_hit = egui::Rect::from_min_size(
-        egui::pos2(promote_hit_x, control_y),
-        egui::vec2(metrics.button_size, metrics.button_size),
-    );
-    let split_hit = egui::Rect::from_min_size(
-        egui::pos2(split_hit_x, control_y),
-        egui::vec2(metrics.button_size, metrics.button_size),
-    );
-    let close_hit = egui::Rect::from_min_size(
-        egui::pos2(close_hit_x, control_y),
-        egui::vec2(metrics.button_size, metrics.button_size),
-    );
 
     TileHeaderRects {
-        promote_hit,
-        split_hit,
-        close_hit,
+        promote_hit: button_at(promote_hit_x),
+        split_hit: button_at(split_hit_x),
+        close_hit: button_at(close_hit_x),
     }
 }
 
-fn tile_control_metrics(tile_rect: egui::Rect, can_close: bool) -> TileControlMetrics {
-    let button_size = if can_close {
-        (tile_rect.width() * 0.12).clamp(TILE_CONTROL_MIN_SIZE, TILE_CONTROL_MAX_SIZE)
+/// The area a tile's visible header controls occupy, so overlays can avoid them.
+pub(crate) fn tile_controls_bounds(
+    tile_rect: egui::Rect,
+    can_promote: bool,
+    can_close: bool,
+) -> egui::Rect {
+    let metrics = tile_control_metrics(tile_rect, can_close);
+    let rects = tile_header_rects(tile_rect, can_promote, can_close, &metrics);
+    let leftmost = if can_promote {
+        rects.promote_hit
     } else {
-        (tile_rect.width() * 0.15).clamp(TILE_CONTROL_MIN_SIZE, TILE_CONTROL_MAX_SIZE)
+        rects.split_hit
     };
+    // Without a close button the close slot coincides with the split button.
+    leftmost.union(rects.close_hit)
+}
+
+fn tile_control_metrics(tile_rect: egui::Rect, can_close: bool) -> TileControlMetrics {
+    let width_share = if can_close { 0.12 } else { 0.15 };
+    let button_size =
+        (tile_rect.width() * width_share).clamp(TILE_CONTROL_MIN_SIZE, TILE_CONTROL_MAX_SIZE);
     let scale = (button_size / TILE_CONTROL_MAX_SIZE).clamp(0.6, 1.0);
 
     TileControlMetrics {
@@ -293,5 +284,28 @@ fn tile_control_metrics(tile_rect: egui::Rect, can_close: bool) -> TileControlMe
         padding: (TILE_CONTROL_PADDING * scale).clamp(3.0, TILE_CONTROL_PADDING),
         spacing: (4.0 * scale).clamp(2.0, 4.0),
         font_size: (button_size * 0.55).clamp(12.0, 16.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tile_controls_bounds;
+    use eframe::egui;
+
+    #[test]
+    fn control_bounds_cover_only_the_buttons_a_tile_shows() {
+        let tile = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
+        for (can_promote, can_close, left) in [
+            (true, true, 282.0),
+            (false, true, 316.0),
+            (true, false, 316.0),
+            (false, false, 350.0),
+        ] {
+            assert_eq!(
+                tile_controls_bounds(tile, can_promote, can_close),
+                egui::Rect::from_min_max(egui::pos2(left, 6.0), egui::pos2(380.0, 36.0)),
+                "promote {can_promote}, close {can_close}"
+            );
+        }
     }
 }

@@ -49,29 +49,13 @@ pub(crate) fn update_tab_drag(
     total_tab_count: usize,
 ) -> Option<TabDragCommit> {
     let drag_state = state::update_current_tab_drag(ui)?;
-    let drag_active = state::drag_is_active(&drag_state);
-    let dragged_indices = drag_state.dragged_indices.clone();
     let allow_combine =
-        drag_sources_allow_combine(zones, &dragged_indices, drag_state.source_index);
-    let drop_intent = drag_active
+        drag_sources_allow_combine(zones, &drag_state.dragged_indices, drag_state.source_index);
+    let drop_intent = state::drag_is_active(&drag_state)
         .then(|| state::locate_drop_intent(zones, drag_state.current_pos, allow_combine))
         .flatten();
-
     if let Some(drop_intent) = &drop_intent {
-        match drop_intent {
-            state::TabDropIntent::Reorder {
-                zone_index,
-                drop_slot,
-            } => {
-                paint::paint_tab_reorder_marker(ui.ctx(), &zones[*zone_index], *drop_slot);
-            }
-            state::TabDropIntent::Combine {
-                zone_index,
-                target_index,
-            } => {
-                paint::paint_tab_combine_target(ui.ctx(), &zones[*zone_index], *target_index);
-            }
-        }
+        paint_drop_intent(ui.ctx(), zones, drop_intent);
     }
 
     if ui.input(|input| input.pointer.primary_down()) {
@@ -80,60 +64,78 @@ pub(crate) fn update_tab_drag(
 
     let drop_intent = drop_intent?;
     state::clear_tab_drag_state(ui);
+    commit_for_drop(
+        drop_intent,
+        drag_state.source_index,
+        drag_state.dragged_indices,
+        total_tab_count,
+    )
+}
 
-    match drop_intent {
-        state::TabDropIntent::Reorder { drop_slot, .. } => {
-            if dragged_indices.len() > 1 {
-                Some(TabDragCommit::ReorderGroup {
-                    from_indices: dragged_indices,
-                    to_index: drop_slot.min(total_tab_count),
-                })
-            } else {
-                let to_index =
-                    state::resolve_drop_slot(drag_state.source_index, drop_slot, total_tab_count);
-                (to_index != drag_state.source_index).then_some(TabDragCommit::Reorder {
-                    from_index: drag_state.source_index,
-                    to_index,
-                })
-            }
-        }
-        state::TabDropIntent::Combine { target_index, .. } => {
-            if dragged_indices.len() > 1 {
-                (!dragged_indices.contains(&target_index)).then_some(TabDragCommit::CombineGroup {
-                    source_indices: dragged_indices,
-                    target_index,
-                })
-            } else {
-                (target_index != drag_state.source_index).then_some(TabDragCommit::Combine {
-                    source_index: drag_state.source_index,
-                    target_index,
-                })
-            }
-        }
+fn paint_drop_intent(ctx: &egui::Context, zones: &[TabDropZone], intent: &state::TabDropIntent) {
+    match *intent {
+        state::TabDropIntent::Reorder {
+            zone_index,
+            drop_slot,
+        } => paint::paint_tab_reorder_marker(ctx, &zones[zone_index], drop_slot),
+        state::TabDropIntent::Combine {
+            zone_index,
+            target_index,
+        } => paint::paint_tab_combine_target(ctx, &zones[zone_index], target_index),
     }
 }
 
+/// The change a released drag makes; `None` when it would leave tabs unchanged.
+fn commit_for_drop(
+    intent: state::TabDropIntent,
+    source_index: usize,
+    dragged_indices: Vec<usize>,
+    total_tab_count: usize,
+) -> Option<TabDragCommit> {
+    let group = dragged_indices.len() > 1;
+    match intent {
+        state::TabDropIntent::Reorder { drop_slot, .. } if group => {
+            Some(TabDragCommit::ReorderGroup {
+                from_indices: dragged_indices,
+                to_index: drop_slot.min(total_tab_count),
+            })
+        }
+        state::TabDropIntent::Reorder { drop_slot, .. } => {
+            let to_index = state::resolve_drop_slot(source_index, drop_slot, total_tab_count);
+            (to_index != source_index).then_some(TabDragCommit::Reorder {
+                from_index: source_index,
+                to_index,
+            })
+        }
+        state::TabDropIntent::Combine { target_index, .. } if group => {
+            (!dragged_indices.contains(&target_index)).then_some(TabDragCommit::CombineGroup {
+                source_indices: dragged_indices,
+                target_index,
+            })
+        }
+        state::TabDropIntent::Combine { target_index, .. } => (target_index != source_index)
+            .then_some(TabDragCommit::Combine {
+                source_index,
+                target_index,
+            }),
+    }
+}
+
+/// Combining is offered when the dragged tab, or any tab of a dragged group,
+/// is a workspace tab (Settings cannot be combined).
 fn drag_sources_allow_combine(
     zones: &[TabDropZone],
     dragged_indices: &[usize],
     source_index: usize,
 ) -> bool {
-    let mut source_can_combine = false;
-    let mut selected_workspace_can_combine = false;
-
-    for entry in zones.iter().flat_map(|zone| zone.entries.iter()) {
-        if entry.index == source_index && entry.combine_enabled {
-            source_can_combine = true;
-        }
-        if dragged_indices.len() > 1
-            && entry.combine_enabled
-            && dragged_indices.contains(&entry.index)
-        {
-            selected_workspace_can_combine = true;
-        }
-    }
-
-    source_can_combine || selected_workspace_can_combine
+    let group = dragged_indices.len() > 1;
+    zones
+        .iter()
+        .flat_map(|zone| zone.entries.iter())
+        .filter(|entry| entry.combine_enabled)
+        .any(|entry| {
+            entry.index == source_index || (group && dragged_indices.contains(&entry.index))
+        })
 }
 
 pub(crate) fn paint_dragged_tab_ghost(
@@ -194,3 +196,6 @@ pub(crate) fn auto_scroll_tab_list(
     }
     crate::app::ui::widget_ids::request_scroll_offset(ctx, scroll_area_id, offset);
 }
+
+#[cfg(test)]
+mod tests;

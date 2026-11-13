@@ -1,4 +1,13 @@
-use super::*;
+use super::{
+    AppThemeMode, EditorAppearanceSource, EditorFontPreset, ScratchpadApp, SettingsUi, app, egui,
+    find, has_button_border, render_page_body, reset_settings_layout_measurements,
+    settings_control_measurements, widgets,
+};
+use crate::app::app_state::test_support::{apply_test_fonts, ui_harness};
+use crate::app::fonts::EDITOR_FONT_FAMILY;
+use crate::app::ui::settings::{FONT_SIZE_OPTIONS, show_page, text_primary};
+use crate::app::ui::widget_ids;
+use egui_kittest::{Harness, kittest::Queryable};
 
 fn custom_app(size: f32, light: bool) -> ScratchpadApp {
     let mut app = app();
@@ -21,7 +30,7 @@ fn appearance_is_resolved_from_the_selected_source_and_stays_scoped() {
             app.state.app_settings.editor.appearance_source = source;
             let settings = &app.state.app_settings;
             let ctx = egui::Context::default();
-            setup(&ctx);
+            apply_test_fonts(&ctx);
             let original = ctx.global_style();
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 let inherited = ui.style().clone();
@@ -188,7 +197,7 @@ fn large_settings_fonts_fit_narrow_and_wide_layouts() {
                     );
                 }
             }
-            let find = |name: &str| measurements.iter().find(|m| m.label == name).unwrap().rect;
+            let find = |name: &str| find(&measurements, name).rect;
             assert!(
                 !find("slider.Size").intersects(find("dropdown.Size")),
                 "Font controls overlap at {width}/{size}"
@@ -211,31 +220,28 @@ fn dropdown_popups_stay_near_their_controls_instead_of_filling_the_window() {
         (2000.0, 16.0),
         (1100.0, 72.0),
     ] {
-        let mut h = Harness::builder()
-            .with_size(egui::vec2(width, 900.0))
-            .with_context_setup(setup)
-            .build_ui_state(
-                |ui, app| {
-                    SettingsUi::apply_appearance(ui, &app.state.app_settings);
-                    SettingsUi::apply_controls(ui);
-                    ui.set_width(300.0);
-                    widgets::inner_select_row(ui, "Size", None, |ui| {
-                        let mut value = app.state.app_settings.editor.font_size as u32;
-                        widgets::dropdown(
-                            ui,
-                            "Size",
-                            &mut value,
-                            &FONT_SIZE_OPTIONS,
-                            |size| size.to_string(),
-                            SettingsUi::size_dropdown_width(ui, ui.max_rect().width()),
-                            "pt",
-                        );
-                        app.state.app_settings.editor.font_size = value as f32;
-                    });
-                },
-                custom_app(size, false),
-            );
-        h.run_steps(3);
+        let mut h = ui_harness(
+            egui::vec2(width, 900.0),
+            custom_app(size, false),
+            |ui, app| {
+                SettingsUi::apply_appearance(ui, &app.state.app_settings);
+                SettingsUi::apply_controls(ui);
+                ui.set_width(300.0);
+                widgets::inner_select_row(ui, "Size", None, |ui| {
+                    let mut value = app.state.app_settings.editor.font_size as u32;
+                    widgets::dropdown(
+                        ui,
+                        "Size",
+                        &mut value,
+                        &FONT_SIZE_OPTIONS,
+                        |size| size.to_string(),
+                        SettingsUi::size_dropdown_width(ui, ui.max_rect().width()),
+                        "pt",
+                    );
+                    app.state.app_settings.editor.font_size = value as f32;
+                });
+            },
+        );
         let control = h.get_by_role_and_label(egui::Role::ComboBox, "Size").rect();
         h.get_by_role_and_label(egui::Role::ComboBox, "Size")
             .click_accesskit();
@@ -258,21 +264,17 @@ fn keyboard_focus_uses_the_accent_without_changing_selected_text_color() {
         let mut app = custom_app(14.0, light);
         app.state.app_settings.editor.editor_text_highlight_color = "#fff36d".into();
         let accent = app.state.app_settings.editor_text_highlight_color();
-        let mut h = Harness::builder().with_context_setup(setup).build_ui_state(
-            |ui, app| {
-                SettingsUi::apply_appearance(ui, &app.state.app_settings);
-                SettingsUi::apply_controls(ui);
-                assert_eq!(
-                    ui.visuals().selection.stroke.color,
-                    app.state.app_settings.editor_text_highlight_text_color()
-                );
-                let mut query = String::from("Find a setting");
-                widgets::search_field(ui, &mut query);
-                widgets::destructive_button(ui, "Reset settings…");
-            },
-            app,
-        );
-        h.run();
+        let mut h = ui_harness(egui::vec2(800.0, 600.0), app, |ui, app| {
+            SettingsUi::apply_appearance(ui, &app.state.app_settings);
+            SettingsUi::apply_controls(ui);
+            assert_eq!(
+                ui.visuals().selection.stroke.color,
+                app.state.app_settings.editor_text_highlight_text_color()
+            );
+            let mut query = String::from("Find a setting");
+            widgets::search_field(ui, &mut query);
+            widgets::destructive_button(ui, "Reset settings…");
+        });
         for label in ["Search settings", "Reset settings…"] {
             h.get_by_label(label).focus();
             h.run_steps(2);
@@ -292,16 +294,12 @@ fn selected_search_text_uses_highlight_foreground_in_the_rendered_glyphs() {
         app.state.app_settings.editor.editor_text_highlight_color = "#fff36d".into();
         let foreground = app.state.app_settings.editor_text_highlight_text_color();
         let background = app.state.app_settings.editor_text_highlight_color();
-        let mut h = Harness::builder().with_context_setup(setup).build_ui_state(
-            |ui, app| {
-                SettingsUi::apply_appearance(ui, &app.state.app_settings);
-                SettingsUi::apply_controls(ui);
-                let mut query = String::from("size");
-                widgets::search_field(ui, &mut query);
-            },
-            app,
-        );
-        h.run();
+        let mut h = ui_harness(egui::vec2(800.0, 600.0), app, |ui, app| {
+            SettingsUi::apply_appearance(ui, &app.state.app_settings);
+            SettingsUi::apply_controls(ui);
+            let mut query = String::from("size");
+            widgets::search_field(ui, &mut query);
+        });
         h.get_by_label("Search settings").focus();
         h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
         h.run_steps(2);
@@ -337,31 +335,20 @@ fn selected_search_text_uses_highlight_foreground_in_the_rendered_glyphs() {
 
 #[test]
 fn dropdown_width_is_explicit_and_independent_of_its_label() {
-    let mut h = Harness::builder()
-        .with_size(egui::vec2(900.0, 600.0))
-        .with_context_setup(setup)
-        .build_ui_state(
-            |ui, app| {
-                SettingsUi::apply_appearance(ui, &app.state.app_settings);
-                SettingsUi::apply_controls(ui);
-                for key in ["Size", "Renamed size"] {
-                    widgets::inner_select_row(ui, key, None, |ui| {
-                        let mut value = 14;
-                        widgets::dropdown(
-                            ui,
-                            key,
-                            &mut value,
-                            &[14, 20],
-                            |n| n.to_string(),
-                            120.0,
-                            "",
-                        );
-                    });
-                }
-            },
-            custom_app(32.0, false),
-        );
-    h.run();
+    let h = ui_harness(
+        egui::vec2(900.0, 600.0),
+        custom_app(32.0, false),
+        |ui, app| {
+            SettingsUi::apply_appearance(ui, &app.state.app_settings);
+            SettingsUi::apply_controls(ui);
+            for key in ["Size", "Renamed size"] {
+                widgets::inner_select_row(ui, key, None, |ui| {
+                    let mut value = 14;
+                    widgets::dropdown(ui, key, &mut value, &[14, 20], |n| n.to_string(), 120.0, "");
+                });
+            }
+        },
+    );
     let size = h.get_by_role_and_label(egui::Role::ComboBox, "Size").rect();
     let renamed = h
         .get_by_role_and_label(egui::Role::ComboBox, "Renamed size")
@@ -377,7 +364,7 @@ fn dropdown_width_is_explicit_and_independent_of_its_label() {
 fn appearance_state_is_independent_of_text_overrides_and_expires_with_its_scope() {
     let app = custom_app(14.0, false);
     let ctx = egui::Context::default();
-    setup(&ctx);
+    apply_test_fonts(&ctx);
     for apply in [true, false] {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let fallback = [

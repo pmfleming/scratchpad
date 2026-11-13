@@ -122,3 +122,13 @@ pub(crate) fn add_tab(app: &mut ScratchpadApp, buffer: BufferState) {
     tabs.push(crate::app::domain::WorkspaceTab::new(buffer));
     app.tab_manager.set_tabs(tabs, 0);
 }
+
+/// Runs `render` for a single headless frame with the standard test fonts and
+/// returns the painted shapes, for paint code that needs no app state.
+pub(crate) fn render_once(render: impl FnMut(&mut egui::Ui)) -> Vec<egui::epaint::ClippedShape> {
+    let ctx = egui::Context::default();
+    apply_test_fonts(&ctx);
+    let mut output = ctx.run_ui(egui::RawInput::default(), render);
+    output.textures_delta.clear();
+    output.shapes
+}

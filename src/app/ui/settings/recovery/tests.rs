@@ -1,25 +1,16 @@
-use super::*;
-use crate::app::app_state::test_support::test_app;
-use egui_kittest::{
-    Harness,
-    kittest::{NodeT, Queryable},
-};
+use super::{egui, render_policy};
+use crate::app::app_state::test_support::{test_app, ui_harness};
+use crate::app::ui::settings::tests::saved_settings;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 #[test]
 fn history_settings_explain_retention_without_expiry_controls() {
     let root = tempfile::tempdir().unwrap();
     let app = test_app(root.path());
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1000.0, 1000.0))
-        .with_context_setup(crate::app::ui::settings::tests::setup)
-        .build_ui_state(
-            |ui, app| {
-                render_policy(ui, app);
-                crate::app::ui::settings::search_options::render(ui, app);
-            },
-            app,
-        );
-    harness.run();
+    let harness = ui_harness(egui::vec2(1000.0, 1000.0), app, |ui, app| {
+        render_policy(ui, app);
+        crate::app::ui::settings::search_options::render(ui, app);
+    });
     harness.get_by_label(
         "All edit branches and closed-file history are retained until you explicitly forget them.",
     );
@@ -36,17 +27,10 @@ fn inline_resets_affect_only_their_own_limits_and_persist() {
     app.state.app_settings.history.failure_ram.automatic = false;
     app.state.app_settings.search.result_limit = SearchResultLimit::Unlimited;
     let failure = app.state.app_settings.history.failure_ram;
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1000.0, 1400.0))
-        .with_context_setup(crate::app::ui::settings::tests::setup)
-        .build_ui_state(
-            |ui, app| {
-                render_policy(ui, app);
-                crate::app::ui::settings::search_options::render(ui, app);
-            },
-            app,
-        );
-    harness.run();
+    let mut harness = ui_harness(egui::vec2(1000.0, 1400.0), app, |ui, app| {
+        render_policy(ui, app);
+        crate::app::ui::settings::search_options::render(ui, app);
+    });
     harness
         .get_by_label("Reset memory cache to recommended")
         .click_accesskit();
@@ -94,14 +78,7 @@ fn inline_resets_affect_only_their_own_limits_and_persist() {
             .failure_ram
             .automatic
     );
-    let saved = harness
-        .state()
-        .state
-        .persistence
-        .settings_store
-        .load()
-        .unwrap()
-        .unwrap();
+    let saved = saved_settings(&harness);
     assert_eq!(
         saved.history.budget,
         harness.state().state.app_settings.history.budget
@@ -124,14 +101,11 @@ fn inline_resets_affect_only_their_own_limits_and_persist() {
 fn search_slider_applies_finite_and_unlimited_limits() {
     use crate::app::services::settings_store::SearchResultLimit;
     let root = tempfile::tempdir().unwrap();
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1000.0, 1400.0))
-        .with_context_setup(crate::app::ui::settings::tests::setup)
-        .build_ui_state(
-            crate::app::ui::settings::search_options::render,
-            test_app(root.path()),
-        );
-    harness.run();
+    let mut harness = ui_harness(
+        egui::vec2(1000.0, 1400.0),
+        test_app(root.path()),
+        crate::app::ui::settings::search_options::render,
+    );
     for (stop, limit) in [
         (0.0, SearchResultLimit::from_matches(50_000)),
         (4.0, SearchResultLimit::from_matches(1_000_000)),
@@ -145,18 +119,6 @@ fn search_slider_applies_finite_and_unlimited_limits() {
             harness.state().state.app_settings.search.result_limit,
             limit
         );
-        assert_eq!(
-            harness
-                .state()
-                .state
-                .persistence
-                .settings_store
-                .load()
-                .unwrap()
-                .unwrap()
-                .search
-                .result_limit,
-            limit
-        );
+        assert_eq!(saved_settings(&harness).search.result_limit, limit);
     }
 }

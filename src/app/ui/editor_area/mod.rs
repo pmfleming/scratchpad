@@ -18,39 +18,42 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default()
         .frame(editor_panel_frame())
         .show(ui, |ui| {
-            widget_ids::feature_scope(ui, "editor_area", |ui| {
-                if app.tab_manager.tabs.as_slice().is_empty() {
-                    return;
-                }
-
-                apply_deferred_tile_actions(ui.ctx(), app);
-
-                if !crate::app::ui::dialogs::history_scrubbing(ui.ctx(), app) {
-                    crate::app::app_state::search_runtime::refresh_search_state(app);
-                }
-                search_replace::show_search_strip(ui, app);
-                let workspace_rect = ui.available_rect_before_wrap();
-                if workspace_rect.width() <= 0.0 || workspace_rect.height() <= 0.0 {
-                    return;
-                }
-
-                paint_workspace_background(
-                    ui,
-                    workspace_rect,
-                    app.state.app_settings.editor_background_color(),
-                );
-
-                app.state.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
-                let editor_state = prepare_editor_state(app);
-                let render_outcome =
-                    render_editor_workspace(ui, app, &editor_state, workspace_rect);
-                finalize_editor_render(ui, app, &editor_state, render_outcome);
-                crate::app::ui::tab_drag::handle_editor_drop(ui, app, workspace_rect);
-                if !crate::app::ui::dialogs::history_scrubbing(ui.ctx(), app) {
-                    crate::app::app_state::search_runtime::refresh_search_state(app);
-                }
-            });
+            widget_ids::feature_scope(ui, "editor_area", |ui| render_editor_area(ui, app));
         });
+}
+
+fn render_editor_area(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    if app.tab_manager.tabs.as_slice().is_empty() {
+        return;
+    }
+
+    apply_deferred_tile_actions(ui.ctx(), app);
+    refresh_search_unless_scrubbing(ui, app);
+    search_replace::show_search_strip(ui, app);
+    let workspace_rect = ui.available_rect_before_wrap();
+    if workspace_rect.width() <= 0.0 || workspace_rect.height() <= 0.0 {
+        return;
+    }
+
+    paint_workspace_background(
+        ui,
+        workspace_rect,
+        app.state.app_settings.editor_background_color(),
+    );
+
+    app.state.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
+    let editor_state = prepare_editor_state(app);
+    let render_outcome = render_editor_workspace(ui, app, &editor_state, workspace_rect);
+    finalize_editor_render(ui, app, &editor_state, render_outcome);
+    crate::app::ui::tab_drag::handle_editor_drop(ui, app, workspace_rect);
+    refresh_search_unless_scrubbing(ui, app);
+}
+
+/// Search results follow edits, except while history scrubbing previews old text.
+fn refresh_search_unless_scrubbing(ui: &egui::Ui, app: &mut ScratchpadApp) {
+    if !crate::app::ui::dialogs::history_scrubbing(ui.ctx(), app) {
+        crate::app::app_state::search_runtime::refresh_search_state(app);
+    }
 }
 
 fn editor_panel_frame() -> egui::Frame {

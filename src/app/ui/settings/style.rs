@@ -173,7 +173,7 @@ impl SettingsUi {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{SettingsUi, egui, theme};
 
     #[test]
     fn settings_inherit_ui_fonts_and_share_the_app_palette_in_both_themes() {

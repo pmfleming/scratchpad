@@ -86,7 +86,10 @@ fn paint_target_split_region(ui: &egui::Ui, rect: egui::Rect) {
     );
 }
 
-fn calculate_floating_tile_rect(overlay: &SplitPreviewOverlay, max_rect: egui::Rect) -> egui::Rect {
+pub(super) fn calculate_floating_tile_rect(
+    overlay: &SplitPreviewOverlay,
+    max_rect: egui::Rect,
+) -> egui::Rect {
     let anchor = egui::pos2(
         overlay
             .handle_anchor
@@ -212,7 +215,7 @@ fn paint_preview_lines(
     }
 }
 
-fn elide_preview_line(line: &str, max_width: f32) -> String {
+pub(super) fn elide_preview_line(line: &str, max_width: f32) -> String {
     let max_chars = ((max_width / 7.0).floor() as usize).max(8);
     if line.chars().count() <= max_chars {
         return line.to_owned();

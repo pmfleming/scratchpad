@@ -8,22 +8,21 @@ pub(super) struct Part {
 }
 
 pub(super) fn parts(ui: &egui::Ui, usage: &StorageUsage) -> [Part; 4] {
-    let colors = if ui.visuals().dark_mode {
+    let colors = palette(
+        ui.visuals().dark_mode,
         [
             [134, 152, 180],
             [72, 182, 247],
             [182, 161, 223],
             [225, 185, 117],
-        ]
-    } else {
+        ],
         [
             [121, 141, 169],
             [24, 136, 201],
             [149, 130, 198],
             [182, 138, 57],
-        ]
-    }
-    .map(|[r, g, b]| egui::Color32::from_rgb(r, g, b));
+        ],
+    );
     [
         Part {
             label: "Other data files",
@@ -53,7 +52,8 @@ pub(super) fn parts(ui: &egui::Ui, usage: &StorageUsage) -> [Part; 4] {
 }
 
 pub(super) fn payload_colors(dark: bool) -> [egui::Color32; 8] {
-    let colors = if dark {
+    palette(
+        dark,
         [
             [111, 193, 173],
             [72, 182, 247],
@@ -63,8 +63,7 @@ pub(super) fn payload_colors(dark: bool) -> [egui::Color32; 8] {
             [151, 188, 106],
             [221, 153, 212],
             [134, 152, 180],
-        ]
-    } else {
+        ],
         [
             [41, 133, 111],
             [24, 136, 201],
@@ -74,9 +73,18 @@ pub(super) fn payload_colors(dark: bool) -> [egui::Color32; 8] {
             [98, 137, 53],
             [172, 93, 162],
             [101, 121, 149],
-        ]
-    };
-    colors.map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
+        ],
+    )
+}
+
+/// The dark- or light-theme variant of a categorical palette.
+fn palette<const N: usize>(
+    dark: bool,
+    dark_rgb: [[u8; 3]; N],
+    light_rgb: [[u8; 3]; N],
+) -> [egui::Color32; N] {
+    let rgb = if dark { dark_rgb } else { light_rgb };
+    rgb.map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
 }
 
 /// Composition of physical files only. Do not mix in logical payloads,

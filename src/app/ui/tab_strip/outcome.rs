@@ -73,20 +73,14 @@ fn apply_tab_combining(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
                 }),
             );
         }
-        crate::app::app_state::workspace::display_tabs::clear_tab_selection(app);
+        display_tabs::clear_tab_selection(app);
         return;
     }
 
     if let Some((source_index, target_index)) = outcome.combined_tabs
         && let (Some(source_index), Some(target_index)) = (
-            crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
-                app,
-                source_index,
-            ),
-            crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
-                app,
-                target_index,
-            ),
+            display_tabs::workspace_index_for_slot(app, source_index),
+            display_tabs::workspace_index_for_slot(app, target_index),
         )
     {
         crate::app::commands::handle_command(
@@ -96,7 +90,7 @@ fn apply_tab_combining(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
                 target_index,
             }),
         );
-        crate::app::app_state::workspace::display_tabs::clear_tab_selection(app);
+        display_tabs::clear_tab_selection(app);
     }
 }
 
@@ -107,17 +101,10 @@ fn resolve_group_combine_targets(
 ) -> Option<(Vec<usize>, usize)> {
     let workspace_sources = source_indices
         .iter()
-        .filter_map(|slot_index| {
-            crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
-                app,
-                *slot_index,
-            )
-        })
+        .filter_map(|slot_index| display_tabs::workspace_index_for_slot(app, *slot_index))
         .collect::<Vec<_>>();
 
-    if let Some(workspace_target) =
-        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, target_index)
-    {
+    if let Some(workspace_target) = display_tabs::workspace_index_for_slot(app, target_index) {
         return (!workspace_sources.is_empty()).then_some((workspace_sources, workspace_target));
     }
 
@@ -130,9 +117,9 @@ fn apply_workspace_slot_command(
     slot_index: Option<usize>,
     command: impl FnOnce(usize) -> AppCommand,
 ) {
-    if let Some(index) = slot_index.and_then(|slot_index| {
-        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
-    }) {
+    if let Some(index) =
+        slot_index.and_then(|slot_index| display_tabs::workspace_index_for_slot(app, slot_index))
+    {
         crate::app::commands::handle_command(app, command(index));
     }
 }

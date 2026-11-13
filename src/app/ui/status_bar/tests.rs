@@ -3,17 +3,15 @@ use super::{
     StatusBarItemKind, StatusBarPathLayout, artifact_icon, plain_text_icon_color,
     status_attention_color, status_bar_path_layout, status_cursor_range,
 };
-use crate::app::domain::EditorViewState;
+use crate::app::app_state::test_support::{test_app, ui_harness};
+use crate::app::domain::{BufferState, EditorViewState, SplitAxis, WorkspaceTab};
+use crate::app::services::{chunk_store::Health, session_manager};
 use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
+use eframe::egui;
+use egui_kittest::kittest::Queryable;
 
 #[test]
 fn zoom_status_opens_scrubber_tracks_the_active_pane_and_is_hidden_in_settings() {
-    use crate::app::{
-        app_state::test_support::test_app,
-        domain::{BufferState, SplitAxis, WorkspaceTab},
-    };
-    use eframe::egui;
-    use egui_kittest::{Harness, kittest::Queryable};
     let root = tempfile::tempdir().unwrap();
     let mut app = test_app(root.path());
     let mut tab = WorkspaceTab::new(BufferState::new("note".into(), "text".into(), None));
@@ -22,15 +20,7 @@ fn zoom_status_opens_scrubber_tracks_the_active_pane_and_is_hidden_in_settings()
     tab.layout.view_mut(first).unwrap().set_zoom_factor(1.25);
     tab.activate_view(first);
     app.tab_manager.set_tabs(vec![tab], 0);
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1600.0, 300.0))
-        .with_context_setup(|ctx| {
-            let mut fonts = egui::FontDefinitions::default();
-            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-            ctx.set_fonts(fonts);
-        })
-        .build_ui_state(super::show_status_bar, app);
-    harness.run();
+    let mut harness = ui_harness(egui::vec2(1600.0, 300.0), app, super::show_status_bar);
     assert!(
         harness
             .query_by_role_and_label(egui::Role::Button, "125%")
@@ -160,42 +150,24 @@ fn path_width_stays_pinned_while_items_disappear() {
         status_item(StatusBarItemKind::Cursor, 40.0),
     ];
 
+    for (available, visible_start, path_width) in [
+        (200.0, 0, 120.0),
+        (180.0, 0, 100.0),
+        (160.0, 1, 100.0),
+        (120.0, 2, 100.0),
+    ] {
+        assert_eq!(
+            status_bar_path_layout(available, 100.0, &items),
+            StatusBarPathLayout {
+                visible_start,
+                path_width,
+            },
+            "{available}"
+        );
+    }
+    // Only once every item is hidden does the path shrink below its floor.
     assert_eq!(
-        status_bar_path_layout(200.0, 100.0, &items),
-        StatusBarPathLayout {
-            visible_start: 0,
-            path_width: 120.0,
-        }
-    );
-    assert_eq!(
-        status_bar_path_layout(180.0, 100.0, &items),
-        StatusBarPathLayout {
-            visible_start: 0,
-            path_width: 100.0,
-        }
-    );
-    assert_eq!(
-        status_bar_path_layout(160.0, 100.0, &items),
-        StatusBarPathLayout {
-            visible_start: 1,
-            path_width: 100.0,
-        }
-    );
-    assert_eq!(
-        status_bar_path_layout(120.0, 100.0, &items),
-        StatusBarPathLayout {
-            visible_start: 2,
-            path_width: 100.0,
-        }
-    );
-}
-
-#[test]
-fn path_width_only_shrinks_below_floor_when_no_space_remains() {
-    let items = [status_item(StatusBarItemKind::LineCount, 40.0)];
-
-    assert_eq!(
-        status_bar_path_layout(80.0, 100.0, &items),
+        status_bar_path_layout(80.0, 100.0, &items[..1]),
         StatusBarPathLayout {
             visible_start: 1,
             path_width: 80.0,
@@ -209,12 +181,9 @@ fn status_item(kind: StatusBarItemKind, width: f32) -> StatusBarItem {
 
 #[test]
 fn storage_warning_is_visible_in_settings_and_empty_workspaces_at_narrow_width() {
-    use crate::app::services::{chunk_store::Health, session_manager};
-    use eframe::egui;
-    use egui_kittest::{Harness, kittest::Queryable};
     for settings in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let mut app = crate::app::app_state::test_support::test_app(root.path());
+        let mut app = test_app(root.path());
         app.tab_manager.set_tabs(Vec::new(), 0);
         if settings {
             app.state
@@ -228,15 +197,7 @@ fn storage_warning_is_visible_in_settings_and_empty_workspaces_at_narrow_width()
             .unwrap()
             .set_health(Health::Unavailable("injected writer failure".into()));
         session_manager::poll_storage_health(&mut app);
-        let mut harness = Harness::builder()
-            .with_size(egui::vec2(400., 300.))
-            .with_context_setup(|ctx| {
-                let mut fonts = egui::FontDefinitions::default();
-                egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-                ctx.set_fonts(fonts);
-            })
-            .build_ui_state(super::show_status_bar, app);
-        harness.run();
+        let harness = ui_harness(egui::vec2(400., 300.), app, super::show_status_bar);
         assert!(
             harness
                 .query_by_label("Session not saving. Text is in memory only.")

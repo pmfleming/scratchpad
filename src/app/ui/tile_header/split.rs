@@ -1,6 +1,8 @@
 mod drag;
 mod geometry;
 mod preview;
+#[cfg(test)]
+mod tests;
 
 use crate::app::domain::{SplitAxis, SplitPath, ViewId};
 use eframe::egui;
@@ -95,15 +97,6 @@ impl TileSplitHandler {
 
 pub fn paint_split_preview(ui: &egui::Ui, overlay: &SplitPreviewOverlay) {
     preview::paint_split_preview(ui, overlay);
-}
-
-#[must_use]
-pub fn split_preview_spec(
-    tile_rect: egui::Rect,
-    start_pos: egui::Pos2,
-    current_pos: egui::Pos2,
-) -> Option<(SplitAxis, bool, f32)> {
-    geometry::split_preview_spec(tile_rect, start_pos, current_pos)
 }
 
 pub(crate) fn split_drag_active_for_context(ctx: &egui::Context) -> bool {

@@ -10,19 +10,11 @@ use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
 use crate::app::ui::tab_strip::tab_cell::{TabPresentation, attention_marker, tab_presentation};
 use crate::app::ui::widget_ids;
 use eframe::egui::{self, Stroke};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 
 #[cfg(test)]
 mod tests;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OverflowListMode {
-    AllTabs,
-    HiddenTabsOnly,
-}
-
-pub(crate) const OVERFLOW_LIST_MODE_TOKEN: &str = "all-tabs";
 
 #[derive(Default)]
 pub(crate) struct OverflowMenuOutcome {
@@ -57,7 +49,6 @@ enum OverflowRowAction {
 
 struct OverflowPopupRequest<'a> {
     app: &'a ScratchpadApp,
-    visible_tab_indices: &'a HashSet<usize>,
     duplicate_name_counts: &'a HashMap<String, usize>,
     overflow_popup_id: egui::Id,
     anchor: egui::Pos2,
@@ -73,7 +64,6 @@ pub(crate) fn show_overflow_button(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
     overflow_popup_open: &mut bool,
-    visible_tab_indices: &HashSet<usize>,
     duplicate_name_counts: &HashMap<String, usize>,
 ) -> OverflowMenuOutcome {
     let mut outcome = OverflowMenuOutcome::default();
@@ -86,7 +76,6 @@ pub(crate) fn show_overflow_button(
     let (anchor, pivot) = overflow_popup_anchor(app, overflow_button_response.rect);
     let popup_request = OverflowPopupRequest {
         app,
-        visible_tab_indices,
         duplicate_name_counts,
         overflow_popup_id,
         anchor,
@@ -141,7 +130,7 @@ fn show_overflow_popup(
     outcome: &mut OverflowMenuOutcome,
 ) -> Option<egui::Response> {
     let (mut filter, opening) = begin_filter(ctx, *overflow_popup_open)?;
-    let matching = matching_slots(request.app, &request, &filter.text);
+    let matching = matching_slots(request.app, request.duplicate_name_counts, &filter.text);
     filter_keys(ctx, &mut filter, &matching);
 
     let active_drag_sources = tab_drag::active_drag_sources_for_context(ctx);
@@ -207,7 +196,6 @@ fn show_overflow_popup(
                     ui,
                     scroll_output.id,
                     request.app,
-                    request.visible_tab_indices,
                     scroll_output.inner_rect,
                     &scroll_output.state,
                 );
@@ -278,7 +266,6 @@ fn maybe_auto_scroll_overflow_popup(
     ui: &mut egui::Ui,
     scroll_area_id: egui::Id,
     app: &ScratchpadApp,
-    visible_tab_indices: &HashSet<usize>,
     viewport_rect: egui::Rect,
     scroll_state: &egui::scroll_area::State,
 ) {
@@ -286,18 +273,14 @@ fn maybe_auto_scroll_overflow_popup(
         ui.ctx(),
         scroll_area_id,
         viewport_rect,
-        estimated_overflow_popup_content_height(ui, app, visible_tab_indices),
+        estimated_overflow_popup_content_height(ui, app),
         scroll_state,
         tab_drag::TabDropAxis::Vertical,
     );
 }
 
-fn estimated_overflow_popup_content_height(
-    ui: &egui::Ui,
-    app: &ScratchpadApp,
-    visible_tab_indices: &HashSet<usize>,
-) -> f32 {
-    overflow_row_count(app, visible_tab_indices) as f32
+fn estimated_overflow_popup_content_height(ui: &egui::Ui, app: &ScratchpadApp) -> f32 {
+    display_tabs::total_tab_slots(app) as f32
         * crate::app::chrome::tab_row_height(ui.ctx(), app.state.app_settings.font_size())
 }
 
@@ -369,12 +352,6 @@ fn overflow_popup_target_height(
         .min(popup_max_height)
 }
 
-fn overflow_row_count(app: &ScratchpadApp, visible_tab_indices: &HashSet<usize>) -> usize {
-    (0..crate::app::app_state::workspace::display_tabs::total_tab_slots(app))
-        .filter(|slot_index| should_show_overflow_row(*slot_index, &[], visible_tab_indices))
-        .count()
-}
-
 fn collect_overflow_row_rects(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
@@ -396,9 +373,7 @@ fn collect_overflow_row_rects(
         row_rects.push(tab_drag::TabRectEntry {
             index: slot_index,
             rect: row_rect,
-            combine_enabled: !crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(
-                app, slot_index,
-            ),
+            combine_enabled: !display_tabs::tab_slot_is_settings(app, slot_index),
         });
     }
 
@@ -430,24 +405,6 @@ fn should_close_overflow_popup(
         || (button_response.clicked_elsewhere()
             && !popup_response.hovered()
             && close_requested_tab.is_none())
-}
-
-fn should_show_overflow_row(
-    slot_index: usize,
-    _active_drag_sources: &[usize],
-    visible_tab_indices: &HashSet<usize>,
-) -> bool {
-    match overflow_list_mode() {
-        OverflowListMode::AllTabs => true,
-        OverflowListMode::HiddenTabsOnly => !visible_tab_indices.contains(&slot_index),
-    }
-}
-
-fn overflow_list_mode() -> OverflowListMode {
-    match OVERFLOW_LIST_MODE_TOKEN {
-        "overflow-only" => OverflowListMode::HiddenTabsOnly,
-        _ => OverflowListMode::AllTabs,
-    }
 }
 
 fn show_overflow_row(
@@ -522,10 +479,8 @@ fn overflow_row_state(
     duplicate_name_counts: &HashMap<String, usize>,
 ) -> Option<OverflowRowState> {
     Some(OverflowRowState {
-        selected: crate::app::app_state::workspace::display_tabs::tab_slot_selected(
-            app, slot_index,
-        ) || crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app)
-            == slot_index,
+        selected: display_tabs::tab_slot_selected(app, slot_index)
+            || display_tabs::active_tab_slot_index(app) == slot_index,
         presentation: tab_presentation(app, slot_index, duplicate_name_counts)?,
     })
 }
@@ -557,8 +512,7 @@ fn overflow_row_action(
     close_response: &egui::Response,
 ) -> OverflowRowAction {
     if promote_response.is_some_and(|promote| promote.clicked())
-        && crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
-            .is_some()
+        && display_tabs::workspace_index_for_slot(app, slot_index).is_some()
     {
         return OverflowRowAction::Promote;
     }
@@ -578,7 +532,7 @@ fn handle_overflow_slot_action(
     is_close: bool,
 ) {
     match (
-        crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index),
+        display_tabs::tab_slot_is_settings(app, slot_index),
         is_close,
     ) {
         (true, true) => menu.outcome.close_settings = true,
@@ -626,15 +580,14 @@ fn filter_field_id() -> egui::Id {
 /// Rows the list shows: every listed tab whose name contains the filter text.
 fn matching_slots(
     app: &ScratchpadApp,
-    request: &OverflowPopupRequest<'_>,
+    duplicate_name_counts: &HashMap<String, usize>,
     text: &str,
 ) -> Vec<usize> {
     let needle = text.trim().to_lowercase();
     (0..display_tabs::total_tab_slots(app))
-        .filter(|&slot| should_show_overflow_row(slot, &[], request.visible_tab_indices))
         .filter(|&slot| {
             needle.is_empty()
-                || tab_presentation(app, slot, request.duplicate_name_counts)
+                || tab_presentation(app, slot, duplicate_name_counts)
                     .is_some_and(|p| p.display_name.to_lowercase().contains(&needle))
         })
         .collect()

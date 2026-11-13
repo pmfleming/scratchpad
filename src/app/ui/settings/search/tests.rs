@@ -1,4 +1,4 @@
-use super::*;
+use super::{SETTINGS, Search, egui};
 use crate::app::ui::settings::{render_page_body, widgets};
 use egui_kittest::{Harness, kittest::Queryable};
 

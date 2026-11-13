@@ -132,25 +132,6 @@ pub fn tab_row_height(ctx: &egui::Context, font_size: f32) -> f32 {
     (ctx.fonts_mut(|fonts| fonts.row_height(&tab_label_font_id(font_size))) + 12.0).max(TAB_HEIGHT)
 }
 
-pub fn tab_button(
-    ui: &mut egui::Ui,
-    surface_key: impl Hash,
-    label: &str,
-    active: bool,
-    selected: bool,
-    show_promote_all: bool,
-    attention: Option<TabAttention>,
-) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    tab_button_with_actions(
-        ui,
-        surface_key,
-        label,
-        active,
-        selected,
-        TabButtonOptions::with_actions(TAB_BUTTON_WIDTH, show_promote_all, attention),
-    )
-}
-
 pub fn tab_button_with_actions(
     ui: &mut egui::Ui,
     surface_key: impl Hash,
@@ -199,25 +180,6 @@ pub fn tab_button_with_actions(
 
     let close_response = close_response.accessible_name(format!("Close {label}"));
     (frame.response, promote_response, close_response, truncated)
-}
-
-pub fn tab_button_sized(
-    ui: &mut egui::Ui,
-    surface_key: impl Hash,
-    label: &str,
-    active: bool,
-    selected: bool,
-    width: f32,
-) -> (egui::Response, egui::Response, bool) {
-    let (response, _, close_response, truncated) = tab_button_with_actions(
-        ui,
-        surface_key,
-        label,
-        active,
-        selected,
-        TabButtonOptions::new(width),
-    );
-    (response, close_response, truncated)
 }
 
 pub fn tab_rename_editor_sized(
@@ -484,96 +446,39 @@ fn truncate_label(
     available_width: f32,
     font_id: &egui::FontId,
 ) -> (String, bool) {
-    let ellipsis = "...";
-    if label_fits(ui, label, available_width, font_id) {
+    const ELLIPSIS: &str = "...";
+    let fits = |text: &str| text_width(ui, text, font_id) <= available_width;
+    if fits(label) {
         return (label.to_owned(), false);
     }
-    if !ellipsis_fits(ui, ellipsis, available_width, font_id) {
+    if !fits(ELLIPSIS) {
         return (String::new(), true);
     }
 
-    (
-        best_truncated_label(ui, label, ellipsis, available_width, font_id).unwrap_or_default(),
-        true,
-    )
+    (longest_fitting_prefix(label, ELLIPSIS, fits), true)
 }
 
-fn label_fits(ui: &egui::Ui, label: &str, available_width: f32, font_id: &egui::FontId) -> bool {
-    text_width(ui, label, font_id) <= available_width
-}
-
-fn ellipsis_fits(
-    ui: &egui::Ui,
-    ellipsis: &str,
-    available_width: f32,
-    font_id: &egui::FontId,
-) -> bool {
-    text_width(ui, ellipsis, font_id) <= available_width
-}
-
-fn best_truncated_label(
-    ui: &egui::Ui,
-    label: &str,
-    suffix: &str,
-    available_width: f32,
-    font_id: &egui::FontId,
-) -> Option<String> {
-    let boundaries = char_boundaries(label);
+/// Binary-searches the longest char-boundary prefix of `label` that still fits
+/// once `suffix` is appended.
+fn longest_fitting_prefix(label: &str, suffix: &str, fits: impl Fn(&str) -> bool) -> String {
+    let boundaries: Vec<usize> = label.char_indices().map(|(index, _)| index).collect();
     let mut low = 0;
     let mut high = boundaries.len();
     let mut best = None;
 
     while low < high {
-        let candidate = truncation_candidate(label, suffix, &boundaries, low, high);
-        if candidate_fits(ui, &candidate.1, available_width, font_id) {
-            best = Some(candidate.1);
-            low = candidate.0 + 1;
+        let mid = low + (high - low) / 2;
+        let candidate = format!("{}{suffix}", &label[..boundaries[mid]]);
+        if fits(&candidate) {
+            best = Some(candidate);
+            low = mid + 1;
         } else {
-            high = candidate.0;
+            high = mid;
         }
     }
 
-    best.or_else(|| full_label_with_suffix_if_fits(ui, label, suffix, available_width, font_id))
-}
-
-fn char_boundaries(label: &str) -> Vec<usize> {
-    label.char_indices().map(|(index, _)| index).collect()
-}
-
-fn truncation_candidate(
-    label: &str,
-    suffix: &str,
-    boundaries: &[usize],
-    low: usize,
-    high: usize,
-) -> (usize, String) {
-    let mid = low + (high - low) / 2;
-    let mid_pos = boundaries[mid];
-    (mid, format!("{}{}", &label[..mid_pos], suffix))
-}
-
-fn candidate_fits(
-    ui: &egui::Ui,
-    candidate: &str,
-    available_width: f32,
-    font_id: &egui::FontId,
-) -> bool {
-    text_width(ui, candidate, font_id) <= available_width
-}
-
-fn full_label_with_suffix_if_fits(
-    ui: &egui::Ui,
-    label: &str,
-    suffix: &str,
-    available_width: f32,
-    font_id: &egui::FontId,
-) -> Option<String> {
-    let candidate = format!("{label}{suffix}");
-    if candidate_fits(ui, &candidate, available_width, font_id) {
-        Some(candidate)
-    } else {
-        None
-    }
+    best.or_else(|| Some(format!("{label}{suffix}")).filter(|candidate| fits(candidate)))
+        .unwrap_or_default()
 }
 
 fn text_width(ui: &egui::Ui, text: &str, font_id: &egui::FontId) -> f32 {
@@ -618,5 +523,25 @@ mod tests {
             normal.family,
             egui::FontFamily::Name(EDITOR_FONT_FAMILY.into())
         );
+    }
+
+    #[test]
+    fn longest_fitting_prefix_keeps_char_boundaries_and_appends_the_suffix() {
+        let cases = [
+            ("abcdef", 6, "abc..."),
+            ("abcdef", 4, "a..."),
+            ("abcdef", 3, "..."),
+            ("abcdef", 2, ""),
+            ("äöü", 5, "äö..."),
+            ("", 3, "..."),
+        ];
+        for (label, max_chars, expected) in cases {
+            let fits = |text: &str| text.chars().count() <= max_chars;
+            assert_eq!(
+                super::longest_fitting_prefix(label, "...", fits),
+                expected,
+                "{label:?} within {max_chars} chars"
+            );
+        }
     }
 }

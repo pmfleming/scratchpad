@@ -10,18 +10,13 @@ use crate::app::theme::{BUTTON_SIZE, action_bg, action_hover_bg};
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone, TabRectEntry};
 use crate::app::ui::tab_overflow;
 use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
-use crate::app::ui::tab_strip::{
-    HeaderLayout, TabStripOutcome, maybe_auto_scroll_tab_strip, record_visible_tab,
-};
+use crate::app::ui::tab_strip::{HeaderLayout, TabStripOutcome, maybe_auto_scroll_tab_strip};
 use crate::app::ui::widget_ids;
 use eframe::egui::{self, Sense};
-use std::collections::HashSet;
 
 struct TabStripEntriesContext<'a> {
     app: &'a mut ScratchpadApp,
     duplicate_name_counts: &'a DuplicateNameCounts,
-    viewport_rect: egui::Rect,
-    visible_tab_indices: &'a mut HashSet<usize>,
     outcome: &'a mut TabStripOutcome,
     spacing: f32,
 }
@@ -33,7 +28,6 @@ pub(super) fn show_tab_region(
     layout: &HeaderLayout,
     duplicate_name_counts: &DuplicateNameCounts,
 ) -> TabStripOutcome {
-    let mut visible_tab_indices = HashSet::new();
     let mut outcome = TabStripOutcome::default();
 
     widget_ids::feature_scope(ui, "tab_strip_horizontal", |ui| {
@@ -52,7 +46,6 @@ pub(super) fn show_tab_region(
                     app,
                     layout,
                     duplicate_name_counts,
-                    &mut visible_tab_indices,
                     &mut outcome,
                 );
                 apply_tab_drag_feedback(ui, app, duplicate_name_counts, &drop_zones, &mut outcome);
@@ -71,7 +64,6 @@ fn allocate_tab_strip_entries(
     layout: &HeaderLayout,
     scroll_area_id: egui::Id,
     duplicate_name_counts: &DuplicateNameCounts,
-    visible_tab_indices: &mut HashSet<usize>,
     outcome: &mut TabStripOutcome,
 ) -> (Vec<TabRectEntry>, egui::Rect) {
     let output = ui.allocate_ui_with_layout(
@@ -82,12 +74,9 @@ fn allocate_tab_strip_entries(
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             configure_tab_strip_viewport(ui, layout.visible_strip_width);
-            let viewport_rect = ui.max_rect();
             let mut context = TabStripEntriesContext {
                 app,
                 duplicate_name_counts,
-                viewport_rect,
-                visible_tab_indices,
                 outcome,
                 spacing: layout.spacing,
             };
@@ -148,20 +137,7 @@ fn collect_tab_entries(
         context.spacing,
         TabDropAxis::Horizontal,
     );
-    collect_slot_entries(
-        ui,
-        context.app,
-        &cell_context,
-        context.outcome,
-        |slot_index, rect| {
-            record_visible_tab(
-                slot_index,
-                rect,
-                context.viewport_rect,
-                context.visible_tab_indices,
-            );
-        },
-    )
+    collect_slot_entries(ui, context.app, &cell_context, context.outcome)
 }
 
 fn collect_tab_drop_zones(
@@ -170,34 +146,20 @@ fn collect_tab_drop_zones(
     app: &mut ScratchpadApp,
     layout: &HeaderLayout,
     duplicate_name_counts: &DuplicateNameCounts,
-    visible_tab_indices: &mut HashSet<usize>,
     outcome: &mut TabStripOutcome,
 ) -> Vec<TabDropZone> {
     let mut drop_zones = Vec::new();
 
     if layout.visible_strip_width > 0.0
-        && let Some(tab_bar_zone) = show_scrolling_tab_strip(
-            ui,
-            app,
-            layout,
-            duplicate_name_counts,
-            visible_tab_indices,
-            outcome,
-        )
+        && let Some(tab_bar_zone) =
+            show_scrolling_tab_strip(ui, app, layout, duplicate_name_counts, outcome)
     {
         drop_zones.push(tab_bar_zone);
     }
 
     if (layout.has_overflow || app.state.window.overflow_popup_open)
-        && let Some(overflow_zone) = show_overflow_controls(
-            ctx,
-            ui,
-            app,
-            layout,
-            visible_tab_indices,
-            duplicate_name_counts,
-            outcome,
-        )
+        && let Some(overflow_zone) =
+            show_overflow_controls(ctx, ui, app, layout, duplicate_name_counts, outcome)
     {
         drop_zones.push(overflow_zone);
     }
@@ -210,7 +172,6 @@ fn show_scrolling_tab_strip(
     app: &mut ScratchpadApp,
     layout: &HeaderLayout,
     duplicate_name_counts: &DuplicateNameCounts,
-    visible_tab_indices: &mut HashSet<usize>,
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
     let scroll_area_id = widget_ids::scroll_id(ui, "tab_strip");
@@ -220,7 +181,6 @@ fn show_scrolling_tab_strip(
         layout,
         scroll_area_id,
         duplicate_name_counts,
-        visible_tab_indices,
         outcome,
     );
     attach_tab_list_background_context_menu(
@@ -259,7 +219,6 @@ fn show_overflow_controls(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
     layout: &HeaderLayout,
-    visible_tab_indices: &HashSet<usize>,
     duplicate_name_counts: &DuplicateNameCounts,
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
@@ -270,7 +229,6 @@ fn show_overflow_controls(
         ui,
         app,
         &mut overflow_popup_open,
-        visible_tab_indices,
         duplicate_name_counts,
     );
     app.state.window.overflow_popup_open = overflow_popup_open;
