@@ -72,9 +72,7 @@ impl Database {
         // Only archives consumed by live/removed documents or explicitly updated
         // closes participate in this diff. Unrelated layouts remain untouched.
         let ids: Vec<_> = request
-            .tabs
-            .iter()
-            .chain(request.closed_tabs.iter().map(|closed| &closed.tab))
+            .all_tabs()
             .flat_map(|tab| tab.session_tab.buffers.iter().map(|b| b.temp_id.clone()))
             .chain(request.removed_documents.iter().cloned())
             .collect();

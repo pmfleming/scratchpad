@@ -156,11 +156,7 @@ impl Database {
         if self.quarantined.is_empty() {
             return;
         }
-        for tab in request
-            .tabs
-            .iter_mut()
-            .chain(request.closed_tabs.iter_mut().map(|closed| &mut closed.tab))
-        {
+        for tab in request.all_tabs_mut() {
             for buffer in &mut tab.session_tab.buffers {
                 if let Some(original) = self.quarantined.get(&buffer.temp_id) {
                     let live_id = buffer.id;

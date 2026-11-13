@@ -69,21 +69,8 @@ impl Actor {
             blocked: worker_blocked.clone(),
             chunks: None,
         };
-        let opened = block_on(async {
-            match ownership {
-                Some(ownership) => Database::open_owned(&root, ownership).await,
-                None => Database::open(&root).await,
-            }
-        });
-        let mut database = match opened {
-            Ok(database) => database,
-            Err(cause) => {
-                let _ = ready_tx.send(Err(cause));
-                return;
-            }
-        };
-        let chunks = match database.chunk_store() {
-            Ok(chunks) => chunks,
+        let (mut database, chunks) = match open_database(&root, ownership) {
+            Ok(opened) => opened,
             Err(cause) => {
                 let _ = ready_tx.send(Err(cause));
                 return;
@@ -92,19 +79,15 @@ impl Actor {
         health.chunks = Some(chunks.clone());
         publish_notices(&mut database, &worker_notices);
         let _ = ready_tx.send(Ok(chunks.clone()));
-        let mut retry_at = Instant::now();
-        let mut backoff = Duration::from_millis(100);
+        let mut retry = Retry::new();
         loop {
             chunks.refresh_headroom();
             chunks.reap_abandoned();
             let drain = chunks.pending_bytes() > 0
                 && !matches!(chunks.health(), Health::Unavailable(_))
-                && Instant::now() >= retry_at;
-            match receiver.recv_timeout(if drain {
-                Duration::ZERO
-            } else {
-                Duration::from_millis(100)
-            }) {
+                && retry.due();
+            let wait = if drain { Duration::ZERO } else { IDLE_POLL };
+            match receiver.recv_timeout(wait) {
                 Ok(Job::Call(job)) => job(&mut database, &worker_blocked),
                 Ok(Job::Drain) => {
                     worker_wake_pending.store(false, Ordering::Release);
@@ -126,36 +109,80 @@ impl Actor {
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
             publish_notices(&mut database, &worker_notices);
-            if database.blocked.is_some() {
-                chunks.set_health(Health::Unavailable(
-                    database.blocked.clone().unwrap_or_default(),
-                ));
+            if let Some(cause) = &database.blocked {
+                chunks.set_health(Health::Unavailable(cause.clone()));
                 continue;
             }
-            // One bounded batch before checking queued jobs again. A queued
-            // manifest waits behind at most the currently running batch.
-            if chunks.pending_bytes() > 0 && Instant::now() >= retry_at {
-                match block_on(database.drain_chunk_batch()) {
-                    Ok(()) => {
-                        backoff = Duration::from_millis(100);
-                        retry_at = Instant::now();
-                    }
-                    Err(cause) => {
-                        log::warn!("chunk batch failed: {cause}");
-                        retry_at = Instant::now() + backoff;
-                        backoff = (backoff * 2).min(Duration::from_secs(5));
-                    }
-                }
-            }
-            if chunks.pending_bytes() == 0
-                && Instant::now() >= retry_at
-                && let Err(cause) = block_on(database.collect_idle_chunk_batch(Instant::now()))
-            {
-                chunks.set_health(Health::Failing(cause.to_string()));
-                retry_at = Instant::now() + backoff;
-            }
+            maintain_chunks(&mut database, &chunks, &mut retry);
         }
         finish_on_disconnect(&mut database, &chunks, &root);
+    }
+}
+
+const IDLE_POLL: Duration = Duration::from_millis(100);
+const MAX_BACKOFF: Duration = Duration::from_secs(5);
+
+fn open_database(
+    root: &std::path::Path,
+    ownership: Option<File>,
+) -> io::Result<(Database, ChunkStoreHandle)> {
+    let database = block_on(async {
+        match ownership {
+            Some(ownership) => Database::open_owned(root, ownership).await,
+            None => Database::open(root).await,
+        }
+    })?;
+    let chunks = database.chunk_store()?;
+    Ok((database, chunks))
+}
+
+/// When background chunk work may next run, backing off after failures.
+struct Retry {
+    at: Instant,
+    backoff: Duration,
+}
+
+impl Retry {
+    fn new() -> Self {
+        Self {
+            at: Instant::now(),
+            backoff: IDLE_POLL,
+        }
+    }
+    fn due(&self) -> bool {
+        Instant::now() >= self.at
+    }
+    fn succeeded(&mut self) {
+        self.backoff = IDLE_POLL;
+        self.at = Instant::now();
+    }
+    fn failed(&mut self) {
+        self.postpone();
+        self.backoff = (self.backoff * 2).min(MAX_BACKOFF);
+    }
+    fn postpone(&mut self) {
+        self.at = Instant::now() + self.backoff;
+    }
+}
+
+/// Runs at most one bounded batch of pending chunk writes, or idle collection
+/// when nothing is pending. A queued manifest waits behind at most this batch.
+fn maintain_chunks(database: &mut Database, chunks: &ChunkStoreHandle, retry: &mut Retry) {
+    if chunks.pending_bytes() > 0 && retry.due() {
+        match block_on(database.drain_chunk_batch()) {
+            Ok(()) => retry.succeeded(),
+            Err(cause) => {
+                log::warn!("chunk batch failed: {cause}");
+                retry.failed();
+            }
+        }
+    }
+    if chunks.pending_bytes() == 0
+        && retry.due()
+        && let Err(cause) = block_on(database.collect_idle_chunk_batch(Instant::now()))
+    {
+        chunks.set_health(Health::Failing(cause.to_string()));
+        retry.postpone();
     }
 }
 impl Database {
@@ -278,49 +305,18 @@ impl DatabaseWorker {
             .reset_documents
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for tab in request
-            .tabs
-            .iter_mut()
-            .chain(request.closed_tabs.iter_mut().map(|closed| &mut closed.tab))
-        {
-            if tab.preserve_existing
-                && tab
-                    .session_tab
-                    .buffers
-                    .iter()
-                    .all(|b| cached.contains_key(&b.temp_id))
-            {
-                for buffer in &mut tab.session_tab.buffers {
-                    let history = cached[&buffer.temp_id].clone();
-                    tab.buffer_snapshots
-                        .push(super::super::capture::CapturedSessionBuffer {
-                            temp_id: buffer.temp_id.clone(),
-                            snapshot: history.snapshot(),
-                        });
-                    buffer.history_capture = Some(history);
-                }
-                tab.preserve_existing = false;
-            }
+        for tab in request.all_tabs_mut() {
+            tab.restore_cached_histories(&cached);
         }
-        if request
-            .tabs
-            .iter()
-            .chain(request.closed_tabs.iter().map(|closed| &closed.tab))
-            .any(|tab| tab.preserve_existing)
-        {
-            request = self.call(move |db| block_on(db.hydrate_reset_request(request)))?;
-            for tab in request
-                .tabs
-                .iter()
-                .chain(request.closed_tabs.iter().map(|closed| &closed.tab))
-            {
-                for buffer in &tab.session_tab.buffers {
-                    if let Some(history) = &buffer.history_capture {
-                        cached.insert(buffer.temp_id.clone(), history.clone());
-                    }
-                }
-            }
+        if !request.all_tabs().any(|tab| tab.preserve_existing) {
+            return Ok(request);
         }
+        let request = self.call(move |db| block_on(db.hydrate_reset_request(request)))?;
+        let histories = request
+            .all_tabs()
+            .flat_map(|tab| &tab.session_tab.buffers)
+            .filter_map(|buffer| Some((buffer.temp_id.clone(), buffer.history_capture.clone()?)));
+        cached.extend(histories);
         Ok(request)
     }
     pub fn call<T: Send + 'static>(
@@ -368,9 +364,20 @@ impl Drop for Worker {
     }
 }
 
+fn publish_notices(database: &mut Database, notices: &Mutex<Vec<super::super::RestoreStatus>>) {
+    if !database.startup_notices.is_empty() {
+        notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .append(&mut database.startup_notices);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Database, DatabaseWorker, Health, Job, block_on, error};
+    use std::sync::{Arc, mpsc};
+    use std::thread;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -561,14 +568,5 @@ mod tests {
             })
             .unwrap();
         assert!(chunks.iter().all(|c| c.reference().is_some()));
-    }
-}
-
-fn publish_notices(database: &mut Database, notices: &Mutex<Vec<super::super::RestoreStatus>>) {
-    if !database.startup_notices.is_empty() {
-        notices
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .append(&mut database.startup_notices);
     }
 }

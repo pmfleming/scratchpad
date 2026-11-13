@@ -1,9 +1,11 @@
 use crate::app::app_state::workspace::restore_conflict;
 use crate::app::app_state::{AppSurface, ScratchpadApp, StatusDomain};
+use crate::app::domain::{BufferState, ViewId};
 use crate::app::services::session_store::{
     RestoreStatusLevel, RestoredSession, SessionActiveSurface, SessionPersistRequest,
 };
 use eframe::egui;
+use std::io;
 use std::time::Instant;
 
 mod storage_health;
@@ -43,7 +45,7 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
     app.queue_background_session_persist(request);
 }
 
-pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()> {
+pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> io::Result<()> {
     if app.state.persistence.close_in_flight || !app.state.persistence.close_queue.is_empty() {
         app.tab_manager.mark_session_dirty();
         return Ok(());
@@ -83,61 +85,64 @@ pub(crate) fn request_session_persist(app: &mut ScratchpadApp) {
 
 /// Commit the closed archive and the remaining workspace before the UI removes
 /// the tab. A failed transaction leaves the live tab and its latest edits intact.
-pub(crate) fn persist_tab_close(app: &mut ScratchpadApp, index: usize) -> std::io::Result<()> {
-    if let Some(view) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .get(index)
-        .and_then(|t| {
-            t.layout
-                .views()
-                .iter()
-                .find(|v| !v.deferred_editor_events.is_empty())
-        })
-        .map(|v| v.id)
-    {
-        app.tab_manager.set_active_tab_index_clamped(index);
-        app.tab_manager.tabs.as_mut_slice()[index].activate_view(view);
-        crate::app::app_state::workspace::accessors::request_focus_for_view(app, view);
-        return Err(std::io::Error::other(
-            "Queued input is being applied; the tab was kept open.",
-        ));
+pub(crate) fn persist_tab_close(app: &mut ScratchpadApp, index: usize) -> io::Result<()> {
+    let Some(tab) = app.tab_manager.tabs.as_slice().get(index) else {
+        return close_without_tab(app, index);
+    };
+    let queued = tab
+        .layout
+        .views()
+        .iter()
+        .find(|v| !v.deferred_editor_events.is_empty())
+        .map(|v| v.id);
+    if let Some(view) = queued {
+        return Err(focus_queued_input(app, index, view, "tab"));
     }
-    if app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .get(index)
-        .is_some_and(|t| t.buffers().any(|b| b.is_preparing_text()))
-    {
-        return Err(std::io::Error::other(
+    if tab.buffers().any(BufferState::is_preparing_text) {
+        return Err(io::Error::other(
             "Text is still being prepared; the tab was kept open.",
         ));
     }
-    if app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .get(index)
-        .is_some_and(|tab| tab.buffers().all(|buffer| buffer.is_loading_preview))
-    {
+    if tab.buffers().all(|buffer| buffer.is_loading_preview) {
         return Ok(());
     }
-    // A failed restore or permanently unavailable store must not trap the user.
-    // Dirty-close confirmation still runs before these persistence helpers.
-    if app.state.persistence.session_restore_failed
-        || app.state.persistence.session_store.writes_blocked()
-    {
+    close_without_tab(app, index)
+}
+/// The persistence-dependent part of a tab close, which also applies to an
+/// index that is no longer open.
+fn close_without_tab(app: &mut ScratchpadApp, index: usize) -> io::Result<()> {
+    if persistence_unavailable(app) {
         close::retain_ram_close(app, index, None);
         return Ok(());
     }
     if app.startup_restore_pending() {
-        return Err(std::io::Error::other(
+        return Err(io::Error::other(
             "session recovery is not ready; tab was not closed",
         ));
     }
     close::enqueue(app, index, None)
+}
+
+/// Moves focus to a view whose queued input must be applied before it closes.
+fn focus_queued_input(
+    app: &mut ScratchpadApp,
+    index: usize,
+    view: ViewId,
+    closing: &str,
+) -> io::Error {
+    app.tab_manager.set_active_tab_index_clamped(index);
+    app.tab_manager.tabs.as_mut_slice()[index].activate_view(view);
+    crate::app::app_state::workspace::accessors::request_focus_for_view(app, view);
+    io::Error::other(format!(
+        "Queued input is being applied; the {closing} was kept open."
+    ))
+}
+
+/// A failed restore or permanently unavailable store must not trap the user.
+/// Dirty-close confirmation still runs before these persistence helpers.
+fn persistence_unavailable(app: &ScratchpadApp) -> bool {
+    app.state.persistence.session_restore_failed
+        || app.state.persistence.session_store.writes_blocked()
 }
 
 fn capture_session(app: &ScratchpadApp) -> SessionPersistRequest {
@@ -201,54 +206,31 @@ pub(crate) fn acknowledge_capture(
 }
 
 /// Retain a final view's document and the remaining layout in the same commit.
-pub(crate) fn persist_view_close(
-    app: &mut ScratchpadApp,
-    view: crate::app::domain::ViewId,
-) -> std::io::Result<()> {
-    if let Some(index) = app.tab_manager.tabs.as_slice().iter().position(|t| {
+pub(crate) fn persist_view_close(app: &mut ScratchpadApp, view: ViewId) -> io::Result<()> {
+    let tabs = app.tab_manager.tabs.as_slice();
+    let queued = tabs.iter().position(|t| {
         t.layout
             .view(view)
             .is_some_and(|v| !v.deferred_editor_events.is_empty())
-    }) {
-        app.tab_manager.set_active_tab_index_clamped(index);
-        app.tab_manager.tabs.as_mut_slice()[index].activate_view(view);
-        crate::app::app_state::workspace::accessors::request_focus_for_view(app, view);
-        return Err(std::io::Error::other(
-            "Queued input is being applied; the view was kept open.",
-        ));
+    });
+    if let Some(index) = queued {
+        return Err(focus_queued_input(app, index, view, "view"));
     }
-    if app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .filter_map(|t| t.buffer_for_view(view))
-        .any(|b| b.is_preparing_text())
-    {
-        return Err(std::io::Error::other(
+    let mut buffers = tabs.iter().filter_map(|t| t.buffer_for_view(view));
+    if buffers.clone().any(BufferState::is_preparing_text) {
+        return Err(io::Error::other(
             "Text is still being prepared; the view was kept open.",
         ));
     }
-    if app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .filter_map(|tab| tab.buffer_for_view(view))
-        .any(|buffer| buffer.is_loading_preview)
-    {
+    if buffers.any(|buffer| buffer.is_loading_preview) {
         return Ok(());
     }
-    // A failed restore or permanently unavailable store must not trap the user.
-    // Dirty-close confirmation still runs before these persistence helpers.
-    if app.state.persistence.session_restore_failed
-        || app.state.persistence.session_store.writes_blocked()
-    {
+    if persistence_unavailable(app) {
         close::retain_ram_close(app, app.tab_manager.active_tab_index, Some(view));
         return Ok(());
     }
     if app.startup_restore_pending() {
-        return Err(std::io::Error::other(
+        return Err(io::Error::other(
             "session recovery is not ready; view was not closed",
         ));
     }

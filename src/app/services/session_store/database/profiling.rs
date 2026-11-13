@@ -242,7 +242,7 @@ impl SessionMaintenanceFixture {
         let start = Instant::now();
         match scenario {
             "stored_usage" => {
-                let usage = self.store.storage_usage()?;
+                let usage = self.store.storage_usage_with_settings(self.store.root())?;
                 if let Some(error) = usage.stored_error {
                     return Err(io::Error::other(error));
                 }

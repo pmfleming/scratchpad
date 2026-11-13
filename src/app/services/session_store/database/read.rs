@@ -79,40 +79,18 @@ impl Database {
             ));
         }
         loop {
-            match async {
-                let phase = Instant::now();
-                self.validate_contents(&manifest, scope).await?;
-                profile.content_validation_ns = phase.elapsed().as_nanos();
-                let phase = Instant::now();
-                let tabs = if matches!(scope, ReadScope::Shells) {
-                    let active = manifest.active_tab_index;
-                    manifest
-                        .tabs
-                        .get_mut(active)
-                        .map(std::slice::from_mut)
-                        .unwrap_or_default()
-                } else {
-                    &mut manifest.tabs
-                };
-                self.read_histories(tabs).await?;
-                profile.history_read_ns = phase.elapsed().as_nanos();
-                Ok(())
+            let Err(cause) = self.read_contents(&mut manifest, scope, &mut profile).await else {
+                break;
+            };
+            if self.repair_length_error(&cause).await? {
+                continue;
             }
-            .await
-            {
-                Ok(()) => break,
-                Err(cause) => {
-                    if self.repair_length_error(&cause).await? {
-                        continue;
-                    }
-                    self.protect_damaged(&cause, &manifest.tabs).await?;
-                    if !matches!(scope, ReadScope::Shells) || damaged_id(&cause).is_none() {
-                        return Err(cause);
-                    }
-                    // Keep a failed active tab cold, with its original recovery payload.
-                    break;
-                }
+            self.protect_damaged(&cause, &manifest.tabs).await?;
+            if !matches!(scope, ReadScope::Shells) || damaged_id(&cause).is_none() {
+                return Err(cause);
             }
+            // Keep a failed active tab cold, with its original recovery payload.
+            break;
         }
         if matches!(scope, ReadScope::Active) {
             manifest.active_tab_index = 0;
@@ -122,6 +100,32 @@ impl Database {
             quarantined: self.quarantined.keys().cloned().collect(),
             profile,
         }))
+    }
+    /// Validates the scope's text and reads its histories. Shell reads load
+    /// history only for the active tab.
+    async fn read_contents(
+        &mut self,
+        manifest: &mut SessionManifest,
+        scope: ReadScope,
+        profile: &mut super::super::SessionRestoreProfile,
+    ) -> io::Result<()> {
+        let phase = Instant::now();
+        self.validate_contents(manifest, scope).await?;
+        profile.content_validation_ns = phase.elapsed().as_nanos();
+        let phase = Instant::now();
+        let tabs = if matches!(scope, ReadScope::Shells) {
+            let active = manifest.active_tab_index;
+            manifest
+                .tabs
+                .get_mut(active)
+                .map(std::slice::from_mut)
+                .unwrap_or_default()
+        } else {
+            &mut manifest.tabs
+        };
+        self.read_histories(tabs).await?;
+        profile.history_read_ns = phase.elapsed().as_nanos();
+        Ok(())
     }
     async fn validate_contents(
         &mut self,
@@ -212,13 +216,13 @@ impl Database {
             .await?;
         let ids: Vec<_> = rows.iter().map(|r| r.1).collect();
         let mut layouts = self.read_layouts(&ids).await?;
-        for (position, id) in rows {
-            let expected = if active_only {
-                manifest.active_tab_index
-            } else {
-                manifest.tabs.len()
-            };
-            if position != expected {
+        let first = if active_only {
+            manifest.active_tab_index
+        } else {
+            0
+        };
+        for (offset, (position, id)) in rows.into_iter().enumerate() {
+            if position != first + offset {
                 return Err(invalid("noncontiguous session tab order"));
             }
             manifest.tabs.push(
@@ -236,12 +240,8 @@ impl Database {
             return Err(invalid("missing session tabs"));
         }
         let mut ids = HashSet::new();
-        if manifest
-            .tabs
-            .iter()
-            .flat_map(|t| &t.buffers)
-            .any(|b| !ids.insert(&b.temp_id))
-        {
+        let mut buffers = manifest.tabs.iter().flat_map(|t| &t.buffers);
+        if buffers.any(|b| !ids.insert(&b.temp_id)) {
             return Err(invalid("duplicate recovery content identity across tabs"));
         }
         Ok(())
@@ -250,28 +250,20 @@ impl Database {
     pub async fn hydrate(&mut self, mut tab: SessionTab) -> io::Result<SessionTab> {
         self.ensure_healthy()?;
         let result = loop {
-            match async {
-                self.validate_hydrated_text(&tab).await?;
-                self.read_histories(std::slice::from_mut(&mut tab)).await?;
-                Ok(())
+            let Err(cause) = self.read_hydrated(&mut tab).await else {
+                break Ok(());
+            };
+            if self.repair_length_error(&cause).await? {
+                continue;
             }
-            .await
-            {
-                Ok(()) => break Ok(()),
-                Err(cause) => {
-                    if self.repair_length_error(&cause).await? {
-                        continue;
-                    }
-                    let protected = self.protect_current_buffer(&cause).await;
-                    if matches!(&protected, Ok(false)) {
-                        return Err(io::Error::new(
-                            io::ErrorKind::NotFound,
-                            "cold buffer was closed before hydration",
-                        ));
-                    }
-                    break protected.and(Err(cause));
-                }
+            let protected = self.protect_current_buffer(&cause).await;
+            if matches!(&protected, Ok(false)) {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "cold buffer was closed before hydration",
+                ));
             }
+            break protected.and(Err(cause));
         };
         if let Err(error) = &result
             && damaged_id(error).is_none()
@@ -305,10 +297,10 @@ impl Database {
         self.protect_damaged(cause, &manifest.tabs).await?;
         Ok(true)
     }
-    async fn validate_hydrated_text(&self, tab: &SessionTab) -> io::Result<()> {
+    async fn read_hydrated(&self, tab: &mut SessionTab) -> io::Result<()> {
         validation::validate_tab(tab)?;
-        let tabs = std::slice::from_ref(tab);
-        self.validate_tab_text(tabs).await
+        self.validate_tab_text(std::slice::from_ref(tab)).await?;
+        self.read_histories(std::slice::from_mut(tab)).await
     }
     pub(super) async fn validate_document_pieces(&mut self, tabs: &[SessionTab]) -> io::Result<()> {
         let ids = self

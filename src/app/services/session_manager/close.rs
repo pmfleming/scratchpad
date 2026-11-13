@@ -21,6 +21,9 @@ impl CloseAfterPersist {
                 .collect(),
         }
     }
+    fn position_in(&self, tabs: &[WorkspaceTab]) -> Option<usize> {
+        tabs.iter().position(|tab| tab.layout_id == self.layout)
+    }
     fn matches(&self, tab: &WorkspaceTab) -> bool {
         self.root == tab.layout.root_pane
             && self.revisions.len() == tab.buffers().count()
@@ -71,13 +74,7 @@ pub(crate) fn poll_close_intents(app: &mut ScratchpadApp) {
     let Some(target) = app.state.persistence.close_queue.pop_front() else {
         return;
     };
-    let Some(index) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .position(|t| t.layout_id == target.layout)
-    else {
+    let Some(index) = target.position_in(app.tab_manager.tabs.as_slice()) else {
         return;
     };
     if !target.matches(&app.tab_manager.tabs.as_slice()[index]) {
@@ -100,13 +97,7 @@ pub(crate) fn poll_close_intents(app: &mut ScratchpadApp) {
     app.queue_background_session_close(request, target);
 }
 pub(crate) fn finish_close(app: &mut ScratchpadApp, target: CloseAfterPersist) {
-    let Some(index) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .position(|tab| tab.layout_id == target.layout)
-    else {
+    let Some(index) = target.position_in(app.tab_manager.tabs.as_slice()) else {
         return;
     };
     if !target.matches(&app.tab_manager.tabs.as_slice()[index]) {
@@ -120,13 +111,7 @@ pub(crate) fn finish_close(app: &mut ScratchpadApp, target: CloseAfterPersist) {
     }
 }
 pub(crate) fn finish_unavailable_close(app: &mut ScratchpadApp, target: CloseAfterPersist) {
-    let Some(index) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .position(|tab| tab.layout_id == target.layout)
-    else {
+    let Some(index) = target.position_in(app.tab_manager.tabs.as_slice()) else {
         return;
     };
     if !target.matches(&app.tab_manager.tabs.as_slice()[index]) {
@@ -165,8 +150,8 @@ pub(super) fn retain_ram_close(app: &mut ScratchpadApp, index: usize, view: Opti
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::app::app_state::{test_support, workspace::lifecycle};
+    use crate::app::domain::WorkspaceTab;
     #[test]
     fn close_during_a_writer_pause_keeps_a_newer_edit_and_a_later_close_commits_it() {
         let root = tempfile::tempdir().unwrap();
@@ -205,14 +190,6 @@ mod tests {
             "{:?}",
             app.state.status.current
         );
-        let archive = store.closed_tabs().unwrap().remove(0);
-        assert_eq!(
-            store
-                .restore_closed_tab(&archive.token)
-                .unwrap()
-                .active_buffer()
-                .text(),
-            "newer accepted text"
-        );
+        assert_eq!(store.newest_closed_text(), "newer accepted text");
     }
 }
