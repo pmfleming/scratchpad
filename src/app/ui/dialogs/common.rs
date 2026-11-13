@@ -1,174 +1,143 @@
-use crate::app::ui::callout;
-use crate::app::ui::widget_ids;
+//! The centred confirm panel shared by file prompts, in History's panel style:
+//! a title, the file line, optional content, then key hints and the actions.
+use crate::app::theme;
+use crate::app::ui::{callout, panel_style, settings, widget_ids};
 use eframe::egui;
-use egui_phosphor::regular::FILE_TEXT;
-use std::hash::Hash;
 
-pub(super) const ICON_CHOICE_BUTTON_SIZE: egui::Vec2 = egui::vec2(72.0, 54.0);
+const HINT_SIZE: f32 = 11.0;
+const PATH_SIZE: f32 = 12.0;
 
-pub(super) fn show_centered_callout(
+/// One footer action. `hint` is its tooltip; the panel itself carries no explanation.
+pub(super) struct Choice<T> {
+    pub(super) label: String,
+    pub(super) hint: &'static str,
+    pub(super) value: T,
+    pub(super) accent: bool,
+    pub(super) quiet: bool,
+}
+
+impl<T> Choice<T> {
+    pub(super) fn new(label: impl Into<String>, hint: &'static str, value: T) -> Self {
+        Self {
+            label: label.into(),
+            hint,
+            value,
+            accent: false,
+            quiet: false,
+        }
+    }
+
+    pub(super) fn accent(mut self) -> Self {
+        self.accent = true;
+        self
+    }
+
+    /// A frameless action, for Cancel.
+    pub(super) fn quiet(mut self) -> Self {
+        self.quiet = true;
+        self
+    }
+}
+
+pub(super) struct Confirm<'a, T> {
+    pub(super) id: &'static str,
+    pub(super) title: &'a str,
+    pub(super) path: &'a str,
+    pub(super) width: f32,
+    pub(super) hints: &'static str,
+    /// Left to right, safest first; the accent action goes last.
+    pub(super) choices: Vec<Choice<T>>,
+    pub(super) enter: Option<T>,
+    pub(super) escape: T,
+}
+
+/// Shows the panel; returns the chosen action, including Enter and Esc.
+pub(super) fn show_confirm<T: Copy>(
     ctx: &egui::Context,
-    id: &'static str,
-    title: &str,
-    size: egui::Vec2,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    callout::show_floating(
-        ctx,
-        id,
-        title,
-        callout::centered_position(ctx, size),
-        size.x,
-        add_contents,
-    );
-}
-
-pub(super) fn render_dialog_header(ui: &mut egui::Ui, title: &str) -> bool {
-    callout::header_row(ui, ("dialog_header", title), "Cancel", |ui| {
-        ui.label(
-            egui::RichText::new(FILE_TEXT)
-                .font(egui_phosphor::font_id(16.0))
-                .color(callout::muted_text(ui)),
-        );
-        ui.add_space(6.0);
-
-        let label_width = (ui.available_width() - 6.0).max(0.0);
-        let label = truncate_dialog_title(ui, title, label_width);
-        let label_response = widget_ids::surface_response(
-            ui,
-            ("dialog_header.title", title),
-            widget_ids::WidgetRole::Label,
-            |ui| {
-                ui.add_sized(
-                    egui::vec2(label_width, 0.0),
-                    egui::Label::new(
-                        egui::RichText::new(&label)
-                            .size(15.0)
-                            .monospace()
-                            .color(callout::text(ui)),
-                    ),
-                )
-            },
-        );
-        if label != title {
-            label_response.on_hover_text(title);
-        }
-    })
-}
-
-fn truncate_dialog_title(ui: &egui::Ui, title: &str, max_width: f32) -> String {
-    let marker = "...";
-    let font_id = egui::FontId::monospace(15.0);
-
-    if text_width(ui, title, font_id.clone()) <= max_width {
-        return title.to_owned();
-    }
-    if text_width(ui, marker, font_id.clone()) >= max_width {
-        return marker.to_owned();
-    }
-
-    let chars = title.chars().collect::<Vec<_>>();
-    let mut prefix_len = chars.len().saturating_sub(1);
-
-    loop {
-        let prefix = chars[..prefix_len].iter().collect::<String>();
-        let candidate = format!("{prefix}{marker}");
-
-        if text_width(ui, &candidate, font_id.clone()) <= max_width {
-            return candidate;
-        }
-
-        if prefix_len > 1 {
-            prefix_len -= 1;
-        } else {
-            return marker.to_owned();
-        }
-    }
-}
-
-fn text_width(ui: &egui::Ui, text: &str, font_id: egui::FontId) -> f32 {
-    ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_owned(), font_id, callout::text(ui))
-            .size()
-            .x
-    })
-}
-
-pub(super) fn render_icon_choice_dialog<T: Copy, const N: usize>(
-    ui: &mut egui::Ui,
-    title: &str,
-    subtitle: &str,
-    close_requested: &mut bool,
-    actions: [(&str, &str, T); N],
+    fill: egui::Color32,
+    confirm: Confirm<'_, T>,
+    header: impl FnOnce(&mut egui::Ui),
+    body: impl FnOnce(&mut egui::Ui),
 ) -> Option<T> {
-    callout::apply_spacing(ui);
-    ui.spacing_mut().item_spacing = egui::vec2(10.0, 12.0);
-
-    if render_dialog_header(ui, title) {
-        *close_requested = true;
+    let frame = panel_style::window_frame(ctx, fill);
+    let layer = widget_ids::area_layer_id(egui::Order::Foreground, confirm.id);
+    let mut chosen = None;
+    let response = egui::Window::new(confirm.title)
+        .id(layer.id)
+        .order(layer.order)
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .frame(frame)
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(ctx.content_rect().center())
+        .show(ctx, |ui| {
+            widget_ids::feature_scope(ui, confirm.id, |ui| {
+                ui.set_width(confirm.width);
+                settings::apply_dialog_typography(ui);
+                callout::apply_spacing(ui);
+                panel_style::apply(ui);
+                ui.visuals_mut().panel_fill = frame.fill;
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(confirm.title)
+                            .size(14.0)
+                            .strong()
+                            .color(callout::text(ui)),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), header);
+                });
+                path_line(ui, confirm.path);
+                body(ui);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(confirm.hints).size(HINT_SIZE).weak());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        for choice in confirm.choices.iter().rev() {
+                            if action_button(ui, choice).clicked() {
+                                chosen = Some(choice.value);
+                            }
+                        }
+                    });
+                });
+            });
+        });
+    if let Some(response) = response {
+        callout::mark_scroll_blocker_if_hovered(ctx, &response.response);
     }
-
-    ui.add_space(2.0);
-    ui.vertical_centered(|ui| {
-        ui.label(
-            egui::RichText::new(subtitle)
-                .size(12.0)
-                .color(callout::muted_text(ui)),
-        );
-    });
-
-    ui.add_space(2.0);
-
-    let mut selected = None;
-    ui.horizontal_centered(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
-        for (icon, tooltip, action) in actions {
-            if callout::icon_button(
-                ui,
-                ("icon_choice", title, tooltip),
-                icon,
-                callout::IconButtonStyle {
-                    icon_size: 26.0,
-                    size: ICON_CHOICE_BUTTON_SIZE,
-                    fill: callout::section_fill(ui),
-                },
-                tooltip,
-                true,
-            )
-            .clicked()
-            {
-                selected = Some(action);
-            }
-        }
-    });
-    selected
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        chosen = Some(confirm.escape);
+    }
+    if let Some(enter) = confirm.enter
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+    {
+        chosen = Some(enter);
+    }
+    chosen
 }
 
-pub(super) fn render_dialog_action_button(
-    ui: &mut egui::Ui,
-    surface_key: impl Hash,
-    icon: &str,
-    label: &str,
-    tooltip: &str,
-) -> bool {
-    widget_ids::surface_response(
+fn path_line(ui: &mut egui::Ui, path: &str) {
+    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 18.0));
+    panel_style::text_end(ui, rect, path, PATH_SIZE, theme::text_muted(ui));
+    let response = widget_ids::interact(
         ui,
-        surface_key,
-        widget_ids::WidgetRole::ActionButton,
-        |ui| {
-            ui.add(
-                egui::Button::new(
-                    egui::RichText::new(format!("{icon} {label}"))
-                        .size(12.0)
-                        .color(callout::text(ui)),
-                )
-                .fill(callout::section_fill(ui))
-                .corner_radius(egui::CornerRadius::same(8))
-                .min_size(egui::vec2(98.0, 34.0)),
-            )
-        },
-    )
-    .on_hover_text(tooltip)
-    .clicked()
+        rect,
+        egui::Id::unique(("confirm.path", path)),
+        egui::Sense::hover(),
+        "confirm-path",
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, path));
+    response.on_hover_text(path);
+}
+
+fn action_button<T>(ui: &mut egui::Ui, choice: &Choice<T>) -> egui::Response {
+    let text = egui::RichText::new(&choice.label);
+    let button = if choice.accent {
+        egui::Button::new(text.color(panel_style::on_accent(ui)))
+            .fill(theme::tab_selected_accent(ui))
+    } else if choice.quiet {
+        egui::Button::new(text).frame(false)
+    } else {
+        egui::Button::new(text).fill(theme::action_bg(ui))
+    };
+    ui.add(button).on_hover_text(choice.hint)
 }

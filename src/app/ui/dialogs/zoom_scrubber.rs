@@ -14,10 +14,13 @@ use crate::app::{
         ViewId,
         view::{MAX_ZOOM_FACTOR, MIN_ZOOM_FACTOR},
     },
-    ui::{callout, widget_ids},
+    theme,
+    ui::{callout, panel_style, widget_ids},
 };
 use eframe::egui;
 use egui_phosphor::regular as icons;
+
+const KEY_HINTS: &str = "← → Step   Home End Limits   0 Reset   Esc Close";
 
 fn focus_id() -> egui::Id {
     egui::Id::unique("zoom.scrubber.track")
@@ -77,6 +80,7 @@ pub(crate) fn handle_input(ctx: &egui::Context, app: &mut ScratchpadApp) {
         (egui::Key::ArrowUp, ZoomChange::In),
         (egui::Key::Home, ZoomChange::Factor(MIN_ZOOM_FACTOR)),
         (egui::Key::End, ZoomChange::Factor(MAX_ZOOM_FACTOR)),
+        (egui::Key::Num0, ZoomChange::Reset),
     ] {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
             zoom::apply(app, view, change);
@@ -95,10 +99,10 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
     }
     let tab = app.tab_manager.active_tab().unwrap();
     let factor = tab.layout.active_view().unwrap().zoom_factor();
-    let name = tab.active_buffer().name.clone();
     let screen = ctx.content_rect();
     let width = (screen.width() - 24.0).clamp(160.0, 480.0);
     let mut change = None;
+    let frame = panel_style::window_frame(ctx, app.state.app_settings.editor_background_color());
     widget_ids::area("zoom_scrubber_window")
         .accessible_name("Zoom scrubber")
         .role(egui::Role::Dialog)
@@ -112,34 +116,42 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
         ))
         .show(ctx, |ui| {
             style::apply(ui);
-            let inner = callout::frame(ui)
-                .corner_radius(egui::CornerRadius::ZERO)
-                .show(ui, |ui| {
-                    ui.set_width((width - 24.0).max(1.0));
-                    ui.set_min_width((width - 24.0).max(1.0));
-                    ui.set_max_width((width - 24.0).max(1.0));
-                    ui.horizontal(|ui| {
-                        ui.strong(format!("Zoom · {:.0}%", factor * 100.0));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if style::icon_button(
-                                ui,
-                                "reset",
-                                icons::ARROW_COUNTER_CLOCKWISE,
-                                "Reset zoom (100%)",
-                                factor != 1.0,
+            let inner = frame.show(ui, |ui| {
+                ui.set_width((width - 24.0).max(1.0));
+                ui.set_min_width((width - 24.0).max(1.0));
+                ui.set_max_width((width - 24.0).max(1.0));
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Zoom").size(14.0).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if style::icon_button(
+                            ui,
+                            "reset",
+                            icons::ARROW_COUNTER_CLOCKWISE,
+                            "Reset zoom (100%)",
+                            factor != 1.0,
+                        )
+                        .clicked()
+                        {
+                            change = Some(ZoomChange::Reset);
+                        }
+                        // Painted, not a label: the slider already reports the value.
+                        let percent = format!("{:.0}%", factor * 100.0);
+                        let width = ui
+                            .painter()
+                            .layout_no_wrap(
+                                percent.clone(),
+                                panel_style::font(ui, 13.0),
+                                theme::text_primary(ui),
                             )
-                            .clicked()
-                            {
-                                change = Some(ZoomChange::Reset);
-                            }
-                        });
-                    });
-                    change = transport(ui, factor).or(change);
-                    ui.horizontal(|ui| {
-                        ui.add(egui::Label::new(name).truncate());
-                        ui.weak("25–400% · This pane");
+                            .size()
+                            .x;
+                        let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(width, 20.0));
+                        panel_style::text(ui, rect, &percent, 13.0, theme::text_primary(ui));
                     });
                 });
+                change = transport(ui, factor).or(change);
+                ui.label(egui::RichText::new(KEY_HINTS).size(11.0).weak());
+            });
             callout::mark_scroll_blocker_if_hovered(ctx, &inner.response);
         });
     if let Some(change) = change {

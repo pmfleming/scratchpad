@@ -2,7 +2,8 @@ use crate::app::services::settings_store::{TabListPosition, TabOrderDirection, T
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::{
-    action_bg, action_hover_bg, border, tab_active_bg, tab_selected_accent, text_primary,
+    action_bg, action_hover_bg, border, tab_active_bg, tab_selected_accent, tab_selected_bg,
+    text_primary,
 };
 use crate::app::ui::{visuals::with_visual_overrides, widget_ids};
 use eframe::egui;
@@ -11,7 +12,7 @@ use egui_phosphor::regular::{
 };
 use std::hash::Hash;
 
-pub(super) const WIDTH: f32 = 220.0;
+pub(super) const WIDTH: f32 = 240.0;
 pub(super) const SUBMENU_WIDTH: f32 = 176.0;
 pub(super) const ORDER_SUBMENU_WIDTH: f32 = 116.0;
 pub(super) const OPEN_FILE_SUBMENU_WIDTH: f32 = 380.0;
@@ -20,15 +21,24 @@ pub(super) const CARET_WIDTH: f32 = 28.0;
 pub(super) const ORDER_DIRECTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
 pub(super) const OPEN_DISPOSITION_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
 
-const ICON_CENTER_X: f32 = 20.0;
-const LABEL_X: f32 = 52.0;
-const NO_ICON_LABEL_X: f32 = 18.0;
-
 pub(super) fn menu_button(
     ui: &mut egui::Ui,
     width: f32,
     label: &str,
     icon: Option<&str>,
+    enabled: bool,
+) -> bool {
+    let keys = menu_shortcut(label).and_then(|action| shortcut_tooltips::keys(ui.ctx(), action));
+    menu_value_button(ui, width, label, icon, keys.as_deref(), enabled)
+}
+
+/// A menu row that shows `value`, such as the current encoding, where a shortcut would go.
+pub(super) fn menu_value_button(
+    ui: &mut egui::Ui,
+    width: f32,
+    label: &str,
+    icon: Option<&str>,
+    value: Option<&str>,
     enabled: bool,
 ) -> bool {
     with_row_visuals(ui, |ui| {
@@ -46,7 +56,7 @@ pub(super) fn menu_button(
             },
         );
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
-        paint_row_label(ui, response.rect, icon, label, enabled);
+        paint_row_label(ui, response.rect, icon, label, value, enabled);
         let clicked = response.clicked();
         if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui, label) {
             response.on_hover_text(tooltip);
@@ -74,10 +84,10 @@ pub(super) fn selectable_menu_button(
                 )
             },
         );
-        paint_row_label(ui, response.rect, None, label, true);
         if selected {
-            paint_selected_row_outline(ui, response.rect);
+            paint_selected_row(ui, response.rect);
         }
+        paint_row_label(ui, response.rect, None, label, None, true);
         response.clicked()
     })
 }
@@ -97,7 +107,7 @@ pub(super) fn order_direction_button(
         let button = egui::Button::new("")
             .min_size(ORDER_DIRECTION_BUTTON_SIZE)
             .stroke(selected_stroke)
-            .corner_radius(egui::CornerRadius::same(8));
+            .corner_radius(egui::CornerRadius::ZERO);
 
         let response = widget_ids::surface_response(
             ui,
@@ -134,7 +144,7 @@ pub(super) fn open_disposition_button(
         let button = egui::Button::new("")
             .min_size(OPEN_DISPOSITION_BUTTON_SIZE)
             .stroke(selected_stroke)
-            .corner_radius(egui::CornerRadius::same(8));
+            .corner_radius(egui::CornerRadius::ZERO);
 
         let response =
             widget_ids::surface_response(ui, id_source, widget_ids::WidgetRole::IconButton, |ui| {
@@ -220,7 +230,16 @@ pub(super) fn primary_menu_button_enabled(
             },
         );
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
-        paint_row_label(ui, response.rect, Some(icon), label, enabled);
+        let keys =
+            menu_shortcut(label).and_then(|action| shortcut_tooltips::keys(ui.ctx(), action));
+        paint_row_label(
+            ui,
+            response.rect,
+            Some(icon),
+            label,
+            keys.as_deref(),
+            enabled,
+        );
         let clicked = response.clicked();
         if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui, label) {
             response.on_hover_text(tooltip);
@@ -256,7 +275,10 @@ pub(super) fn submenu_button_sized(
             egui::containers::menu::SubMenuButton::from_button(button)
                 .config(
                     egui::containers::menu::MenuConfig::new()
-                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .style(crate::app::ui::panel_style::menu_style(
+                            ui.visuals().window_fill,
+                        )),
                 )
                 .ui(ui, |ui| {
                     ui.set_min_width(width);
@@ -269,9 +291,9 @@ pub(super) fn submenu_button_sized(
 
 pub(super) fn close_direction_label(position: TabListPosition) -> &'static str {
     if position.is_vertical() {
-        "Close Down"
+        "Close down"
     } else {
-        "Close Right"
+        "Close right"
     }
 }
 
@@ -303,21 +325,26 @@ fn tab_order_direction_icon_and_tooltip(
 }
 
 fn shortcut_tooltip_for_menu_label(ui: &egui::Ui, label: &str) -> Option<String> {
-    let action = match label {
-        "New Tab" => ShortcutAction::NewTab,
-        "Open File" => ShortcutAction::OpenFile,
-        "Open File Here" => ShortcutAction::OpenFileHere,
+    Some(shortcut_tooltips::action(
+        ui.ctx(),
+        menu_shortcut(label)?,
+        label,
+    ))
+}
+
+fn menu_shortcut(label: &str) -> Option<ShortcutAction> {
+    Some(match label {
+        "New tab" => ShortcutAction::NewTab,
+        "Open file" => ShortcutAction::OpenFile,
+        "Open file here" => ShortcutAction::OpenFileHere,
         "Rename" => ShortcutAction::RenameTab,
         "Save" => ShortcutAction::SaveFile,
         "Encoding" => ShortcutAction::OpenEncodingDialog,
-        "Copy Path" => ShortcutAction::CopyActivePath,
-        "Reveal In Explorer" | "Open Folder" => ShortcutAction::RevealActivePath,
-        "Hide Tab List" => ShortcutAction::ToggleTabList,
-        "Pin Tab List" => ShortcutAction::ToggleTabListAutoHide,
+        "Copy path" => ShortcutAction::CopyActivePath,
+        "Reveal in Explorer" | "Open folder" => ShortcutAction::RevealActivePath,
         "Close" => ShortcutAction::CloseTab,
         _ => return None,
-    };
-    Some(shortcut_tooltips::action(ui.ctx(), action, label))
+    })
 }
 
 pub(super) fn tab_list_position_icon(position: TabListPosition) -> &'static str {
@@ -334,64 +361,23 @@ fn paint_row_label(
     rect: egui::Rect,
     icon: Option<&str>,
     label: &str,
+    trailing: Option<&str>,
     enabled: bool,
 ) {
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let color = if enabled {
-        text_primary(ui)
-    } else {
-        text_primary(ui).gamma_multiply(0.45)
-    };
-    if let Some(icon) = icon {
-        ui.painter().text(
-            rect.left_center() + egui::vec2(ICON_CENTER_X, 0.0),
-            egui::Align2::CENTER_CENTER,
-            icon,
-            egui_phosphor::font_id(font.size),
-            color,
-        );
-    }
-    ui.painter().text(
-        rect.left_center() + egui::vec2(label_x(icon), 0.0),
-        egui::Align2::LEFT_CENTER,
-        label,
-        font,
-        color,
-    );
+    crate::app::ui::panel_style::paint_menu_row(ui, rect, icon, label, trailing, enabled);
 }
 
-fn label_x(icon: Option<&str>) -> f32 {
-    if icon.is_some() {
-        LABEL_X
-    } else {
-        NO_ICON_LABEL_X
-    }
-}
-
-fn paint_selected_row_outline(ui: &egui::Ui, rect: egui::Rect) {
-    ui.painter().rect_stroke(
-        rect.shrink2(egui::vec2(5.0, 3.0)),
-        4.0,
-        egui::Stroke::new(1.5, tab_selected_accent(ui).gamma_multiply(0.95)),
-        egui::StrokeKind::Outside,
+fn paint_selected_row(ui: &egui::Ui, rect: egui::Rect) {
+    ui.painter().rect_filled(rect, 0, tab_selected_bg(ui));
+    ui.painter().rect_filled(
+        egui::Rect::from_min_size(rect.min, egui::vec2(2.0, rect.height())),
+        0,
+        tab_selected_accent(ui),
     );
 }
 
 fn apply_row_hover_style(ui: &mut egui::Ui) {
-    let hover_bg = action_hover_bg(ui);
-    let visuals = ui.visuals_mut();
-    visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-    visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-    for widgets in [
-        &mut visuals.widgets.hovered,
-        &mut visuals.widgets.active,
-        &mut visuals.widgets.open,
-    ] {
-        widgets.bg_fill = hover_bg;
-        widgets.weak_bg_fill = hover_bg;
-        widgets.bg_stroke = egui::Stroke::NONE;
-    }
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+    crate::app::ui::panel_style::flat_rows(ui);
 }
 
 pub(super) fn with_row_visuals<R>(

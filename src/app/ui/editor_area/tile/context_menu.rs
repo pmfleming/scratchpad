@@ -11,25 +11,22 @@ use crate::app::app_state::{
 use crate::app::commands::{
     AppCommand, DialogCommand, EditCommand, SearchCommand, WorkspaceCommand,
 };
-use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
-use crate::app::theme::text_primary;
-use crate::app::ui::{tile_header::TileAction, visuals::with_visual_overrides, widget_ids};
+use crate::app::ui::{panel_style, tile_header::TileAction, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_LINE_UP, ARROWS_COUNTER_CLOCKWISE,
-    ARROWS_SPLIT, CARET_RIGHT, CLIPBOARD_TEXT, CLOCK_COUNTER_CLOCKWISE, COPY, MAGNIFYING_GLASS,
-    SCISSORS, SELECTION_ALL, TRASH, X,
+    ARROWS_SPLIT, CLIPBOARD_TEXT, CLOCK_COUNTER_CLOCKWISE, COPY, MAGNIFYING_GLASS, SCISSORS,
+    SELECTION_ALL, TRASH, X,
 };
 use model::{
-    SPLIT_MENU_ITEMS, SplitDirection, queue_split_action, should_activate_tile_on_secondary_click,
+    SPLIT_MENU_ITEMS, queue_split_action, shortcut_tooltip_for_menu_label,
+    should_activate_tile_on_secondary_click,
 };
 use unicode_menu::render_display_unicode_menu;
 use widgets::{
-    EDITOR_CONTEXT_CARET_WIDTH, EDITOR_CONTEXT_MENU_WIDTH, EDITOR_CONTEXT_ROW_HEIGHT,
-    EDITOR_CONTEXT_SUBMENU_WIDTH, apply_context_menu_row_hover_style, icon_rail_button,
-    icon_rail_leading_space, menu_action_button, paint_context_menu_row_label, set_menu_width,
-    split_menu_button,
+    EDITOR_CONTEXT_MENU_WIDTH, EDITOR_CONTEXT_ROW_HEIGHT, icon_rail_button,
+    icon_rail_leading_space, menu_action_button, set_menu_width,
 };
 
 pub(super) fn attach_editor_context_menu(
@@ -46,6 +43,9 @@ pub(super) fn attach_editor_context_menu(
         request.view_id,
     );
     egui::Popup::context_menu(tile_response)
+        .style(panel_style::menu_style(
+            app.state.app_settings.editor_background_color(),
+        ))
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
@@ -150,11 +150,11 @@ fn render_tile_menu(
     can_promote: bool,
 ) {
     split_menu_row(ui, actions);
-    if menu_action_button(ui, "Promote Tile", Some(ARROW_LINE_UP), can_promote) {
+    if menu_action_button(ui, "Promote to tab", Some(ARROW_LINE_UP), can_promote) {
         actions.push(TileAction::Promote(request.view_id));
         ui.close();
     }
-    if menu_action_button(ui, "Close Tile", Some(X), request.multiple_tiles_visible) {
+    if menu_action_button(ui, "Close pane", Some(X), request.multiple_tiles_visible) {
         actions.push(TileAction::Close(request.view_id));
         ui.close();
     }
@@ -282,74 +282,37 @@ fn run_icon_rail_action(
     icon_rail_button(ui, icon, tooltip, enabled).clicked() && action(ui, app)
 }
 
+/// "Split" with the four directions inline, one click each.
 fn split_menu_row(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-
-        let split_clicked = render_split_primary_button(ui);
-        render_split_submenu(ui, actions);
-
-        if split_clicked {
-            queue_split_action(actions, SplitDirection::Right);
-        }
-    });
-}
-
-fn render_split_primary_button(ui: &mut egui::Ui) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            "editor_context.split_primary",
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add(
-                    egui::Button::new("")
-                        .min_size(egui::vec2(
-                            EDITOR_CONTEXT_MENU_WIDTH - EDITOR_CONTEXT_CARET_WIDTH,
-                            28.0,
-                        ))
-                        .stroke(egui::Stroke::NONE),
+    let rect = widget_ids::allocate_exact_rect(
+        ui,
+        egui::vec2(EDITOR_CONTEXT_MENU_WIDTH, EDITOR_CONTEXT_ROW_HEIGHT),
+    );
+    panel_style::paint_menu_row(ui, rect, Some(ARROWS_SPLIT), "Split", None, true);
+    widget_ids::rect_scope_with_layout(
+        ui,
+        rect.shrink2(egui::vec2(6.0, 1.0)),
+        "editor_context.split",
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for item in SPLIT_MENU_ITEMS.iter().rev() {
+                let hint = shortcut_tooltip_for_menu_label(ui.ctx(), item.label)
+                    .unwrap_or_else(|| item.label.to_owned());
+                if panel_style::icon_button_with_hint(
+                    ui,
+                    ("editor_context.split", item.label),
+                    item.icon,
+                    item.label,
+                    &hint,
+                    true,
                 )
-            },
-        );
-        paint_context_menu_row_label(ui, response.rect, Some(ARROWS_SPLIT), "Split", true);
-        let clicked = response.clicked();
-        response.on_hover_text(shortcut_tooltips::action(
-            ui.ctx(),
-            ShortcutAction::SplitRight,
-            "Split Right",
-        ));
-        clicked
-    })
-}
-
-fn render_split_submenu(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let button = egui::Button::new(
-            egui::RichText::new(CARET_RIGHT)
-                .font(egui_phosphor::font_id(14.0))
-                .color(text_primary(ui)),
-        )
-        .min_size(egui::vec2(
-            EDITOR_CONTEXT_CARET_WIDTH,
-            EDITOR_CONTEXT_ROW_HEIGHT,
-        ))
-        .stroke(egui::Stroke::NONE);
-
-        widget_ids::surface_widget(ui, "editor_context.split_caret", "submenu", |ui| {
-            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-                set_menu_width(ui, EDITOR_CONTEXT_SUBMENU_WIDTH);
-                render_split_submenu_items(ui, actions);
-            });
-        });
-    });
-}
-
-fn render_split_submenu_items(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
-    for item in SPLIT_MENU_ITEMS {
-        if split_menu_button(ui, item.label, item.icon) {
-            queue_split_action(actions, item.direction);
-            ui.close();
-        }
-    }
+                .clicked()
+                {
+                    queue_split_action(actions, item.direction);
+                    ui.close();
+                }
+            }
+        },
+    );
 }

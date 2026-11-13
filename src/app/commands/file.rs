@@ -47,6 +47,9 @@ pub(super) fn handle_file_command(app: &mut ScratchpadApp, command: FileCommand)
         FileCommand::SaveConflictAsCopy { tab_index, view_id } => {
             save_conflict_as_copy_command(app, tab_index, view_id)
         }
+        FileCommand::SaveMissingAs { tab_index, view_id } => {
+            run_save_conflict_command(app, tab_index, view_id, FileController::save_file_as_at)
+        }
     }
 }
 

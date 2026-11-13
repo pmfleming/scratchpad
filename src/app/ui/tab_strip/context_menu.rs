@@ -2,7 +2,7 @@ use crate::app::app_state::{PendingTabContextMenu, ScratchpadApp};
 use crate::app::commands::{AppCommand, SettingsCommand, WorkspaceCommand};
 use crate::app::ui::widget_ids;
 use eframe::egui;
-use egui_phosphor::regular::{FLOPPY_DISK, MINUS, TABS, TRAY, X, X_SQUARE};
+use egui_phosphor::regular::{FLOPPY_DISK, TABS, X, X_SQUARE};
 use std::path::PathBuf;
 
 mod close;
@@ -20,8 +20,6 @@ struct TabContextMenuState {
     workspace_index: Option<usize>,
     is_settings: bool,
     path: Option<PathBuf>,
-    toggle_tab_list_label: &'static str,
-    toggle_tab_list_icon: &'static str,
     close_direction_label: &'static str,
     close_direction_icon: &'static str,
 }
@@ -70,6 +68,8 @@ fn attach_tab_context_menu_impl(
     }
 
     let menu_state = TabContextMenuState::new(app, slot_index);
+    let menu_style =
+        crate::app::ui::panel_style::menu_style(app.state.app_settings.editor_background_color());
     let pending_menu = app
         .state
         .dialogs
@@ -83,6 +83,7 @@ fn attach_tab_context_menu_impl(
             response.layer_id,
         )
         .kind(egui::PopupKind::Menu)
+        .style(menu_style)
         .layout(egui::Layout::top_down_justified(egui::Align::Min))
         .width(TAB_CONTEXT_MENU_WIDTH)
         .anchor(tab_context_menu_anchor(response, pending))
@@ -99,7 +100,9 @@ fn attach_tab_context_menu_impl(
         };
     }
 
-    response.context_menu(|ui| render_tab_context_menu(ui, app, slot_index, &menu_state));
+    egui::Popup::context_menu(response)
+        .style(menu_style)
+        .show(|ui| render_tab_context_menu(ui, app, slot_index, &menu_state));
 
     if secondary_clicked {
         TabContextClick::Secondary
@@ -145,17 +148,8 @@ fn render_tab_context_menu(
 
     ui.separator();
 
-    if order::render_tab_list_actions(
-        ui,
-        app,
-        menu_state.toggle_tab_list_label,
-        menu_state.toggle_tab_list_icon,
-    ) {
-        crate::app::app_state::settings_controller::set_auto_hide_tab_list(
-            app,
-            !app.state.app_settings.auto_hide_tab_list(),
-        );
-        ui.close();
+    if let Some(auto_hide) = order::render_tab_list_actions(ui, app) {
+        crate::app::app_state::settings_controller::set_auto_hide_tab_list(app, auto_hide);
     }
     order::render_tab_order_submenu(ui, app);
 
@@ -236,19 +230,12 @@ impl TabContextMenuState {
             crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
                 app, slot_index,
             );
-        let auto_hide = app.state.app_settings.auto_hide_tab_list();
         Self {
             workspace_index,
             is_settings: crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(
                 app, slot_index,
             ),
             path: tab_slot_path(app, slot_index),
-            toggle_tab_list_label: if auto_hide {
-                "Pin Tab List"
-            } else {
-                "Hide Tab List"
-            },
-            toggle_tab_list_icon: if auto_hide { TRAY } else { MINUS },
             close_direction_label: close_direction_label(
                 app.state.app_settings.tab_list_position(),
             ),
@@ -270,14 +257,14 @@ fn render_close_submenu(
 ) {
     submenu_button(ui, "tab_context.close_caret", |ui| {
         for (label, icon, action) in [
-            ("Close Others", TABS, TabCloseAction::Others),
+            ("Close others", TABS, TabCloseAction::Others),
             (
                 close_direction_label,
                 close_direction_icon,
                 TabCloseAction::After,
             ),
-            ("Close Saved", FLOPPY_DISK, TabCloseAction::Saved),
-            ("Close All", X_SQUARE, TabCloseAction::All),
+            ("Close saved", FLOPPY_DISK, TabCloseAction::Saved),
+            ("Close all", X_SQUARE, TabCloseAction::All),
         ] {
             if menu_button(ui, TAB_CONTEXT_SUBMENU_WIDTH, label, Some(icon), true) {
                 match action {

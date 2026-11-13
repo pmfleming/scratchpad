@@ -259,3 +259,120 @@ pub(crate) fn lock_navigation_focus(ctx: &egui::Context, id: egui::Id) {
         );
     });
 }
+
+/// Popup and menu style matching the panels: square, bordered, no shadow, and
+/// the list selection colour for hovered rows.
+pub(crate) fn menu_style(fill: egui::Color32) -> egui::style::StyleModifier {
+    egui::style::StyleModifier::new(move |style| {
+        egui::containers::menu::menu_style(style);
+        let border = theme::border_for_visuals(&style.visuals);
+        let hover = theme::tab_selected_bg_for_visuals(&style.visuals);
+        let visuals = &mut style.visuals;
+        visuals.menu_corner_radius = egui::CornerRadius::ZERO;
+        visuals.popup_shadow = egui::Shadow::NONE;
+        visuals.window_fill = fill;
+        visuals.panel_fill = fill;
+        visuals.window_stroke = egui::Stroke::new(1.0, border);
+        for widget in [
+            &mut visuals.widgets.noninteractive,
+            &mut visuals.widgets.inactive,
+            &mut visuals.widgets.hovered,
+            &mut visuals.widgets.active,
+            &mut visuals.widgets.open,
+        ] {
+            widget.corner_radius = egui::CornerRadius::ZERO;
+        }
+        for widget in [
+            &mut visuals.widgets.hovered,
+            &mut visuals.widgets.active,
+            &mut visuals.widgets.open,
+        ] {
+            widget.bg_fill = hover;
+            widget.weak_bg_fill = hover;
+        }
+    })
+}
+
+/// A menu row label: icon, text and, right-aligned, its shortcut or value.
+pub(crate) fn paint_menu_row(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    icon: Option<&str>,
+    label: &str,
+    trailing: Option<&str>,
+    enabled: bool,
+) {
+    const ICON_X: f32 = 12.0;
+    const LABEL_X: f32 = 36.0;
+    let size = egui::TextStyle::Button.resolve(ui.style()).size;
+    let color = if enabled {
+        theme::text_primary(ui)
+    } else {
+        theme::text_muted(ui).gamma_multiply(0.7)
+    };
+    let inner = rect;
+    if let Some(icon) = icon {
+        text(
+            ui,
+            egui::Rect::from_min_size(
+                inner.min + egui::vec2(ICON_X, 0.0),
+                egui::vec2(18.0, inner.height()),
+            ),
+            icon,
+            size,
+            if enabled {
+                theme::text_muted(ui)
+            } else {
+                color
+            },
+        );
+    }
+    let mut right = inner.right() - 10.0;
+    if let Some(trailing) = trailing {
+        let width = ui
+            .painter()
+            .layout_no_wrap(trailing.to_owned(), font(ui, 11.0), color)
+            .size()
+            .x;
+        let tail = egui::Rect::from_min_max(
+            egui::pos2(right - width, inner.top()),
+            egui::pos2(right, inner.bottom()),
+        );
+        text(ui, tail, trailing, 11.0, theme::text_muted(ui));
+        right = tail.left() - 8.0;
+    }
+    text(
+        ui,
+        egui::Rect::from_min_max(
+            egui::pos2(
+                inner.left() + if icon.is_some() { LABEL_X } else { ICON_X },
+                inner.top(),
+            ),
+            egui::pos2(right, inner.bottom()),
+        ),
+        label,
+        size,
+        color,
+    );
+}
+
+/// Transparent menu rows that take the list selection colour on hover; square corners.
+pub(crate) fn flat_rows(ui: &mut egui::Ui) {
+    let hover = theme::tab_selected_bg(ui);
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+    widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+    for state in [&mut widgets.hovered, &mut widgets.active, &mut widgets.open] {
+        state.bg_fill = hover;
+        state.weak_bg_fill = hover;
+    }
+    for state in [
+        &mut widgets.inactive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+        &mut widgets.open,
+    ] {
+        state.bg_stroke = egui::Stroke::NONE;
+        state.corner_radius = egui::CornerRadius::ZERO;
+    }
+}

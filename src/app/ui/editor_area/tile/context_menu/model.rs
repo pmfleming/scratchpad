@@ -69,21 +69,33 @@ pub(super) fn shortcut_tooltip_for_menu_label(ctx: &egui::Context, label: &str) 
         "Redo" => return Some(shortcut_tooltips::REDO.to_owned()),
         _ => {}
     }
-    let action = match label {
+    Some(shortcut_tooltips::action(ctx, menu_action(label)?, label))
+}
+
+/// The shortcut shown at the right of a menu row, such as "Ctrl+H".
+pub(super) fn menu_keys(ctx: &egui::Context, label: &str) -> Option<String> {
+    match label {
+        "Undo" => Some("Ctrl+Z".to_owned()),
+        "Redo" => Some("Ctrl+Y".to_owned()),
+        _ => shortcut_tooltips::keys(ctx, menu_action(label)?),
+    }
+}
+
+fn menu_action(label: &str) -> Option<ShortcutAction> {
+    Some(match label {
         "History" => ShortcutAction::OpenTextHistory,
         "Find" => ShortcutAction::OpenSearch,
         "Replace" => ShortcutAction::OpenReplace,
-        "Right to Left" | "Left to Right" => ShortcutAction::ToggleReadingOrder,
-        "Control Chars" => ShortcutAction::ToggleControlChars,
-        "Promote Tile" => ShortcutAction::PromoteTileToTab,
-        "Close Tile" => ShortcutAction::CloseTile,
+        "Right to left" | "Left to right" => ShortcutAction::ToggleReadingOrder,
+        "Control chars" => ShortcutAction::ToggleControlChars,
+        "Promote to tab" => ShortcutAction::PromoteTileToTab,
+        "Close pane" => ShortcutAction::CloseTile,
         "Split Left" => ShortcutAction::SplitLeft,
         "Split Right" => ShortcutAction::SplitRight,
         "Split Up" => ShortcutAction::SplitUp,
         "Split Down" => ShortcutAction::SplitDown,
         _ => return None,
-    };
-    Some(shortcut_tooltips::action(ctx, action, label))
+    })
 }
 
 pub(super) fn should_activate_tile_on_secondary_click(

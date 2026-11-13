@@ -30,7 +30,7 @@ pub(super) fn render_file_actions(
     rename_enabled: bool,
     save_enabled: bool,
 ) {
-    if menu_button(ui, TAB_CONTEXT_MENU_WIDTH, "New Tab", Some(PLUS), true) {
+    if menu_button(ui, TAB_CONTEXT_MENU_WIDTH, "New tab", Some(PLUS), true) {
         crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::NewTab));
         ui.close();
     }
@@ -81,9 +81,9 @@ fn render_open_file_actions(
     open_enabled: bool,
 ) {
     let (label, command) = if app.state.app_settings.recent_files_enabled() {
-        ("Open File", FileCommand::OpenFile)
+        ("Open file", FileCommand::OpenFile)
     } else {
-        ("Open File Here", FileCommand::OpenFileHere)
+        ("Open file here", FileCommand::OpenFileHere)
     };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -186,7 +186,7 @@ fn render_save_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_enabled:
         if menu_button(
             ui,
             SUBMENU_WIDTH,
-            "Save All",
+            "Save all",
             Some(FLOPPY_DISK),
             save_enabled,
         ) {

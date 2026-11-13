@@ -1,5 +1,5 @@
 use super::activate_slot;
-use super::menu_ui::{WIDTH as TAB_CONTEXT_MENU_WIDTH, menu_button};
+use super::menu_ui::{WIDTH as TAB_CONTEXT_MENU_WIDTH, menu_button, menu_value_button};
 use crate::app::app_state::{ScratchpadApp, StatusDomain, frame};
 use crate::app::platform_file;
 use eframe::egui;
@@ -15,11 +15,13 @@ pub(super) fn render_location_actions(
     reveal_enabled: bool,
     path: Option<&Path>,
 ) {
-    if menu_button(
+    let encoding = slot_encoding(app, slot_index);
+    if menu_value_button(
         ui,
         TAB_CONTEXT_MENU_WIDTH,
         "Encoding",
         Some(TRANSLATE),
+        encoding.as_deref(),
         encoding_enabled,
     ) {
         activate_slot(app, slot_index);
@@ -29,7 +31,7 @@ pub(super) fn render_location_actions(
     if menu_button(
         ui,
         TAB_CONTEXT_MENU_WIDTH,
-        "Copy Path",
+        "Copy path",
         Some(COPY),
         copy_path_enabled,
     ) {
@@ -56,4 +58,19 @@ pub(super) fn render_location_actions(
         }
         ui.close();
     }
+}
+
+/// The encoding label of the tab in `slot_index`, if it is a document.
+fn slot_encoding(app: &ScratchpadApp, slot_index: usize) -> Option<String> {
+    let index =
+        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)?;
+    Some(
+        app.tab_manager
+            .tabs
+            .as_slice()
+            .get(index)?
+            .active_buffer()
+            .format
+            .encoding_label(),
+    )
 }

@@ -263,3 +263,44 @@ mod tests {
         ));
     }
 }
+
+/// The first active binding for `shortcut_action`, written for menus: "Ctrl+Shift+E".
+pub(crate) fn keys(ctx: &egui::Context, shortcut_action: ShortcutAction) -> Option<String> {
+    let runtime = runtime_shortcuts(ctx);
+    let binding = runtime.bindings(shortcut_action).first().copied()?;
+    Some(
+        format_binding(runtime.profile, binding)
+            .split('+')
+            .map(|part| {
+                let mut chars = part.chars();
+                chars.next().map_or_else(String::new, |first| {
+                    first
+                        .to_uppercase()
+                        .chain(chars.flat_map(char::to_lowercase))
+                        .collect()
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("+"),
+    )
+}
+
+#[cfg(test)]
+mod key_label_tests {
+    use super::keys;
+    use crate::app::shortcut_keymap::ShortcutAction;
+
+    #[test]
+    fn menu_shortcuts_read_like_ctrl_shift_e() {
+        let ctx = eframe::egui::Context::default();
+        assert_eq!(
+            keys(&ctx, ShortcutAction::NewTab).as_deref(),
+            Some("Ctrl+N")
+        );
+        assert_eq!(
+            keys(&ctx, ShortcutAction::OpenEncodingDialog).as_deref(),
+            Some("Ctrl+Shift+E")
+        );
+        assert_eq!(keys(&ctx, ShortcutAction::RenameTab).as_deref(), Some("F2"));
+    }
+}

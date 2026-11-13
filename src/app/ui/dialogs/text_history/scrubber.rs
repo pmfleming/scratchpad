@@ -8,6 +8,8 @@ use crate::app::{
 };
 use eframe::egui;
 
+const KEY_HINTS: &str = "← → Step   Home End Ends   Esc Close";
+
 #[derive(Clone)]
 struct Drag {
     buffer: u64,
@@ -51,6 +53,7 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let width = (screen.width() - 24.0).clamp(160.0, 480.0);
     let mut target = None;
     let mut open_history = false;
+    let frame = style::window_frame(ctx, app.state.app_settings.editor_background_color());
     widget_ids::area("history_scrubber_window")
         .accessible_name("Scrubber")
         .role(egui::Role::Dialog)
@@ -64,7 +67,6 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
         ))
         .show(ctx, |ui| {
             style::apply(ui);
-            let frame = callout::frame(ui).corner_radius(egui::CornerRadius::ZERO);
             let inner = frame.show(ui, |ui| {
                 ui.set_width((width - 24.0).max(1.0));
                 ui.set_min_width((width - 24.0).max(1.0));
@@ -76,6 +78,7 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
                 open_history = card::header(ui, buffer);
                 target = transport(ui, buffer);
                 card::caption(ui, buffer);
+                ui.label(egui::RichText::new(KEY_HINTS).size(11.0).weak());
             });
             callout::mark_scroll_blocker_if_hovered(ctx, &inner.response);
         });

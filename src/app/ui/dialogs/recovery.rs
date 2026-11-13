@@ -183,7 +183,7 @@ fn render_preview(
     }
 }
 
-fn text_preview(ui: &mut egui::Ui, title: &str, text: &str) {
+pub(super) fn text_preview(ui: &mut egui::Ui, title: &str, text: &str) {
     ui.label(title);
     // Keep paint work bounded; exports and editable copies use the full recovery result.
     let end = text

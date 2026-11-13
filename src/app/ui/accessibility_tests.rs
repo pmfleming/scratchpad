@@ -55,13 +55,12 @@ fn named_dialog_disappears_from_accessibility_tree_when_closed() {
     let mut harness = Harness::builder().with_context_setup(setup).build_ui_state(
         |ui, open| {
             if *open {
-                super::callout::show_floating(
-                    ui.ctx(),
-                    "accessible-dialog",
-                    "Test dialog",
-                    egui::pos2(10.0, 10.0),
-                    300.0,
-                    |ui| {
+                crate::app::ui::widget_ids::area("accessible-dialog")
+                    .accessible_name("Test dialog")
+                    .role(egui::Role::Dialog)
+                    .order(egui::Order::Foreground)
+                    .default_pos(egui::pos2(10.0, 10.0))
+                    .show(ui.ctx(), |ui| {
                         let response = crate::app::chrome::phosphor_button(
                             ui,
                             "test-close",
@@ -74,8 +73,7 @@ fn named_dialog_disappears_from_accessibility_tree_when_closed() {
                         if response.clicked() {
                             *open = false;
                         }
-                    },
-                );
+                    });
             }
         },
         true,

@@ -1,22 +1,30 @@
-use super::common::{
-    render_dialog_action_button, render_icon_choice_dialog, show_centered_callout,
-};
+//! Prompts for closing modified files and saving over disk changes.
+use super::common::{Choice, Confirm, show_confirm};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::{AppCommand, FileCommand, WorkspaceCommand};
-use crate::app::domain::{BufferFreshness, PendingAction, ViewId};
-use crate::app::ui::callout;
+use crate::app::domain::{BufferFreshness, DocumentSnapshot, PendingAction, ViewId};
+use crate::app::theme;
+use crate::app::ui::recovery as query;
 use eframe::egui;
-use egui_phosphor::regular::{ARROW_CLOCKWISE, COPY, FLOPPY_DISK, TRASH, WARNING, X};
+use std::path::PathBuf;
+use std::time::Duration;
 
-const UNSAVED_CHANGES_SIZE: egui::Vec2 = egui::vec2(272.0, 154.0);
-const MISSING_FILE_DIALOG_SIZE: egui::Vec2 = egui::vec2(432.0, 154.0);
-const SAVE_CONFLICT_DIALOG_SIZE: egui::Vec2 = egui::vec2(432.0, 214.0);
+mod disk_diff;
+#[cfg(test)]
+mod tests;
 
-struct SaveConflictDialogState {
-    title: &'static str,
-    message: String,
+const UNSAVED_WIDTH: f32 = 360.0;
+const DISK_WIDTH: f32 = 440.0;
+const COMPARE_WIDTH: f32 = 720.0;
+const DIFF_SIZE: f32 = 11.5;
+
+/// What the tab and its disk file look like when a save runs into a change.
+struct DiskPrompt {
+    path: Option<PathBuf>,
     path_label: String,
     freshness: BufferFreshness,
+    encoding: String,
+    snapshot: DocumentSnapshot,
 }
 
 #[derive(Clone, Copy)]
@@ -26,61 +34,40 @@ enum UnsavedChoice {
     Cancel,
 }
 
-impl SaveConflictDialogState {
-    fn from_freshness(path_label: String, freshness: BufferFreshness) -> Option<Self> {
-        let (title, message) = match freshness {
-            BufferFreshness::ConflictOnDisk => (
-                "File Changed on Disk",
-                format!("{path_label} changed on disk while this tab has unsaved edits."),
-            ),
-            BufferFreshness::MissingOnDisk => (
-                "File Missing on Disk",
-                format!("{path_label} is missing on disk, but this tab still has content."),
-            ),
-            BufferFreshness::StaleOnDisk => (
-                "File Changed on Disk",
-                format!("{path_label} changed on disk."),
-            ),
-            BufferFreshness::InSync | BufferFreshness::AutoReloaded => return None,
-        };
+#[derive(Clone, Copy)]
+enum ConflictChoice {
+    Overwrite,
+    Reload,
+    SaveCopy,
+    Cancel,
+}
 
-        Some(Self {
-            title,
-            message,
-            path_label,
-            freshness,
-        })
-    }
-
-    fn primary_action_label(&self) -> &'static str {
-        "Overwrite"
-    }
-
-    fn can_reload(&self) -> bool {
-        self.freshness != BufferFreshness::MissingOnDisk
-    }
-
-    fn is_missing_on_disk(&self) -> bool {
-        self.freshness == BufferFreshness::MissingOnDisk
-    }
+#[derive(Clone, Copy)]
+enum MissingChoice {
+    Recreate,
+    SaveAs,
+    Close,
+    Cancel,
 }
 
 pub(crate) fn show_pending_action_modal(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let Some(action) = crate::app::app_state::workspace::accessors::pending_action(app) else {
         return;
     };
-
     match action {
         PendingAction::CloseTab(index) => handle_pending_close_tab(ctx, app, index),
         PendingAction::CloseView { tab_index, view_id } => {
             handle_pending_close_view(ctx, app, tab_index, view_id);
         }
-        PendingAction::SaveConflict { tab_index, view_id }
-            if save_conflict_dialog_state(app, tab_index, view_id).is_some() =>
-        {
-            show_save_conflict_confirmation(ctx, app, tab_index, view_id);
+        PendingAction::SaveConflict { tab_index, view_id } => {
+            match disk_prompt(app, tab_index, view_id) {
+                Some(prompt) if prompt.freshness == BufferFreshness::MissingOnDisk => {
+                    show_missing(ctx, app, tab_index, view_id, &prompt);
+                }
+                Some(prompt) => show_conflict(ctx, app, tab_index, view_id, &prompt),
+                None => clear_pending_action(app),
+            }
         }
-        PendingAction::SaveConflict { .. } => clear_pending_action(app),
     }
 }
 
@@ -88,7 +75,17 @@ fn handle_pending_close_tab(ctx: &egui::Context, app: &mut ScratchpadApp, index:
     match app.tab_manager.tabs.as_slice().get(index) {
         None => clear_pending_action(app),
         Some(tab) if !tab.buffers.buffer.is_dirty => close_pending_tab(app, index),
-        Some(_) => show_close_tab_confirmation(ctx, app, index),
+        Some(tab) => {
+            let buffer = &tab.buffers.buffer;
+            let path = path_label(buffer);
+            let untitled = buffer.path.is_none();
+            match ask_unsaved(ctx, app, &path, untitled) {
+                Some(UnsavedChoice::Save) => save_and_close_pending_tab(app, index),
+                Some(UnsavedChoice::Discard) => close_pending_tab(app, index),
+                Some(UnsavedChoice::Cancel) => clear_pending_action(app),
+                None => {}
+            }
+        }
     }
 }
 
@@ -102,160 +99,272 @@ fn handle_pending_close_view(
         clear_pending_action(app);
         return;
     };
-
     if tab.is_last_view_for_buffer(view_id) != Some(true) {
         close_pending_view(app, tab_index, view_id);
         return;
     }
-
     match tab.buffer_for_view(view_id) {
         None => clear_pending_action(app),
         Some(buffer) if !buffer.is_dirty => close_pending_view(app, tab_index, view_id),
-        Some(_) => show_close_view_confirmation(ctx, app, tab_index, view_id),
+        Some(buffer) => {
+            let path = path_label(buffer);
+            let untitled = buffer.path.is_none();
+            match ask_unsaved(ctx, app, &path, untitled) {
+                Some(UnsavedChoice::Save) => save_and_close_pending_view(app, tab_index, view_id),
+                Some(UnsavedChoice::Discard) => close_pending_view(app, tab_index, view_id),
+                Some(UnsavedChoice::Cancel) => clear_pending_action(app),
+                None => {}
+            }
+        }
     }
 }
 
-fn show_close_tab_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp, index: usize) {
-    let tab_name = app.tab_manager.tabs.as_slice()[index]
-        .buffers
-        .buffer
-        .name
-        .clone();
-    let mut close_requested = false;
-
-    show_centered_callout(
-        ctx,
-        "unsaved_changes_overlay_v3",
-        "Unsaved changes",
-        UNSAVED_CHANGES_SIZE,
-        |ui| render_unsaved_changes_dialog(ui, &tab_name, app, index, &mut close_requested),
-    );
-
-    if close_requested {
-        clear_pending_action(app);
-    }
+fn path_label(buffer: &crate::app::domain::BufferState) -> String {
+    buffer
+        .path
+        .as_ref()
+        .map_or_else(|| buffer.name.clone(), |path| path.display().to_string())
 }
 
-fn show_close_view_confirmation(
+fn ask_unsaved(
     ctx: &egui::Context,
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-) {
-    let Some(tab_name) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .get(tab_index)
-        .and_then(|tab| tab.buffer_for_view(view_id))
-        .map(|buffer| buffer.name.clone())
-    else {
-        clear_pending_action(app);
-        return;
-    };
-    let mut close_requested = false;
-
-    show_centered_callout(
-        ctx,
-        "unsaved_changes_overlay_v3",
-        "Unsaved changes",
-        UNSAVED_CHANGES_SIZE,
-        |ui| {
-            render_unsaved_changes_view_dialog(
-                ui,
-                &tab_name,
-                app,
-                tab_index,
-                view_id,
-                &mut close_requested,
-            );
-        },
-    );
-
-    if close_requested {
-        clear_pending_action(app);
-    }
-}
-
-fn show_save_conflict_confirmation(
-    ctx: &egui::Context,
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-) {
-    let Some(state) = save_conflict_dialog_state(app, tab_index, view_id) else {
-        return;
-    };
-
-    let mut close_requested = false;
-    let dialog_size = if state.is_missing_on_disk() {
-        MISSING_FILE_DIALOG_SIZE
-    } else {
-        SAVE_CONFLICT_DIALOG_SIZE
-    };
-
-    show_centered_callout(
-        ctx,
-        "file_change_overlay_v1",
-        "File changed on disk",
-        dialog_size,
-        |ui| {
-            render_save_conflict_dialog(ui, app, tab_index, view_id, &state, &mut close_requested);
-        },
-    );
-
-    if close_requested {
-        clear_pending_action(app);
-    }
-}
-
-fn render_unsaved_changes_view_dialog(
-    ui: &mut egui::Ui,
-    tab_name: &str,
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-    close_requested: &mut bool,
-) {
-    match render_unsaved_changes_body(ui, tab_name, close_requested) {
-        Some(UnsavedChoice::Save) => save_and_close_pending_view(app, tab_index, view_id),
-        Some(UnsavedChoice::Discard) => close_pending_view(app, tab_index, view_id),
-        Some(UnsavedChoice::Cancel) => *close_requested = true,
-        None => {}
-    }
-}
-
-fn render_unsaved_changes_dialog(
-    ui: &mut egui::Ui,
-    tab_name: &str,
-    app: &mut ScratchpadApp,
-    index: usize,
-    close_requested: &mut bool,
-) {
-    match render_unsaved_changes_body(ui, tab_name, close_requested) {
-        Some(UnsavedChoice::Save) => save_and_close_pending_tab(app, index),
-        Some(UnsavedChoice::Discard) => close_pending_tab(app, index),
-        Some(UnsavedChoice::Cancel) => *close_requested = true,
-        None => {}
-    }
-}
-
-fn render_unsaved_changes_body(
-    ui: &mut egui::Ui,
-    tab_name: &str,
-    close_requested: &mut bool,
+    app: &ScratchpadApp,
+    path: &str,
+    untitled: bool,
 ) -> Option<UnsavedChoice> {
-    render_icon_choice_dialog(
-        ui,
-        tab_name,
-        "Unsaved Changes",
-        close_requested,
-        [
-            (FLOPPY_DISK, "Save changes", UnsavedChoice::Save),
-            (TRASH, "Close without saving", UnsavedChoice::Discard),
-            (X, "Cancel", UnsavedChoice::Cancel),
-        ],
+    show_confirm(
+        ctx,
+        app.state.app_settings.editor_background_color(),
+        Confirm {
+            id: "unsaved_changes_panel",
+            title: "Unsaved changes",
+            path,
+            width: UNSAVED_WIDTH,
+            hints: "Enter Save   Esc Cancel",
+            choices: vec![
+                Choice::new("Cancel", "Keep the file open", UnsavedChoice::Cancel).quiet(),
+                Choice::new(
+                    "Don't save",
+                    "Close and discard the changes",
+                    UnsavedChoice::Discard,
+                ),
+                Choice::new(
+                    if untitled { "Save…" } else { "Save" },
+                    "Save the changes, then close",
+                    UnsavedChoice::Save,
+                )
+                .accent(),
+            ],
+            enter: Some(UnsavedChoice::Save),
+            escape: UnsavedChoice::Cancel,
+        },
+        |_| {},
+        |_| {},
     )
+}
+
+fn compare_key() -> egui::Id {
+    egui::Id::unique("pending.disk.compare")
+}
+
+fn show_conflict(
+    ctx: &egui::Context,
+    app: &mut ScratchpadApp,
+    tab_index: usize,
+    view_id: ViewId,
+    prompt: &DiskPrompt,
+) {
+    let showing = ctx.data(|d| d.get_temp::<bool>(compare_key()).unwrap_or(false));
+    let mut compare = showing;
+    let choice = show_confirm(
+        ctx,
+        app.state.app_settings.editor_background_color(),
+        Confirm {
+            id: "disk_change_panel",
+            title: "Changed on disk",
+            path: &prompt.path_label,
+            width: if showing { COMPARE_WIDTH } else { DISK_WIDTH },
+            hints: "Enter Overwrite   Esc Cancel",
+            choices: vec![
+                Choice::new("Cancel", "Decide later", ConflictChoice::Cancel).quiet(),
+                Choice::new(
+                    "Save copy…",
+                    "Keep this text in a new file",
+                    ConflictChoice::SaveCopy,
+                ),
+                Choice::new(
+                    "Reload",
+                    "Discard this tab's edits and load the disk version",
+                    ConflictChoice::Reload,
+                ),
+                Choice::new(
+                    "Overwrite",
+                    "Replace the disk version with this tab",
+                    ConflictChoice::Overwrite,
+                )
+                .accent(),
+            ],
+            enter: Some(ConflictChoice::Overwrite),
+            escape: ConflictChoice::Cancel,
+        },
+        |ui| {
+            ui.selectable_value(&mut compare, true, "Compare")
+                .on_hover_text("Show both versions side by side");
+            ui.selectable_value(&mut compare, false, "Summary")
+                .on_hover_text("Show the first change");
+        },
+        |ui| disk_change(ui, prompt, showing),
+    );
+    ctx.data_mut(|d| d.insert_temp(compare_key(), compare));
+    let Some(choice) = choice else {
+        return;
+    };
+    ctx.data_mut(|d| d.remove::<bool>(compare_key()));
+    let command = match choice {
+        ConflictChoice::Overwrite => FileCommand::SaveConflictOverwrite { tab_index, view_id },
+        ConflictChoice::Reload => FileCommand::ReloadBufferFromDisk { tab_index, view_id },
+        ConflictChoice::SaveCopy => FileCommand::SaveConflictAsCopy { tab_index, view_id },
+        ConflictChoice::Cancel => {
+            clear_pending_action(app);
+            return;
+        }
+    };
+    crate::app::commands::handle_command(app, AppCommand::File(command));
+}
+
+/// The first changed lines, or both versions in full.
+fn disk_change(ui: &mut egui::Ui, prompt: &DiskPrompt, compare: bool) {
+    let Some(path) = prompt.path.clone() else {
+        return;
+    };
+    let encoding = prompt.encoding.clone();
+    let snapshot = prompt.snapshot.clone();
+    let diff = query::query_with_interval(
+        ui,
+        ("pending.disk_diff", path.clone(), snapshot.revision()),
+        Duration::from_hours(1),
+        move || disk_diff::load(&path, &encoding, &snapshot),
+    );
+    ui.separator();
+    let diff = match diff {
+        None => {
+            muted(ui, "Reading disk file…");
+            return;
+        }
+        Some(Err(error)) => {
+            muted(ui, &error);
+            return;
+        }
+        Some(Ok(diff)) => diff,
+    };
+    if compare {
+        ui.columns(2, |columns| {
+            super::recovery::text_preview(&mut columns[0], "Disk", &diff.disk);
+            super::recovery::text_preview(&mut columns[1], "This tab", &diff.tab);
+        });
+        return;
+    }
+    if diff.removed.is_empty() && diff.added.is_empty() {
+        muted(ui, "Same text");
+        return;
+    }
+    egui::Frame::NONE
+        .stroke(egui::Stroke::new(1.0, theme::border(ui)))
+        .inner_margin(egui::Margin::symmetric(6, 4))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 0.0;
+            muted(ui, &format!("Ln {}", diff.line));
+            for (lines, sign, color) in [
+                (&diff.removed, '-', theme::diff_del(ui)),
+                (&diff.added, '+', theme::diff_add(ui)),
+            ] {
+                for line in lines {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!("{sign} {line}"))
+                                .monospace()
+                                .size(DIFF_SIZE)
+                                .color(color),
+                        )
+                        .truncate(),
+                    );
+                }
+            }
+            if diff.more {
+                muted(ui, "…");
+            }
+        });
+}
+
+fn muted(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        egui::RichText::new(text)
+            .size(12.0)
+            .color(theme::text_muted(ui)),
+    );
+}
+
+fn show_missing(
+    ctx: &egui::Context,
+    app: &mut ScratchpadApp,
+    tab_index: usize,
+    view_id: ViewId,
+    prompt: &DiskPrompt,
+) {
+    let choice = show_confirm(
+        ctx,
+        app.state.app_settings.editor_background_color(),
+        Confirm {
+            id: "disk_missing_panel",
+            title: "Missing on disk",
+            path: &prompt.path_label,
+            width: DISK_WIDTH,
+            hints: "Enter Recreate   Esc Cancel",
+            choices: vec![
+                Choice::new(
+                    "Cancel",
+                    "Keep the tab and decide later",
+                    MissingChoice::Cancel,
+                )
+                .quiet(),
+                Choice::new(
+                    "Close tab",
+                    "Close the tab without saving",
+                    MissingChoice::Close,
+                ),
+                Choice::new(
+                    "Save as…",
+                    "Save this text somewhere new",
+                    MissingChoice::SaveAs,
+                ),
+                Choice::new(
+                    "Recreate",
+                    "Write the file again at its original path",
+                    MissingChoice::Recreate,
+                )
+                .accent(),
+            ],
+            enter: Some(MissingChoice::Recreate),
+            escape: MissingChoice::Cancel,
+        },
+        |_| {},
+        |_| {},
+    );
+    let command = match choice {
+        None => return,
+        Some(MissingChoice::Recreate) => FileCommand::SaveConflictOverwrite { tab_index, view_id },
+        Some(MissingChoice::SaveAs) => FileCommand::SaveMissingAs { tab_index, view_id },
+        Some(MissingChoice::Close) => {
+            close_pending_view(app, tab_index, view_id);
+            return;
+        }
+        Some(MissingChoice::Cancel) => {
+            clear_pending_action(app);
+            return;
+        }
+    };
+    crate::app::commands::handle_command(app, AppCommand::File(command));
 }
 
 fn save_and_close_pending_tab(app: &mut ScratchpadApp, index: usize) {
@@ -269,158 +378,9 @@ fn save_and_close_pending_view(app: &mut ScratchpadApp, tab_index: usize, view_i
         clear_pending_action(app);
         return;
     }
-
     if crate::app::app_state::workspace_controller::save_file_at(app, tab_index) {
         close_pending_view(app, tab_index, view_id);
     }
-}
-
-fn render_save_conflict_dialog(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-    state: &SaveConflictDialogState,
-    close_requested: &mut bool,
-) {
-    if state.is_missing_on_disk() {
-        render_missing_file_dialog(ui, app, tab_index, view_id, state, close_requested);
-        return;
-    }
-
-    callout::apply_spacing(ui);
-
-    if callout::header_row(
-        ui,
-        "pending_file_change.header",
-        "Close file change prompt",
-        |ui| {
-            ui.label(
-                egui::RichText::new(WARNING)
-                    .font(egui_phosphor::font_id(16.0))
-                    .color(callout::muted_text(ui)),
-            );
-            ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new(state.title)
-                        .size(15.0)
-                        .color(callout::text(ui)),
-                );
-                ui.label(
-                    egui::RichText::new("Resolve the on-disk mismatch before continuing.")
-                        .size(11.5)
-                        .color(callout::muted_text(ui)),
-                );
-            });
-        },
-    ) {
-        *close_requested = true;
-    }
-
-    callout::section_frame(ui).show(ui, |ui| {
-        ui.label(
-            egui::RichText::new(&state.message)
-                .size(12.5)
-                .color(callout::text(ui)),
-        );
-    });
-
-    ui.horizontal_wrapped(|ui| {
-        if render_dialog_action_button(
-            ui,
-            "save_conflict.overwrite",
-            FLOPPY_DISK,
-            state.primary_action_label(),
-            "Write the current buffer back to disk",
-        ) {
-            crate::app::commands::handle_command(
-                app,
-                AppCommand::File(FileCommand::SaveConflictOverwrite { tab_index, view_id }),
-            );
-        }
-
-        if state.can_reload()
-            && render_dialog_action_button(
-                ui,
-                "save_conflict.reload",
-                ARROW_CLOCKWISE,
-                "Reload",
-                "Discard local buffer state and reload from disk",
-            )
-        {
-            crate::app::commands::handle_command(
-                app,
-                AppCommand::File(FileCommand::ReloadBufferFromDisk { tab_index, view_id }),
-            );
-        }
-
-        if render_dialog_action_button(
-            ui,
-            "save_conflict.save_as_copy",
-            COPY,
-            "Save As Copy",
-            "Keep this buffer by saving it to a new file",
-        ) {
-            crate::app::commands::handle_command(
-                app,
-                AppCommand::File(FileCommand::SaveConflictAsCopy { tab_index, view_id }),
-            );
-        }
-
-        if render_dialog_action_button(
-            ui,
-            "save_conflict.cancel",
-            X,
-            "Cancel",
-            "Dismiss this prompt",
-        ) {
-            *close_requested = true;
-        }
-    });
-}
-
-fn render_missing_file_dialog(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-    state: &SaveConflictDialogState,
-    close_requested: &mut bool,
-) {
-    if let Some(action) = render_icon_choice_dialog(
-        ui,
-        &state.path_label,
-        "File Missing on Disk",
-        close_requested,
-        [
-            (
-                FLOPPY_DISK,
-                "Recreate the file at its original path",
-                MissingFileChoice::Save,
-            ),
-            (
-                TRASH,
-                "Discard this missing file tab",
-                MissingFileChoice::Discard,
-            ),
-        ],
-    ) {
-        match action {
-            MissingFileChoice::Save => {
-                crate::app::commands::handle_command(
-                    app,
-                    AppCommand::File(FileCommand::SaveConflictOverwrite { tab_index, view_id }),
-                );
-            }
-            MissingFileChoice::Discard => close_pending_view(app, tab_index, view_id),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum MissingFileChoice {
-    Save,
-    Discard,
 }
 
 fn close_pending_tab(app: &mut ScratchpadApp, index: usize) {
@@ -446,20 +406,21 @@ fn clear_pending_action(app: &mut ScratchpadApp) {
     crate::app::app_state::workspace::accessors::set_pending_action(app, None);
 }
 
-fn save_conflict_dialog_state(
-    app: &ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-) -> Option<SaveConflictDialogState> {
+fn disk_prompt(app: &ScratchpadApp, tab_index: usize, view_id: ViewId) -> Option<DiskPrompt> {
     let buffer = app
         .tab_manager
         .tabs
         .as_slice()
         .get(tab_index)?
         .buffer_for_view(view_id)?;
-    let path_label = buffer
-        .path
-        .as_ref()
-        .map_or_else(|| buffer.name.clone(), |path| path.display().to_string());
-    SaveConflictDialogState::from_freshness(path_label, buffer.freshness)
+    match buffer.freshness {
+        BufferFreshness::InSync | BufferFreshness::AutoReloaded => None,
+        freshness => Some(DiskPrompt {
+            path: buffer.path.clone(),
+            path_label: path_label(buffer),
+            freshness,
+            encoding: buffer.format.encoding_name.clone(),
+            snapshot: buffer.document_snapshot(),
+        }),
+    }
 }

@@ -128,6 +128,11 @@ pub enum FileCommand {
         tab_index: usize,
         view_id: ViewId,
     },
+    /// Saves a missing file somewhere new; the tab moves to the new path.
+    SaveMissingAs {
+        tab_index: usize,
+        view_id: ViewId,
+    },
 }
 
 pub enum DialogCommand {

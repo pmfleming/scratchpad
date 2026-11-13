@@ -123,9 +123,14 @@ pub(in crate::app::ui::settings) fn color_button(
             format!("Edit {label} color"),
         )
     });
-    let style = (**ui.style()).clone();
+    let base = (**ui.style()).clone();
+    let fill = ui.visuals().panel_fill;
+    let flat = crate::app::ui::panel_style::menu_style(fill);
     egui::Popup::menu(&response)
-        .style(style)
+        .style(egui::style::StyleModifier::new(move |style| {
+            *style = base.clone();
+            flat.apply(style);
+        }))
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             let viewport = ui.ctx().content_rect().size() - egui::vec2(48.0, 48.0);
@@ -133,6 +138,10 @@ pub(in crate::app::ui::settings) fn color_button(
                 .max_width(viewport.x.max(100.0))
                 .max_height(viewport.y.max(100.0))
                 .show(ui, |ui| {
+                    ui.label(egui::RichText::new(label).size(14.0).strong());
+                    if hex_field(ui, label, color) {
+                        response.mark_changed();
+                    }
                     ui.spacing_mut().slider_width = 275.0;
                     if egui::color_picker::color_picker_color32(
                         ui,
@@ -141,7 +150,74 @@ pub(in crate::app::ui::settings) fn color_button(
                     ) {
                         response.mark_changed();
                     }
+                    ui.label(egui::RichText::new("Esc Close").size(11.0).weak());
                 });
         });
     response
+}
+
+/// A `#RRGGBB` field that accepts typing and paste; returns true when it set `color`.
+fn hex_field(ui: &mut egui::Ui, label: &str, color: &mut egui::Color32) -> bool {
+    let id = egui::Id::unique(("settings.color.hex", label));
+    let current = format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b());
+    let editing = ui.memory(|m| m.has_focus(id));
+    let mut text = if editing {
+        ui.data(|d| d.get_temp::<String>(id)).unwrap_or(current)
+    } else {
+        current
+    };
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .id(id)
+            .font(egui::TextStyle::Monospace)
+            .desired_width(96.0),
+    );
+    response.widget_info(|| egui::WidgetInfo::text_edit(true, "", &text, format!("{label} hex")));
+    ui.data_mut(|d| d.insert_temp(id, text.clone()));
+    match parse_hex(&text) {
+        Some(parsed) if response.changed() && parsed != *color => {
+            *color = parsed;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Reads `#RGB`, `#RRGGBB`, or the same without `#`.
+pub(crate) fn parse_hex(text: &str) -> Option<egui::Color32> {
+    let digits = text.trim().trim_start_matches('#');
+    let channel = |s: &str| u8::from_str_radix(s, 16).ok();
+    match digits.len() {
+        6 => Some(egui::Color32::from_rgb(
+            channel(&digits[0..2])?,
+            channel(&digits[2..4])?,
+            channel(&digits[4..6])?,
+        )),
+        3 => {
+            let short = |i: usize| channel(&digits[i..=i]).map(|v| v * 17);
+            Some(egui::Color32::from_rgb(short(0)?, short(1)?, short(2)?))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod hex_tests {
+    use super::parse_hex;
+    use eframe::egui::Color32;
+
+    #[test]
+    fn hex_accepts_long_short_and_bare_forms() {
+        assert_eq!(
+            parse_hex("#1D2126"),
+            Some(Color32::from_rgb(0x1D, 0x21, 0x26))
+        );
+        assert_eq!(parse_hex("fff"), Some(Color32::WHITE));
+        assert_eq!(
+            parse_hex(" #abc "),
+            Some(Color32::from_rgb(0xAA, 0xBB, 0xCC))
+        );
+        assert_eq!(parse_hex("#12345"), None);
+        assert_eq!(parse_hex("#GG0000"), None);
+    }
 }

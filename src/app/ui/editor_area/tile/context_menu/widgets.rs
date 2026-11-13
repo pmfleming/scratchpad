@@ -1,10 +1,9 @@
 use super::model::shortcut_tooltip_for_menu_label;
-use crate::app::theme::{action_bg, action_hover_bg, border, text_primary};
-use crate::app::ui::{visuals::with_visual_overrides, widget_ids};
+use crate::app::theme::text_primary;
+use crate::app::ui::{panel_style, visuals::with_visual_overrides, widget_ids};
 use eframe::egui;
 
 pub(super) const EDITOR_CONTEXT_MENU_WIDTH: f32 = 204.0;
-pub(super) const EDITOR_CONTEXT_SUBMENU_WIDTH: f32 = 168.0;
 pub(super) const EDITOR_UNICODE_INSERT_SUBMENU_WIDTH: f32 = 380.0;
 pub(super) const EDITOR_CONTEXT_ROW_HEIGHT: f32 = 28.0;
 pub(super) const EDITOR_CONTEXT_CARET_WIDTH: f32 = 28.0;
@@ -13,8 +12,6 @@ pub(super) const EDITOR_UNICODE_DIVIDER_X: f32 = 76.0;
 pub(super) const EDITOR_UNICODE_DESCRIPTION_X: f32 = 94.0;
 
 const EDITOR_CONTEXT_ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
-const EDITOR_CONTEXT_ICON_CENTER_X: f32 = 20.0;
-const EDITOR_CONTEXT_LABEL_X: f32 = 52.0;
 const EDITOR_CONTEXT_RAIL_BUTTON_COUNT: f32 = 4.0;
 
 pub(super) fn set_menu_width(ui: &mut egui::Ui, width: f32) {
@@ -61,33 +58,6 @@ pub(super) fn menu_action_button(
     })
 }
 
-pub(super) fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            ("editor_context.split_submenu", label),
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add(
-                    egui::Button::new("")
-                        .min_size(egui::vec2(
-                            EDITOR_CONTEXT_SUBMENU_WIDTH,
-                            EDITOR_CONTEXT_ROW_HEIGHT,
-                        ))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
-        paint_context_menu_row_label(ui, response.rect, Some(icon), label, true);
-        let clicked = response.clicked();
-        if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui.ctx(), label) {
-            response.on_hover_text(tooltip);
-        }
-        clicked
-    })
-}
-
 pub(super) fn paint_context_menu_row_label(
     ui: &egui::Ui,
     rect: egui::Rect,
@@ -95,45 +65,12 @@ pub(super) fn paint_context_menu_row_label(
     label: &str,
     enabled: bool,
 ) {
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let color = if enabled {
-        text_primary(ui)
-    } else {
-        text_primary(ui).gamma_multiply(0.45)
-    };
-    if let Some(icon) = icon {
-        ui.painter().text(
-            rect.left_center() + egui::vec2(EDITOR_CONTEXT_ICON_CENTER_X, 0.0),
-            egui::Align2::CENTER_CENTER,
-            icon,
-            egui_phosphor::font_id(font.size),
-            color,
-        );
-    }
-    ui.painter().text(
-        rect.left_center() + egui::vec2(EDITOR_CONTEXT_LABEL_X, 0.0),
-        egui::Align2::LEFT_CENTER,
-        label,
-        font,
-        color,
-    );
+    let keys = super::model::menu_keys(ui.ctx(), label);
+    panel_style::paint_menu_row(ui, rect, icon, label, keys.as_deref(), enabled);
 }
 
 pub(super) fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {
-    let hover_bg = action_hover_bg(ui);
-    let visuals = ui.visuals_mut();
-    visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-    visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-    visuals.widgets.hovered.bg_fill = hover_bg;
-    visuals.widgets.hovered.weak_bg_fill = hover_bg;
-    visuals.widgets.active.bg_fill = hover_bg;
-    visuals.widgets.active.weak_bg_fill = hover_bg;
-    visuals.widgets.open.bg_fill = hover_bg;
-    visuals.widgets.open.weak_bg_fill = hover_bg;
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
+    panel_style::flat_rows(ui);
 }
 
 pub(super) fn icon_rail_button(
@@ -154,8 +91,8 @@ pub(super) fn icon_rail_button(
                 .color(color),
         )
         .min_size(EDITOR_CONTEXT_ICON_BUTTON_SIZE)
-        .stroke(egui::Stroke::new(1.0, border(ui)))
-        .corner_radius(egui::CornerRadius::same(8));
+        .frame_when_inactive(false)
+        .corner_radius(egui::CornerRadius::ZERO);
 
         widget_ids::surface_response(
             ui,
@@ -168,17 +105,7 @@ pub(super) fn icon_rail_button(
 }
 
 fn apply_icon_rail_button_style(ui: &mut egui::Ui) {
-    let idle_bg = action_bg(ui);
-    let hover_bg = action_hover_bg(ui);
-    let visuals = ui.visuals_mut();
-    visuals.widgets.inactive.bg_fill = idle_bg;
-    visuals.widgets.inactive.weak_bg_fill = idle_bg;
-    visuals.widgets.hovered.bg_fill = hover_bg;
-    visuals.widgets.hovered.weak_bg_fill = hover_bg;
-    visuals.widgets.active.bg_fill = hover_bg;
-    visuals.widgets.active.weak_bg_fill = hover_bg;
-    visuals.widgets.open.bg_fill = hover_bg;
-    visuals.widgets.open.weak_bg_fill = hover_bg;
+    panel_style::flat_rows(ui);
 }
 
 #[cfg(test)]

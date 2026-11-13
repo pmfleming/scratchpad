@@ -79,7 +79,7 @@ mod imp {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    pub(super) const REVEAL_FILE_LABEL: &str = "Reveal In Explorer";
+    pub(super) const REVEAL_FILE_LABEL: &str = "Reveal in Explorer";
     pub(super) const REVEAL_FILE_ERROR_MESSAGE: &str = "Could not reveal this file in Explorer.";
 
     pub(super) fn pick_open_files(kind: OpenFileDialogKind) -> Option<Vec<PathBuf>> {
@@ -108,7 +108,7 @@ mod imp {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    pub(super) const REVEAL_FILE_LABEL: &str = "Open Folder";
+    pub(super) const REVEAL_FILE_LABEL: &str = "Open folder";
     pub(super) const REVEAL_FILE_ERROR_MESSAGE: &str = "Could not open the containing folder.";
 
     pub(super) fn pick_open_files(kind: OpenFileDialogKind) -> Option<Vec<PathBuf>> {
@@ -135,7 +135,7 @@ mod imp {
     use super::{OpenFileDialogKind, text_file_dialog};
     use std::path::{Path, PathBuf};
 
-    pub(super) const REVEAL_FILE_LABEL: &str = "Open Folder";
+    pub(super) const REVEAL_FILE_LABEL: &str = "Open folder";
     pub(super) const REVEAL_FILE_ERROR_MESSAGE: &str = "Could not open the containing folder.";
 
     pub(super) fn pick_open_files(kind: OpenFileDialogKind) -> Option<Vec<PathBuf>> {
@@ -175,12 +175,12 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_reveal_label_is_file_manager_neutral() {
-        assert_eq!(reveal_file_label(), "Open Folder");
+        assert_eq!(reveal_file_label(), "Open folder");
     }
 
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_reveal_label_names_explorer() {
-        assert_eq!(reveal_file_label(), "Reveal In Explorer");
+        assert_eq!(reveal_file_label(), "Reveal in Explorer");
     }
 }

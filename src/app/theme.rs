@@ -76,6 +76,11 @@ visuals_theme_fn!(
     TAB_ACTIVE_BG_LIGHT
 );
 visuals_theme_fn!(border_for_visuals, BORDER, BORDER_LIGHT);
+visuals_theme_fn!(
+    tab_selected_bg_for_visuals,
+    TAB_SELECTED_BG,
+    TAB_SELECTED_BG_LIGHT
+);
 visuals_theme_fn!(text_primary_for_visuals, TEXT_PRIMARY, TEXT_PRIMARY_LIGHT);
 
 pub const HEADER_CONTROL_HEIGHT: f32 = 30.0;

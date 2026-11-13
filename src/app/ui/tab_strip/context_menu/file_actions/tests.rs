@@ -48,9 +48,9 @@ fn open_file_submenu_contains_closed_files_without_a_separate_menu_item() {
             harness.get_by_role_and_label(
                 egui::Role::Button,
                 if recent_files {
-                    "Open File"
+                    "Open file"
                 } else {
-                    "Open File Here"
+                    "Open file here"
                 },
             );
             assert!(harness.query_by_label("Recently Closed").is_none());

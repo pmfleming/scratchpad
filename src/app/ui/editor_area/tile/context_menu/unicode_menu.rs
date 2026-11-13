@@ -127,9 +127,9 @@ fn render_unicode_menu_contents(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let control_chars_available =
         buffer.is_some_and(|buffer| buffer.has_visible_control_substitutions());
     let (direction_label, direction_icon) = if right_to_left {
-        ("Left to Right", TEXT_ALIGN_LEFT)
+        ("Left to right", TEXT_ALIGN_LEFT)
     } else {
-        ("Right to Left", TEXT_ALIGN_RIGHT)
+        ("Right to left", TEXT_ALIGN_RIGHT)
     };
 
     if menu_action_button(ui, direction_label, Some(direction_icon), true) {
@@ -144,7 +144,7 @@ fn render_unicode_menu_contents(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     };
     if menu_action_button(
         ui,
-        "Control Chars",
+        "Control chars",
         Some(control_icon),
         show_control_chars || control_chars_available,
     ) {
@@ -152,7 +152,7 @@ fn render_unicode_menu_contents(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         ui.close();
     }
 
-    unicode_submenu_row(ui, "Insert Control", TEXT_AA, |ui| {
+    unicode_submenu_row(ui, "Insert control", TEXT_AA, |ui| {
         render_insert_control_menu(ui, app);
     });
     menu_action_button(ui, "Reconversion", Some(ARROW_U_UP_LEFT), false);
@@ -185,9 +185,13 @@ fn unicode_submenu_row(
 
         let (response, _) =
             widget_ids::surface_widget(ui, ("editor_context.submenu", label), "submenu", |ui| {
-                egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-                    add_contents(ui);
-                })
+                egui::containers::menu::SubMenuButton::from_button(button)
+                    .config(egui::containers::menu::MenuConfig::new().style(
+                        crate::app::ui::panel_style::menu_style(ui.visuals().window_fill),
+                    ))
+                    .ui(ui, |ui| {
+                        add_contents(ui);
+                    })
             })
             .inner;
 

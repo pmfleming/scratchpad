@@ -140,9 +140,9 @@ fn show_overflow_popup(
     overflow_popup_open: &mut bool,
     outcome: &mut OverflowMenuOutcome,
 ) -> Option<egui::Response> {
-    if !*overflow_popup_open {
-        return None;
-    }
+    let (mut filter, opening) = begin_filter(ctx, *overflow_popup_open)?;
+    let matching = matching_slots(request.app, &request, &filter.text);
+    filter_keys(ctx, &mut filter, &matching);
 
     let active_drag_sources = tab_drag::active_drag_sources_for_context(ctx);
     let row_width =
@@ -150,7 +150,7 @@ fn show_overflow_popup(
             .min((ctx.content_rect().width() - TAB_LIST_SCROLLBAR_GUTTER - 16.0).max(0.0));
     let popup_width = row_width + TAB_LIST_SCROLLBAR_GUTTER;
     let popup_max_height = overflow_popup_max_height(ctx, request.anchor, request.pivot);
-    let visible_row_count = overflow_row_count(request.app, request.visible_tab_indices);
+    let visible_row_count = matching.len();
     let row_height =
         crate::app::chrome::tab_row_height(ctx, request.app.state.app_settings.font_size());
     let popup_target_height =
@@ -161,9 +161,16 @@ fn show_overflow_popup(
         .fixed_pos(request.anchor)
         .pivot(request.pivot)
         .show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
+            crate::app::ui::panel_style::window_frame(
+                ctx,
+                request.app.state.app_settings.editor_background_color(),
+            )
+            .inner_margin(egui::Margin::symmetric(0, 6))
+            .show(ui, |ui| {
                 ui.set_width(popup_width);
                 ui.set_min_width(popup_width);
+                crate::app::ui::panel_style::apply(ui);
+                filter_field(ui, &mut filter, opening, matching.len());
 
                 let mut menu = OverflowMenuContext {
                     row_width,
@@ -190,7 +197,7 @@ fn show_overflow_popup(
                                 request.app,
                                 request.duplicate_name_counts,
                                 &active_drag_sources,
-                                request.visible_tab_indices,
+                                &matching,
                                 &mut menu,
                             )
                         })
@@ -204,10 +211,22 @@ fn show_overflow_popup(
                     scroll_output.inner_rect,
                     &scroll_output.state,
                 );
+                filter_footer(ui, &filter, &scroll_output.inner);
                 scroll_output.inner
             })
         });
 
+    if std::mem::take(&mut filter.activate)
+        && let Some(slot) = filter.highlight.or_else(|| matching.first().copied())
+    {
+        if display_tabs::tab_slot_is_settings(request.app, slot) {
+            outcome.activate_settings = true;
+        } else {
+            outcome.activated_tab = Some(slot);
+        }
+        *overflow_popup_open = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(filter_state_id(), filter));
     outcome.drop_zone = build_overflow_drop_zone(&area_response.inner.inner);
     Some(area_response.response)
 }
@@ -361,17 +380,11 @@ fn collect_overflow_row_rects(
     app: &ScratchpadApp,
     duplicate_name_counts: &HashMap<String, usize>,
     active_drag_sources: &[usize],
-    visible_tab_indices: &HashSet<usize>,
+    matching: &[usize],
     menu: &mut OverflowMenuContext<'_>,
 ) -> Vec<tab_drag::TabRectEntry> {
-    let mut row_rects =
-        Vec::with_capacity(crate::app::app_state::workspace::display_tabs::total_tab_slots(app));
-
-    for slot_index in 0..crate::app::app_state::workspace::display_tabs::total_tab_slots(app) {
-        if !should_show_overflow_row(slot_index, active_drag_sources, visible_tab_indices) {
-            continue;
-        }
-
+    let mut row_rects = Vec::with_capacity(matching.len());
+    for &slot_index in matching {
         let row_rect = show_overflow_row(
             ui,
             app,
@@ -587,4 +600,150 @@ fn render_drag_source_placeholder(ui: &mut egui::Ui, width: f32, row_height: f32
         egui::StrokeKind::Outside,
     );
     rect
+}
+
+const OVERFLOW_KEY_HINTS: &str = "↑ ↓ Move   Enter Open   Esc Close";
+
+/// Type-to-filter and keyboard state for one opening of the list.
+#[derive(Clone, Default)]
+struct OverflowFilter {
+    text: String,
+    /// The row ↑ ↓ moved to, by slot index.
+    highlight: Option<usize>,
+    /// Enter was pressed; open the highlighted or first row.
+    activate: bool,
+    opened: bool,
+}
+
+fn filter_state_id() -> egui::Id {
+    widget_ids::ctx_key("tab_overflow_filter")
+}
+
+fn filter_field_id() -> egui::Id {
+    widget_ids::ctx_key("tab_overflow_filter_field")
+}
+
+/// Rows the list shows: every listed tab whose name contains the filter text.
+fn matching_slots(
+    app: &ScratchpadApp,
+    request: &OverflowPopupRequest<'_>,
+    text: &str,
+) -> Vec<usize> {
+    let needle = text.trim().to_lowercase();
+    (0..display_tabs::total_tab_slots(app))
+        .filter(|&slot| should_show_overflow_row(slot, &[], request.visible_tab_indices))
+        .filter(|&slot| {
+            needle.is_empty()
+                || tab_presentation(app, slot, request.duplicate_name_counts)
+                    .is_some_and(|p| p.display_name.to_lowercase().contains(&needle))
+        })
+        .collect()
+}
+
+/// ↑ ↓ move through the filtered rows and Enter opens one, while the filter has focus.
+fn filter_keys(ctx: &egui::Context, filter: &mut OverflowFilter, matching: &[usize]) {
+    if !ctx.memory(|m| m.has_focus(filter_field_id())) {
+        return;
+    }
+    let position = filter
+        .highlight
+        .and_then(|slot| matching.iter().position(|&s| s == slot));
+    let consume = |key| ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
+    let last = matching.len().saturating_sub(1);
+    let target = if consume(egui::Key::ArrowDown) {
+        Some(position.map_or(0, |i| (i + 1).min(last)))
+    } else if consume(egui::Key::ArrowUp) {
+        Some(position.map_or(0, |i| i.saturating_sub(1)))
+    } else {
+        None
+    };
+    if let Some(index) = target {
+        filter.highlight = matching.get(index).copied();
+    }
+    if filter
+        .highlight
+        .is_some_and(|slot| !matching.contains(&slot))
+    {
+        filter.highlight = None;
+    }
+    filter.activate |= consume(egui::Key::Enter) && !matching.is_empty();
+}
+
+fn filter_field(ui: &mut egui::Ui, filter: &mut OverflowFilter, opening: bool, matches: usize) {
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut filter.text)
+                .id(filter_field_id())
+                .hint_text("Filter")
+                .frame(egui::Frame::NONE)
+                .desired_width(ui.available_width() - 10.0),
+        );
+        response.widget_info(|| egui::WidgetInfo::text_edit(true, "", &filter.text, "Filter tabs"));
+        if response.changed() {
+            filter.highlight = None;
+        }
+        if opening {
+            response.request_focus();
+        }
+        let line = response.rect.expand2(egui::vec2(0.0, 2.0));
+        ui.painter().line_segment(
+            [line.left_bottom(), line.right_bottom()],
+            egui::Stroke::new(
+                1.0,
+                if response.has_focus() {
+                    crate::app::theme::tab_selected_accent(ui)
+                } else {
+                    border(ui)
+                },
+            ),
+        );
+        if matches == 0 {
+            ui.label(egui::RichText::new("No tabs").size(11.0).weak());
+        }
+    });
+    ui.add_space(4.0);
+}
+
+/// The filter for this opening of the list; `None` while the list is closed.
+/// The flag is true on the frame the list opens.
+fn begin_filter(ctx: &egui::Context, open: bool) -> Option<(OverflowFilter, bool)> {
+    let filter = ctx
+        .data(|d| d.get_temp::<OverflowFilter>(filter_state_id()))
+        .unwrap_or_default();
+    if !open {
+        if filter.opened {
+            ctx.data_mut(|d| d.remove::<OverflowFilter>(filter_state_id()));
+        }
+        return None;
+    }
+    if filter.opened {
+        return Some((filter, false));
+    }
+    Some((
+        OverflowFilter {
+            opened: true,
+            ..OverflowFilter::default()
+        },
+        true,
+    ))
+}
+
+/// Marks the keyboard row and shows the key hints under the list.
+fn filter_footer(ui: &mut egui::Ui, filter: &OverflowFilter, rows: &[tab_drag::TabRectEntry]) {
+    if let Some(row) = filter
+        .highlight
+        .and_then(|slot| rows.iter().find(|row| row.index == slot))
+    {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_size(row.rect.min, egui::vec2(2.0, row.rect.height())),
+            0,
+            crate::app::theme::tab_selected_accent(ui),
+        );
+    }
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        ui.label(egui::RichText::new(OVERFLOW_KEY_HINTS).size(11.0).weak());
+    });
 }
