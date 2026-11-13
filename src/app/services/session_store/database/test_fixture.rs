@@ -1,7 +1,8 @@
 //! Shared fixtures for the session database tests.
 use super::{Database, ReadScope};
 use crate::app::domain::{BufferState, CharCursor, CursorRange, WorkspaceTab};
-use crate::app::services::session_store::SessionPersistRequest;
+use crate::app::services::session_store::{SessionPersistRequest, SessionStore};
+use futures_lite::future::block_on;
 use std::collections::HashMap;
 
 pub(super) fn tab(text: &str) -> WorkspaceTab {
@@ -91,5 +92,30 @@ pub(super) async fn assert_queries_seek_indexes(db: &Database, queries: &[(&str,
             !details.iter().any(|line| line.starts_with(&scans)),
             "{details:?}"
         );
+    }
+}
+
+/// Store-level helpers for tests that drive the app against a real session store.
+impl SessionStore {
+    /// Runs SQL on the store's database worker, behind the store's back.
+    pub(crate) fn exec_for_test(&self, sql: &str) {
+        let sql = sql.to_owned();
+        self.worker()
+            .unwrap()
+            .call(move |db| block_on(db.conn.execute_batch(&sql)).map_err(super::error))
+            .unwrap();
+    }
+    pub(crate) fn integer_for_test(&self, sql: &str) -> i64 {
+        let sql = sql.to_owned();
+        self.worker()
+            .unwrap()
+            .call(move |db| block_on(db.integer(&sql)))
+            .unwrap()
+    }
+    /// The active text of the most recently closed tab, read without consuming it.
+    pub(crate) fn newest_closed_text(&self) -> String {
+        let archive = self.closed_tabs().unwrap().remove(0);
+        let tab = self.restore_closed_tab(&archive.token).unwrap();
+        tab.active_buffer().text()
     }
 }

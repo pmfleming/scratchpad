@@ -190,14 +190,6 @@ mod tests {
             "{:?}",
             app.state.status.current
         );
-        let archive = store.closed_tabs().unwrap().remove(0);
-        assert_eq!(
-            store
-                .restore_closed_tab(&archive.token)
-                .unwrap()
-                .active_buffer()
-                .text(),
-            "newer accepted text"
-        );
+        assert_eq!(store.newest_closed_text(), "newer accepted text");
     }
 }

@@ -219,28 +219,14 @@ fn failed_close_activity_commit_keeps_the_document_open_and_pending_work_retryab
     let mut app = test_support::test_app(root.path());
     FileController::open_paths(&mut app, vec![path]);
     let store = app.state.persistence.session_store.clone();
-    store.worker().unwrap().call(|db|block_on(async {
-        db.conn.execute_batch("CREATE TRIGGER refuse_closed BEFORE INSERT ON activity WHEN new.kind='closed' BEGIN SELECT RAISE(ABORT,'injected close failure'); END;").await.map_err(error)
-    })).unwrap();
+    store.exec_for_test("CREATE TRIGGER refuse_closed BEFORE INSERT ON activity WHEN new.kind='closed' BEGIN SELECT RAISE(ABORT,'injected close failure'); END;");
     let count = app.tab_manager.tabs.len();
     let index = app.tab_manager.active_tab_index;
     workspace_controller::perform_close_tab_no_persist(&mut app, index);
     crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.tabs.len(), count);
     assert_eq!(app.state.persistence.pending_activity.len(), 1);
-    store
-        .worker()
-        .unwrap()
-        .call(|db| {
-            block_on(async {
-                db.conn
-                    .execute("DROP TRIGGER refuse_closed", ())
-                    .await
-                    .map_err(error)?;
-                Ok(())
-            })
-        })
-        .unwrap();
+    store.exec_for_test("DROP TRIGGER refuse_closed");
     workspace_controller::perform_close_tab_no_persist(&mut app, index);
     crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.tabs.len(), count - 1);
