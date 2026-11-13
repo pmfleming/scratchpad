@@ -177,61 +177,16 @@ fn render_select_row(
     let width = ui.available_width();
     let stacked = width < 540.0 * SettingsUi::scale(ui).max(1.0);
     let control_width = width.min(SettingsUi::column_width(ui));
-    let label_width = if stacked {
-        width
+    let (label_width, label_min_height) = if stacked {
+        (width, 0.0)
     } else {
-        width - control_width - SettingsUi::CONTROLS.gap
+        (
+            width - control_width - SettingsUi::CONTROLS.gap,
+            control_height,
+        )
     };
     let add_label = |ui: &mut egui::Ui| {
-        let mut text = egui::text::LayoutJob::default();
-        text.append(
-            label,
-            0.0,
-            egui::TextFormat {
-                font_id: egui::TextStyle::Body.resolve(ui.style()),
-                color: text_primary(ui),
-                ..Default::default()
-            },
-        );
-        if let Some(description) = description {
-            text.append(
-                &format!("\n{description}"),
-                0.0,
-                egui::TextFormat {
-                    font_id: SettingsUi::font(ui, 12.5),
-                    color: text_muted(ui),
-                    ..Default::default()
-                },
-            );
-        }
-        text.wrap.max_width = label_width;
-        let galley = ui.fonts_mut(|fonts| fonts.layout_job(text));
-        let height = if stacked {
-            galley.size().y
-        } else {
-            galley.size().y.max(control_height)
-        };
-        let response = widget_ids::allocate_exact_rect_interact(
-            ui,
-            egui::vec2(label_width, height),
-            ("settings.label", label),
-            egui::Sense::hover(),
-            "settings_label",
-        );
-        let position = egui::pos2(
-            response.rect.left(),
-            response.rect.center().y - galley.size().y / 2.0,
-        );
-        record_settings_control_box(
-            format!("label.{label}"),
-            egui::Rect::from_min_size(position, galley.size()),
-        );
-        ui.painter().galley(position, galley, text_primary(ui));
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, label));
-        if let Some(description) = description {
-            ui.ctx()
-                .accesskit_node_builder(response.id, |node| node.set_description(description));
-        }
+        select_row_label(ui, label, description, label_width, label_min_height);
     };
     let add_control = |ui: &mut egui::Ui| {
         let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(control_width, control_height));
@@ -259,6 +214,57 @@ fn render_select_row(
         });
     }
     ui.add_space(6.0);
+}
+
+/// The row's label and muted description, vertically centred in at least `min_height`.
+fn select_row_label(
+    ui: &mut egui::Ui,
+    label: &str,
+    description: Option<&str>,
+    width: f32,
+    min_height: f32,
+) {
+    let mut text = egui::text::LayoutJob::default();
+    let format = |font_id, color| egui::TextFormat {
+        font_id,
+        color,
+        ..Default::default()
+    };
+    text.append(
+        label,
+        0.0,
+        format(egui::TextStyle::Body.resolve(ui.style()), text_primary(ui)),
+    );
+    if let Some(description) = description {
+        text.append(
+            &format!("\n{description}"),
+            0.0,
+            format(SettingsUi::font(ui, 12.5), text_muted(ui)),
+        );
+    }
+    text.wrap.max_width = width;
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(text));
+    let response = widget_ids::allocate_exact_rect_interact(
+        ui,
+        egui::vec2(width, galley.size().y.max(min_height)),
+        ("settings.label", label),
+        egui::Sense::hover(),
+        "settings_label",
+    );
+    let position = egui::pos2(
+        response.rect.left(),
+        response.rect.center().y - galley.size().y / 2.0,
+    );
+    record_settings_control_box(
+        format!("label.{label}"),
+        egui::Rect::from_min_size(position, galley.size()),
+    );
+    ui.painter().galley(position, galley, text_primary(ui));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, label));
+    if let Some(description) = description {
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_description(description));
+    }
 }
 
 pub(super) fn available_width_control(ui: &mut egui::Ui, control: impl FnOnce(&mut egui::Ui)) {
@@ -307,15 +313,7 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
     let original = *value;
     available_width_control(ui, |ui| {
         let lane = ui.max_rect();
-        let unit_width = if unit.is_empty() {
-            0.0
-        } else {
-            ui.fonts_mut(|fonts| {
-                fonts.layout_no_wrap(unit.to_owned(), SettingsUi::font(ui, 12.5), text_muted(ui))
-            })
-            .size()
-            .x + ui.spacing().item_spacing.x
-        };
+        let unit_width = unit_label_width(ui, unit);
         let width = width.min((lane.width() - unit_width).max(0.0));
         let left = lane.right() - width - unit_width;
         let rect = egui::Rect::from_min_max(egui::pos2(left, lane.top()), lane.max);
@@ -325,43 +323,76 @@ pub(super) fn dropdown<T: Copy + PartialEq>(
             (key, "dropdown"),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                let popup_style = (**ui.style()).clone();
-                let response = widget_ids::combo_box(ui, key)
-                    .selected_text(label(*value))
-                    .width(width.min(ui.available_width()))
-                    .truncate()
-                    .popup_style(popup_style.into())
-                    .show_ui(ui, |ui| {
-                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                        for &option in options {
-                            let text =
-                                egui::RichText::new(label(option)).color(if *value == option {
-                                    ui.visuals().selection.stroke.color
-                                } else {
-                                    text_primary(ui)
-                                });
-                            if ui.selectable_value(value, option, text).clicked() {
-                                ui.close();
-                            }
-                        }
-                    })
-                    .response;
-                record_settings_control_box(format!("combo.{key}"), response.rect);
-                let mut control_rect = response.rect;
-                if !unit.is_empty() {
-                    let unit = ui.label(
-                        egui::RichText::new(unit)
-                            .font(SettingsUi::font(ui, 12.5))
-                            .color(text_muted(ui)),
-                    );
-                    record_settings_control_box(format!("unit.{key}"), unit.rect);
-                    control_rect = control_rect.union(unit.rect);
-                }
+                let combo = dropdown_combo(ui, key, value, options, &label, width);
+                record_settings_control_box(format!("combo.{key}"), combo.rect);
+                let control_rect = match unit_label(ui, unit) {
+                    Some(unit_rect) => {
+                        record_settings_control_box(format!("unit.{key}"), unit_rect);
+                        combo.rect.union(unit_rect)
+                    }
+                    None => combo.rect,
+                };
                 record_settings_control_box(format!("dropdown.{key}"), control_rect);
             },
         );
     });
     *value != original
+}
+
+fn dropdown_combo<T: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    key: &str,
+    value: &mut T,
+    options: &[T],
+    label: &impl Fn(T) -> String,
+    width: f32,
+) -> egui::Response {
+    let popup_style = (**ui.style()).clone();
+    widget_ids::combo_box(ui, key)
+        .selected_text(label(*value))
+        .width(width.min(ui.available_width()))
+        .truncate()
+        .popup_style(popup_style.into())
+        .show_ui(ui, |ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            for &option in options {
+                let text = egui::RichText::new(label(option))
+                    .color(choice_text_color(ui, *value == option));
+                if ui.selectable_value(value, option, text).clicked() {
+                    ui.close();
+                }
+            }
+        })
+        .response
+}
+
+/// Selected choices use the selection foreground, others the primary text colour.
+pub(super) fn choice_text_color(ui: &egui::Ui, selected: bool) -> egui::Color32 {
+    if selected {
+        ui.visuals().selection.stroke.color
+    } else {
+        text_primary(ui)
+    }
+}
+
+fn unit_label_width(ui: &egui::Ui, unit: &str) -> f32 {
+    if unit.is_empty() {
+        return 0.0;
+    }
+    let galley = ui.fonts_mut(|fonts| {
+        fonts.layout_no_wrap(unit.to_owned(), SettingsUi::font(ui, 12.5), text_muted(ui))
+    });
+    galley.size().x + ui.spacing().item_spacing.x
+}
+
+fn unit_label(ui: &mut egui::Ui, unit: &str) -> Option<egui::Rect> {
+    if unit.is_empty() {
+        return None;
+    }
+    let text = egui::RichText::new(unit)
+        .font(SettingsUi::font(ui, 12.5))
+        .color(text_muted(ui));
+    Some(ui.label(text).rect)
 }
 
 pub(super) fn action_row(ui: &mut egui::Ui, label: &str, button: &str, help: Option<&str>) -> bool {
