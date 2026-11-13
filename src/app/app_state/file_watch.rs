@@ -125,7 +125,8 @@ impl WatchDirectories {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{DIRECTORY_REVALIDATE, WatchDirectories};
+    use std::time::Instant;
 
     #[test]
     fn directory_cache_tracks_membership_and_revalidates_missing_parents() {

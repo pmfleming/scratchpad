@@ -174,7 +174,7 @@ fn collect_vertical_tab_entries(
         4.0,
         TabDropAxis::Vertical,
     );
-    collect_slot_entries(ui, app, &context, outcome, |_, _| {})
+    collect_slot_entries(ui, app, &context, outcome)
 }
 
 fn maybe_auto_scroll_vertical_entries(

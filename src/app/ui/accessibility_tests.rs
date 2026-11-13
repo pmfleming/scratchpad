@@ -104,13 +104,13 @@ fn tab_identity_survives_reordering_and_close_is_a_named_action() {
                         ["first", "second"]
                     };
                     for label in labels {
-                        let (_, close, _) = crate::app::chrome::tab_button_sized(
+                        let (_, _, close, _) = crate::app::chrome::tab_button_with_actions(
                             ui,
                             ("accessible-tab", label),
                             label,
                             label == "first",
                             false,
-                            180.0,
+                            crate::app::chrome::TabButtonOptions::new(180.0),
                         );
                         if close.clicked() {
                             *reversed = !*reversed;

@@ -1,8 +1,10 @@
+use crate::app::app_state::ScratchpadApp;
 use crate::app::app_state::workspace::{accessors as workspace_accessors, display_tabs};
 use crate::app::chrome::{
     TabButtonOptions, TabRenameEditorOptions, tab_button_with_actions, tab_rename_editor_sized,
 };
-use crate::app::domain::TabAttentionState;
+use crate::app::domain::buffer::StorageAttention;
+use crate::app::domain::{TabAttentionState, WorkspaceTab};
 use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_context_menu;
 use crate::app::ui::widget_ids;
@@ -18,7 +20,7 @@ pub(crate) struct TabPresentation {
 }
 
 pub(crate) fn tab_presentation(
-    app: &crate::app::app_state::ScratchpadApp,
+    app: &ScratchpadApp,
     slot_index: usize,
     duplicate_name_counts: &HashMap<String, usize>,
 ) -> Option<TabPresentation> {
@@ -40,29 +42,27 @@ pub(crate) fn tab_presentation(
         > 1;
     let display_name = crate::app::domain::tab::summary::full_display_name(tab, has_duplicate);
     Some(TabPresentation {
-        tooltip: {
-            let mut tooltip = display_name.clone();
-            for buffer in tab
-                .buffers()
-                .filter(|buffer| buffer.storage_attention.is_some())
-            {
-                let cause = match &buffer.storage_attention {
-                    Some(crate::app::domain::buffer::StorageAttention::Unsaved) => {
-                        "Changes are in memory only; session is not saving.".to_owned()
-                    }
-                    Some(crate::app::domain::buffer::StorageAttention::Unreadable(cause)) => {
-                        format!("Text is unreadable: {cause}")
-                    }
-                    None => String::new(),
-                };
-                let _ = write!(tooltip, "\n{}: {cause}", buffer.display_name());
-            }
-            tooltip
-        },
+        tooltip: storage_attention_tooltip(&display_name, tab),
         display_name,
         can_promote_all_files: crate::app::domain::tab::summary::can_promote_all_files(tab),
         attention_state: crate::app::domain::tab::summary::attention_state(tab),
     })
+}
+
+/// The tab name followed by one line per buffer whose storage needs attention.
+fn storage_attention_tooltip(display_name: &str, tab: &WorkspaceTab) -> String {
+    let mut tooltip = display_name.to_owned();
+    for buffer in tab.buffers() {
+        let cause = match &buffer.storage_attention {
+            Some(StorageAttention::Unsaved) => {
+                "Changes are in memory only; session is not saving.".to_owned()
+            }
+            Some(StorageAttention::Unreadable(cause)) => format!("Text is unreadable: {cause}"),
+            None => continue,
+        };
+        let _ = write!(tooltip, "\n{}: {cause}", buffer.display_name());
+    }
+    tooltip
 }
 
 pub(crate) struct TabCellProps<'a> {
@@ -94,58 +94,81 @@ pub(crate) enum TabInteraction {
 
 pub(crate) fn render_tab_cell_sized(
     ui: &mut egui::Ui,
-    app: &mut crate::app::app_state::ScratchpadApp,
+    app: &mut ScratchpadApp,
     index: usize,
     props: TabCellProps<'_>,
 ) -> TabCellOutcome {
     widget_ids::surface_scope(ui, ("tab_strip.slot", index), |ui| {
         if workspace_accessors::tab_rename_matches_slot(app, index) {
-            return render_tab_rename_cell(ui, app, index, props);
-        }
-
-        let (tab_response, promote_response, close_response, truncated) =
-            tab_button_with_width(ui, index, &props);
-        let tab_response = maybe_attach_tab_tooltip(tab_response, props.tooltip, truncated);
-        let dragged_slots = display_tabs::dragged_tab_slots(app, index);
-        tab_drag::begin_tab_drag_if_needed(
-            ui,
-            index,
-            &dragged_slots,
-            &tab_response,
-            &close_response,
-        );
-
-        if props.is_active && props.pending_scroll_to_active {
-            tab_response.scroll_to_me(Some(egui::Align::Center));
-        }
-
-        let context_click = attach_tab_context_menu(&tab_response, app, index);
-        let interaction = if context_click.secondary_clicked() {
-            TabInteraction::Activate(index)
-        } else if promote_response.is_some_and(|response| response.clicked()) {
-            TabInteraction::PromoteAllFiles(index)
-        } else if close_response.clicked() {
-            TabInteraction::RequestClose(index)
-        } else if tab_response.double_clicked() {
-            display_tabs::select_only_tab_slot(app, index);
-            TabInteraction::BeginRename(index)
-        } else if tab_response.clicked() {
-            primary_click_interaction(ui, app, index)
+            render_tab_rename_cell(ui, app, index, props)
         } else {
-            TabInteraction::None
-        };
-
-        TabCellOutcome {
-            interaction,
-            rect: tab_response.rect,
+            render_tab_button_cell(ui, app, index, props)
         }
     })
     .inner
 }
 
+fn render_tab_button_cell(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    index: usize,
+    props: TabCellProps<'_>,
+) -> TabCellOutcome {
+    let (tab_response, promote_response, close_response, truncated) =
+        tab_button_with_width(ui, index, &props);
+    let tab_response = maybe_attach_tab_tooltip(tab_response, props.tooltip, truncated);
+    let dragged_slots = display_tabs::dragged_tab_slots(app, index);
+    tab_drag::begin_tab_drag_if_needed(ui, index, &dragged_slots, &tab_response, &close_response);
+
+    if props.is_active && props.pending_scroll_to_active {
+        tab_response.scroll_to_me(Some(egui::Align::Center));
+    }
+
+    let clicks = TabClicks {
+        context: attach_tab_context_menu(&tab_response, app, index).secondary_clicked(),
+        promote: promote_response.is_some_and(|response| response.clicked()),
+        close: close_response.clicked(),
+        double: tab_response.double_clicked(),
+        primary: tab_response.clicked(),
+    };
+    TabCellOutcome {
+        interaction: clicks.interaction(ui, app, index),
+        rect: tab_response.rect,
+    }
+}
+
+/// This frame's clicks on one tab button.
+struct TabClicks {
+    context: bool,
+    promote: bool,
+    close: bool,
+    double: bool,
+    primary: bool,
+}
+
+impl TabClicks {
+    /// The first click by priority wins; selection changes happen here.
+    fn interaction(&self, ui: &egui::Ui, app: &mut ScratchpadApp, index: usize) -> TabInteraction {
+        if self.context {
+            TabInteraction::Activate(index)
+        } else if self.promote {
+            TabInteraction::PromoteAllFiles(index)
+        } else if self.close {
+            TabInteraction::RequestClose(index)
+        } else if self.double {
+            display_tabs::select_only_tab_slot(app, index);
+            TabInteraction::BeginRename(index)
+        } else if self.primary {
+            primary_click_interaction(ui, app, index)
+        } else {
+            TabInteraction::None
+        }
+    }
+}
+
 fn primary_click_interaction(
     ui: &egui::Ui,
-    app: &mut crate::app::app_state::ScratchpadApp,
+    app: &mut ScratchpadApp,
     index: usize,
 ) -> TabInteraction {
     let modifiers = ui.input(|input| input.modifiers);
@@ -163,7 +186,7 @@ fn primary_click_interaction(
 
 fn render_tab_rename_cell(
     ui: &mut egui::Ui,
-    app: &mut crate::app::app_state::ScratchpadApp,
+    app: &mut ScratchpadApp,
     index: usize,
     props: TabCellProps<'_>,
 ) -> TabCellOutcome {

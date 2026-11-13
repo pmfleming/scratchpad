@@ -14,14 +14,7 @@ mod inspection;
 mod tests;
 pub use artifacts::TextArtifactSummary;
 pub use format::{EncodingSource, TextFormatMetadata};
-pub use line_endings::{
-    LineEndingCounts, LineEndingStyle, analyze_line_endings, platform_default_line_ending,
-};
-
-#[must_use]
-pub fn display_line_count(text: &str) -> usize {
-    TextInspection::inspect(text).line_count
-}
+pub use line_endings::{LineEndingCounts, LineEndingStyle, platform_default_line_ending};
 
 pub(crate) fn display_line_count_from_piece_tree(tree: &PieceTreeLite) -> usize {
     tree.display_line_count()

@@ -386,134 +386,90 @@ impl FileController {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        FileController, LoadedPathResult, OpenHerePathOutcome, ScratchpadApp, SplitAxis,
-        WorkspaceTab,
-    };
-    use crate::app::domain::{BufferState, TabManager};
-    use crate::app::services::file_service::FileService;
-    use crate::app::services::session_store::SessionStore;
-    use crate::app::services::settings_store::SettingsStore;
-    use crate::app::startup::StartupOptions;
-
-    fn test_app(root: &std::path::Path, tabs: Vec<WorkspaceTab>) -> ScratchpadApp {
-        let mut app = ScratchpadApp::with_stores_and_startup(
-            SessionStore::new(root.join("session")),
-            SettingsStore::new(root.join("settings")),
-            StartupOptions::default(),
-        );
-        app.set_session_persist_on_drop(false);
-        app.tab_manager = TabManager::for_test_tabs(tabs);
-        crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
-        app
-    }
-
-    fn disk_buffer(path: &std::path::Path, text: &str) -> BufferState {
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let mut buffer = BufferState::new(name, text.to_owned(), Some(path.to_path_buf()));
-        buffer.sync_to_disk_state(FileService::read_disk_state(path).ok());
-        buffer
-    }
+    use super::{FileController, LoadedPathResult, OpenHerePathOutcome, SplitAxis, WorkspaceTab};
+    use crate::app::app_state::test_support::{disk_buffer, test_app_with_tabs, write_file};
+    use crate::app::domain::BufferState;
 
     #[test]
     fn open_loaded_files_here_adds_each_loaded_file_to_active_workspace() {
         let directory = tempfile::tempdir().unwrap();
-        let one = directory.path().join("one.txt");
-        let two = directory.path().join("two.txt");
-        std::fs::write(&one, "one").unwrap();
-        std::fs::write(&two, "two").unwrap();
-        let mut app = test_app(
-            directory.path(),
-            vec![WorkspaceTab::new(BufferState::new(
-                "base.txt".to_owned(),
-                "base".to_owned(),
-                None,
-            ))],
-        );
+        let paths = [
+            write_file(directory.path(), "one.txt", "one"),
+            write_file(directory.path(), "two.txt", "two"),
+        ];
+        let base = BufferState::new("base.txt".to_owned(), "base".to_owned(), None);
+        let mut app = test_app_with_tabs(directory.path(), vec![WorkspaceTab::new(base)]);
         let anchor_view_id = app.tab_manager.tabs.as_slice()[0].layout.active_view_id();
+        let loaded = paths
+            .iter()
+            .zip(["one", "two"])
+            .map(|(path, text)| {
+                let buffer = disk_buffer(path, text);
+                LoadedPathResult {
+                    missing: false,
+                    retained_tab: None,
+                    path: path.clone(),
+                    disk_state: buffer.disk_state.clone(),
+                    result: Ok(buffer),
+                }
+            })
+            .collect();
 
-        let outcomes = FileController::open_loaded_files_here(
-            &mut app,
-            Some(anchor_view_id),
-            vec![
-                LoadedPathResult {
-                    missing: false,
-                    retained_tab: None,
-                    path: one.clone(),
-                    disk_state: FileService::read_disk_state(&one).ok(),
-                    result: Ok(disk_buffer(&one, "one")),
-                },
-                LoadedPathResult {
-                    missing: false,
-                    retained_tab: None,
-                    path: two.clone(),
-                    disk_state: FileService::read_disk_state(&two).ok(),
-                    result: Ok(disk_buffer(&two, "two")),
-                },
-            ],
-        );
+        let outcomes =
+            FileController::open_loaded_files_here(&mut app, Some(anchor_view_id), loaded);
 
         assert_eq!(outcomes.len(), 2);
-        assert!(matches!(outcomes[0], OpenHerePathOutcome::Opened { .. }));
-        assert!(matches!(outcomes[1], OpenHerePathOutcome::Opened { .. }));
+        assert!(
+            outcomes
+                .iter()
+                .all(|outcome| matches!(outcome, OpenHerePathOutcome::Opened { .. }))
+        );
         assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
         assert_eq!(app.tab_manager.tabs.as_slice()[0].buffers().count(), 3);
-        assert!(app.tab_manager.find_tab_by_path(&one).is_some());
-        assert!(app.tab_manager.find_tab_by_path(&two).is_some());
-    }
-
-    #[test]
-    fn open_selected_paths_here_reuses_path_already_in_current_workspace() {
-        let directory = tempfile::tempdir().unwrap();
-        let first = directory.path().join("first.txt");
-        let second = directory.path().join("second.txt");
-        std::fs::write(&first, "first").unwrap();
-        std::fs::write(&second, "second").unwrap();
-        let mut tab = WorkspaceTab::new(disk_buffer(&first, "first"));
-        let second_view = tab
-            .open_buffer_as_split(
-                disk_buffer(&second, "second"),
-                SplitAxis::Vertical,
-                true,
-                0.5,
-            )
-            .unwrap();
-        let mut app = test_app(directory.path(), vec![tab]);
-
-        FileController::open_selected_paths_here_async(&mut app, vec![second]);
-
-        assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
-        assert_eq!(app.tab_manager.tabs.as_slice()[0].buffers().count(), 2);
-        assert_eq!(
-            app.tab_manager.tabs.as_slice()[0].layout.active_view_id(),
-            second_view
+        assert!(
+            paths
+                .iter()
+                .all(|path| app.tab_manager.find_tab_by_path(path).is_some())
         );
     }
 
     #[test]
-    fn open_selected_paths_here_migrates_existing_path_from_another_tab() {
-        let directory = tempfile::tempdir().unwrap();
-        let first = directory.path().join("first.txt");
-        let second = directory.path().join("second.txt");
-        std::fs::write(&first, "first").unwrap();
-        std::fs::write(&second, "second").unwrap();
-        let mut app = test_app(
-            directory.path(),
-            vec![
-                WorkspaceTab::new(disk_buffer(&first, "first")),
-                WorkspaceTab::new(disk_buffer(&second, "second")),
-            ],
-        );
+    fn open_selected_paths_here_reuses_or_migrates_an_already_open_path() {
+        for split_in_current_tab in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let first = write_file(directory.path(), "first.txt", "first");
+            let second = write_file(directory.path(), "second.txt", "second");
+            let mut tab = WorkspaceTab::new(disk_buffer(&first, "first"));
+            let mut tabs = Vec::new();
+            let second_view = if split_in_current_tab {
+                let view = tab.open_buffer_as_split(
+                    disk_buffer(&second, "second"),
+                    SplitAxis::Vertical,
+                    true,
+                    0.5,
+                );
+                Some(view.unwrap())
+            } else {
+                tabs.push(WorkspaceTab::new(disk_buffer(&second, "second")));
+                None
+            };
+            tabs.insert(0, tab);
+            let mut app = test_app_with_tabs(directory.path(), tabs);
 
-        FileController::open_selected_paths_here_async(&mut app, vec![second.clone()]);
+            FileController::open_selected_paths_here_async(&mut app, vec![second.clone()]);
 
-        assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
-        assert_eq!(app.tab_manager.tabs.as_slice()[0].buffers().count(), 2);
-        assert_eq!(
-            app.tab_manager
-                .find_tab_by_path(&second)
-                .map(|(index, _)| index),
-            Some(0)
-        );
+            let tabs = app.tab_manager.tabs.as_slice();
+            assert_eq!(tabs.len(), 1);
+            assert_eq!(tabs[0].buffers().count(), 2);
+            assert_eq!(
+                app.tab_manager
+                    .find_tab_by_path(&second)
+                    .map(|(index, _)| index),
+                Some(0)
+            );
+            if let Some(view) = second_view {
+                assert_eq!(tabs[0].layout.active_view_id(), view);
+            }
+        }
     }
 }

@@ -1,7 +1,8 @@
 //! A live, pane-local zoom control with the history scrubber's focus behavior.
 mod track;
 
-use super::text_history::{editor_input_requested, style};
+use super::scrubber_chrome::{self, Step};
+use super::text_history::{editor_input_requested, keys_belong_elsewhere};
 use crate::app::{
     app_state::{
         ScratchpadApp, settings_state,
@@ -15,7 +16,7 @@ use crate::app::{
         view::{MAX_ZOOM_FACTOR, MIN_ZOOM_FACTOR},
     },
     theme,
-    ui::{callout, panel_style, widget_ids},
+    ui::{panel_style, widget_ids},
 };
 use eframe::egui;
 use egui_phosphor::regular as icons;
@@ -58,10 +59,7 @@ pub(crate) fn handle_input(ctx: &egui::Context, app: &mut ScratchpadApp) {
         close(ctx, app);
         return;
     }
-    if app.state.dialogs.any_modal_open()
-        || egui::Popup::is_any_open(ctx)
-        || accessors::pending_action(app).is_some()
-    {
+    if keys_belong_elsewhere(ctx, app) {
         return;
     }
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
@@ -99,131 +97,109 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
     }
     let tab = app.tab_manager.active_tab().unwrap();
     let factor = tab.layout.active_view().unwrap().zoom_factor();
-    let screen = ctx.content_rect();
-    let width = (screen.width() - 24.0).clamp(160.0, 480.0);
     let mut change = None;
-    let frame = panel_style::window_frame(ctx, app.state.app_settings.editor_background_color());
-    widget_ids::area("zoom_scrubber_window")
-        .accessible_name("Zoom scrubber")
-        .role(egui::Role::Dialog)
-        .order(egui::Order::Foreground)
-        .constrain(true)
-        .movable(true)
-        .default_size(egui::vec2(width, 104.0))
-        .default_pos(egui::pos2(
-            (screen.right() - width - 24.0).max(screen.left()),
-            (screen.bottom() - 150.0).max(screen.top()),
-        ))
-        .show(ctx, |ui| {
-            style::apply(ui);
-            let inner = frame.show(ui, |ui| {
-                ui.set_width((width - 24.0).max(1.0));
-                ui.set_min_width((width - 24.0).max(1.0));
-                ui.set_max_width((width - 24.0).max(1.0));
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Zoom").size(14.0).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if style::icon_button(
-                            ui,
-                            "reset",
-                            icons::ARROW_COUNTER_CLOCKWISE,
-                            "Reset zoom (100%)",
-                            factor != 1.0,
-                        )
-                        .clicked()
-                        {
-                            change = Some(ZoomChange::Reset);
-                        }
-                        // Painted, not a label: the slider already reports the value.
-                        let percent = format!("{:.0}%", factor * 100.0);
-                        let width = ui
-                            .painter()
-                            .layout_no_wrap(
-                                percent.clone(),
-                                panel_style::font(ui, 13.0),
-                                theme::text_primary(ui),
-                            )
-                            .size()
-                            .x;
-                        let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(width, 20.0));
-                        panel_style::text(ui, rect, &percent, 13.0, theme::text_primary(ui));
-                    });
-                });
-                change = transport(ui, factor).or(change);
-                ui.label(egui::RichText::new(KEY_HINTS).size(11.0).weak());
-            });
-            callout::mark_scroll_blocker_if_hovered(ctx, &inner.response);
-        });
+    let fill = app.state.app_settings.editor_background_color();
+    scrubber_chrome::show_card(ctx, fill, "zoom_scrubber_window", "Zoom scrubber", |ui| {
+        if header(ui, factor) {
+            change = Some(ZoomChange::Reset);
+        }
+        change = transport(ui, factor).or(change);
+        ui.label(egui::RichText::new(KEY_HINTS).size(11.0).weak());
+    });
     if let Some(change) = change {
         zoom::apply(app, view, change);
         ctx.memory_mut(|m| m.request_focus(focus_id()));
         ctx.request_repaint();
     }
     if ctx.memory(|m| m.has_focus(focus_id())) {
-        ctx.memory_mut(|m| {
-            m.set_focus_lock_filter(
-                focus_id(),
-                egui::EventFilter {
-                    horizontal_arrows: true,
-                    vertical_arrows: true,
-                    escape: true,
-                    tab: false,
-                },
-            );
-        });
+        panel_style::lock_navigation_focus(ctx, focus_id());
     }
 }
 
-fn transport(ui: &mut egui::Ui, factor: f32) -> Option<ZoomChange> {
-    let mut change = None;
+/// Title, the current percentage and reset. Returns true when reset was clicked.
+fn header(ui: &mut egui::Ui, factor: f32) -> bool {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        let track_width = (ui.available_width() - 104.0).max(20.0);
-        for (key, icon, label, target, enabled) in [
-            (
-                "minimum",
-                icons::SKIP_BACK,
-                "Minimum zoom (Home)",
-                ZoomChange::Factor(MIN_ZOOM_FACTOR),
-                factor > MIN_ZOOM_FACTOR,
-            ),
-            (
-                "decrease",
-                icons::CARET_LEFT,
-                "Zoom out (←)",
-                ZoomChange::Out,
-                factor > MIN_ZOOM_FACTOR,
-            ),
-        ] {
-            if style::icon_button(ui, key, icon, label, enabled).clicked() {
-                change = Some(target);
+        ui.label(egui::RichText::new("Zoom").size(14.0).strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let reset = panel_style::icon_button(
+                ui,
+                "reset",
+                icons::ARROW_COUNTER_CLOCKWISE,
+                "Reset zoom (100%)",
+                factor != 1.0,
+            )
+            .clicked();
+            // Painted, not a label: the slider already reports the value.
+            let percent = format!("{:.0}%", factor * 100.0);
+            let width = ui
+                .painter()
+                .layout_no_wrap(
+                    percent.clone(),
+                    panel_style::font(ui, 13.0),
+                    theme::text_primary(ui),
+                )
+                .size()
+                .x;
+            let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(width, 20.0));
+            panel_style::text(ui, rect, &percent, 13.0, theme::text_primary(ui));
+            reset
+        })
+        .inner
+    })
+    .inner
+}
+
+fn transport(ui: &mut egui::Ui, factor: f32) -> Option<ZoomChange> {
+    let above_min = factor > MIN_ZOOM_FACTOR;
+    let below_max = factor < MAX_ZOOM_FACTOR;
+    let mut change = None;
+    scrubber_chrome::transport(
+        ui,
+        &mut change,
+        |_| {
+            [
+                Step {
+                    key: "minimum",
+                    icon: icons::SKIP_BACK,
+                    label: "Minimum zoom (Home)",
+                    target: ZoomChange::Factor(MIN_ZOOM_FACTOR),
+                    enabled: above_min,
+                },
+                Step {
+                    key: "decrease",
+                    icon: icons::CARET_LEFT,
+                    label: "Zoom out (←)",
+                    target: ZoomChange::Out,
+                    enabled: above_min,
+                },
+            ]
+        },
+        |ui, change, width| {
+            let mut percent = factor * 100.0;
+            if track::show(ui, &mut percent, width).changed() {
+                *change = Some(ZoomChange::Factor(percent / 100.0));
             }
-        }
-        let mut percent = factor * 100.0;
-        if track::show(ui, &mut percent, track_width).changed() {
-            change = Some(ZoomChange::Factor(percent / 100.0));
-        }
-        for (key, icon, label, target, enabled) in [
-            (
-                "increase",
-                icons::CARET_RIGHT,
-                "Zoom in (→)",
-                ZoomChange::In,
-                factor < MAX_ZOOM_FACTOR,
-            ),
-            (
-                "maximum",
-                icons::SKIP_FORWARD,
-                "Maximum zoom (End)",
-                ZoomChange::Factor(MAX_ZOOM_FACTOR),
-                factor < MAX_ZOOM_FACTOR,
-            ),
-        ] {
-            if style::icon_button(ui, key, icon, label, enabled).clicked() {
-                change = Some(target);
-            }
-        }
-    });
+        },
+        |_| {
+            [
+                Step {
+                    key: "increase",
+                    icon: icons::CARET_RIGHT,
+                    label: "Zoom in (→)",
+                    target: ZoomChange::In,
+                    enabled: below_max,
+                },
+                Step {
+                    key: "maximum",
+                    icon: icons::SKIP_FORWARD,
+                    label: "Maximum zoom (End)",
+                    target: ZoomChange::Factor(MAX_ZOOM_FACTOR),
+                    enabled: below_max,
+                },
+            ]
+        },
+        |change, target| *change = Some(target),
+    );
     change
 }
 

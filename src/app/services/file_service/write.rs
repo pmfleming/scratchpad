@@ -1,7 +1,7 @@
 mod newlines;
 
 use crate::app::domain::{DocumentSnapshot, TextFormatMetadata};
-use encoding_rs::CoderResult;
+use encoding_rs::{CoderResult, Encoding};
 use std::io::{self, Write};
 use std::ops::Deref;
 
@@ -30,17 +30,6 @@ pub(super) fn write_snapshot_to_writer(
     )
 }
 
-pub(super) fn write_snapshot_utf8_to_writer(
-    writer: &mut dyn Write,
-    snapshot: &DocumentSnapshot,
-) -> io::Result<()> {
-    let tree = snapshot.piece_tree();
-    for span in tree.try_spans_for_range(0..tree.len_chars()) {
-        writer.write_all(span?.text.as_bytes())?;
-    }
-    Ok(())
-}
-
 // Accept borrowed strings and piece-tree text without flattening the snapshot.
 fn write_with_format<S: Deref<Target = str>>(
     writer: &mut dyn Write,
@@ -49,26 +38,12 @@ fn write_with_format<S: Deref<Target = str>>(
 ) -> io::Result<()> {
     let encoding = resolve_encoding(&format.encoding_name)?;
     if format.has_bom {
-        let bom: &[u8] = if encoding == encoding_rs::UTF_8 {
-            &[0xEF, 0xBB, 0xBF]
-        } else if encoding == encoding_rs::UTF_16LE {
-            &[0xFF, 0xFE]
-        } else if encoding == encoding_rs::UTF_16BE {
-            &[0xFE, 0xFF]
-        } else {
-            &[]
-        };
-        writer.write_all(bom)?;
+        writer.write_all(bom_bytes(encoding))?;
     }
     if encoding == encoding_rs::UTF_8 {
         return write_serialized_spans(spans, format, |span| writer.write_all(span.as_bytes()));
     }
-    if encoding == encoding_rs::UTF_16LE || encoding == encoding_rs::UTF_16BE {
-        let to_bytes: fn(u16) -> [u8; 2] = if encoding == encoding_rs::UTF_16LE {
-            u16::to_le_bytes
-        } else {
-            u16::to_be_bytes
-        };
+    if let Some(to_bytes) = utf16_unit_bytes(encoding) {
         return write_serialized_spans(spans, format, |span| {
             for unit in span.encode_utf16() {
                 writer.write_all(&to_bytes(unit))?;
@@ -84,6 +59,30 @@ fn write_with_format<S: Deref<Target = str>>(
     // Stateful encodings must emit their closing shift sequence even when the
     // final content span is empty or ends in a normalized newline.
     encode_span(writer, &mut encoder, &mut dst, "", true)
+}
+
+/// The byte-order mark for `encoding`; empty for encodings without one.
+pub(super) fn bom_bytes(encoding: &'static Encoding) -> &'static [u8] {
+    if encoding == encoding_rs::UTF_8 {
+        &[0xEF, 0xBB, 0xBF]
+    } else if encoding == encoding_rs::UTF_16LE {
+        &[0xFF, 0xFE]
+    } else if encoding == encoding_rs::UTF_16BE {
+        &[0xFE, 0xFF]
+    } else {
+        &[]
+    }
+}
+
+/// encoding_rs has no UTF-16 encoder, so UTF-16 code units are serialized directly.
+fn utf16_unit_bytes(encoding: &'static Encoding) -> Option<fn(u16) -> [u8; 2]> {
+    if encoding == encoding_rs::UTF_16LE {
+        Some(u16::to_le_bytes)
+    } else if encoding == encoding_rs::UTF_16BE {
+        Some(u16::to_be_bytes)
+    } else {
+        None
+    }
 }
 
 fn write_serialized_spans<S: Deref<Target = str>>(

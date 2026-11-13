@@ -290,29 +290,35 @@ mod tests {
     }
 
     #[test]
-    fn deleting_the_only_inserted_char_removes_transient_entry() {
-        let latest = record(0, "", "x", 0, 1);
-        let incoming = record(0, "x", "", 1, 0);
-
-        assert!(matches!(
-            coalesced_local_edit_record(latest, &incoming),
-            Some(CoalescedEdit::Noop)
-        ));
-    }
-
-    #[test]
-    fn delete_records_do_not_merge_across_newline() {
-        let latest = record(2, "b", "", 3, 2);
-        let incoming = record(1, "\n", "", 2, 1);
-
-        assert!(coalesced_local_edit_record(latest, &incoming).is_none());
-    }
-
-    #[test]
-    fn cursor_jump_prevents_coalescing() {
-        let latest = record(0, "", "a", 0, 1);
-        let incoming = record(0, "", "b", 0, 1);
-
-        assert!(coalesced_local_edit_record(latest, &incoming).is_none());
+    fn unmergeable_records_cancel_or_stay_separate() {
+        // (case, latest, incoming, cancels out); every other case must not merge.
+        let cases = [
+            (
+                "deleting the only inserted char removes the transient entry",
+                record(0, "", "x", 0, 1),
+                record(0, "x", "", 1, 0),
+                true,
+            ),
+            (
+                "deletes do not merge across a newline",
+                record(2, "b", "", 3, 2),
+                record(1, "\n", "", 2, 1),
+                false,
+            ),
+            (
+                "a cursor jump prevents coalescing",
+                record(0, "", "a", 0, 1),
+                record(0, "", "b", 0, 1),
+                false,
+            ),
+        ];
+        for (case, latest, incoming, cancels) in cases {
+            let merged = coalesced_local_edit_record(latest, &incoming);
+            if cancels {
+                assert!(matches!(merged, Some(CoalescedEdit::Noop)), "{case}");
+            } else {
+                assert!(merged.is_none(), "{case}");
+            }
+        }
     }
 }

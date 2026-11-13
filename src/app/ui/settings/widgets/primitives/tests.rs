@@ -1,4 +1,4 @@
-use super::*;
+use super::{SettingsUi, egui, toggle_switch};
 use egui_kittest::{Harness, kittest::Queryable};
 
 fn has_ring(
@@ -27,7 +27,7 @@ fn keyboard_focus_is_painted_for_on_and_off_switches_in_both_themes() {
             let mut harness = Harness::builder()
                 .with_size(egui::vec2(400.0, 220.0))
                 .with_context_setup(move |ctx| {
-                    crate::app::ui::settings::tests::setup(ctx);
+                    crate::app::app_state::test_support::apply_test_fonts(ctx);
                     ctx.set_visuals(if dark {
                         egui::Visuals::dark()
                     } else {

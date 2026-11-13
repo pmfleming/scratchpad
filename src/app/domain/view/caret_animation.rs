@@ -36,27 +36,28 @@ impl CaretAnimationState {
         let previous_target = self.target;
         let previous_visual = self.current_rect(now).unwrap_or(target);
 
-        if force_snap || previous_cursor.is_none() {
-            self.snap(cursor, target);
-        } else if previous_cursor == Some(cursor) {
-            if previous_target.is_none_or(|previous| !rect_approximately_equal(previous, target)) {
-                // The logical cursor did not move, so its geometry changed because of scrolling,
-                // wrapping, font metrics, or another layout change. Following that movement would
-                // make the caret lag behind the document; keep it attached to the real position.
-                self.snap(cursor, target);
+        let same_cursor = previous_cursor == Some(cursor);
+        let unchanged = same_cursor
+            && previous_target.is_some_and(|previous| rect_approximately_equal(previous, target));
+        if force_snap || !unchanged {
+            // Only a moved logical cursor animates. When the cursor stayed put, its geometry
+            // changed because of scrolling, wrapping, font metrics, or another layout change.
+            // Following that movement would make the caret lag behind the document; keep it
+            // attached to the real position.
+            let moved = previous_cursor.is_some() && !same_cursor;
+            let animated_from = (moved && animate_target_change && !force_snap)
+                .then(|| animation_start_rect(previous_visual, target))
+                .flatten();
+            match animated_from {
+                Some(from) => {
+                    self.cursor = Some(cursor);
+                    self.from = Some(from);
+                    self.target = Some(target);
+                    self.started_at = now;
+                    self.active = true;
+                }
+                None => self.snap(cursor, target),
             }
-        } else if animate_target_change {
-            if let Some(from) = animation_start_rect(previous_visual, target) {
-                self.cursor = Some(cursor);
-                self.from = Some(from);
-                self.target = Some(target);
-                self.started_at = now;
-                self.active = true;
-            } else {
-                self.snap(cursor, target);
-            }
-        } else {
-            self.snap(cursor, target);
         }
 
         let rect = self.current_rect(now).unwrap_or(target);
@@ -164,14 +165,7 @@ mod tests {
 
     #[test]
     fn adjacent_row_animation_uses_the_destination_column() {
-        let mut animation = CaretAnimationState::default();
-        animation.update(
-            CharCursor::new(1),
-            caret_rect(50.0, 20.0),
-            1.0,
-            false,
-            false,
-        );
+        let mut animation = settled_caret(50.0, 20.0);
 
         let target = caret_rect(12.0, 36.0);
         let started = animation.update(CharCursor::new(2), target, 2.0, true, false);
@@ -183,14 +177,7 @@ mod tests {
 
     #[test]
     fn large_cursor_jumps_and_layout_motion_snap() {
-        let mut animation = CaretAnimationState::default();
-        animation.update(
-            CharCursor::new(1),
-            caret_rect(10.0, 20.0),
-            1.0,
-            false,
-            false,
-        );
+        let mut animation = settled_caret(10.0, 20.0);
 
         let far_target = caret_rect(30.0, 100.0);
         let far_jump = animation.update(CharCursor::new(2), far_target, 2.0, true, false);
@@ -205,14 +192,7 @@ mod tests {
 
     #[test]
     fn forced_snap_cancels_an_active_animation() {
-        let mut animation = CaretAnimationState::default();
-        animation.update(
-            CharCursor::new(1),
-            caret_rect(10.0, 20.0),
-            1.0,
-            false,
-            false,
-        );
+        let mut animation = settled_caret(10.0, 20.0);
         let target = caret_rect(30.0, 20.0);
         assert!(
             animation
@@ -223,6 +203,13 @@ mod tests {
         let snapped = animation.update(CharCursor::new(2), target, 2.01, false, true);
         assert!(!snapped.active);
         assert_eq!(snapped.rect, target);
+    }
+
+    /// A caret resting on cursor 1 at `(x, y)` since time 1.0.
+    fn settled_caret(x: f32, y: f32) -> CaretAnimationState {
+        let mut animation = CaretAnimationState::default();
+        animation.update(CharCursor::new(1), caret_rect(x, y), 1.0, false, false);
+        animation
     }
 
     fn caret_rect(x: f32, y: f32) -> egui::Rect {

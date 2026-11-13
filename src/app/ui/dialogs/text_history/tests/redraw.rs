@@ -1,4 +1,11 @@
-use super::*;
+use super::super::{focus_id, scrubber};
+use super::{app, text};
+use crate::app::{
+    app_state::{ScratchpadApp, test_support::app_ui_harness},
+    domain::{BufferState, CursorRange, WorkspaceTab},
+};
+use eframe::egui;
+use egui_kittest::{Harness, kittest::Queryable};
 
 #[test]
 fn distant_history_edits_stay_visible_while_history_or_scrubber_keeps_focus() {
@@ -20,8 +27,7 @@ fn distant_history_edits_stay_visible_while_history_or_scrubber_keeps_focus() {
             app.state.dialogs.text_history.close();
             app.state.dialogs.history_scrubber.open();
         }
-        let mut h = harness(app);
-        h.run_steps(3);
+        let mut h = app_ui_harness(app);
         let focus = if mode == "Scrubber" {
             scrubber::focus_id()
         } else {

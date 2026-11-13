@@ -1,7 +1,11 @@
-use super::super::menu_ui::{OPEN_FILE_SUBMENU_WIDTH as LIST_WIDTH, ROW_HEIGHT, with_row_visuals};
+use super::super::menu_ui::{OPEN_FILE_SUBMENU_WIDTH as LIST_WIDTH, ROW_HEIGHT};
+use crate::app::chrome::with_flat_row_visuals;
 use crate::app::{
     app_state::{ScratchpadApp, workspace::lifecycle},
-    services::{session_store::ClosedTabInfo, settings_store::RecentlyClosedFile},
+    services::{
+        session_store::{ClosedTabInfo, SessionStore},
+        settings_store::RecentlyClosedFile,
+    },
     ui::{recovery, widget_ids},
 };
 use eframe::egui;
@@ -10,6 +14,7 @@ use std::{
     collections::HashMap,
     io,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 #[cfg(test)]
@@ -60,22 +65,28 @@ impl ReopenEntry {
     }
 
     fn disk_icon(&self) -> Option<&'static str> {
+        let any = |wanted| self.paths.iter().any(|(_, status)| *status == wanted);
         if self.paths.is_empty() {
             None
-        } else if self
-            .paths
-            .iter()
-            .any(|(_, status)| *status == DiskStatus::Unavailable)
-        {
+        } else if any(DiskStatus::Unavailable) {
             Some(WARNING_CIRCLE)
-        } else if self
-            .paths
-            .iter()
-            .any(|(_, status)| *status == DiskStatus::Missing)
-        {
+        } else if any(DiskStatus::Missing) {
             Some(FILE_X)
         } else {
             Some(FILE)
+        }
+    }
+
+    /// File-only entries reopen from disk; archives need the session restored first.
+    fn enabled(&self, restore_ready: bool) -> bool {
+        self.can_reopen() && (restore_ready || matches!(self.target, ReopenTarget::File(_)))
+    }
+
+    /// Entries sharing a name are told apart by their closing time.
+    fn label(&self, name_is_shared: bool) -> String {
+        match self.closed_at {
+            Some(at) if name_is_shared => format!("{} · {}", self.name, recovery::timestamp(at)),
+            _ => self.name.clone(),
         }
     }
 
@@ -147,53 +158,52 @@ struct ReopenList {
     archive_error: Option<String>,
 }
 
+impl ReopenList {
+    fn load(store: &SessionStore, files: Vec<RecentlyClosedFile>) -> Self {
+        let (archives, archive_error) = match store.closed_tabs() {
+            Ok(archives) => (archives, None),
+            Err(error) => (Vec::new(), Some(error.to_string())),
+        };
+        Self {
+            entries: merged_entries(archives, files),
+            archive_error,
+        }
+    }
+
+    /// Row labels in entry order.
+    fn labels(&self) -> Vec<String> {
+        let mut name_counts = HashMap::<&str, usize>::new();
+        for entry in &self.entries {
+            *name_counts.entry(&entry.name).or_default() += 1;
+        }
+        self.entries
+            .iter()
+            .map(|entry| entry.label(name_counts[entry.name.as_str()] > 1))
+            .collect()
+    }
+
+    /// Shows the archive error or empty state; returns whether rows should follow.
+    fn show_status(&self, ui: &mut egui::Ui) -> bool {
+        if let Some(error) = &self.archive_error {
+            ui.label(format!("Could not read retained tabs: {error}"));
+        }
+        if self.entries.is_empty() && self.archive_error.is_none() {
+            ui.label("No recently closed files");
+        }
+        !self.entries.is_empty()
+    }
+}
+
 pub(super) fn render_recently_closed_files(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
     slot_index: usize,
 ) {
-    let store = app.state.persistence.session_store.clone();
-    let root = store.root().to_owned();
-    let files: Vec<_> = app
-        .state
-        .recently_closed_files
-        .iter()
-        .filter(|_| app.state.app_settings.recent_files_enabled())
-        .cloned()
-        .collect();
-    let key = ("closed.unified", root, files.clone());
-    let list = match recovery::query(ui, key, move || {
-        let (archives, archive_error) = match store.closed_tabs() {
-            Ok(archives) => (archives, None),
-            Err(error) => (Vec::new(), Some(error.to_string())),
-        };
-        Ok(ReopenList {
-            entries: merged_entries(archives, files),
-            archive_error,
-        })
-    }) {
-        Some(Ok(list)) => list,
-        Some(Err(error)) => {
-            ui.label(format!("Could not read recently closed items: {error}"));
-            return;
-        }
-        None => {
-            ui.label("Loading recently closed items…");
-            return;
-        }
-    };
-    if let Some(error) = &list.archive_error {
-        ui.label(format!("Could not read retained tabs: {error}"));
-    }
-    if list.entries.is_empty() {
-        if list.archive_error.is_none() {
-            ui.label("No recently closed files");
-        }
+    let Some(list) = query_reopen_list(ui, app) else {
         return;
-    }
-    let mut names = HashMap::<&str, usize>::new();
-    for entry in &list.entries {
-        *names.entry(&entry.name).or_default() += 1;
+    };
+    if !list.show_status(ui) {
+        return;
     }
     let restore_ready =
         !app.startup_restore_pending() && !app.state.persistence.session_restore_failed;
@@ -202,33 +212,49 @@ pub(super) fn render_recently_closed_files(
     egui::ScrollArea::vertical()
         .max_height(300.0)
         .show(ui, |ui| {
-            for entry in &list.entries {
-                let label = if names[entry.name.as_str()] > 1 {
-                    entry.closed_at.map_or_else(
-                        || entry.name.clone(),
-                        |at| format!("{} · {}", entry.name, recovery::timestamp(at)),
-                    )
-                } else {
-                    entry.name.clone()
-                };
-                let enabled = entry.can_reopen()
-                    && (restore_ready || matches!(entry.target, ReopenTarget::File(_)));
-                if render_entry(ui, entry, &label, enabled) {
-                    match &entry.target {
-                        ReopenTarget::Archive(token) => lifecycle::reopen_archived_tab(app, token),
-                        ReopenTarget::File(path) => {
-                            super::activate_slot(app, slot_index);
-                            super::open_recent_file(app, path.clone());
-                        }
-                    }
+            for (entry, label) in list.entries.iter().zip(list.labels()) {
+                if render_entry(ui, entry, &label, entry.enabled(restore_ready)) {
+                    reopen(app, &entry.target, slot_index);
                     ui.close();
                 }
             }
         });
 }
 
+/// Loads the merged list off the UI thread, showing progress or failure meanwhile.
+fn query_reopen_list(ui: &mut egui::Ui, app: &ScratchpadApp) -> Option<Arc<ReopenList>> {
+    let store = app.state.persistence.session_store.clone();
+    let files: Vec<_> = if app.state.app_settings.recent_files_enabled() {
+        app.state.recently_closed_files.iter().cloned().collect()
+    } else {
+        Vec::new()
+    };
+    let key = ("closed.unified", store.root().to_owned(), files.clone());
+    match recovery::query(ui, key, move || Ok(ReopenList::load(&store, files))) {
+        Some(Ok(list)) => Some(list),
+        Some(Err(error)) => {
+            ui.label(format!("Could not read recently closed items: {error}"));
+            None
+        }
+        None => {
+            ui.label("Loading recently closed items…");
+            None
+        }
+    }
+}
+
+fn reopen(app: &mut ScratchpadApp, target: &ReopenTarget, slot_index: usize) {
+    match target {
+        ReopenTarget::Archive(token) => lifecycle::reopen_archived_tab(app, token),
+        ReopenTarget::File(path) => {
+            super::activate_slot(app, slot_index);
+            super::open_recent_file(app, path.clone());
+        }
+    }
+}
+
 fn render_entry(ui: &mut egui::Ui, entry: &ReopenEntry, label: &str, enabled: bool) -> bool {
-    with_row_visuals(ui, |ui| {
+    with_flat_row_visuals(ui, |ui| {
         let response = widget_ids::surface_response(
             ui,
             ("tab_context.reopen", &entry.target),

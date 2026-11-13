@@ -1,6 +1,7 @@
-use super::model::shortcut_tooltip_for_menu_label;
+use super::model::{menu_keys, shortcut_tooltip_for_menu_label};
+use crate::app::chrome::{MenuRow, menu_row_button, with_flat_row_visuals};
 use crate::app::theme::text_primary;
-use crate::app::ui::{panel_style, visuals::with_visual_overrides, widget_ids};
+use crate::app::ui::{panel_style, widget_ids};
 use eframe::egui;
 
 pub(super) const EDITOR_CONTEXT_MENU_WIDTH: f32 = 204.0;
@@ -31,31 +32,20 @@ pub(super) fn menu_action_button(
     icon: Option<&str>,
     enabled: bool,
 ) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            ("editor_context.menu_action", label),
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add_enabled(
-                    enabled,
-                    egui::Button::new("")
-                        .min_size(egui::vec2(
-                            EDITOR_CONTEXT_MENU_WIDTH,
-                            EDITOR_CONTEXT_ROW_HEIGHT,
-                        ))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
-        paint_context_menu_row_label(ui, response.rect, icon, label, enabled);
-        let clicked = response.clicked();
-        if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui.ctx(), label) {
-            response.on_hover_text(tooltip);
-        }
-        clicked
-    })
+    let keys = menu_keys(ui.ctx(), label);
+    let row = MenuRow {
+        label,
+        icon,
+        trailing: keys.as_deref(),
+        tooltip: shortcut_tooltip_for_menu_label(ui.ctx(), label),
+        enabled,
+    };
+    menu_row_button(
+        ui,
+        ("editor_context.menu_action", label),
+        egui::vec2(EDITOR_CONTEXT_MENU_WIDTH, EDITOR_CONTEXT_ROW_HEIGHT),
+        row,
+    )
 }
 
 pub(super) fn paint_context_menu_row_label(
@@ -65,12 +55,8 @@ pub(super) fn paint_context_menu_row_label(
     label: &str,
     enabled: bool,
 ) {
-    let keys = super::model::menu_keys(ui.ctx(), label);
+    let keys = menu_keys(ui.ctx(), label);
     panel_style::paint_menu_row(ui, rect, icon, label, keys.as_deref(), enabled);
-}
-
-pub(super) fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {
-    panel_style::flat_rows(ui);
 }
 
 pub(super) fn icon_rail_button(
@@ -79,7 +65,7 @@ pub(super) fn icon_rail_button(
     tooltip: &str,
     enabled: bool,
 ) -> egui::Response {
-    with_visual_overrides(ui, apply_icon_rail_button_style, |ui| {
+    with_flat_row_visuals(ui, |ui| {
         let color = if enabled {
             text_primary(ui)
         } else {
@@ -102,10 +88,6 @@ pub(super) fn icon_rail_button(
         )
         .on_hover_text(tooltip)
     })
-}
-
-fn apply_icon_rail_button_style(ui: &mut egui::Ui) {
-    panel_style::flat_rows(ui);
 }
 
 #[cfg(test)]

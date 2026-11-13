@@ -17,7 +17,6 @@ pub enum SearchError {
     InvalidRegex(String),
     UnsupportedRegex(String),
     ReplacementMismatch(String),
-    ResultLimitExceeded(String),
 }
 
 impl SearchError {
@@ -26,7 +25,6 @@ impl SearchError {
         match self {
             Self::InvalidRegex(message)
             | Self::UnsupportedRegex(message)
-            | Self::ResultLimitExceeded(message)
             | Self::ReplacementMismatch(message) => message,
         }
     }
@@ -43,13 +41,6 @@ impl SearchOutcome {
         Self {
             matches,
             error: None,
-        }
-    }
-
-    fn with_error(error: SearchError) -> Self {
-        Self {
-            matches: Vec::new(),
-            error: Some(error),
         }
     }
 }
@@ -110,11 +101,11 @@ impl SearchProgram {
         if count <= limit {
             return true;
         }
-        self.result_budget
-            .as_ref()
-            .unwrap()
-            .exceeded
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(budget) = &self.result_budget {
+            budget
+                .exceeded
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         false
     }
 
@@ -178,14 +169,6 @@ impl SearchProgram {
         self.max_match_chars
     }
 
-    pub fn expand_replacement(
-        &self,
-        matched_text: &str,
-        replacement: &str,
-    ) -> Result<String, SearchError> {
-        self.expand_replacement_at(matched_text, 0..matched_text.len(), replacement)
-    }
-
     /// The range is in bytes within the original context. Assertions and
     /// captures must agree with the exact match that was reviewed.
     pub fn expand_replacement_at(
@@ -213,62 +196,12 @@ impl SearchProgram {
 
 #[must_use]
 pub fn find_matches(text: &str, query: &str, options: SearchOptions) -> Vec<Range<usize>> {
-    search_text(text, query, options).matches
-}
-
-#[must_use]
-pub fn validate_search_query(query: &str, options: SearchOptions) -> Option<SearchError> {
     if query.is_empty() {
-        return None;
+        return Vec::new();
     }
-
-    match options.mode {
-        SearchMode::PlainText => None,
-        SearchMode::Regex => SearchProgram::compile(query, options).err(),
-    }
-}
-
-#[must_use]
-pub fn search_text(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
-    if query.is_empty() {
-        return SearchOutcome::default();
-    }
-
-    match SearchProgram::compile(query, options) {
-        Ok(program) => search_program(text, &program),
-        Err(error) => SearchOutcome::with_error(error),
-    }
-}
-
-pub fn find_matches_interruptible<F>(
-    text: &str,
-    query: &str,
-    options: SearchOptions,
-    should_continue: F,
-) -> Option<Vec<Range<usize>>>
-where
-    F: FnMut() -> bool,
-{
-    search_text_interruptible(text, query, options, should_continue).map(|result| result.matches)
-}
-
-pub fn search_text_interruptible<F>(
-    text: &str,
-    query: &str,
-    options: SearchOptions,
-    should_continue: F,
-) -> Option<SearchOutcome>
-where
-    F: FnMut() -> bool,
-{
-    if query.is_empty() {
-        return Some(SearchOutcome::default());
-    }
-
-    match SearchProgram::compile(query, options) {
-        Ok(program) => search_program_interruptible(text, &program, should_continue),
-        Err(error) => Some(SearchOutcome::with_error(error)),
-    }
+    SearchProgram::compile(query, options)
+        .map(|program| search_program(text, &program).matches)
+        .unwrap_or_default()
 }
 
 #[must_use]
@@ -349,12 +282,61 @@ pub fn previous_match_index(total_matches: usize, current: Option<usize>) -> Opt
     })
 }
 
+/// Match the source's uniform lower, upper or title case. Mixed case and
+/// uncased text leave the user's replacement unchanged.
+pub(crate) fn preserve_replacement_case(source: &str, replacement: &str) -> String {
+    match uniform_letter_case(source) {
+        Some(LetterCase::Upper) => replacement.to_uppercase(),
+        Some(LetterCase::Lower) => replacement.to_lowercase(),
+        Some(LetterCase::Title) => title_case(replacement),
+        None => replacement.to_owned(),
+    }
+}
+
+enum LetterCase {
+    Upper,
+    Lower,
+    Title,
+}
+
+fn is_cased(c: char) -> bool {
+    c.is_lowercase() || c.is_uppercase()
+}
+
+fn uniform_letter_case(text: &str) -> Option<LetterCase> {
+    let mut letters = text.chars().filter(|c| is_cased(*c));
+    let first_upper = letters.next()?.is_uppercase();
+    let (mut rest_upper, mut rest_lower) = (true, true);
+    for c in letters {
+        rest_upper &= c.is_uppercase();
+        rest_lower &= c.is_lowercase();
+    }
+    match (first_upper, rest_upper, rest_lower) {
+        (true, true, _) => Some(LetterCase::Upper),
+        (false, _, true) => Some(LetterCase::Lower),
+        (true, false, true) => Some(LetterCase::Title),
+        _ => None,
+    }
+}
+
+/// Lowercase `text`, then uppercase its first cased character.
+fn title_case(text: &str) -> String {
+    let lower = text.to_lowercase();
+    let Some((index, first)) = lower.char_indices().find(|(_, c)| is_cased(*c)) else {
+        return lower;
+    };
+    let mut titled = String::with_capacity(lower.len());
+    titled.push_str(&lower[..index]);
+    titled.extend(first.to_uppercase());
+    titled.push_str(&lower[index + first.len_utf8()..]);
+    titled
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         SearchError, SearchMode, SearchOptions, SearchProgram, find_matches,
-        find_matches_interruptible, search_program, search_program_interruptible, search_text,
-        search_text_interruptible, validate_search_query,
+        preserve_replacement_case, search_program, search_program_interruptible,
     };
 
     #[test]
@@ -424,11 +406,7 @@ mod tests {
                 "{query} in {text}"
             );
             let program = SearchProgram::compile(query, options).unwrap();
-            assert_eq!(
-                find_matches_interruptible(text, query, options, || true),
-                Some(expected.clone())
-            );
-            assert!(search_text_interruptible(text, query, options, || false).is_none());
+            assert!(search_program_interruptible(text, &program, || false).is_none());
             for limit in [0, 1, expected.len(), usize::MAX] {
                 let bounded = program.clone().with_result_limit(limit);
                 let result = search_program_interruptible(text, &bounded, || true);
@@ -446,7 +424,6 @@ mod tests {
                     match_case,
                     ..SearchOptions::default()
                 };
-                assert!(search_text(text, query, options).matches.is_empty());
                 let program = SearchProgram::compile(query, options).unwrap();
                 assert!(search_program(text, &program).matches.is_empty());
             }
@@ -465,22 +442,17 @@ mod tests {
             ("a".to_owned(), "a", SearchMode::PlainText, true),
         ] {
             let mut calls = 0;
-            assert!(
-                search_text_interruptible(
-                    &text,
-                    query,
-                    SearchOptions {
-                        mode,
-                        match_case,
-                        whole_word: false
-                    },
-                    || {
-                        calls += 1;
-                        calls < 2
-                    }
-                )
-                .is_none()
-            );
+            let options = SearchOptions {
+                mode,
+                match_case,
+                whole_word: false,
+            };
+            let program = SearchProgram::compile(query, options).unwrap();
+            let outcome = search_program_interruptible(&text, &program, || {
+                calls += 1;
+                calls < 2
+            });
+            assert!(outcome.is_none());
             assert_eq!(calls, 2);
         }
     }
@@ -492,21 +464,23 @@ mod tests {
             match_case: true,
             whole_word: false,
         };
-        for query in ["a*"] {
-            let error = validate_search_query(query, options).unwrap();
-            assert!(matches!(error, SearchError::UnsupportedRegex(_)));
-            assert!(!error.message().is_empty());
-            let outcome = search_text("a", query, options);
-            assert!(outcome.matches.is_empty());
-            assert_eq!(outcome.error, Some(error));
-        }
+        let error = SearchProgram::compile("a*", options).unwrap_err();
+        assert!(matches!(error, SearchError::UnsupportedRegex(_)));
+        assert!(!error.message().is_empty());
+        assert!(find_matches("a", "a*", options).is_empty());
+        assert!(matches!(
+            SearchProgram::compile("(", options),
+            Err(SearchError::InvalidRegex(_))
+        ));
         let program = SearchProgram::compile(r"([a-z]{1,8})-([0-9]{1,4})", options).unwrap();
         assert_eq!(
-            program.expand_replacement("item-42", "$2:$1").unwrap(),
+            program
+                .expand_replacement_at("item-42", 0..7, "$2:$1")
+                .unwrap(),
             "42:item"
         );
         assert!(matches!(
-            program.expand_replacement("stale", "$2:$1"),
+            program.expand_replacement_at("stale", 0..5, "$2:$1"),
             Err(SearchError::ReplacementMismatch(_))
         ));
     }
@@ -530,38 +504,24 @@ mod tests {
         assert!(!clone.reserve_result_matches(1));
         assert!(program.result_limit_exceeded());
     }
-}
 
-/// Match the source's uniform lower, upper or title case. Mixed case and
-/// uncased text leave the user's replacement unchanged.
-pub(crate) fn preserve_replacement_case(source: &str, replacement: &str) -> String {
-    let letters: Vec<_> = source
-        .chars()
-        .filter(|c| c.is_lowercase() || c.is_uppercase())
-        .collect();
-    if letters.is_empty() {
-        return replacement.to_owned();
+    #[test]
+    fn replacement_case_follows_uniform_source_case_only() {
+        for (source, replacement, expected) in [
+            ("FOO", "bar baz", "BAR BAZ"),
+            ("X", "bar", "BAR"),
+            ("foo", "Bar BAZ", "bar baz"),
+            ("Foo", "bAR baz", "Bar baz"),
+            ("Éclair", "1 école", "1 École"),
+            ("fOO", "bar", "bar"),
+            ("123", "Bar", "Bar"),
+            ("Foo", "123", "123"),
+        ] {
+            assert_eq!(
+                preserve_replacement_case(source, replacement),
+                expected,
+                "{source} -> {replacement}"
+            );
+        }
     }
-    if letters.iter().all(|c| c.is_uppercase()) {
-        return replacement.to_uppercase();
-    }
-    if letters.iter().all(|c| c.is_lowercase()) {
-        return replacement.to_lowercase();
-    }
-    if letters[0].is_uppercase() && letters[1..].iter().all(|c| c.is_lowercase()) {
-        let mut first = true;
-        return replacement
-            .to_lowercase()
-            .chars()
-            .flat_map(|c| {
-                if first && (c.is_lowercase() || c.is_uppercase()) {
-                    first = false;
-                    c.to_uppercase().collect::<Vec<_>>()
-                } else {
-                    vec![c]
-                }
-            })
-            .collect();
-    }
-    replacement.to_owned()
 }

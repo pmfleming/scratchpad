@@ -2,6 +2,7 @@ use super::history_rows::HistoryRows;
 use super::{
     ContentInventory, Database, SessionPersistProfile, error, invalid, quarantine::damaged,
 };
+use crate::app::domain::buffer::PieceTreeLite;
 use crate::app::services::session_store::{
     capture::{CapturedSessionBuffer, CapturedSessionTab, SessionPersistRequest},
     model::SessionTab,
@@ -295,51 +296,62 @@ impl Database {
             .iter()
             .map(|s| (s.temp_id.as_str(), s))
             .collect();
+        let trees = self.changed_content_trees(&prepared.buffers, &snapshots);
+        self.prepare_contents(trees, &mut prepared.contents).await?;
+        profile.content_prepare_ns = phase.elapsed().as_nanos();
+        Ok(())
+    }
+    /// Live buffers whose stored text must be (re)written, sorted by id, with
+    /// the tree to store: the history's tree, or a history-less buffer's snapshot.
+    fn changed_content_trees<'a>(
+        &self,
+        buffers: &'a HashMap<String, RecoveryBuffer>,
+        snapshots: &HashMap<&str, &'a CapturedSessionBuffer>,
+    ) -> Vec<(&'a String, &'a PieceTreeLite)> {
+        let stored = |id: &str| {
+            self.inventory
+                .as_ref()
+                .is_some_and(|inventory| inventory.snapshots.contains(id))
+        };
         let mut trees = Vec::new();
-        for (id, buffer) in &prepared.buffers {
-            if let Some(history) = &buffer.history {
-                let changed = self.history_cache.get(id) != buffer.history_fingerprints.as_ref();
-                let text_changed = snapshots.contains_key(id.as_str());
-                if !changed
-                    && history.len() == 0
-                    && self
-                        .document_cache
-                        .get(id)
-                        .is_some_and(|row| row.text_is_empty)
-                    && self
-                        .inventory
-                        .as_ref()
-                        .is_some_and(|i| i.snapshots.contains(id))
-                    && snapshots
-                        .get(id.as_str())
-                        .is_none_or(|s| s.snapshot.len_bytes() == 0)
-                {
-                    // Empty text with no undo references has no backing bytes to
-                    // compare. Preserve its existing manifest after reopening.
-                    continue;
-                }
-                if changed
-                    || text_changed
-                    || !self
-                        .inventory
-                        .as_ref()
-                        .is_some_and(|i| i.snapshots.contains(id))
-                {
-                    let tree = if history.len() == 0 {
-                        snapshots
-                            .get(id.as_str())
-                            .map_or_else(|| history.0.piece_tree(), |s| s.snapshot.piece_tree())
-                    } else {
-                        history.0.piece_tree()
-                    };
-                    trees.push((id, tree));
-                }
+        for (id, buffer) in buffers {
+            let Some(history) = &buffer.history else {
+                continue;
+            };
+            let snapshot = snapshots.get(id.as_str()).copied();
+            let changed = self.history_cache.get(id) != buffer.history_fingerprints.as_ref();
+            if !changed
+                && history.len() == 0
+                && self
+                    .document_cache
+                    .get(id)
+                    .is_some_and(|row| row.text_is_empty)
+                && stored(id)
+                && snapshot.is_none_or(|s| s.snapshot.len_bytes() == 0)
+            {
+                // Empty text with no undo references has no backing bytes to
+                // compare. Preserve its existing manifest after reopening.
+                continue;
+            }
+            if changed || snapshot.is_some() || !stored(id) {
+                let tree = match snapshot {
+                    Some(captured) if history.len() == 0 => captured.snapshot.piece_tree(),
+                    _ => history.0.piece_tree(),
+                };
+                trees.push((id, tree));
             }
         }
-        // Queue a bounded group before draining so small documents share body
-        // transactions. Large captures still drain before the next document.
-        let store = self.chunk_store()?;
         trees.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        trees
+    }
+    /// Queues a bounded group before draining so small documents share body
+    /// transactions. Large captures still drain before the next document.
+    async fn prepare_contents(
+        &mut self,
+        trees: Vec<(&String, &PieceTreeLite)>,
+        contents: &mut HashMap<String, super::content::PreparedContent>,
+    ) -> io::Result<()> {
+        let store = self.chunk_store()?;
         let mut trees = trees.into_iter().peekable();
         while trees.peek().is_some() {
             let mut batch = Vec::new();
@@ -351,10 +363,9 @@ impl Database {
             }
             for (id, tree, capture) in batch {
                 let content = self.prepare_content(id, tree, capture).await?;
-                prepared.contents.insert(id.clone(), content);
+                contents.insert(id.clone(), content);
             }
         }
-        profile.content_prepare_ns = phase.elapsed().as_nanos();
         Ok(())
     }
 

@@ -57,7 +57,7 @@ impl<T> WakeSender<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Arc, RepaintSignal, WakeSender, egui, mpsc};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]

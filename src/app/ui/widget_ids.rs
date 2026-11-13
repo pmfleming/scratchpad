@@ -379,40 +379,35 @@ mod tests {
     }
 
     fn collect_forbidden_patterns(path: &Path, violations: &mut Vec<String>) {
-        let Ok(metadata) = fs::metadata(path) else {
-            return;
-        };
-        if metadata.is_dir() {
-            let Ok(entries) = fs::read_dir(path) else {
-                return;
-            };
-            for entry in entries.flatten() {
+        if path.is_dir() {
+            for entry in fs::read_dir(path).into_iter().flatten().flatten() {
                 collect_forbidden_patterns(&entry.path(), violations);
             }
             return;
         }
-        if path.file_name().and_then(|name| name.to_str()) == Some("widget_ids.rs")
-            || path.extension().and_then(|ext| ext.to_str()) != Some("rs")
-        {
+        if !is_checked_source(path) {
             return;
         }
-
         let Ok(contents) = fs::read_to_string(path) else {
             return;
         };
+        let display = path
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(path)
+            .display()
+            .to_string();
         for (line_index, line) in contents.lines().enumerate() {
-            for pattern in FORBIDDEN_APP_PATTERNS {
-                if line.contains(pattern) {
-                    violations.push(format!(
-                        "{}:{} contains `{}`",
-                        path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
-                            .unwrap_or(path)
-                            .display(),
-                        line_index + 1,
-                        pattern
-                    ));
-                }
-            }
+            violations.extend(
+                FORBIDDEN_APP_PATTERNS
+                    .iter()
+                    .filter(|pattern| line.contains(*pattern))
+                    .map(|pattern| format!("{display}:{} contains `{pattern}`", line_index + 1)),
+            );
         }
+    }
+
+    fn is_checked_source(path: &Path) -> bool {
+        path.extension().is_some_and(|ext| ext == "rs")
+            && path.file_name().is_none_or(|name| name != "widget_ids.rs")
     }
 }

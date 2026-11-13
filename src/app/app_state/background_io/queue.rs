@@ -1,6 +1,5 @@
-use super::fallback::BackgroundIoFallback;
 use super::{
-    BackgroundIoRequest, BackgroundIoResult, PathBuf, PathLoadRequest, PendingBackgroundAction,
+    BackgroundIoRequest, PathBuf, PathLoadRequest, PendingBackgroundAction,
     PendingEncodingComplianceAction, PendingSavePathAction, PendingSessionHydrationAction,
     PendingSessionPersistAction, PendingStartupRestoreAction, PendingTextMetadataAction,
     ScratchpadApp, SessionPersistRequest, StartupOptions, cold_session_tab_buffer_ids,
@@ -47,12 +46,7 @@ impl ScratchpadApp {
             target,
             claimed,
         };
-        self.send_background_request_or_apply(request_id, request, |app, request_id, _| {
-            app.apply_background_io_result(BackgroundIoResult::RetainedReopened {
-                request_id,
-                result: Err("Background document reopening unavailable.".into()),
-            });
-        });
+        self.send_background_request(request);
     }
 
     pub(crate) fn queue_active_buffer_encoding_compliance_refresh(&mut self) {
@@ -207,15 +201,10 @@ impl ScratchpadApp {
                     None => request,
                 })
                 .map(|request| {
-                    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-                    let tokens = self
+                    let cancelled = self
                         .state
                         .background_io
-                        .path_imports
-                        .entry(request.path().clone())
-                        .or_default();
-                    tokens.retain(|token| token.strong_count() > 0);
-                    tokens.push(std::sync::Arc::downgrade(&cancelled));
+                        .register_path_import(request.path());
                     PathLoadRequest::Cancelable {
                         cancelled,
                         request: Box::new(request),
@@ -224,13 +213,7 @@ impl ScratchpadApp {
                 .collect(),
             streaming,
         };
-        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
-            app.apply_background_io_result(BackgroundIoResult::PathsLoaded {
-                request_id,
-                results: request.into_loaded_path_results().unwrap_or_default(),
-                is_partial: false,
-            });
-        });
+        self.send_background_request(request);
     }
 
     pub(crate) fn queue_background_cold_file_shells(
@@ -250,14 +233,7 @@ impl ScratchpadApp {
             paths,
             session_store: self.state.persistence.session_store.clone(),
         };
-        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
-            let shells = request.into_cold_file_shell_results().unwrap_or_default();
-            app.apply_background_io_result(BackgroundIoResult::ColdFileShellsBuilt {
-                request_id,
-                shells,
-                selected_path: None,
-            });
-        });
+        self.send_background_request(request);
     }
 
     pub(crate) fn queue_background_path_load_with_encoding(
@@ -290,13 +266,7 @@ impl ScratchpadApp {
             requests: vec![request],
             streaming: false,
         };
-        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
-            app.apply_background_io_result(BackgroundIoResult::PathsLoaded {
-                request_id,
-                results: request.into_loaded_path_results().unwrap_or_default(),
-                is_partial: false,
-            });
-        });
+        self.send_background_request(request);
     }
 
     pub(crate) fn queue_background_path_save(
@@ -318,13 +288,7 @@ impl ScratchpadApp {
             snapshot,
             format,
         };
-        if let Err(error) = self.state.background_io.tx.send(request) {
-            record_background_send_error(&error);
-            self.apply_background_io_result(error.into_request().into_path_saved_result());
-            return false;
-        }
-
-        true
+        self.send_background_request(request)
     }
 
     pub(crate) fn queue_background_session_restore(&mut self, startup_options: StartupOptions) {
@@ -342,12 +306,7 @@ impl ScratchpadApp {
             request_id,
             session_store: self.state.persistence.session_store.clone(),
         };
-        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
-            app.apply_background_io_result(BackgroundIoResult::SessionRestored {
-                request_id,
-                result: request.into_restore_result(),
-            });
-        });
+        self.send_background_request(request);
     }
 
     pub(crate) fn queue_next_progressive_session_hydration(&mut self) {
@@ -391,12 +350,7 @@ impl ScratchpadApp {
             tab_index,
             cold_session_tab,
         };
-        if let Err(error) = self.state.background_io.tx.send(request) {
-            record_background_send_error(&error);
-            self.apply_background_io_result(
-                error.into_request().into_hydrated_session_tab_result(),
-            );
-        }
+        self.send_background_request(request);
     }
 
     pub(crate) fn queue_background_session_persist(&mut self, request: SessionPersistRequest) {
@@ -428,12 +382,7 @@ impl ScratchpadApp {
             session_store: self.state.persistence.session_store.clone(),
             request,
         };
-        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
-            app.apply_background_io_result(BackgroundIoResult::SessionPersisted {
-                request_id,
-                result: request.into_persist_result(),
-            });
-        });
+        self.send_background_request(request);
     }
 
     pub(crate) fn queue_background_text_metadata_refresh(
@@ -488,15 +437,7 @@ impl ScratchpadApp {
 
         let request =
             analysis_refresh_request(kind, request_id, buffer_id, revision, snapshot, format);
-        self.send_background_request_or_apply(
-            request_id,
-            request,
-            move |app, request_id, request| {
-                app.apply_background_io_result(analysis_refresh_fallback_result(
-                    kind, request_id, buffer_id, revision, request,
-                ));
-            },
-        );
+        self.send_background_request(request);
     }
 
     fn has_pending_analysis_refresh(
@@ -517,16 +458,16 @@ impl ScratchpadApp {
         }
     }
 
-    fn send_background_request_or_apply(
-        &mut self,
-        request_id: u64,
-        request: BackgroundIoRequest,
-        fallback: impl FnOnce(&mut Self, u64, BackgroundIoRequest),
-    ) {
-        if let Err(error) = self.state.background_io.tx.send(request) {
-            record_background_send_error(&error);
-            fallback(self, request_id, error.into_request());
+    /// Queues `request`, or applies its unavailable result when it cannot be queued.
+    fn send_background_request(&mut self, request: BackgroundIoRequest) -> bool {
+        let Err(error) = self.state.background_io.tx.send(request) else {
+            return true;
+        };
+        record_background_send_error(&error);
+        if let Some(result) = super::fallback::unavailable_result(error.into_request()) {
+            self.apply_background_io_result(result);
         }
+        false
     }
 }
 
@@ -574,30 +515,5 @@ fn analysis_refresh_request(
             snapshot,
             format,
         },
-    }
-}
-
-fn analysis_refresh_fallback_result(
-    kind: AnalysisRefreshKind,
-    request_id: u64,
-    buffer_id: u64,
-    revision: u64,
-    request: BackgroundIoRequest,
-) -> BackgroundIoResult {
-    match kind {
-        AnalysisRefreshKind::TextMetadata => BackgroundIoResult::TextMetadataRefreshed {
-            request_id,
-            buffer_id,
-            revision,
-            result: request.into_text_metadata_result(),
-        },
-        AnalysisRefreshKind::EncodingCompliance => {
-            BackgroundIoResult::EncodingComplianceRefreshed {
-                request_id,
-                buffer_id,
-                revision,
-                result: request.into_encoding_compliance_result(),
-            }
-        }
     }
 }

@@ -1,6 +1,6 @@
 use super::{
     closed::ClosedRow,
-    tests::{database, request, tab},
+    test_fixture::{database, exec, request, tab},
 };
 use crate::app::services::session_store::CapturedClosedTab;
 use futures_lite::future::block_on;
@@ -24,10 +24,7 @@ fn archive_diff_preserves_survivors_and_requested_order() {
         )).await.unwrap();
         db.write_closed(&old[1..], &old).await.unwrap();
         assert!(db.closed_rows().await.unwrap() == old[1..]);
-        db.conn
-            .execute_batch("DROP TRIGGER keep_archive; DROP TRIGGER keep_payload;")
-            .await
-            .unwrap();
+        exec(&db, "DROP TRIGGER keep_archive; DROP TRIGGER keep_payload;").await;
         let mut rows = db.closed_rows().await.unwrap();
         rows.reverse();
         let previous = db.closed_rows().await.unwrap();
@@ -51,12 +48,7 @@ fn token_lookup_does_not_decode_unrelated_archives() {
             .push(CapturedClosedTab::capture(&tab("wanted"), None));
         db.persist(save, 1).await.unwrap();
         let token = db.closed_rows().await.unwrap()[0].token.clone();
-        db.conn
-            .execute_batch(
-                "INSERT INTO layouts VALUES(9223372036854775807,1,'bad'); INSERT INTO closed_tabs(token,closed_at,layout_id) VALUES('broken',0,9223372036854775807)",
-            )
-            .await
-            .unwrap();
+        exec(&db, "INSERT INTO layouts VALUES(9223372036854775807,1,'bad'); INSERT INTO closed_tabs(token,closed_at,layout_id) VALUES('broken',0,9223372036854775807)").await;
         let tab = db.read_closed_tab(&token).await.unwrap();
         assert_eq!(
             tab.buffers[0]
@@ -94,7 +86,7 @@ fn archive_diff_failure_rolls_back_removed_and_changed_rows() {
             layout: old[1].layout.clone(),
             tab: old[1].tab.clone(),
         };
-        db.conn.execute_batch("CREATE TRIGGER fail_update BEFORE UPDATE ON closed_tabs BEGIN SELECT RAISE(ABORT, 'injected'); END; BEGIN IMMEDIATE;").await.unwrap();
+        exec(&db, "CREATE TRIGGER fail_update BEFORE UPDATE ON closed_tabs BEGIN SELECT RAISE(ABORT, 'injected'); END; BEGIN IMMEDIATE;").await;
         let result = db.write_closed(&[changed], &old).await;
         assert!(db.finish_transaction(result).await.is_err());
         assert!(db.closed_rows().await.unwrap() == old);

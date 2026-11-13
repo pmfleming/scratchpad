@@ -1,7 +1,7 @@
 use super::{
     Database,
     history::HistoryFingerprint,
-    tests::{database, insert, request, tab},
+    test_fixture::{database, insert, request, tab},
 };
 use crate::app::domain::PersistedHistoryEntry;
 use futures_lite::future::block_on;

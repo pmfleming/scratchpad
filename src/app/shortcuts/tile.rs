@@ -1,4 +1,4 @@
-use super::consume_app_shortcut;
+use super::{consume_app_shortcut, first_consumed};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::domain::{SplitAxis, TileDirection};
@@ -12,7 +12,7 @@ pub(super) fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context
         return;
     }
 
-    if let Some(direction) = consume_tile_move(app, ctx) {
+    if let Some(direction) = first_consumed(app, ctx, &TILE_MOVES) {
         crate::app::commands::handle_command(
             app,
             AppCommand::Workspace(WorkspaceCommand::MoveActiveTile { direction }),
@@ -20,7 +20,7 @@ pub(super) fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context
         return;
     }
 
-    if let Some(direction) = consume_tile_resize(app, ctx) {
+    if let Some(direction) = first_consumed(app, ctx, &TILE_RESIZES) {
         crate::app::commands::handle_command(
             app,
             AppCommand::Workspace(WorkspaceCommand::ResizeActiveTile { direction }),
@@ -87,69 +87,34 @@ fn handle_tile_close_shortcut(app: &mut ScratchpadApp, ctx: &egui::Context) -> b
     false
 }
 
-fn consume_tile_move(app: &ScratchpadApp, ctx: &egui::Context) -> Option<TileDirection> {
-    consume_directional_shortcut(
-        app,
-        ctx,
-        DirectionalActions {
-            left: ShortcutAction::MoveTileLeft,
-            right: ShortcutAction::MoveTileRight,
-            up: ShortcutAction::MoveTileUp,
-            down: ShortcutAction::MoveTileDown,
-        },
-    )
-}
+const TILE_MOVES: [(ShortcutAction, TileDirection); 4] = [
+    (ShortcutAction::MoveTileLeft, TileDirection::Left),
+    (ShortcutAction::MoveTileRight, TileDirection::Right),
+    (ShortcutAction::MoveTileUp, TileDirection::Up),
+    (ShortcutAction::MoveTileDown, TileDirection::Down),
+];
 
-fn consume_tile_resize(app: &ScratchpadApp, ctx: &egui::Context) -> Option<TileDirection> {
-    consume_directional_shortcut(
-        app,
-        ctx,
-        DirectionalActions {
-            left: ShortcutAction::ResizeTileLeft,
-            right: ShortcutAction::ResizeTileRight,
-            up: ShortcutAction::ResizeTileUp,
-            down: ShortcutAction::ResizeTileDown,
-        },
-    )
-}
+const TILE_RESIZES: [(ShortcutAction, TileDirection); 4] = [
+    (ShortcutAction::ResizeTileLeft, TileDirection::Left),
+    (ShortcutAction::ResizeTileRight, TileDirection::Right),
+    (ShortcutAction::ResizeTileUp, TileDirection::Up),
+    (ShortcutAction::ResizeTileDown, TileDirection::Down),
+];
 
-struct DirectionalActions {
-    left: ShortcutAction,
-    right: ShortcutAction,
-    up: ShortcutAction,
-    down: ShortcutAction,
-}
-
-fn consume_directional_shortcut(
-    app: &ScratchpadApp,
-    ctx: &egui::Context,
-    actions: DirectionalActions,
-) -> Option<TileDirection> {
-    if consume_app_shortcut(app, ctx, actions.left) {
-        Some(TileDirection::Left)
-    } else if consume_app_shortcut(app, ctx, actions.right) {
-        Some(TileDirection::Right)
-    } else if consume_app_shortcut(app, ctx, actions.up) {
-        Some(TileDirection::Up)
-    } else if consume_app_shortcut(app, ctx, actions.down) {
-        Some(TileDirection::Down)
-    } else {
-        None
-    }
-}
-
+/// Returns the split axis and whether the new view goes first.
 fn consume_tile_split(app: &ScratchpadApp, ctx: &egui::Context) -> Option<(SplitAxis, bool)> {
-    if consume_app_shortcut(app, ctx, ShortcutAction::SplitTile) {
-        Some((app.state.workspace_reflow_axis, false))
-    } else if consume_app_shortcut(app, ctx, ShortcutAction::SplitUp) {
-        Some((SplitAxis::Horizontal, true))
-    } else if consume_app_shortcut(app, ctx, ShortcutAction::SplitDown) {
-        Some((SplitAxis::Horizontal, false))
-    } else if consume_app_shortcut(app, ctx, ShortcutAction::SplitLeft) {
-        Some((SplitAxis::Vertical, true))
-    } else if consume_app_shortcut(app, ctx, ShortcutAction::SplitRight) {
-        Some((SplitAxis::Vertical, false))
-    } else {
-        None
-    }
+    first_consumed(
+        app,
+        ctx,
+        &[
+            (
+                ShortcutAction::SplitTile,
+                (app.state.workspace_reflow_axis, false),
+            ),
+            (ShortcutAction::SplitUp, (SplitAxis::Horizontal, true)),
+            (ShortcutAction::SplitDown, (SplitAxis::Horizontal, false)),
+            (ShortcutAction::SplitLeft, (SplitAxis::Vertical, true)),
+            (ShortcutAction::SplitRight, (SplitAxis::Vertical, false)),
+        ],
+    )
 }

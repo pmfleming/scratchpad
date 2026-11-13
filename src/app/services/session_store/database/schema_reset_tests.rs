@@ -1,6 +1,6 @@
 use super::{
     Database,
-    tests::{database, request, tab},
+    test_fixture::{database, exec, request, scalar, tab},
 };
 use crate::app::services::session_store::SessionStore;
 use futures_lite::future::block_on;
@@ -20,7 +20,7 @@ fn tree_rows_and_positions_round_trip_transactionally() {
         let mut tab = tab("");
         for text in ["a", "b", "c"] {
             let at = tab.active_buffer().document().piece_tree().len_chars();
-            super::tests::insert(&mut tab, at, text);
+            super::test_fixture::insert(&mut tab, at, text);
         }
         let document = tab.active_buffer_mut().document_mut();
         document.navigate_history(1).unwrap();
@@ -40,9 +40,11 @@ fn tree_rows_and_positions_round_trip_transactionally() {
         db.persist(request, 1).await.unwrap();
         assert_eq!(db.read_history(&id).await.unwrap(), expected);
         assert_eq!(
-            db.integer("SELECT count(*) FROM document_history WHERE now_id=1 AND tip_id=4")
-                .await
-                .unwrap(),
+            scalar(
+                &db,
+                "SELECT count(*) FROM document_history WHERE now_id=1 AND tip_id=4"
+            )
+            .await,
             1
         );
         db.checkpoint().await.unwrap();
@@ -55,7 +57,7 @@ fn tree_rows_and_positions_round_trip_transactionally() {
         assert_eq!(document.extract_text(), "abranch");
         document.navigate_history(3).unwrap();
         assert_eq!(document.extract_text(), "abc");
-        assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 13);
+        assert_eq!(scalar(&db, "PRAGMA user_version").await, 13);
     });
 }
 
@@ -76,14 +78,8 @@ fn inconsistent_cursor_and_corrupt_branch_payload_are_rejected() {
                 .await
                 .is_err()
         );
-        db.conn
-            .execute("PRAGMA foreign_keys=OFF", ())
-            .await
-            .unwrap();
-        db.conn
-            .execute("UPDATE document_history SET now_id=999", ())
-            .await
-            .unwrap();
+        exec(&db, "PRAGMA foreign_keys=OFF").await;
+        exec(&db, "UPDATE document_history SET now_id=999").await;
         assert!(db.read_history(id).await.is_err());
         assert!(
             db.hydrate(request(&tabs).tabs.remove(0).session_tab)

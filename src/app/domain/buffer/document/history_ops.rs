@@ -103,6 +103,26 @@ impl TextDocument {
             })
             .collect::<PieceHistoryEdits>();
         self.history.latest_update_at = Some(Instant::now());
+        let summary = operation_summary(source, &record);
+        self.new_history_entry(
+            source,
+            summary,
+            edits,
+            record.previous_selection,
+            record.next_selection,
+        )
+    }
+
+    /// A replayable entry under the current history node, stamped now and
+    /// given the next entry id.
+    pub(super) fn new_history_entry(
+        &mut self,
+        source: PieceSource,
+        summary: String,
+        edits: PieceHistoryEdits,
+        previous_selection: CursorRange,
+        next_selection: CursorRange,
+    ) -> PieceHistoryEntry {
         let entry = PieceHistoryEntry {
             id: self.history.next_id,
             parent_id: self.history.tree.now(),
@@ -112,15 +132,14 @@ impl TextDocument {
                 .as_secs(),
             global_seq: next_text_history_global_seq(),
             source,
-
-            summary: operation_summary(source, &record),
+            summary,
             edits,
             flags: PieceHistoryFlags {
                 undone: false,
                 replayable: true,
             },
-            previous_selection: record.previous_selection,
-            next_selection: record.next_selection,
+            previous_selection,
+            next_selection,
         };
         self.history.next_id = self.history.next_id.saturating_add(1);
         entry

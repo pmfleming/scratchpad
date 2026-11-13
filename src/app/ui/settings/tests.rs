@@ -1,41 +1,80 @@
 mod resolved_appearance;
 mod typography;
 
-use super::*;
+use super::widgets::{
+    SettingsControlMeasurement, reset_settings_layout_measurements, settings_card_measurements,
+    settings_control_measurements,
+};
+use super::{
+    AppThemeMode, EditorAppearanceSource, EditorFontPreset, PREVIEW_QUOTES, ScratchpadApp,
+    SettingsUi, appearance, egui, opening, recovery, render_page_body, text_formatting, widgets,
+};
+use crate::app::app_state::test_support::{apply_test_fonts, ui_harness};
+use crate::app::services::settings_store::AppSettings;
 use egui_kittest::{
     Harness,
     kittest::{NodeT, Queryable},
-};
-use widgets::{
-    reset_settings_layout_measurements, settings_card_measurements, settings_control_measurements,
 };
 
 fn app() -> ScratchpadApp {
     let root = tempfile::tempdir().unwrap().keep();
     crate::app::app_state::test_support::test_app(&root)
 }
-pub(super) fn setup(ctx: &egui::Context) {
-    let mut fonts = egui::FontDefinitions::default();
-    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-    fonts.families.insert(
-        egui::FontFamily::Name(EDITOR_FONT_FAMILY.into()),
-        fonts.families[&egui::FontFamily::Monospace].clone(),
-    );
-    ctx.set_fonts(fonts);
+
+fn primary_button(harness: &mut Harness<'_, ScratchpadApp>, pos: egui::Pos2, pressed: bool) {
+    harness.event(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    });
+}
+
+/// The settings as last written to disk.
+pub(super) fn saved_settings(harness: &Harness<'_, ScratchpadApp>) -> AppSettings {
+    harness
+        .state()
+        .state
+        .persistence
+        .settings_store
+        .load()
+        .unwrap()
+        .unwrap()
+}
+
+/// Lays out the whole page once at `width` and returns the recorded control boxes.
+fn measure_page(ctx: &egui::Context, width: f32) -> Vec<SettingsControlMeasurement> {
+    reset_settings_layout_measurements();
+    let mut app = app();
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        ui.set_width(width);
+        ui.set_min_height(9000.0);
+        render_page_body(ui, &mut app, width);
+    });
+    output.textures_delta.clear();
+    settings_control_measurements()
+}
+
+/// The recorded box of the control `name`.
+pub(super) fn measured_rect(name: &str) -> egui::Rect {
+    find(&settings_control_measurements(), name).rect
+}
+
+pub(super) fn find<'a>(
+    measurements: &'a [SettingsControlMeasurement],
+    name: &str,
+) -> &'a SettingsControlMeasurement {
+    measurements
+        .iter()
+        .find(|m| m.label == name)
+        .unwrap_or_else(|| panic!("missing {name}"))
 }
 
 #[test]
 fn settings_have_six_independent_categories_without_nested_disclosures() {
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1100.0, 6000.0))
-        .with_context_setup(setup)
-        .build_ui_state(
-            |ui, app| {
-                render_page_body(ui, app, 1100.0);
-            },
-            app(),
-        );
-    harness.run();
+    let mut harness = ui_harness(egui::vec2(1100.0, 6000.0), app(), |ui, app| {
+        render_page_body(ui, app, 1100.0);
+    });
     assert_eq!(
         harness
             .get_all_by_role(egui::Role::DisclosureTriangle)
@@ -81,11 +120,9 @@ fn settings_have_six_independent_categories_without_nested_disclosures() {
 
 #[test]
 fn search_reveals_matching_groups_without_losing_collapse_state() {
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1100.0, 6000.0))
-        .with_context_setup(setup)
-        .build_ui_state(|ui, app| render_page_body(ui, app, 1100.0), app());
-    harness.run();
+    let mut harness = ui_harness(egui::vec2(1100.0, 6000.0), app(), |ui, app| {
+        render_page_body(ui, app, 1100.0);
+    });
     harness.get_by_label("Collapse all").click_accesskit();
     harness.run_steps(2);
     assert!(harness.query_by_role(egui::Role::Slider).is_none());
@@ -129,24 +166,11 @@ fn search_reveals_matching_groups_without_losing_collapse_state() {
 #[test]
 fn controls_share_right_edge_and_sliders_align_within_their_groups() {
     for width in [1200.0, 900.0, 500.0, 360.0] {
-        reset_settings_layout_measurements();
         let ctx = egui::Context::default();
-        setup(&ctx);
-        let mut app = app();
-        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.set_width(width);
-            ui.set_min_height(9000.0);
-            render_page_body(ui, &mut app, width);
-        });
-        output.textures_delta.clear();
-        let measurements = settings_control_measurements();
-        let find = |name: &str| {
-            measurements
-                .iter()
-                .find(|m| m.label == name)
-                .unwrap_or_else(|| panic!("missing {name}"))
-        };
-        let left = |m: &widgets::SettingsControlMeasurement| m.center_x - m.width / 2.0;
+        apply_test_fonts(&ctx);
+        let measurements = measure_page(&ctx, width);
+        let find = |name: &str| find(&measurements, name);
+        let left = |m: &SettingsControlMeasurement| m.center_x - m.width / 2.0;
         for label in ["dropdown.Font", "dropdown.Size", "segments.Colors"] {
             assert!(
                 (find(label).right_x - find("segments.Use appearance from").right_x).abs() < 1.0,
@@ -240,7 +264,6 @@ fn styled_controls_fit_and_align_with_production_fonts_in_both_themes() {
                 EditorFontPreset::Mono,
                 EditorFontPreset::Serif,
             ] {
-                reset_settings_layout_measurements();
                 let ctx = egui::Context::default();
                 ctx.set_visuals(if dark {
                     egui::Visuals::dark()
@@ -253,15 +276,8 @@ fn styled_controls_fit_and_align_with_production_fonts_in_both_themes() {
                     4.0,
                 )
                 .unwrap();
-                let mut app = app();
-                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                    ui.set_width(width);
-                    ui.set_min_height(9000.0);
-                    render_page_body(ui, &mut app, width);
-                });
-                output.textures_delta.clear();
-                let measurements = settings_control_measurements();
-                let find = |name: &str| measurements.iter().find(|m| m.label == name).unwrap();
+                let measurements = measure_page(&ctx, width);
+                let find = |name: &str| find(&measurements, name);
                 for (control, row) in [
                     ("segments.Use appearance from", "Use appearance from"),
                     ("segments.Colors", "Colors"),
@@ -330,7 +346,7 @@ fn long_segment_labels_stack_without_overlapping_the_next_row() {
     });
     output.textures_delta.clear();
     let measurements = settings_control_measurements();
-    let find = |name: &str| measurements.iter().find(|m| m.label == name).unwrap();
+    let find = |name: &str| find(&measurements, name);
     let group = find("segments.Long choices").rect;
     assert!(group.height() > 72.0);
     assert!(find("label.Next row").rect.top() >= group.bottom());
@@ -351,17 +367,10 @@ fn appearance_controls_stay_visible_for_system_source_and_editing_forks_from_it(
     );
     let system_size = app.state.app_settings.font_size();
     let system_colors = resolved_colors(&app);
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1000.0, 1800.0))
-        .with_context_setup(setup)
-        .build_ui_state(
-            |ui, app| {
-                ui.set_width(880.0);
-                text_formatting::render_appearance(ui, app);
-            },
-            app,
-        );
-    harness.run();
+    let mut harness = ui_harness(egui::vec2(1000.0, 1800.0), app, |ui, app| {
+        ui.set_width(880.0);
+        text_formatting::render_appearance(ui, app);
+    });
     for label in ["Font", "Size", "Text", "Background", "Search highlight"] {
         harness.get_by_role_and_label(egui::Role::Label, label);
     }
@@ -402,18 +411,11 @@ fn font_size_slider_and_presets_stay_in_sync_and_persist() {
     app.state.app_settings.editor.appearance_source = EditorAppearanceSource::System;
     let system_font = app.state.app_settings.editor_font_selection();
     let system_colors = resolved_colors(&app);
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1000.0, 1800.0))
-        .with_context_setup(setup)
-        .build_ui_state(
-            |ui, app| {
-                reset_settings_layout_measurements();
-                ui.set_width(880.0);
-                text_formatting::render_appearance(ui, app);
-            },
-            app,
-        );
-    harness.run();
+    let mut harness = ui_harness(egui::vec2(1000.0, 1800.0), app, |ui, app| {
+        reset_settings_layout_measurements();
+        ui.set_width(880.0);
+        text_formatting::render_appearance(ui, app);
+    });
     harness
         .get_by_role_and_label(egui::Role::Slider, "Size")
         .set_value_accesskit(33.0);
@@ -447,19 +449,10 @@ fn font_size_slider_and_presets_stay_in_sync_and_persist() {
     harness.get_by_label("20").click_accesskit();
     harness.run_steps(2);
     assert_eq!(harness.state().state.app_settings.font_size(), 20.0);
-    let slider = settings_control_measurements()
-        .iter()
-        .find(|m| m.label == "slider.Size")
-        .unwrap()
-        .rect;
+    let slider = measured_rect("slider.Size");
     let mut pos = egui::pos2(slider.left() + 1.0, slider.center().y);
     harness.event(egui::Event::PointerMoved(pos));
-    harness.event(egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed: true,
-        modifiers: egui::Modifiers::NONE,
-    });
+    primary_button(&mut harness, pos, true);
     harness.run_steps(2);
     assert_eq!(harness.state().state.app_settings.font_size(), 8.0);
     pos.x = slider.right() - 1.0;
@@ -473,21 +466,9 @@ fn font_size_slider_and_presets_stay_in_sync_and_persist() {
             .value(),
         Some("72".into())
     );
-    harness.event(egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers: egui::Modifiers::NONE,
-    });
+    primary_button(&mut harness, pos, false);
     harness.run_steps(2);
-    let saved = harness
-        .state()
-        .state
-        .persistence
-        .settings_store
-        .load()
-        .unwrap()
-        .unwrap();
+    let saved = saved_settings(&harness);
     assert_eq!(saved.editor.font_size, 72.0);
 }
 
@@ -495,18 +476,11 @@ fn font_size_slider_and_presets_stay_in_sync_and_persist() {
 fn global_reset_requires_confirmation_and_cancel_does_not_change_settings() {
     let mut app = app();
     app.state.app_settings.editor.editor_gutter = 23;
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1000.0, 1400.0))
-        .with_context_setup(setup)
-        .build_ui_state(
-            |ui, app| {
-                ui.set_width(880.0);
-                opening::render_application(ui, app);
-                opening::reset_confirmation(ui.ctx(), app);
-            },
-            app,
-        );
-    harness.run();
+    let mut harness = ui_harness(egui::vec2(1000.0, 1400.0), app, |ui, app| {
+        ui.set_width(880.0);
+        opening::render_application(ui, app);
+        opening::reset_confirmation(ui.ctx(), app);
+    });
     harness.get_by_label("Reset settings…").click_accesskit();
     harness.run_steps(2);
     assert_eq!(harness.state().state.app_settings.editor_gutter(), 23);
@@ -553,7 +527,7 @@ fn both_reset_actions_are_destructive_without_restyling_ordinary_buttons() {
         let mut harness = Harness::builder()
             .with_size(egui::vec2(1000.0, 1400.0))
             .with_context_setup(move |ctx| {
-                setup(ctx);
+                apply_test_fonts(ctx);
                 ctx.set_visuals(if dark {
                     egui::Visuals::dark()
                 } else {
@@ -644,8 +618,7 @@ fn both_previews_are_right_aligned_and_vertically_centered_without_clipping() {
                     });
                     output.textures_delta.clear();
                     let measurements = settings_control_measurements();
-                    let find =
-                        |name: &str| measurements.iter().find(|m| m.label == name).unwrap().rect;
+                    let find = |name: &str| find(&measurements, name).rect;
                     let key = if tabs { "preview.tabs" } else { "preview.text" };
                     let content = find(&format!("{key}.content"));
                     let text = find(&format!("{key}.label"));
@@ -690,33 +663,15 @@ fn both_previews_are_right_aligned_and_vertically_centered_without_clipping() {
 fn padding_slider_keeps_dragging_while_preview_resize_moves_the_row() {
     let mut state = app();
     state.state.app_settings.editor.editor_gutter = 0;
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1100.0, 6000.0))
-        .with_context_setup(setup)
-        .build_ui_state(
-            |ui, app| {
-                reset_settings_layout_measurements();
-                render_page_body(ui, app, 1100.0);
-            },
-            state,
-        );
-    harness.run();
-    let slider_rect = || {
-        settings_control_measurements()
-            .into_iter()
-            .find(|m| m.label == "slider.Editor padding")
-            .unwrap()
-            .rect
-    };
+    let mut harness = ui_harness(egui::vec2(1100.0, 6000.0), state, |ui, app| {
+        reset_settings_layout_measurements();
+        render_page_body(ui, app, 1100.0);
+    });
+    let slider_rect = || measured_rect("slider.Editor padding");
     let initial = slider_rect();
     let start = egui::pos2(initial.left() + 1.0, initial.center().y);
     harness.event(egui::Event::PointerMoved(start));
-    harness.event(egui::Event::PointerButton {
-        pos: start,
-        button: egui::PointerButton::Primary,
-        pressed: true,
-        modifiers: egui::Modifiers::NONE,
-    });
+    primary_button(&mut harness, start, true);
     harness.run_steps(2);
     let mut previous = harness.state().state.app_settings.editor_gutter();
     for fraction in [0.25, 0.5, 0.75, 0.99] {
@@ -734,12 +689,7 @@ fn padding_slider_keeps_dragging_while_preview_resize_moves_the_row() {
     }
     assert_eq!(previous, 32);
     assert!(slider_rect().top() > initial.top());
-    harness.event(egui::Event::PointerButton {
-        pos: initial.right_center(),
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers: egui::Modifiers::NONE,
-    });
+    primary_button(&mut harness, initial.right_center(), false);
     harness.run_steps(2);
 }
 
@@ -764,17 +714,10 @@ fn rendering_byte_budgets_does_not_round_or_clamp_stored_values() {
 fn auto_hide_reveals_delay_and_keeps_the_saved_value_when_disabled() {
     let mut app = app();
     app.state.app_settings.workspace.auto_hide_tab_list = false;
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1000.0, 1800.0))
-        .with_context_setup(setup)
-        .build_ui_state(
-            |ui, app| {
-                ui.set_width(880.0);
-                appearance::render_workspace(ui, app);
-            },
-            app,
-        );
-    harness.run();
+    let mut harness = ui_harness(egui::vec2(1000.0, 1800.0), app, |ui, app| {
+        ui.set_width(880.0);
+        appearance::render_workspace(ui, app);
+    });
     assert!(
         harness
             .query_by_role_and_label(egui::Role::ComboBox, "Hide after")
@@ -819,17 +762,10 @@ fn auto_hide_reveals_delay_and_keeps_the_saved_value_when_disabled() {
 
 #[test]
 fn exact_value_inputs_and_recommended_limits_keep_slider_values_in_sync() {
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1000.0, 1800.0))
-        .with_context_setup(setup)
-        .build_ui_state(
-            |ui, app| {
-                ui.set_width(880.0);
-                recovery::render_policy(ui, app);
-            },
-            app(),
-        );
-    harness.run();
+    let mut harness = ui_harness(egui::vec2(1000.0, 1800.0), app(), |ui, app| {
+        ui.set_width(880.0);
+        recovery::render_policy(ui, app);
+    });
     for (label, value) in [
         ("Memory per file", 83.0),
         ("Memory across all files", 1024.0),
@@ -862,14 +798,7 @@ fn exact_value_inputs_and_recommended_limits_keep_slider_values_in_sync() {
             .budget
             .derived_from_memory
     );
-    let saved = harness
-        .state()
-        .state
-        .persistence
-        .settings_store
-        .load()
-        .unwrap()
-        .unwrap();
+    let saved = saved_settings(&harness);
     assert_eq!(
         saved.history.budget,
         harness.state().state.app_settings.history.budget
@@ -882,33 +811,15 @@ fn font_size_drag_keeps_its_track_stable_until_release() {
         let mut state = app();
         state.state.app_settings.editor.appearance_source = EditorAppearanceSource::App;
         state.state.app_settings.editor.font_size = 14.0;
-        let mut h = Harness::builder()
-            .with_size(egui::vec2(width, 12000.0))
-            .with_context_setup(setup)
-            .build_ui_state(
-                move |ui, app| {
-                    reset_settings_layout_measurements();
-                    render_page_body(ui, app, width);
-                },
-                state,
-            );
-        h.run();
-        let slider_rect = || {
-            settings_control_measurements()
-                .into_iter()
-                .find(|m| m.label == "slider.Size")
-                .unwrap()
-                .rect
-        };
+        let mut h = ui_harness(egui::vec2(width, 12000.0), state, move |ui, app| {
+            reset_settings_layout_measurements();
+            render_page_body(ui, app, width);
+        });
+        let slider_rect = || measured_rect("slider.Size");
         let initial = slider_rect();
         let mut pos = initial.left_center() + egui::vec2(1.0, 0.0);
         h.event(egui::Event::PointerMoved(pos));
-        h.event(egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        });
+        primary_button(&mut h, pos, true);
         h.run_steps(2);
         let mut previous = h.state().state.app_settings.font_size();
         for fraction in [0.25, 0.5, 0.75, 0.99] {
@@ -925,12 +836,7 @@ fn font_size_drag_keeps_its_track_stable_until_release() {
             previous = size;
         }
         assert_eq!(previous, 72.0);
-        h.event(egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        });
+        primary_button(&mut h, pos, false);
         h.run_steps(2);
         assert_ne!(
             slider_rect(),

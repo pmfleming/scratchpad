@@ -78,22 +78,6 @@ impl TextFormatMetadata {
     }
 
     #[must_use]
-    pub fn encoding_tooltip(&self) -> String {
-        let source = match self.encoding_source {
-            EncodingSource::Bom => "Detected from BOM",
-            EncodingSource::Heuristic => "Detected heuristically",
-            EncodingSource::ExplicitUserChoice => "Selected explicitly",
-            EncodingSource::DefaultForNewFile => "Default for new files",
-        };
-        let ascii = if self.is_ascii_subset {
-            "; ASCII-only content"
-        } else {
-            ""
-        };
-        format!("{source}{ascii}")
-    }
-
-    #[must_use]
     pub fn line_endings_label(&self) -> &'static str {
         self.line_endings.label()
     }
@@ -141,38 +125,6 @@ impl TextFormatMetadata {
         had_replacements
     }
 
-    pub fn has_non_compliant_characters_spans(
-        &self,
-        spans: impl Iterator<Item = impl AsRef<str>>,
-    ) -> bool {
-        let Some(encoding) = Encoding::for_label(self.encoding_name.as_bytes()) else {
-            return true;
-        };
-
-        if encoding == encoding_rs::UTF_8 {
-            return false;
-        }
-
-        let mut encoder = encoding.new_encoder();
-        let mut dst = [0u8; 4096];
-        for span in spans {
-            let mut src = span.as_ref();
-            loop {
-                let (result, read, _written, had_errors) =
-                    encoder.encode_from_utf8(src, &mut dst, false);
-                if had_errors {
-                    return true;
-                }
-                src = &src[read..];
-                if result == encoding_rs::CoderResult::InputEmpty {
-                    break;
-                }
-            }
-        }
-        let (_result, _read, _written, had_errors) = encoder.encode_from_utf8("", &mut dst, true);
-        had_errors
-    }
-
     pub(super) fn apply_inspection(&mut self, inspection: &TextInspection) {
         self.line_ending_counts = inspection.line_ending_counts;
         self.line_endings = inspection.line_endings;
@@ -206,28 +158,26 @@ impl TextFormatMetadata {
 mod tests {
     use super::{EncodingSource, TextFormatMetadata};
 
-    #[test]
-    fn encoding_label_names_known_windows_ansi_encoding() {
-        let format = TextFormatMetadata::detected(
-            "plain",
-            "windows-1252".to_owned(),
+    fn heuristic(text: &str, encoding: &str, decoding_warnings: bool) -> TextFormatMetadata {
+        TextFormatMetadata::detected(
+            text,
+            encoding.to_owned(),
             false,
             EncodingSource::Heuristic,
-            false,
-        );
+            decoding_warnings,
+        )
+    }
+
+    #[test]
+    fn encoding_label_names_known_windows_ansi_encoding() {
+        let format = heuristic("plain", "windows-1252", false);
 
         assert_eq!(format.encoding_label(), "Windows-1252 (ANSI)");
     }
 
     #[test]
     fn format_warning_text_combines_format_warnings() {
-        let format = TextFormatMetadata::detected(
-            "a\r\nb\n",
-            "UTF-8".to_owned(),
-            false,
-            EncodingSource::Heuristic,
-            true,
-        );
+        let format = heuristic("a\r\nb\n", "UTF-8", true);
 
         assert_eq!(
             format.format_warning_text(),

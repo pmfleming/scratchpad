@@ -1,13 +1,19 @@
 mod display;
 mod navigation;
-use super::*;
+use super::{
+    Action, ROW_HEIGHT, RowState, State, apply, model, paint_row, presentation, row_change,
+};
 use crate::app::{
+    app_state::test_support::{add_tab, app_ui_harness},
     domain::{
         BufferState, CharCursor, CursorRange, WorkspaceTab,
         buffer::{OperationRecord, TextDocumentEditOperation},
     },
-    ui::dialogs::text_history::tests::{app, harness, text},
+    services::session_store::timeline::{TimelineKind, TimelineRow},
+    theme,
+    ui::dialogs::text_history::tests::{app, text},
 };
+use eframe::egui;
 use egui_kittest::kittest::Queryable;
 
 #[test]
@@ -112,15 +118,12 @@ fn live_index_moves_coalesced_edits_without_changing_row_identity_or_tracking_na
 fn timeline_keyboard_selects_across_files_and_first_typed_event_reaches_editor() {
     let root = tempfile::tempdir().unwrap();
     let mut app = app(root.path());
-    let original = app.tab_manager.active_tab().unwrap().clone();
     let mut other = BufferState::new("other.txt".into(), "start".into(), None);
     other
         .document_mut()
         .replace_exact_with_history("other edited");
-    app.tab_manager
-        .set_tabs(vec![original, WorkspaceTab::new(other)], 0);
-    let mut h = harness(app);
-    h.run_steps(3);
+    add_tab(&mut app, other);
+    let mut h = app_ui_harness(app);
     h.get_by_label("Timeline").click();
     h.run_steps(3);
     h.get_by_label("Replace with \"other edited\" · other.txt")
@@ -235,8 +238,7 @@ fn informational_rows_are_static_and_keyboard_selection_skips_them() {
         app.tab_manager.active_tab().unwrap().active_buffer(),
     );
     app.state.persistence.pending_activity.push(event);
-    let mut h = harness(app);
-    h.run_steps(3);
+    let mut h = app_ui_harness(app);
     h.get_by_label("Timeline").click();
     h.run_steps(3);
     assert!(

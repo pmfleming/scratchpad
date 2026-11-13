@@ -81,7 +81,7 @@ impl PieceTreeStorage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Arc, ImportContext, Path, PieceTreeStorage, io};
     use std::sync::atomic::{AtomicBool, Ordering};
     #[test]
     fn cancellation_after_a_chunk_abandons_the_entire_import() {

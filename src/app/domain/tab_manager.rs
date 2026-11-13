@@ -1,8 +1,6 @@
 use crate::app::CanonicalPathKey;
-use crate::app::domain::tab::summary;
 use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
 use crate::app::services::session_store::ColdSessionTab;
-use crate::app::theme;
 use std::collections::HashMap;
 
 mod display;
@@ -39,20 +37,7 @@ pub struct TabManager {
 
 impl Default for TabManager {
     fn default() -> Self {
-        let mut manager = Self {
-            tabs: vec![WorkspaceTab::untitled()],
-            active_tab_index: 0,
-            pending_action: None,
-            session_dirty: false,
-            pending_scroll_to_active: true,
-            path_index_generation: 0,
-            inactive_cleanup_key: None,
-            buffer_tab_index: HashMap::new(),
-            path_tab_index: HashMap::new(),
-            cold_session_tabs: HashMap::new(),
-        };
-        manager.rebuild_buffer_tab_index();
-        manager
+        Self::with_tabs(vec![WorkspaceTab::untitled()], true)
     }
 }
 
@@ -64,12 +49,16 @@ impl TabManager {
 
     #[cfg(test)]
     pub(crate) fn for_test_tabs(tabs: Vec<WorkspaceTab>) -> Self {
+        Self::with_tabs(tabs, false)
+    }
+
+    fn with_tabs(tabs: Vec<WorkspaceTab>, pending_scroll_to_active: bool) -> Self {
         let mut manager = Self {
             tabs,
             active_tab_index: 0,
             pending_action: None,
             session_dirty: false,
-            pending_scroll_to_active: false,
+            pending_scroll_to_active,
             path_index_generation: 0,
             inactive_cleanup_key: None,
             buffer_tab_index: HashMap::new(),
@@ -119,16 +108,6 @@ impl TabManager {
                 tab.clear_transient_view_state();
             }
         }
-    }
-
-    #[must_use]
-    pub fn estimated_tab_strip_width(&self, spacing: f32) -> f32 {
-        if self.tabs.is_empty() {
-            return 0.0;
-        }
-
-        (self.tabs.len() as f32 * theme::TAB_BUTTON_WIDTH)
-            + ((self.tabs.len().saturating_sub(1)) as f32 * spacing)
     }
 
     pub fn append_tab(&mut self, tab: WorkspaceTab) {
@@ -258,22 +237,11 @@ impl TabManager {
     pub(crate) fn find_tab_by_path_key(&self, key: &CanonicalPathKey) -> Option<(usize, ViewId)> {
         self.path_owner(key).map(|(_, tab, view)| (tab, view))
     }
-
-    pub fn describe_tab_at(&self, index: usize) -> String {
-        self.tabs
-            .get(index)
-            .map_or_else(|| format!("tab#{index}<missing>"), summary::display_name)
-    }
-
-    #[must_use]
-    pub fn describe_active_tab(&self) -> String {
-        self.describe_tab_at(self.active_tab_index)
-    }
 }
 
 #[cfg(test)]
 mod inactive_cleanup_tests {
-    use super::*;
+    use super::{TabManager, WorkspaceTab};
     #[test]
     fn activation_and_background_installation_evict_inactive_views() {
         let mut manager =

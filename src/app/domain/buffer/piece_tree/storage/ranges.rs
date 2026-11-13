@@ -113,16 +113,7 @@ impl PieceTreeStorage {
                 known_chars: None,
             }),
             (OriginalTextStorage::Chunked(original), PieceBuffer::Original) => {
-                for block in original
-                    .chunks
-                    .iter()
-                    .skip(
-                        original
-                            .chunks
-                            .partition_point(|c| c.logical_start + c.byte_len <= start),
-                    )
-                    .take_while(|c| c.logical_start < end)
-                {
+                for block in original.chunks_overlapping(start, end) {
                     chunk(
                         block.logical_start,
                         &block.text,
@@ -132,17 +123,7 @@ impl PieceTreeStorage {
                 Ok(())
             }
             (_, PieceBuffer::Add) => {
-                for block in self
-                    .add
-                    .chunks
-                    .iter()
-                    .skip(
-                        self.add
-                            .chunks
-                            .partition_point(|c| c.start_byte + c.text.len() <= start),
-                    )
-                    .take_while(|c| c.start_byte < end)
-                {
+                for block in self.add.chunks_overlapping(start, end) {
                     chunk(block.start_byte, &block.text, None)?;
                 }
                 Ok(())

@@ -1,12 +1,10 @@
 //! Bulk edits retain references and small labels; deleted text is never flattened.
-use super::super::{
-    PieceHistoryEdits, PieceHistoryFlags, next_text_history_global_seq,
-    normalize_inserted_text_line_endings,
-};
+use super::super::{ByteSpan, PieceHistoryEdits, normalize_inserted_text_line_endings};
 use super::{
-    CursorRange, PieceHistoryEdit, PieceHistoryEntry, PieceSource, TextDocument,
-    TextDocumentEditOperation, TextDocumentOperationRecord, TextReplacementError, TextReplacements,
+    CursorRange, PieceHistoryEdit, PieceSource, TextDocument, TextDocumentEditOperation,
+    TextDocumentOperationRecord, TextReplacementError, TextReplacements,
 };
+use std::ops::Range;
 impl TextDocument {
     pub(crate) fn replace_document_references(
         &mut self,
@@ -34,20 +32,7 @@ impl TextDocument {
             }
         };
         let mut edits = PieceHistoryEdits::new();
-        if !deleted.is_empty() {
-            edits.push(PieceHistoryEdit::Deleted {
-                start_char: 0,
-                spans: deleted,
-            });
-        }
-        let mut position = 0;
-        for span in inserted {
-            edits.push(PieceHistoryEdit::Inserted {
-                start_char: position,
-                span,
-            });
-            position += span.char_len;
-        }
+        push_reference_edits(&mut edits, 0, deleted, inserted);
         if !edits.is_empty() {
             self.append_reference_entry(
                 edits,
@@ -74,67 +59,10 @@ impl TextDocument {
         let original = self.content.clone();
         let mut previews = Vec::new();
         let mut edits = PieceHistoryEdits::new();
-        let result = (|| {
-            for (range, text) in replacements {
-                let deleted = self
-                    .piece_tree()
-                    .reference_spans(range.clone())
-                    .map_err(|_| TextReplacementError::StorageUnreadable)?;
-                let mut prefix = String::new();
-                for span in self
-                    .piece_tree()
-                    .try_spans_for_range(range.start..range.end.min(range.start.saturating_add(80)))
-                {
-                    prefix.push_str(
-                        &span
-                            .map_err(|_| TextReplacementError::StorageUnreadable)?
-                            .text,
-                    );
-                }
-                let normalized =
-                    normalize_inserted_text_line_endings(text, self.content.preferred_line_ending);
-                let count = normalized.chars().count();
-                let _pin = self
-                    .piece_tree()
-                    .pin_edit_boundaries(range.clone())
-                    .map_err(|_| TextReplacementError::StorageUnreadable)?;
-                self.piece_tree_mut().remove_char_range(range.clone());
-                self.piece_tree_mut()
-                    .insert_with_source(range.start, &normalized, source);
-                if self.piece_tree().intake_error().is_some() {
-                    return Err(TextReplacementError::BulkRefused);
-                }
-                if self.piece_tree().read_fault().is_some() {
-                    return Err(TextReplacementError::StorageUnreadable);
-                }
-                let inserted = self
-                    .piece_tree()
-                    .reference_spans(range.start..range.start + count)
-                    .map_err(|_| TextReplacementError::StorageUnreadable)?;
-                let inserted = super::super::piece_tree::coalesce_spans(inserted);
-                if !deleted.is_empty() {
-                    edits.push(PieceHistoryEdit::Deleted {
-                        start_char: range.start as u64,
-                        spans: deleted,
-                    });
-                }
-                let mut at = range.start as u64;
-                for span in inserted {
-                    edits.push(PieceHistoryEdit::Inserted {
-                        start_char: at,
-                        span,
-                    });
-                    at += span.char_len;
-                }
-                previews.push(TextDocumentEditOperation {
-                    start_char: range.start,
-                    deleted_text: prefix,
-                    inserted_text: normalized.chars().take(80).collect(),
-                    deleted_spans: Vec::new(),
-                });
-            }
+        let result = replacements.iter().try_for_each(|(range, text)| {
+            previews.push(self.replace_reference_range(range.clone(), text, source, &mut edits)?);
             Ok(())
-        })();
+        });
         if result.is_err() {
             self.content = original;
             return result;
@@ -152,6 +80,60 @@ impl TextDocument {
         }
         Ok(())
     }
+    /// Replaces one range, recording its removed and inserted spans in `edits`
+    /// and returning the short preview shown in history summaries.
+    fn replace_reference_range(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        source: PieceSource,
+        edits: &mut PieceHistoryEdits,
+    ) -> Result<TextDocumentEditOperation, TextReplacementError> {
+        let deleted = self
+            .piece_tree()
+            .reference_spans(range.clone())
+            .map_err(unreadable)?;
+        let deleted_text = self.reference_preview(&range)?;
+        let normalized =
+            normalize_inserted_text_line_endings(text, self.content.preferred_line_ending);
+        let count = normalized.chars().count();
+        let _pin = self
+            .piece_tree()
+            .pin_edit_boundaries(range.clone())
+            .map_err(unreadable)?;
+        self.piece_tree_mut().remove_char_range(range.clone());
+        self.piece_tree_mut()
+            .insert_with_source(range.start, &normalized, source);
+        if self.piece_tree().intake_error().is_some() {
+            return Err(TextReplacementError::BulkRefused);
+        }
+        if self.piece_tree().read_fault().is_some() {
+            return Err(TextReplacementError::StorageUnreadable);
+        }
+        let inserted = self
+            .piece_tree()
+            .reference_spans(range.start..range.start + count)
+            .map_err(unreadable)?;
+        let inserted = super::super::piece_tree::coalesce_spans(inserted);
+        push_reference_edits(edits, range.start as u64, deleted, inserted);
+        Ok(TextDocumentEditOperation {
+            start_char: range.start,
+            deleted_text,
+            inserted_text: normalized.chars().take(PREVIEW_CHARS).collect(),
+            deleted_spans: Vec::new(),
+        })
+    }
+
+    /// The first characters of `range`, read without flattening the rest.
+    fn reference_preview(&self, range: &Range<usize>) -> Result<String, TextReplacementError> {
+        let end = range.end.min(range.start.saturating_add(PREVIEW_CHARS));
+        let mut preview = String::new();
+        for span in self.piece_tree().try_spans_for_range(range.start..end) {
+            preview.push_str(&span.map_err(unreadable)?.text);
+        }
+        Ok(preview)
+    }
+
     pub(super) fn append_reference_entry(
         &mut self,
         edits: PieceHistoryEdits,
@@ -160,30 +142,43 @@ impl TextDocument {
         source: PieceSource,
         summary: String,
     ) {
-        let entry = PieceHistoryEntry {
-            id: self.history.next_id,
-            parent_id: self.history.tree.now(),
-            edited_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            global_seq: next_text_history_global_seq(),
-            source,
-            summary,
-            edits,
-            flags: PieceHistoryFlags {
-                undone: false,
-                replayable: true,
-            },
-            previous_selection: previous,
-            next_selection: next,
-        };
-        self.history.next_id = self.history.next_id.saturating_add(1);
+        let entry = self.new_history_entry(source, summary, edits, previous, next);
         self.history.byte_usage += entry.byte_cost();
         assert!(self.history.tree.append(entry.id));
         self.history.entries.push(entry);
         self.history.latest_operation_record = None;
         self.seal_history_group();
         self.advance_history_revision();
+    }
+}
+
+/// Characters of deleted and inserted text kept for the history summary.
+const PREVIEW_CHARS: usize = 80;
+
+fn unreadable(_: std::io::Error) -> TextReplacementError {
+    TextReplacementError::StorageUnreadable
+}
+
+/// Records a deletion at `start_char`, then the inserted spans laid out from
+/// the same position.
+fn push_reference_edits(
+    edits: &mut PieceHistoryEdits,
+    start_char: u64,
+    deleted: Vec<ByteSpan>,
+    inserted: impl IntoIterator<Item = ByteSpan>,
+) {
+    if !deleted.is_empty() {
+        edits.push(PieceHistoryEdit::Deleted {
+            start_char,
+            spans: deleted,
+        });
+    }
+    let mut at = start_char;
+    for span in inserted {
+        edits.push(PieceHistoryEdit::Inserted {
+            start_char: at,
+            span,
+        });
+        at += span.char_len;
     }
 }

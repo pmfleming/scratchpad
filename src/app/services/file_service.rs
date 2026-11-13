@@ -1,8 +1,7 @@
 use crate::app::diagnostics;
 use crate::app::domain::buffer::BufferTextMetadata;
 use crate::app::domain::{
-    BufferState, DiskFileState, DocumentSnapshot, EncodingSource, TextArtifactSummary,
-    TextDocument, TextFormatMetadata,
+    BufferState, DiskFileState, DocumentSnapshot, EncodingSource, TextDocument, TextFormatMetadata,
 };
 use encoding_rs::Encoding;
 use std::io;
@@ -74,7 +73,6 @@ pub struct FileService;
 pub struct FileContent {
     pub document: TextDocument,
     pub format: TextFormatMetadata,
-    pub artifact_summary: TextArtifactSummary,
     pub(crate) text_metadata: BufferTextMetadata,
     pub(crate) decoded_digest: Option<String>,
     pub(crate) metadata_exact: bool,
@@ -88,7 +86,6 @@ pub struct FileVisibleWindow {
     pub loaded_bytes: usize,
     pub encoding_name: String,
     pub has_bom: bool,
-    pub has_decoding_warnings: bool,
     pub complete: bool,
 }
 
@@ -276,10 +273,7 @@ impl FileService {
     }
 
     pub fn encoding_supports_bom(encoding_name: &str) -> io::Result<bool> {
-        let encoding = resolve_encoding(encoding_name)?;
-        Ok(encoding == encoding_rs::UTF_8
-            || encoding == encoding_rs::UTF_16LE
-            || encoding == encoding_rs::UTF_16BE)
+        Ok(!write::bom_bytes(resolve_encoding(encoding_name)?).is_empty())
     }
 
     pub fn write_file_with_format(
@@ -315,20 +309,6 @@ impl FileService {
                 "file_service::write_snapshot_with_format",
                 &error,
                 [("encoding", format.encoding_name.clone())],
-            );
-        })
-    }
-
-    pub fn write_snapshot_utf8(path: &Path, snapshot: &DocumentSnapshot) -> io::Result<()> {
-        document_write::write_document_with(path, |file| {
-            write::write_snapshot_utf8_to_writer(file, snapshot)
-        })
-        .inspect_err(|error| {
-            diagnostics::record_io_error(
-                "write_snapshot_utf8",
-                Some(path),
-                "file_service::write_snapshot_utf8",
-                &error,
             );
         })
     }

@@ -152,22 +152,9 @@ fn handle_relevant_input_event(
     let cursor = view.cursor_range.unwrap_or_default();
 
     match event {
-        RelevantInputEvent::Text(text)
-            if text.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES
-                || cursor.as_sorted_char_range().len()
-                    >= crate::app::domain::buffer::BULK_TEXT_BYTES / 4 =>
-        {
-            let (start, end) = cursor.sorted_indices();
-            buffer.queue_text_preparation(
-                vec![(start..end, text)],
-                cursor,
-                None,
-                PieceSource::Edit,
-                Some(view.id),
-            );
-            false
+        RelevantInputEvent::Text(text) => {
+            insert_or_queue_text(buffer, view, &cursor, text, PieceSource::Edit)
         }
-        RelevantInputEvent::Text(text) => insert_text(buffer, view, &cursor, &text),
         RelevantInputEvent::ImePreedit {
             text,
             active_range_chars,
@@ -185,43 +172,62 @@ fn handle_relevant_input_event(
             context,
             handle_movement_event,
         ),
+        RelevantInputEvent::Copy if is_large_clipboard_selection(&cursor) => {
+            queue_clipboard(ui, buffer, view, &cursor, false);
+            false
+        }
         RelevantInputEvent::Copy => {
-            if cursor.as_sorted_char_range().len() >= 64 * 1024 {
-                queue_clipboard(ui, buffer, view, &cursor, false);
-                return false;
-            }
             copy_selection(ui, buffer, &cursor);
             false
         }
-        RelevantInputEvent::Cut if !cursor.is_empty() => {
-            if cursor.as_sorted_char_range().len() >= 64 * 1024 {
-                queue_clipboard(ui, buffer, view, &cursor, true);
-                return false;
-            }
+        RelevantInputEvent::Cut if cursor.is_empty() => false,
+        RelevantInputEvent::Cut if is_large_clipboard_selection(&cursor) => {
+            queue_clipboard(ui, buffer, view, &cursor, true);
+            false
+        }
+        RelevantInputEvent::Cut => {
             let (new_cursor, selected) = editing::apply_cut(buffer, &cursor);
             ui.copy_text(selected);
             view.set_cursor_range_anchored(buffer, new_cursor);
             true
         }
-        RelevantInputEvent::Cut => false,
         RelevantInputEvent::Paste(text) => {
-            if text.len() >= crate::app::domain::buffer::BULK_TEXT_BYTES
-                || cursor.as_sorted_char_range().len()
-                    >= crate::app::domain::buffer::BULK_TEXT_BYTES / 4
-            {
-                let (start, end) = cursor.sorted_indices();
-                buffer.queue_text_preparation(
-                    vec![(start..end, text)],
-                    cursor,
-                    None,
-                    PieceSource::Paste,
-                    Some(view.id),
-                );
-                return false;
-            }
-            insert_text_with_source(buffer, view, &cursor, &text, PieceSource::Paste)
+            insert_or_queue_text(buffer, view, &cursor, text, PieceSource::Paste)
         }
     }
+}
+
+/// Selections this large are copied or cut on the background edit worker.
+const LARGE_CLIPBOARD_CHARS: usize = 64 * 1024;
+
+fn is_large_clipboard_selection(cursor: &CursorRange) -> bool {
+    cursor.as_sorted_char_range().len() >= LARGE_CLIPBOARD_CHARS
+}
+
+/// Insert typed or pasted text, or queue bulk edits for background preparation.
+/// Returns whether the buffer changed this frame.
+fn insert_or_queue_text(
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    cursor: &CursorRange,
+    text: String,
+    source: PieceSource,
+) -> bool {
+    use crate::app::domain::buffer::BULK_TEXT_BYTES;
+    let bulk =
+        text.len() >= BULK_TEXT_BYTES || cursor.as_sorted_char_range().len() >= BULK_TEXT_BYTES / 4;
+    if !bulk {
+        return insert_text_with_source(buffer, view, cursor, &text, source);
+    }
+    let (start, end) = cursor.sorted_indices();
+    buffer.queue_text_preparation(
+        vec![(start..end, text)],
+        *cursor,
+        None,
+        source,
+        Some(view.id),
+    );
+    false
 }
 
 fn handle_key_event(

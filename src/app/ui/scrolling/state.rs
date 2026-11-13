@@ -1,7 +1,6 @@
 use eframe::egui::{Id, Pos2, Ui, Vec2};
 
 use super::acceleration::ScrollAccelerationState;
-use super::target::ScrollTarget;
 
 /// Persistent scroll state stored in `egui::Memory` keyed by a stable `Id`.
 ///
@@ -12,8 +11,6 @@ use super::target::ScrollTarget;
 pub struct ScrollState {
     /// Current scroll offset, in pixels. `(0,0)` is content origin.
     pub offset: Vec2,
-    /// Pending programmatic target to reveal on the next frame.
-    pub pending_target: Option<ScrollTarget>,
     /// Last observed content size (pixels).
     pub content_size: Vec2,
     /// Last observed inner viewport size (pixels, excluding scrollbars).
@@ -21,9 +18,6 @@ pub struct ScrollState {
     /// Scrollbar drag state (per axis): origin pointer position when drag began,
     /// and the offset value at that moment. `None` when not dragging.
     pub scrollbar_drag: [Option<ScrollbarDragState>; 2],
-    /// True if the user has interacted with the scrollbar/wheel since the last
-    /// programmatic scroll. Used to suppress automatic snap-back behaviors.
-    pub user_scrolled: bool,
     pub(super) wheel_acceleration: [ScrollAccelerationState; 2],
 }
 
@@ -43,10 +37,6 @@ impl ScrollState {
 
     pub fn store(self, ui: &Ui, id: Id) {
         ui.ctx().data_mut(|d| d.insert_temp::<Self>(id, self));
-    }
-
-    pub fn request_target(&mut self, target: ScrollTarget) {
-        self.pending_target = Some(target);
     }
 
     pub fn sanitize(&mut self) {

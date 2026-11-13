@@ -55,62 +55,20 @@ const CATEGORIES: [Category; 6] = [
 ];
 
 pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    let search_id = egui::Id::unique("settings.search");
-    let mut query = ui
-        .data_mut(|data| data.get_temp::<String>(search_id))
-        .unwrap_or_default();
-    super::widgets::search_field(ui, &mut query);
-    ui.data_mut(|data| data.insert_temp(search_id, query.clone()));
-    let query = query.trim().to_lowercase();
+    let query = search_query(ui);
     let search = super::search::Search::new(&query);
     search.clone().install(ui);
-    let mut visible = 0;
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            for (label, icon, open) in [
-                ("Collapse all", ARROWS_IN_LINE_VERTICAL, false),
-                ("Expand all", ARROWS_OUT_LINE_VERTICAL, true),
-            ] {
-                let response = super::widget_ids::surface_response(
-                    ui,
-                    ("settings.categories", open),
-                    super::widget_ids::WidgetRole::IconButton,
-                    |ui| {
-                        ui.add_enabled(
-                            query.is_empty(),
-                            egui::Button::new(
-                                egui::RichText::new(icon).font(egui_phosphor::font_id(18.0)),
-                            )
-                            .frame(false)
-                            .min_size(egui::vec2(36.0, SettingsUi::control_height(ui))),
-                        )
-                    },
-                );
-                if response
-                    .accessible_name(label)
-                    .on_hover_text(label)
-                    .clicked()
-                {
-                    // Resolve IDs in the parent scope, after this horizontal row.
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp(egui::Id::unique("settings.expand_all"), open)
-                    });
-                }
-            }
+            expand_collapse_buttons(ui, query.is_empty());
         });
     });
-    if let Some(open) =
-        ui.data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("settings.expand_all")))
+    apply_expand_all_request(ui);
+    let mut visible = 0;
+    for item in CATEGORIES
+        .iter()
+        .filter(|item| matches_category(item, &search))
     {
-        for item in &CATEGORIES {
-            let id = super::widget_ids::local(ui, item.key);
-            ui.data_mut(|data| data.insert_persisted(id, open));
-        }
-    }
-    for item in &CATEGORIES {
-        if !matches_category(item, &search) {
-            continue;
-        }
         visible += 1;
         ui.add_space(SettingsUi::LAYOUT.section_gap);
         category(
@@ -126,6 +84,63 @@ pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut Scratchpad
         ui.label("No matching settings. Try tabs, font or history.");
     }
     super::search::Search::default().install(ui);
+}
+
+/// The search field's normalised text, kept across frames.
+fn search_query(ui: &mut egui::Ui) -> String {
+    let search_id = egui::Id::unique("settings.search");
+    let mut query = ui
+        .data_mut(|data| data.get_temp::<String>(search_id))
+        .unwrap_or_default();
+    super::widgets::search_field(ui, &mut query);
+    let normalised = query.trim().to_lowercase();
+    ui.data_mut(|data| data.insert_temp(search_id, query));
+    normalised
+}
+
+fn expand_all_request_id() -> egui::Id {
+    egui::Id::unique("settings.expand_all")
+}
+
+/// "Collapse all" and "Expand all", disabled while a search reveals matches.
+fn expand_collapse_buttons(ui: &mut egui::Ui, enabled: bool) {
+    for (label, icon, open) in [
+        ("Collapse all", ARROWS_IN_LINE_VERTICAL, false),
+        ("Expand all", ARROWS_OUT_LINE_VERTICAL, true),
+    ] {
+        let response = super::widget_ids::surface_response(
+            ui,
+            ("settings.categories", open),
+            super::widget_ids::WidgetRole::IconButton,
+            |ui| {
+                ui.add_enabled(
+                    enabled,
+                    egui::Button::new(egui::RichText::new(icon).font(egui_phosphor::font_id(18.0)))
+                        .frame(false)
+                        .min_size(egui::vec2(36.0, SettingsUi::control_height(ui))),
+                )
+            },
+        );
+        if response
+            .accessible_name(label)
+            .on_hover_text(label)
+            .clicked()
+        {
+            // Resolve IDs in the parent scope, after this horizontal row.
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(expand_all_request_id(), open));
+        }
+    }
+}
+
+fn apply_expand_all_request(ui: &mut egui::Ui) {
+    let Some(open) = ui.data_mut(|data| data.remove_temp::<bool>(expand_all_request_id())) else {
+        return;
+    };
+    for item in &CATEGORIES {
+        let id = super::widget_ids::local(ui, item.key);
+        ui.data_mut(|data| data.insert_persisted(id, open));
+    }
 }
 
 fn matches_category(category: &Category, search: &super::search::Search) -> bool {

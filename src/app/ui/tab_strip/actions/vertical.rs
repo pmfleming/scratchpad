@@ -1,11 +1,11 @@
 use crate::app::app_state::{ScratchpadApp, frame};
-use crate::app::chrome::{
-    PhosphorButtonColors, phosphor_button, phosphor_button_with_hover_icon_color,
-};
+use crate::app::chrome::{PhosphorButtonColors, phosphor_button_with_colors};
 use crate::app::commands::{AppCommand, FileCommand, SearchCommand};
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
-use crate::app::theme::{CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg};
+use crate::app::theme::{
+    CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg, text_primary,
+};
 use eframe::egui;
 use std::borrow::Cow;
 
@@ -121,6 +121,8 @@ fn render_single_button_row(
     });
 }
 
+/// Caption buttons first, right-aligned, then the file buttons, each wrapped
+/// to `buttons_per_row`.
 fn render_caption_first_rows(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
@@ -129,31 +131,11 @@ fn render_caption_first_rows(
     button_size: egui::Vec2,
     buttons_per_row: usize,
 ) {
-    if !right.is_empty() {
-        render_wrapped_button_section(
-            ui,
-            app,
-            right,
-            button_size,
-            BUTTON_SPACING,
-            buttons_per_row,
-            true,
-        );
-        if !left.is_empty() {
-            ui.add_space(BUTTON_SPACING);
-        }
+    render_wrapped_button_section(ui, app, right, button_size, buttons_per_row, true);
+    if !left.is_empty() && !right.is_empty() {
+        ui.add_space(BUTTON_SPACING);
     }
-    if !left.is_empty() {
-        render_wrapped_button_section(
-            ui,
-            app,
-            left,
-            button_size,
-            BUTTON_SPACING,
-            buttons_per_row,
-            false,
-        );
-    }
+    render_wrapped_button_section(ui, app, left, button_size, buttons_per_row, false);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,48 +240,22 @@ fn render_wrapped_button_section(
     app: &mut ScratchpadApp,
     buttons: &[VerticalActionButton],
     button_size: egui::Vec2,
-    button_spacing: f32,
     buttons_per_row: usize,
     right_justified: bool,
 ) {
-    let row_count = buttons.len().div_ceil(buttons_per_row);
     for (row_index, row) in buttons.chunks(buttons_per_row).enumerate() {
-        render_aligned_button_row(ui, app, row, button_size, button_spacing, right_justified);
-        if row_index + 1 < row_count {
-            ui.add_space(button_spacing);
+        if row_index > 0 {
+            ui.add_space(BUTTON_SPACING);
         }
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = BUTTON_SPACING;
+            if right_justified {
+                let row_width = row_width(row.len(), button_size.x, BUTTON_SPACING);
+                ui.add_space((ui.available_width() - row_width).max(0.0));
+            }
+            render_button_group(ui, app, row, button_size);
+        });
     }
-}
-
-fn render_aligned_button_row(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    buttons: &[VerticalActionButton],
-    button_size: egui::Vec2,
-    button_spacing: f32,
-    right_justified: bool,
-) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = button_spacing;
-        if right_justified {
-            ui.add_space(right_justified_row_leading_space(
-                ui.available_width(),
-                buttons.len(),
-                button_size.x,
-                button_spacing,
-            ));
-        }
-        render_button_group(ui, app, buttons, button_size);
-    });
-}
-
-fn right_justified_row_leading_space(
-    available_width: f32,
-    button_count: usize,
-    button_width: f32,
-    button_spacing: f32,
-) -> f32 {
-    (available_width - row_width(button_count, button_width, button_spacing)).max(0.0)
 }
 
 fn row_width(button_count: usize, button_width: f32, button_spacing: f32) -> f32 {
@@ -313,48 +269,75 @@ fn render_button_group(
     button_size: egui::Vec2,
 ) {
     for button in buttons {
-        render_button(ui, app, button, button_size);
+        let colors = if matches!(button.action, VerticalAction::CloseWindow) {
+            PhosphorButtonColors::with_hover_icon(
+                action_bg(ui),
+                CLOSE_HOVER_BG,
+                text_primary(ui),
+                egui::Color32::WHITE,
+            )
+        } else {
+            PhosphorButtonColors::new(action_bg(ui), action_hover_bg(ui), text_primary(ui))
+        };
+        let response = phosphor_button_with_colors(
+            ui,
+            button.action.id_key(),
+            button.icon,
+            button_size,
+            colors,
+            &button.tooltip,
+        );
+        if response.clicked() {
+            handle_vertical_action(ui.ctx(), app, button.action);
+        }
     }
 }
 
-fn render_button(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    button: &VerticalActionButton,
-    button_size: egui::Vec2,
-) {
-    let is_close = matches!(button.action, VerticalAction::CloseWindow);
-    let (background, hover_background) = if is_close {
-        (action_bg(ui), CLOSE_HOVER_BG)
-    } else {
-        (action_bg(ui), action_hover_bg(ui))
+#[cfg(test)]
+mod tests {
+    use super::{
+        VerticalPrimaryActionsLayout::{CaptionFirstRows, SingleRow},
+        show_vertical_primary_actions, vertical_primary_actions_layout,
     };
-    let response = if is_close {
-        phosphor_button_with_hover_icon_color(
-            ui,
-            button.action.id_key(),
-            button.icon,
-            button_size,
-            PhosphorButtonColors::with_hover_icon(
-                background,
-                hover_background,
-                crate::app::theme::text_primary(ui),
-                egui::Color32::WHITE,
-            ),
-            &button.tooltip,
-        )
-    } else {
-        phosphor_button(
-            ui,
-            button.action.id_key(),
-            button.icon,
-            button_size,
-            background,
-            hover_background,
-            &button.tooltip,
-        )
-    };
-    if response.clicked() {
-        handle_vertical_action(ui.ctx(), app, button.action);
+    use crate::app::app_state::test_support::{test_app, ui_harness};
+    use eframe::egui;
+    use egui_kittest::kittest::Queryable;
+
+    #[test]
+    fn actions_share_one_row_until_they_must_wrap_by_group_then_pairs() {
+        for (width, left, right, expected) in [
+            (300.0, 3, 3, SingleRow),
+            (128.0, 0, 3, SingleRow),
+            (130.0, 3, 3, CaptionFirstRows { buttons_per_row: 3 }),
+            (90.0, 3, 3, CaptionFirstRows { buttons_per_row: 2 }),
+            (40.0, 3, 3, CaptionFirstRows { buttons_per_row: 1 }),
+        ] {
+            assert_eq!(
+                vertical_primary_actions_layout(width, 40.0, 4.0, left, right),
+                expected,
+                "{width} wide"
+            );
+        }
+    }
+
+    #[test]
+    fn narrow_lists_stack_caption_buttons_above_file_buttons() {
+        for (width, stacked) in [(400.0, false), (60.0, true)] {
+            let root = tempfile::tempdir().unwrap();
+            let harness = ui_harness(
+                egui::vec2(width, 400.0),
+                test_app(root.path()),
+                |ui, app| {
+                    assert!(show_vertical_primary_actions(ui, app, true, true));
+                    assert!(!show_vertical_primary_actions(ui, app, false, false));
+                },
+            );
+            let close = harness.get_by_label("Close").rect();
+            let minimize = harness.get_by_label("Minimize").rect();
+            let search = harness.get_by_label_contains("Search").rect();
+            assert_eq!(close.bottom() < search.top(), stacked, "{width}");
+            assert_eq!(minimize.top() < close.top(), stacked, "{width}");
+            harness.get_by_label("Maximize");
+        }
     }
 }

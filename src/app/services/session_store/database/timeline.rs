@@ -1,5 +1,6 @@
 mod preview;
 use super::{Database, error, invalid};
+use crate::app::services::session_store::activity::ActivityKind;
 use crate::app::services::session_store::timeline::{
     TIMELINE_PAGE_SIZE, TimelineCursor, TimelineKind, TimelinePage, TimelineRow,
 };
@@ -37,32 +38,18 @@ impl Database {
                 Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:row.get::<i64>(2).map_err(error)? as u64},timestamp:row.get::<i64>(3).map_err(error)? as u64,kind:TimelineKind::Edit(source),summary:row.get(5).map_err(error)?,name:row.get(6).map_err(error)?,path:row.get::<Option<String>>(7).map_err(error)?.as_deref().map(crate::app::path_identity::encoding::decode).transpose()?.map(|p| p.to_string_lossy().into_owned()),preview:None})
             },
         ).await?;
-        // The engine's UNION plan sorts both full sources. Limit each source
-        // independently, then merge at most two pages of metadata here.
-        rows.extend(self.query_collect(
-            "SELECT a.global_seq,a.document_id,a.observed_at,a.kind,a.name,a.path FROM activity a JOIN documents d ON d.id=a.document_id
-             WHERE (?4='' OR instr(a.search_text,?4)>0 OR instr(d.search_text,?4)>0)
-             AND a.global_seq<=?1 AND (?5=1 OR a.global_seq<?1 OR (a.global_seq=?1 AND (a.document_id<?2 OR (a.document_id=?2 AND 0<?3))))
-             ORDER BY a.global_seq DESC,a.document_id DESC LIMIT ?6",
-            params![sequence,cursor.document.as_str(),node,search.to_lowercase(),i64::from(first),(TIMELINE_PAGE_SIZE+1) as i64],
-            |row| {
-                let kind:String=row.get(3).map_err(error)?;
-                let kind:super::super::activity::ActivityKind=super::super::activity::ActivityKind::from_storage(kind).map_err(invalid)?;
-                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:0},timestamp:row.get::<i64>(2).map_err(error)? as u64,name:row.get(4).map_err(error)?,path:row.get(5).map_err(error)?,summary:kind.summary(),kind:TimelineKind::Activity(kind),preview:None})
-            },
-        ).await?);
-        rows.extend(self.query_collect(
-            "SELECT a.global_seq,a.document_id,a.observed_at,a.payload,a.name,a.path FROM replace_operations a JOIN documents d ON d.id=a.document_id
-             WHERE (?4='' OR instr(a.search_text,?4)>0 OR instr(d.search_text,?4)>0)
-             AND a.global_seq<=?1 AND (?5=1 OR a.global_seq<?1 OR (a.global_seq=?1 AND (a.document_id<?2 OR (a.document_id=?2 AND 0<?3))))
-             ORDER BY a.global_seq DESC,a.document_id DESC LIMIT ?6",
-            params![sequence,cursor.document.as_str(),node,search.to_lowercase(),i64::from(first),(TIMELINE_PAGE_SIZE+1) as i64],
-            |row| {
-                let kind: String = row.get(3).map_err(error)?;
-                let kind = super::super::activity::ActivityKind::from_storage(kind).map_err(invalid)?;
-                Ok(TimelineRow {cursor:TimelineCursor {sequence:row.get::<i64>(0).map_err(error)? as u64,document:row.get(1).map_err(error)?,node:0},timestamp:row.get::<i64>(2).map_err(error)? as u64,name:row.get(4).map_err(error)?,path:row.get(5).map_err(error)?,summary:kind.summary(),kind:TimelineKind::Activity(kind),preview:None})
-            },
-        ).await?);
+        // The engine's UNION plan sorts every full source. Limit each source
+        // independently, then merge at most a few pages of metadata here.
+        for (table, kind) in [("activity", "kind"), ("replace_operations", "payload")] {
+            rows.extend(self.query_collect(
+                &format!("SELECT a.global_seq,a.document_id,a.observed_at,a.{kind},a.name,a.path FROM {table} a JOIN documents d ON d.id=a.document_id
+                 WHERE (?4='' OR instr(a.search_text,?4)>0 OR instr(d.search_text,?4)>0)
+                 AND a.global_seq<=?1 AND (?5=1 OR a.global_seq<?1 OR (a.global_seq=?1 AND (a.document_id<?2 OR (a.document_id=?2 AND 0<?3))))
+                 ORDER BY a.global_seq DESC,a.document_id DESC LIMIT ?6"),
+                params![sequence,cursor.document.as_str(),node,search.to_lowercase(),i64::from(first),(TIMELINE_PAGE_SIZE+1) as i64],
+                activity_row,
+            ).await?);
+        }
         rows.sort_by(|a, b| b.cursor.cmp(&a.cursor));
         let more = rows.len() > TIMELINE_PAGE_SIZE;
         let mut rows: Vec<_> = rows.into_iter().take(TIMELINE_PAGE_SIZE).collect();
@@ -74,4 +61,23 @@ impl Database {
             .flatten();
         Ok(TimelinePage { rows, older })
     }
+}
+
+/// A timeline row for a recorded activity or replace-all operation.
+fn activity_row(row: &turso::Row) -> io::Result<TimelineRow> {
+    let kind: String = row.get(3).map_err(error)?;
+    let kind = ActivityKind::from_storage(kind).map_err(invalid)?;
+    Ok(TimelineRow {
+        cursor: TimelineCursor {
+            sequence: row.get::<i64>(0).map_err(error)? as u64,
+            document: row.get(1).map_err(error)?,
+            node: 0,
+        },
+        timestamp: row.get::<i64>(2).map_err(error)? as u64,
+        name: row.get(4).map_err(error)?,
+        path: row.get(5).map_err(error)?,
+        summary: kind.summary(),
+        kind: TimelineKind::Activity(kind),
+        preview: None,
+    })
 }

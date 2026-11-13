@@ -20,6 +20,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Internal quality refactor with no intended change to behaviour, appearance, settings or file formats. Complex storage, recovery, buffer and panel code is split into smaller steps, duplicated panel chrome is shared, unused code is removed, and tests are consolidated while covering more of the editor. Restoring stored text reads each chunk once, piece-table navigation no longer panics on an out-of-range position, and resource probe reports drop counters that were always zero.
+
 - Replacement prepares every target before committing any file, and reports success only after completion. Regex captures keep their surrounding context, selection scope stays locked through navigation and edits, and replacements verify document identity as well as revision. Searches beyond the result limit keep a bounded preview list and offer a complete replacement review.
 
 - File matching preserves native filenames and Windows case, verifies hard-link aliases, and rechecks changed symlinks before redirecting opens, Save As, or renames. Existing session aliases retain independent edits as recovered copies. Sessions and recent-file settings round-trip non-UTF-8 filenames; missing paths retain explicit resolution failures and use conservative exact-path matching.

@@ -159,7 +159,7 @@ fn tab_preview_text(style: IndentationStyle, display: TabDisplayMode, columns: u
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{IndentationStyle, TabDisplayMode, tab_preview_text};
     #[test]
     fn indentation_preview_uses_joyce_quote() {
         for style in [IndentationStyle::Spaces, IndentationStyle::TabCharacter] {

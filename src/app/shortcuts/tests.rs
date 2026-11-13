@@ -1,9 +1,8 @@
 use super::handle_shortcuts;
-use crate::app::app_state::{ScratchpadApp, workspace::accessors};
-use crate::app::domain::{BufferState, TabManager, WorkspaceTab};
-use crate::app::services::{session_store::SessionStore, settings_store::SettingsStore};
+use crate::app::app_state::{ScratchpadApp, test_support::test_app, workspace::accessors};
+use crate::app::commands::{AppCommand, SettingsCommand, handle_command};
+use crate::app::domain::{BufferState, SplitAxis, TabManager, ViewId, WorkspaceTab};
 use crate::app::shortcut_keymap::ShortcutAction;
-use crate::app::startup::StartupOptions;
 use eframe::egui;
 
 fn press(ctx: &egui::Context, app: &mut ScratchpadApp, key: egui::Key, modifiers: egui::Modifiers) {
@@ -24,9 +23,18 @@ fn press(ctx: &egui::Context, app: &mut ScratchpadApp, key: egui::Key, modifiers
     .clear();
 }
 
+fn zoom_label(app: &ScratchpadApp, view: ViewId) -> String {
+    let tab = app.tab_manager.active_tab().unwrap();
+    tab.layout.view(view).unwrap().zoom_label()
+}
+
+fn line_numbers_visible(app: &ScratchpadApp) -> bool {
+    let tab = app.tab_manager.active_tab().unwrap();
+    tab.layout.line_numbers_visible()
+}
+
 #[test]
 fn zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers() {
-    use crate::app::{app_state::test_support::test_app, domain::SplitAxis};
     let root = tempfile::tempdir().unwrap();
     let mut app = test_app(root.path());
     let mut tab = WorkspaceTab::new(BufferState::new("note".into(), "text".into(), None));
@@ -37,90 +45,42 @@ fn zoom_shortcuts_are_view_local_and_reset_is_distinct_from_line_numbers() {
     let baseline = app.state.app_settings.font_size();
     let ctx = egui::Context::default();
     ctx.options_mut(|options| options.zoom_with_keyboard = false);
-    press(&ctx, &mut app, egui::Key::Equals, egui::Modifiers::CTRL);
-    assert_eq!(
-        app.tab_manager
-            .active_tab()
-            .unwrap()
-            .layout
-            .view(first)
-            .unwrap()
-            .zoom_label(),
-        "110%"
-    );
+    let ctrl = egui::Modifiers::CTRL;
+
+    press(&ctx, &mut app, egui::Key::Equals, ctrl);
+    assert_eq!(zoom_label(&app, first), "110%");
     app.tab_manager
         .active_tab_mut()
         .unwrap()
         .activate_view(second);
-    press(&ctx, &mut app, egui::Key::Minus, egui::Modifiers::CTRL);
-    assert_eq!(
-        app.tab_manager
-            .active_tab()
-            .unwrap()
-            .layout
-            .view(second)
-            .unwrap()
-            .zoom_label(),
-        "90%"
-    );
-    press(&ctx, &mut app, egui::Key::Num0, egui::Modifiers::CTRL);
-    let tab = app.tab_manager.active_tab().unwrap();
-    assert_eq!(tab.layout.view(second).unwrap().zoom_factor(), 1.0);
-    assert_eq!(tab.layout.view(first).unwrap().zoom_label(), "110%");
-    assert!(!tab.layout.line_numbers_visible());
-    press(&ctx, &mut app, egui::Key::Num9, egui::Modifiers::CTRL);
-    assert!(
-        app.tab_manager
-            .active_tab()
-            .unwrap()
-            .layout
-            .line_numbers_visible()
-    );
+    press(&ctx, &mut app, egui::Key::Minus, ctrl);
+    assert_eq!(zoom_label(&app, second), "90%");
+    press(&ctx, &mut app, egui::Key::Num0, ctrl);
+    assert_eq!(zoom_label(&app, second), "100%");
+    assert_eq!(zoom_label(&app, first), "110%");
+    assert!(!line_numbers_visible(&app));
+    press(&ctx, &mut app, egui::Key::Num9, ctrl);
+    assert!(line_numbers_visible(&app));
+
+    // A rebound reset frees its default key.
     app.state
         .app_settings
         .shortcuts
         .bindings
         .insert("reset_zoom".into(), "alt+r".into());
-    press(&ctx, &mut app, egui::Key::Equals, egui::Modifiers::CTRL);
-    press(&ctx, &mut app, egui::Key::Num0, egui::Modifiers::CTRL);
-    assert_eq!(
-        app.tab_manager
-            .active_tab()
-            .unwrap()
-            .layout
-            .view(second)
-            .unwrap()
-            .zoom_label(),
-        "110%"
-    );
+    press(&ctx, &mut app, egui::Key::Equals, ctrl);
+    press(&ctx, &mut app, egui::Key::Num0, ctrl);
+    assert_eq!(zoom_label(&app, second), "110%");
     press(&ctx, &mut app, egui::Key::R, egui::Modifiers::ALT);
-    assert_eq!(
-        app.tab_manager
-            .active_tab()
-            .unwrap()
-            .layout
-            .view(second)
-            .unwrap()
-            .zoom_factor(),
-        1.0
-    );
-    crate::app::commands::handle_command(
+    assert_eq!(zoom_label(&app, second), "100%");
+
+    // Settings own the keyboard while open.
+    handle_command(
         &mut app,
-        crate::app::commands::AppCommand::Settings(
-            crate::app::commands::SettingsCommand::OpenSettings,
-        ),
+        AppCommand::Settings(SettingsCommand::OpenSettings),
     );
-    press(&ctx, &mut app, egui::Key::Equals, egui::Modifiers::CTRL);
-    assert_eq!(
-        app.tab_manager
-            .active_tab()
-            .unwrap()
-            .layout
-            .view(second)
-            .unwrap()
-            .zoom_factor(),
-        1.0
-    );
+    press(&ctx, &mut app, egui::Key::Equals, ctrl);
+    assert_eq!(zoom_label(&app, second), "100%");
     assert_eq!(app.state.app_settings.font_size(), baseline);
 }
 
@@ -178,12 +138,7 @@ fn configured_utility_keys_reach_their_application_actions() {
     ];
     for &(action, check) in cases {
         let root = tempfile::tempdir().unwrap();
-        let mut app = ScratchpadApp::with_stores_and_startup(
-            SessionStore::new(root.path().join("session")),
-            SettingsStore::new(root.path().join("settings")),
-            StartupOptions::default(),
-        );
-        app.set_session_persist_on_drop(false);
+        let mut app = test_app(root.path());
         app.tab_manager = TabManager::for_test_tabs(vec![WorkspaceTab::new(BufferState::new(
             "note".into(),
             "text".into(),

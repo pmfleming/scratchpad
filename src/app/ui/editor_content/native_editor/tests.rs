@@ -98,32 +98,17 @@ fn editor_keeps_tab_and_pins_only_bounded_synchronous_input() {
 }
 
 #[test]
-fn cursor_only_movement_inside_existing_slice_keeps_galley() {
-    let before = Some(CursorRange::one(CharCursor::new(5)));
-    let after = Some(CursorRange::one(CharCursor::new(50)));
-
-    assert!(!should_rebuild_galley_after_input(
-        false, None, None, before, after, 0, 100
-    ));
-}
-
-#[test]
-fn cursor_only_movement_outside_existing_slice_rebuilds_for_reveal() {
-    let before = Some(CursorRange::one(CharCursor::new(5)));
-    let after = Some(CursorRange::one(CharCursor::new(500)));
-
-    assert!(should_rebuild_galley_after_input(
-        false, None, None, before, after, 0, 100
-    ));
-}
-
-#[test]
-fn unchanged_input_keeps_existing_galley() {
-    let cursor = Some(CursorRange::one(CharCursor::new(5)));
-
-    assert!(!should_rebuild_galley_after_input(
-        false, None, None, cursor, cursor, 0, 100
-    ));
+fn cursor_only_input_rebuilds_the_galley_only_when_leaving_the_slice() {
+    // The existing slice covers chars 0..100.
+    for (before, after, rebuild) in [(5, 5, false), (5, 50, false), (5, 500, true)] {
+        let before = Some(CursorRange::one(CharCursor::new(before)));
+        let after = Some(CursorRange::one(CharCursor::new(after)));
+        assert_eq!(
+            should_rebuild_galley_after_input(false, None, None, before, after, 0, 100),
+            rebuild,
+            "{before:?} -> {after:?}"
+        );
+    }
 }
 
 #[test]
@@ -186,88 +171,48 @@ fn undo_after_control_char_edit_restores_document_text() {
 }
 
 #[test]
-fn same_line_edit_requests_horizontal_cursor_reveal() {
-    let buffer = BufferState::new("sample.txt".to_owned(), "alpha beta".to_owned(), None);
-    let mut view = EditorViewState::new(buffer.id);
-    let previous = Some(CursorRange::one(CharCursor::new(1)));
-    view.cursor_range = Some(CursorRange::one(CharCursor::new(2)));
+fn cursor_reveal_after_input_follows_edit_kind_and_drag_state() {
+    use CursorRevealMode::{KeepHorizontalVisible, KeepVisible};
+    // (text, previous cursor, new cursor, word wrap, edited, dragging, expected)
+    for (text, previous, current, word_wrap, changed, dragging, expected) in [
+        // Same-line edits only need horizontal reveal unless lines wrap.
+        (
+            "alpha beta",
+            1,
+            2,
+            false,
+            true,
+            false,
+            Some(KeepHorizontalVisible),
+        ),
+        ("alpha beta", 1, 2, true, true, false, Some(KeepVisible)),
+        // Edits that move to another line and plain cursor moves reveal fully.
+        ("alpha\nbeta", 4, 7, false, true, false, Some(KeepVisible)),
+        ("alpha\nbeta", 1, 3, false, false, false, Some(KeepVisible)),
+        ("alpha", 1, 1, false, true, false, None),
+        // A selection drag clears any pending reveal.
+        ("alpha", 1, 2, false, true, true, None),
+    ] {
+        let buffer = BufferState::new("sample.txt".to_owned(), text.to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id);
+        if dragging {
+            view.request_cursor_reveal(CursorRevealMode::Center);
+        }
+        view.cursor_range = Some(CursorRange::one(CharCursor::new(current)));
+        let previous = Some(CursorRange::one(CharCursor::new(previous)));
 
-    request_cursor_reveal_after_input(&buffer, &mut view, previous, Some(0), false, true, false);
+        request_cursor_reveal_after_input(
+            &buffer,
+            &mut view,
+            previous,
+            Some(0),
+            word_wrap,
+            changed,
+            dragging,
+        );
 
-    assert_eq!(
-        view.cursor_reveal_mode(),
-        Some(CursorRevealMode::KeepHorizontalVisible)
-    );
-}
-
-#[test]
-fn wrapped_same_line_edit_requests_vertical_cursor_reveal() {
-    let buffer = BufferState::new("sample.txt".to_owned(), "alpha beta".to_owned(), None);
-    let mut view = EditorViewState::new(buffer.id);
-    let previous = Some(CursorRange::one(CharCursor::new(1)));
-    view.cursor_range = Some(CursorRange::one(CharCursor::new(2)));
-
-    request_cursor_reveal_after_input(&buffer, &mut view, previous, Some(0), true, true, false);
-
-    assert_eq!(
-        view.cursor_reveal_mode(),
-        Some(CursorRevealMode::KeepVisible)
-    );
-}
-
-#[test]
-fn newline_edit_requests_vertical_cursor_reveal() {
-    let buffer = BufferState::new("sample.txt".to_owned(), "alpha\nbeta".to_owned(), None);
-    let mut view = EditorViewState::new(buffer.id);
-    let previous = Some(CursorRange::one(CharCursor::new(4)));
-    view.cursor_range = Some(CursorRange::one(CharCursor::new(7)));
-
-    request_cursor_reveal_after_input(&buffer, &mut view, previous, Some(0), false, true, false);
-
-    assert_eq!(
-        view.cursor_reveal_mode(),
-        Some(CursorRevealMode::KeepVisible)
-    );
-}
-
-#[test]
-fn cursor_movement_without_edit_requests_keep_visible_reveal() {
-    let buffer = BufferState::new("sample.txt".to_owned(), "alpha\nbeta".to_owned(), None);
-    let mut view = EditorViewState::new(buffer.id);
-    let previous = Some(CursorRange::one(CharCursor::new(1)));
-    view.cursor_range = Some(CursorRange::one(CharCursor::new(3)));
-
-    request_cursor_reveal_after_input(&buffer, &mut view, previous, Some(0), false, false, false);
-
-    assert_eq!(
-        view.cursor_reveal_mode(),
-        Some(CursorRevealMode::KeepVisible)
-    );
-}
-
-#[test]
-fn unchanged_cursor_does_not_request_reveal() {
-    let buffer = BufferState::new("sample.txt".to_owned(), "alpha".to_owned(), None);
-    let cursor = Some(CursorRange::one(CharCursor::new(1)));
-    let mut view = EditorViewState::new(buffer.id);
-    view.cursor_range = cursor;
-
-    request_cursor_reveal_after_input(&buffer, &mut view, cursor, Some(0), false, true, false);
-
-    assert_eq!(view.cursor_reveal_mode(), None);
-}
-
-#[test]
-fn selection_drag_suppresses_cursor_reveal() {
-    let buffer = BufferState::new("sample.txt".to_owned(), "alpha".to_owned(), None);
-    let mut view = EditorViewState::new(buffer.id);
-    view.request_cursor_reveal(CursorRevealMode::Center);
-    let previous = Some(CursorRange::one(CharCursor::new(1)));
-    view.cursor_range = Some(CursorRange::one(CharCursor::new(2)));
-
-    request_cursor_reveal_after_input(&buffer, &mut view, previous, Some(0), false, true, true);
-
-    assert_eq!(view.cursor_reveal_mode(), None);
+        assert_eq!(view.cursor_reveal_mode(), expected, "{text:?} {previous:?}");
+    }
 }
 
 #[test]
@@ -357,13 +302,7 @@ fn home_and_end_move_to_line_boundaries() {
                 ui,
                 &mut buffer,
                 &mut view,
-                TextEditOptions::new(
-                    key.is_none(),
-                    false,
-                    &font,
-                    egui::Color32::WHITE,
-                    EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
-                ),
+                test_options(&font, key.is_none(), false),
                 None,
             );
             assert!(outcome.focused);
@@ -456,13 +395,7 @@ fn middle_press_pastes_only_into_the_target_split_at_the_pointer() {
                         &mut columns[index],
                         &mut buffers[index],
                         &mut views[index],
-                        TextEditOptions::new(
-                            frame == 0 && index == 0,
-                            false,
-                            &font,
-                            egui::Color32::WHITE,
-                            EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
-                        ),
+                        test_options(&font, frame == 0 && index == 0, false),
                         None,
                     );
                     rects[index] = outcome.response.rect;
@@ -496,13 +429,7 @@ fn image_only_paste_does_not_change_plain_text_or_revision() {
             ui,
             &mut buffer,
             &mut view,
-            TextEditOptions::new(
-                true,
-                false,
-                &font,
-                egui::Color32::WHITE,
-                EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
-            ),
+            test_options(&font, true, false),
             None,
         );
         assert!(!outcome.changed);
@@ -511,6 +438,20 @@ fn image_only_paste_does_not_change_plain_text_or_revision() {
     assert_eq!(buffer.text(), "plain text");
     assert_eq!(buffer.document_revision(), revision);
     assert_eq!(buffer.is_dirty, dirty);
+}
+
+fn test_options(
+    font_id: &egui::FontId,
+    request_focus: bool,
+    word_wrap: bool,
+) -> TextEditOptions<'_> {
+    TextEditOptions::new(
+        request_focus,
+        word_wrap,
+        font_id,
+        egui::Color32::WHITE,
+        EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
+    )
 }
 
 fn render_editor_key(
@@ -538,13 +479,7 @@ fn render_editor_key(
             ui,
             buffer,
             view,
-            TextEditOptions::new(
-                true,
-                false,
-                font_id,
-                egui::Color32::WHITE,
-                EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
-            ),
+            test_options(font_id, true, false),
             Some(viewport),
         );
     });
@@ -566,13 +501,7 @@ fn render_wrapped_width(
             ui,
             buffer,
             view,
-            TextEditOptions::new(
-                false,
-                true,
-                font_id,
-                egui::Color32::WHITE,
-                EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
-            ),
+            test_options(font_id, false, true),
             Some(viewport),
         );
     });

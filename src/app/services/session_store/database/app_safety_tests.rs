@@ -24,19 +24,9 @@ fn failed_blocking_restore_cannot_erase_healthy_tabs_after_quarantine() {
     let tabs = tabs();
     store.persist(&tabs, 0, 16.0, false).unwrap();
     let id = tabs[1].active_buffer().temp_id.clone();
-    store
-        .worker()
-        .unwrap()
-        .call(move |db| {
-            block_on(async {
-                db.conn
-                    .execute("UPDATE document_pieces SET body=x'00' WHERE id=?", [id])
-                    .await
-                    .map_err(database::error)?;
-                Ok(())
-            })
-        })
-        .unwrap();
+    store.exec_for_test(&format!(
+        "UPDATE document_pieces SET body=x'00' WHERE id='{id}'"
+    ));
     let mut app = ScratchpadApp::with_stores_and_startup(
         store.clone(),
         SettingsStore::new(root.path().join("settings")),
@@ -53,18 +43,10 @@ fn failed_blocking_restore_cannot_erase_healthy_tabs_after_quarantine() {
     assert!(!app.state.background_io.has_pending_persist());
     session_manager::persist_session_now(&mut app).unwrap();
     drop(app); // default drop persistence is enabled
-    store
-        .worker()
-        .unwrap()
-        .call(|db| {
-            block_on(async {
-                assert_eq!(db.integer("SELECT count(*) FROM tabs").await?, 2);
-                assert_eq!(db.integer("SELECT count(*) FROM document_pieces").await?, 2);
-                assert_eq!(db.integer("SELECT count(*) FROM quarantine").await?, 1);
-                Ok(())
-            })
-        })
-        .unwrap();
+    for (table, rows) in [("tabs", 2), ("document_pieces", 2), ("quarantine", 1)] {
+        let count = store.integer_for_test(&format!("SELECT count(*) FROM {table}"));
+        assert_eq!(count, rows, "{table}");
+    }
     assert_eq!(
         store.load_startup_visible().unwrap().unwrap().tabs[0]
             .active_buffer()
@@ -131,23 +113,7 @@ fn incompatible_session_requires_explicit_reset_then_saves_and_restarts() {
     wait_for_reset(&mut app);
     assert!(!app.state.persistence.session_restore_failed);
     assert!(!app.state.persistence.session_store.writes_blocked());
-    let detail = app
-        .state
-        .status
-        .current
-        .as_ref()
-        .unwrap()
-        .detail
-        .as_ref()
-        .unwrap();
-    let backup = std::path::PathBuf::from(
-        detail
-            .lines()
-            .next()
-            .unwrap()
-            .strip_prefix("Previous session moved to: ")
-            .unwrap(),
-    );
+    let (backup, detail) = reset_backup(&app);
     assert_eq!(std::fs::read(backup.join("session.db")).unwrap(), previous);
     assert!(detail.contains("temporary-file cleanup"));
     let output = logic(&mut app, &ctx, &close_input());
@@ -162,6 +128,15 @@ fn incompatible_session_requires_explicit_reset_then_saves_and_restarts() {
     assert_eq!(restored.tabs.len(), 2);
     assert_eq!(restored.tabs[0].active_buffer().text(), "new edits");
     std::fs::remove_dir_all(backup).unwrap();
+}
+
+/// The backup directory a completed reset reported, and the full status detail.
+fn reset_backup(app: &ScratchpadApp) -> (std::path::PathBuf, String) {
+    let status = app.state.status.current.as_ref().unwrap();
+    let detail = status.detail.clone().unwrap();
+    let first = detail.lines().next().unwrap();
+    let backup = first.strip_prefix("Previous session moved to: ").unwrap();
+    (backup.into(), detail)
 }
 
 fn wait_for_reset(app: &mut ScratchpadApp) {
@@ -204,22 +179,7 @@ fn failed_reset_keeps_saving_paused_and_can_be_retried() {
     session_manager::start_new_session(&mut app, &ctx);
     wait_for_reset(&mut app);
     assert!(!app.state.persistence.session_restore_failed);
-    let detail = app
-        .state
-        .status
-        .current
-        .as_ref()
-        .unwrap()
-        .detail
-        .as_ref()
-        .unwrap();
-    let backup = detail
-        .lines()
-        .next()
-        .unwrap()
-        .strip_prefix("Previous session moved to: ")
-        .unwrap();
-    std::fs::remove_dir_all(backup).unwrap();
+    std::fs::remove_dir_all(reset_backup(&app).0).unwrap();
 }
 
 #[test]
@@ -238,9 +198,7 @@ fn final_split_view_close_retains_latest_text_and_rolls_back_before_removing_the
     let id = tab.buffer_for_view(view).unwrap().temp_id.clone();
     app.tab_manager.set_tabs(vec![tab], 0);
     let store = app.state.persistence.session_store.clone();
-    store.worker().unwrap().call(|db| block_on(async {
-        db.conn.execute_batch("CREATE TRIGGER refuse_view_archive BEFORE INSERT ON closed_tabs BEGIN SELECT RAISE(ABORT,'transient failure'); END;").await.map_err(database::error)
-    })).unwrap();
+    store.exec_for_test("CREATE TRIGGER refuse_view_archive BEFORE INSERT ON closed_tabs BEGIN SELECT RAISE(ABORT,'transient failure'); END;");
     crate::app::commands::perform_close_view(&mut app, view);
     crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 2);
@@ -253,19 +211,7 @@ fn final_split_view_close_retains_latest_text_and_rolls_back_before_removing_the
             .text(),
         "latest unsaved"
     );
-    store
-        .worker()
-        .unwrap()
-        .call(|db| {
-            block_on(async {
-                db.conn
-                    .execute("DROP TRIGGER refuse_view_archive", ())
-                    .await
-                    .map_err(database::error)?;
-                Ok(())
-            })
-        })
-        .unwrap();
+    store.exec_for_test("DROP TRIGGER refuse_view_archive");
     crate::app::commands::perform_close_view(&mut app, view);
     crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.active_tab().unwrap().layout.leaf_count(), 1);
@@ -295,9 +241,7 @@ fn failed_archive_commit_leaves_the_live_tab_open() {
     app.tab_manager.tabs.as_mut_slice()[0]
         .active_buffer_mut()
         .replace_text("latest unsaved text".into());
-    store.worker().unwrap().call(|db| block_on(async {
-        db.conn.execute_batch("CREATE TRIGGER refuse_archive BEFORE INSERT ON closed_tabs BEGIN SELECT RAISE(ABORT, 'transient failure'); END;").await.map_err(database::error)
-    })).unwrap();
+    store.exec_for_test("CREATE TRIGGER refuse_archive BEFORE INSERT ON closed_tabs BEGIN SELECT RAISE(ABORT, 'transient failure'); END;");
     let count = app.tab_manager.tabs.len();
     crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, 0);
     crate::app::app_state::test_support::wait_for_background_io(&mut app);
@@ -306,31 +250,11 @@ fn failed_archive_commit_leaves_the_live_tab_open() {
         app.tab_manager.tabs.as_slice()[0].active_buffer().text(),
         "latest unsaved text"
     );
-    store
-        .worker()
-        .unwrap()
-        .call(|db| {
-            block_on(async {
-                db.conn
-                    .execute("DROP TRIGGER refuse_archive", ())
-                    .await
-                    .map_err(database::error)?;
-                Ok(())
-            })
-        })
-        .unwrap();
+    store.exec_for_test("DROP TRIGGER refuse_archive");
     crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, 0);
     crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.tabs.len(), count - 1);
-    let archive = store.closed_tabs().unwrap().remove(0);
-    assert_eq!(
-        store
-            .restore_closed_tab(&archive.token)
-            .unwrap()
-            .active_buffer()
-            .text(),
-        "latest unsaved text"
-    );
+    assert_eq!(store.newest_closed_text(), "latest unsaved text");
 }
 
 #[test]
@@ -344,9 +268,7 @@ fn retryable_session_save_failure_keeps_window_open_and_does_not_loop() {
         StartupOptions::default(),
     );
     app.set_session_persist_on_drop(false);
-    store.worker().unwrap().call(|db| block_on(async {
-        db.conn.execute_batch("CREATE TRIGGER refuse BEFORE INSERT ON session_state BEGIN SELECT RAISE(ABORT, 'transient failure'); END;").await.map_err(database::error)
-    })).unwrap();
+    store.exec_for_test("CREATE TRIGGER refuse BEFORE INSERT ON session_state BEGIN SELECT RAISE(ABORT, 'transient failure'); END;");
     crate::app::app_state::settings_controller::close_settings(&mut app);
     app.tab_manager.set_tabs(Vec::new(), 0);
     let ctx = egui::Context::default();
@@ -359,19 +281,7 @@ fn retryable_session_save_failure_keeps_window_open_and_does_not_loop() {
         let _ = logic(&mut app, &ctx, &input);
     }
     assert_eq!(app.state.status.history.len(), count);
-    store
-        .worker()
-        .unwrap()
-        .call(|db| {
-            block_on(async {
-                db.conn
-                    .execute("DROP TRIGGER refuse", ())
-                    .await
-                    .map_err(database::error)?;
-                Ok(())
-            })
-        })
-        .unwrap();
+    store.exec_for_test("DROP TRIGGER refuse");
     let _ = logic(&mut app, &ctx, &close_input());
     assert!(app.state.window.close_in_progress);
 }
@@ -406,15 +316,7 @@ fn closing_cold_split_retains_both_documents_and_remaining_layout() {
     let restored = store.load().unwrap().unwrap();
     assert_eq!(restored.tabs[0].active_buffer().text(), "first unsaved");
     assert_eq!(restored.tabs[0].layout.leaf_count(), 1);
-    let archive = store.closed_tabs().unwrap().remove(0);
-    assert_eq!(
-        store
-            .restore_closed_tab(&archive.token)
-            .unwrap()
-            .active_buffer()
-            .text(),
-        "second unsaved"
-    );
+    assert_eq!(store.newest_closed_text(), "second unsaved");
 }
 
 #[test]

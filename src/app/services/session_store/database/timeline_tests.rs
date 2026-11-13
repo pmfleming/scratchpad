@@ -1,6 +1,6 @@
 use super::{
     error,
-    tests::{database, insert, request, tab},
+    test_fixture::{database, exec, insert, request, scalar, tab},
 };
 use futures_lite::future::block_on;
 
@@ -15,13 +15,11 @@ fn pages_use_total_sequence_order_skip_baselines_and_keep_ordinary_edits_metadat
         }
         db.persist(request(&tabs), 1).await.unwrap();
         // Ordinary text previews must not read or decode replay payloads.
-        db.conn
-            .execute(
-                "UPDATE history SET packed_spans=x'00',global_seq=42 WHERE edited_at<>0",
-                (),
-            )
-            .await
-            .unwrap();
+        exec(
+            &db,
+            "UPDATE history SET packed_spans=x'00',global_seq=42 WHERE edited_at<>0",
+        )
+        .await;
         let mut ids = std::collections::HashSet::new();
         let mut before = None;
         loop {
@@ -75,13 +73,11 @@ fn zero_edit_timestamps_and_clock_changes_do_not_hide_or_reorder_activity() {
         insert(&mut live, 0, "first");
         insert(&mut live, 0, "second");
         db.persist(request(&[live]), 1).await.unwrap();
-        db.conn
-            .execute(
-                "UPDATE history SET edited_at=0,global_seq=9223372036854775807 WHERE seq=3",
-                (),
-            )
-            .await
-            .unwrap();
+        exec(
+            &db,
+            "UPDATE history SET edited_at=0,global_seq=9223372036854775807 WHERE seq=3",
+        )
+        .await;
         let page = db.timeline_page(None, vec![], String::new()).await.unwrap();
         assert_eq!(page.rows.len(), 2);
         assert_eq!(page.rows[0].cursor.node, 3);
@@ -166,14 +162,8 @@ fn whitespace_previews_are_exact_bounded_and_optional() {
             assert_eq!(row.preview, expected, "case {i}");
         }
         // Unavailable bytes must not prevent navigation metadata from displaying.
-        db.conn
-            .execute("DELETE FROM document_tail", ())
-            .await
-            .unwrap();
-        db.conn
-            .execute("DELETE FROM chunk_bodies", ())
-            .await
-            .unwrap();
+        exec(&db, "DELETE FROM document_tail").await;
+        exec(&db, "DELETE FROM chunk_bodies").await;
         let missing = db.timeline_page(None, vec![], String::new()).await.unwrap();
         assert_eq!(missing.rows.len(), page.rows.len());
         assert!(missing.rows.iter().all(|r| r.preview.is_none()));
@@ -216,11 +206,6 @@ fn coalesced_whitespace_preview_crosses_incremental_tail_segments() {
                 " ".repeat(at + 1)
             );
         }
-        assert!(
-            db.integer("SELECT count(*) FROM document_tail")
-                .await
-                .unwrap()
-                > 1
-        );
+        assert!(scalar(&db, "SELECT count(*) FROM document_tail").await > 1);
     });
 }

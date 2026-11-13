@@ -1,6 +1,6 @@
 use super::{
     Database, error,
-    tests::{database, request, tab},
+    test_fixture::{database, request, scalar, tab},
 };
 use crate::app::{
     app_state::{test_support, workspace_controller},
@@ -33,14 +33,9 @@ fn activity_alone_commits_and_repeated_captures_are_idempotent() {
             assert!(profile.manifest_write_ns > 0);
             assert_eq!(profile.snapshot_bytes_read, 0);
             assert_eq!(profile.snapshot_bytes_hashed, 0);
+            assert_eq!(scalar(&db, "SELECT count(*) FROM activity").await, 1);
             assert_eq!(
-                db.integer("SELECT count(*) FROM activity").await.unwrap(),
-                1
-            );
-            assert_eq!(
-                db.integer("SELECT edit_seq FROM document_history")
-                    .await
-                    .unwrap(),
+                scalar(&db, "SELECT edit_seq FROM document_history").await,
                 recency
             );
         }
@@ -71,10 +66,7 @@ fn activity_and_document_changes_roll_back_together_when_a_reference_is_missing(
         let mut save = request(&tabs);
         save.activity.push(event);
         assert!(db.persist(save, 2).await.is_err());
-        assert_eq!(
-            db.integer("SELECT count(*) FROM activity").await.unwrap(),
-            0
-        );
+        assert_eq!(scalar(&db, "SELECT count(*) FROM activity").await, 0);
         assert_eq!(
             db.read_all_contents().await.unwrap()[&tabs[0].active_buffer().temp_id],
             "before"
@@ -227,28 +219,14 @@ fn failed_close_activity_commit_keeps_the_document_open_and_pending_work_retryab
     let mut app = test_support::test_app(root.path());
     FileController::open_paths(&mut app, vec![path]);
     let store = app.state.persistence.session_store.clone();
-    store.worker().unwrap().call(|db|block_on(async {
-        db.conn.execute_batch("CREATE TRIGGER refuse_closed BEFORE INSERT ON activity WHEN new.kind='closed' BEGIN SELECT RAISE(ABORT,'injected close failure'); END;").await.map_err(error)
-    })).unwrap();
+    store.exec_for_test("CREATE TRIGGER refuse_closed BEFORE INSERT ON activity WHEN new.kind='closed' BEGIN SELECT RAISE(ABORT,'injected close failure'); END;");
     let count = app.tab_manager.tabs.len();
     let index = app.tab_manager.active_tab_index;
     workspace_controller::perform_close_tab_no_persist(&mut app, index);
     crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.tabs.len(), count);
     assert_eq!(app.state.persistence.pending_activity.len(), 1);
-    store
-        .worker()
-        .unwrap()
-        .call(|db| {
-            block_on(async {
-                db.conn
-                    .execute("DROP TRIGGER refuse_closed", ())
-                    .await
-                    .map_err(error)?;
-                Ok(())
-            })
-        })
-        .unwrap();
+    store.exec_for_test("DROP TRIGGER refuse_closed");
     workspace_controller::perform_close_tab_no_persist(&mut app, index);
     crate::app::app_state::test_support::wait_for_background_io(&mut app);
     assert_eq!(app.tab_manager.tabs.len(), count - 1);
@@ -373,8 +351,8 @@ fn replace_operation_and_group_members_survive_database_reopen() {
             buffer
                 .replace_char_ranges_with_undo(
                     &[(0..count, "bar".into())],
-                    Default::default(),
-                    Default::default(),
+                    crate::app::domain::CursorRange::default(),
+                    crate::app::domain::CursorRange::default(),
                 )
                 .unwrap();
         }
@@ -412,9 +390,7 @@ fn replace_operation_and_group_members_survive_database_reopen() {
         );
         assert_eq!(rows[0].summary, "Replace all · 3 matches in 2 files");
         assert_eq!(
-            db.integer("SELECT count(*) FROM replace_operations")
-                .await
-                .unwrap(),
+            scalar(&db, "SELECT count(*) FROM replace_operations").await,
             1
         );
     });

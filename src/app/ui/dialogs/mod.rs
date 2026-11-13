@@ -2,6 +2,7 @@ mod common;
 mod encoding;
 mod pending;
 pub(crate) mod recovery;
+mod scrubber_chrome;
 mod status_history;
 mod text_history;
 pub(crate) mod zoom_scrubber;

@@ -1,6 +1,10 @@
-use super::*;
-use crate::app::app_state::test_support::{test_app, wait_for_background_io};
-use crate::app::domain::{BufferState, WorkspaceTab};
+use super::show_encoding_window;
+use crate::app::app_state::{
+    ScratchpadApp, frame,
+    test_support::{disk_buffer, test_app, ui_harness, wait_for_background_io, write_file},
+};
+use crate::app::domain::WorkspaceTab;
+use eframe::egui;
 use egui_kittest::{
     Harness,
     kittest::{NodeT, Queryable},
@@ -13,13 +17,9 @@ struct Fixture {
 
 fn app_with_file(dirty: bool) -> (Fixture, ScratchpadApp) {
     let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("notes.txt");
-    std::fs::write(&path, "text").unwrap();
+    let path = write_file(root.path(), "notes.txt", "text");
     let mut app = test_app(root.path());
-    let mut buffer = BufferState::new("notes.txt".into(), "text".into(), Some(path.clone()));
-    buffer.sync_to_disk_state(
-        crate::app::services::file_service::FileService::read_disk_state(&path).ok(),
-    );
+    let mut buffer = disk_buffer(&path, "text");
     buffer.is_dirty = dirty;
     app.tab_manager.tabs.as_mut_slice()[0] = WorkspaceTab::new(buffer);
     frame::open_encoding_dialog(&mut app);
@@ -27,22 +27,9 @@ fn app_with_file(dirty: bool) -> (Fixture, ScratchpadApp) {
 }
 
 fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1100.0, 900.0))
-        .with_context_setup(|ctx| {
-            crate::app::fonts::apply_editor_fonts(
-                ctx,
-                &crate::app::fonts::EditorFontSelection::scratchpad(
-                    crate::app::fonts::EditorFontPreset::Standard,
-                ),
-                4.0,
-            )
-            .unwrap();
-            ctx.options_mut(|o| o.warn_on_id_clash = true);
-        })
-        .build_ui_state(|ui, app| show_encoding_window(ui.ctx(), app), app);
-    harness.run_steps(3);
-    harness
+    ui_harness(egui::vec2(1100.0, 900.0), app, |ui, app| {
+        show_encoding_window(ui.ctx(), app);
+    })
 }
 
 fn press(harness: &mut Harness<'static, ScratchpadApp>, key: egui::Key) {

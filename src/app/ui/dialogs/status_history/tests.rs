@@ -1,7 +1,7 @@
 use super::model::{Counts, StatusRow, clock_at, rows};
 use crate::app::app_state::{
     ScratchpadApp, StatusDomain, StatusFilter, StatusMessage, StatusSeverity, StatusState,
-    test_support::test_app,
+    test_support::{test_app, ui_harness},
 };
 use eframe::egui;
 use egui_kittest::{Harness, kittest::Queryable};
@@ -18,26 +18,9 @@ fn message(id: u64, severity: StatusSeverity, text: &str) -> StatusMessage {
 }
 
 fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
-    let mut harness = Harness::builder()
-        .allow_missing_glyphs()
-        .with_size(egui::vec2(1100.0, 900.0))
-        .with_context_setup(|ctx| {
-            crate::app::fonts::apply_editor_fonts(
-                ctx,
-                &crate::app::fonts::EditorFontSelection::scratchpad(
-                    crate::app::fonts::EditorFontPreset::Standard,
-                ),
-                4.0,
-            )
-            .unwrap();
-            ctx.options_mut(|o| o.warn_on_id_clash = true);
-        })
-        .build_ui_state(
-            |ui, app| super::show_status_history_window(ui.ctx(), app),
-            app,
-        );
-    harness.run_steps(3);
-    harness
+    ui_harness(egui::vec2(1100.0, 900.0), app, |ui, app| {
+        super::show_status_history_window(ui.ctx(), app);
+    })
 }
 
 /// An app with three messages, oldest first, and the panel open.

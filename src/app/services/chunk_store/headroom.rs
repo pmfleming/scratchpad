@@ -103,7 +103,7 @@ pub struct AdmissionObservation {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{MemorySample, memory_pressure};
     #[test]
     fn memory_profiles_pressure_and_failure_budget_bound_admission() {
         for (available, expected) in [

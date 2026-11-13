@@ -274,11 +274,6 @@ impl ScratchpadApp {
         toggle_search(self);
     }
 
-    #[must_use]
-    pub fn search_open(&self) -> bool {
-        self.state.search_state.open()
-    }
-
     pub fn set_search_query(&mut self, query: impl Into<String>) {
         set_search_query(self, query);
     }

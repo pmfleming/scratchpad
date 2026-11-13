@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    SettingsUi, StorageUsage, chart, counted, details, egui, format_bytes, payload_rows,
+    payload_total, summary,
+};
+use crate::app::app_state::test_support::apply_test_fonts;
 use egui_kittest::{Harness, kittest::Queryable};
 
 fn sample_usage() -> StorageUsage {
@@ -11,11 +15,6 @@ fn sample_usage() -> StorageUsage {
         allocated_bytes: Some(10_527_264),
         ..Default::default()
     }
-}
-fn setup(ctx: &egui::Context) {
-    let mut fonts = egui::FontDefinitions::default();
-    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-    ctx.set_fonts(fonts);
 }
 
 #[test]
@@ -59,7 +58,7 @@ fn both_pies_and_exact_values_are_visible_without_nested_disclosures() {
         let mut harness = Harness::builder()
             .with_size(egui::vec2(800.0, 1600.0))
             .with_context_setup(move |ctx| {
-                setup(ctx);
+                apply_test_fonts(ctx);
                 ctx.set_visuals(if dark {
                     egui::Visuals::dark()
                 } else {
@@ -216,7 +215,7 @@ fn unavailable_recovery_is_not_an_empty_chart() {
     usage.allocated_bytes = None;
     let mut harness = Harness::builder()
         .with_size(egui::vec2(800.0, 1000.0))
-        .with_context_setup(setup)
+        .with_context_setup(apply_test_fonts)
         .build_ui_state(
             |ui, usage| {
                 ui.set_width(634.0);

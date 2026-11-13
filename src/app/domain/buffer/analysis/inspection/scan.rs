@@ -106,62 +106,24 @@ impl InspectionState {
 
     fn observe_text(&mut self, text: &str) {
         let bytes = text.as_bytes();
-        if let Some(first) = bytes.first() {
-            if !self.seen_any {
-                self.starts_with_lf = *first == b'\n';
-                self.seen_any = true;
-            }
-            self.ends_with_cr = bytes.last() == Some(&b'\r');
-            self.ends_with_lf = bytes.last() == Some(&b'\n');
-        }
-
+        self.observe_edges(bytes);
         if bytes.len() >= 64 && ordinary_utf8(bytes) {
-            let mut lines = memchr::memchr_iter(b'\n', bytes).count();
-            if self.pending_cr {
-                self.pending_cr = false;
-                if bytes[0] == b'\n' {
-                    self.record_crlf();
-                    lines -= 1;
-                } else {
-                    self.record_cr();
-                }
-            }
-            self.line_count += lines;
-            self.line_ending_counts.lf += lines;
-            self.is_ascii_subset &= bytes.is_ascii();
+            self.observe_ordinary_utf8(bytes);
             return;
         }
 
         let mut index = 0usize;
         while index < bytes.len() {
             let byte = bytes[index];
-            if self.pending_cr {
-                self.pending_cr = false;
-                if byte == b'\n' {
-                    self.record_crlf();
-                    index += 1;
-                    continue;
-                }
-                self.record_cr();
+            if self.resolve_pending_cr(byte) {
+                index += 1;
+                continue;
             }
-
-            // The reduction over 32 bytes can vectorize without platform-specific
-            // intrinsics. Controls and UTF-8 retain the scalar decoder below.
-            if (b' '..=b'~').contains(&byte) {
-                if let Some(block) = bytes.get(index..index + 32)
-                    && printable_ascii_block(block.try_into().unwrap())
-                {
-                    index += 32;
-                    continue;
-                }
-                if let Some(word) = bytes.get(index..index + 8)
-                    && printable_ascii_word(word.try_into().unwrap())
-                {
-                    index += 8;
-                    continue;
-                }
+            let printable = printable_ascii_run(&bytes[index..]);
+            if printable > 0 {
+                index += printable;
+                continue;
             }
-
             match byte {
                 b'\r' => self.pending_cr = true,
                 b'\n' => self.record_lf(),
@@ -174,6 +136,46 @@ impl InspectionState {
             }
             index += 1;
         }
+    }
+
+    /// Tracks the first and last bytes seen, which decide leading-LF and
+    /// trailing CR/LF joins across spans.
+    fn observe_edges(&mut self, bytes: &[u8]) {
+        let (Some(&first), Some(&last)) = (bytes.first(), bytes.last()) else {
+            return;
+        };
+        if !self.seen_any {
+            self.starts_with_lf = first == b'\n';
+            self.seen_any = true;
+        }
+        self.ends_with_cr = last == b'\r';
+        self.ends_with_lf = last == b'\n';
+    }
+
+    /// Counts a span without CR or artifact bytes with whole-slice passes.
+    fn observe_ordinary_utf8(&mut self, bytes: &[u8]) {
+        let mut lines = memchr::memchr_iter(b'\n', bytes).count();
+        if self.resolve_pending_cr(bytes[0]) {
+            lines -= 1;
+        }
+        self.line_count += lines;
+        self.line_ending_counts.lf += lines;
+        self.is_ascii_subset &= bytes.is_ascii();
+    }
+
+    /// Settles a CR left pending by the previous byte. Returns true when `next`
+    /// is its LF, which then belongs to the recorded CRLF.
+    fn resolve_pending_cr(&mut self, next: u8) -> bool {
+        if !self.pending_cr {
+            return false;
+        }
+        self.pending_cr = false;
+        if next == b'\n' {
+            self.record_crlf();
+            return true;
+        }
+        self.record_cr();
+        false
     }
 
     fn observe_non_ascii_byte(&mut self, bytes: &[u8], index: usize) {
@@ -219,14 +221,37 @@ impl InspectionState {
 
 // Scan the common UTF-8 case with independent vectorizable passes. CR and
 // artifact lead bytes retain the existing decoder, including cross-span CRLF.
-#[allow(clippy::needless_bitwise_bool)] // Keep the range mask vectorizable.
+// Masks combine as `u8` bit operations so the reduction stays branch-free.
 fn ordinary_utf8(bytes: &[u8]) -> bool {
     let controls = bytes.iter().fold(0u8, |mask, &byte| {
-        mask | u8::from(((byte < b' ') & (byte.wrapping_sub(b'\t') > 1)) | (byte == 0x7f))
+        mask | (u8::from(byte < b' ') & u8::from(byte.wrapping_sub(b'\t') > 1))
+            | u8::from(byte == 0x7f)
     });
     controls == 0
         && memchr::memchr3(0xc2, 0xd8, 0xe2, bytes).is_none()
         && memchr::memchr(0xef, bytes).is_none()
+}
+
+/// Length of the printable-ASCII block or word that starts `bytes`, or 0.
+/// The reduction over 32 bytes can vectorize without platform-specific
+/// intrinsics. Controls and UTF-8 retain the scalar decoder.
+fn printable_ascii_run(bytes: &[u8]) -> usize {
+    if !bytes
+        .first()
+        .is_some_and(|byte| (b' '..=b'~').contains(byte))
+    {
+        return 0;
+    }
+    if bytes.first_chunk::<32>().is_some_and(printable_ascii_block) {
+        return 32;
+    }
+    if bytes
+        .first_chunk::<8>()
+        .is_some_and(|word| printable_ascii_word(*word))
+    {
+        return 8;
+    }
+    0
 }
 
 fn printable_ascii_word(bytes: [u8; 8]) -> bool {

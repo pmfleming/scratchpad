@@ -17,7 +17,7 @@ use crate::app::{
         ScratchpadApp,
         workspace::{accessors, mutation},
     },
-    domain::buffer::TextHistoryEvent,
+    domain::{BufferState, buffer::TextHistoryEvent},
 };
 use eframe::egui;
 pub(crate) use scrubber::history_scrubbing;
@@ -65,14 +65,8 @@ fn close(ctx: &egui::Context, app: &mut ScratchpadApp) {
 fn navigate(ctx: &egui::Context, app: &mut ScratchpadApp, buffer: u64, node: u64) -> bool {
     let focused = ctx.memory(|m| m.has_focus(focus_id()) || m.has_focus(scrubber::focus_id()));
     let result = mutation::navigate_text_history(app, buffer, node, true);
-    if focused
-        && let Some(view) = app
-            .tab_manager
-            .active_tab()
-            .and_then(|t| t.layout.active_view())
-            .map(|v| v.id)
-    {
-        accessors::consume_focus_request(app, view);
+    if focused {
+        keep_focus_from_editor(app);
     }
     if result && let Some(tab) = app.tab_manager.active_tab() {
         let buffer = tab.active_buffer();
@@ -87,11 +81,31 @@ fn navigate(ctx: &egui::Context, app: &mut ScratchpadApp, buffer: u64, node: u64
     result
 }
 
-pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    if app.state.dialogs.any_modal_open()
+/// Modals, menus and pending prompts keep History and the scrubbers from reading keys.
+pub(super) fn keys_belong_elsewhere(ctx: &egui::Context, app: &ScratchpadApp) -> bool {
+    app.state.dialogs.any_modal_open()
         || egui::Popup::is_any_open(ctx)
         || accessors::pending_action(app).is_some()
+}
+
+/// Drops the editor's pending focus request so History or the scrubber keeps focus.
+fn keep_focus_from_editor(app: &mut ScratchpadApp) {
+    if let Some(view) = app
+        .tab_manager
+        .active_tab()
+        .and_then(|t| t.layout.active_view())
+        .map(|v| v.id)
     {
+        accessors::consume_focus_request(app, view);
+    }
+}
+
+fn history_ui(ctx: &egui::Context) -> Option<HistoryUi> {
+    ctx.data(|d| d.get_temp::<HistoryUi>(state_key()))
+}
+
+pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    if keys_belong_elsewhere(ctx, app) {
         return;
     }
     let rail = app.state.dialogs.text_history.is_open() && ctx.memory(|m| m.has_focus(focus_id()));
@@ -108,43 +122,40 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
         }
         return;
     }
-    let timeline = rail
-        && ctx
-            .data(|d| d.get_temp::<HistoryUi>(state_key()))
-            .is_some_and(|s| s.all_files);
+    let timeline = rail && history_ui(ctx).is_some_and(|s| s.all_files);
     if timeline && let Some(action) = timeline::keyboard(ctx, app) {
         timeline::apply(ctx, app, action);
         return;
     }
-    if resume_editor_input(ctx, app) {
+    if resume_editor_input(ctx, app) || timeline {
         return;
     }
-    if timeline {
-        return;
-    }
-    let selected = ctx
-        .data(|d| d.get_temp::<HistoryUi>(state_key()))
-        .and_then(|s| s.selected);
-    let id = if rail {
-        selected.or_else(|| active_buffer(app))
+    // History follows its chosen file; the scrubber always follows the active one.
+    let selected = if rail {
+        history_ui(ctx).and_then(|s| s.selected)
     } else {
-        active_buffer(app)
+        None
     };
-    let Some(id) = id else {
+    let Some(id) = selected.or_else(|| active_buffer(app)) else {
         return;
     };
-    let Some(buffer) = app
+    let target = app
         .tab_manager
         .tabs
         .as_slice()
         .iter()
         .find_map(|tab| tab.buffer_by_id(id))
-    else {
-        return;
-    };
+        .and_then(|buffer| keyboard_target(ctx, buffer));
+    if let Some(target) = target {
+        navigate(ctx, app, id, target);
+    }
+}
+
+/// Where the arrow, Home and End keys pressed this frame move Now along the route.
+fn keyboard_target(ctx: &egui::Context, buffer: &BufferState) -> Option<u64> {
     let document = buffer.document();
-    let mut position = document.operation_undo_depth();
     let route = document.history_route();
+    let mut position = document.operation_undo_depth();
     let mut changed = false;
     ctx.input_mut(|i| {
         for (key, target) in [
@@ -161,17 +172,11 @@ pub(crate) fn handle_text_history_navigation(ctx: &egui::Context, app: &mut Scra
             }
         }
     });
-    let target = position.checked_sub(1).map_or(0, |i| route[i]);
-    if changed {
-        navigate(ctx, app, id, target);
-    }
+    changed.then(|| position.checked_sub(1).map_or(0, |i| route[i]))
 }
 
 pub(crate) fn dismiss_text_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    if app.state.dialogs.any_modal_open()
-        || egui::Popup::is_any_open(ctx)
-        || accessors::pending_action(app).is_some()
-    {
+    if keys_belong_elsewhere(ctx, app) {
         return;
     }
     if (app.state.dialogs.text_history.is_open() || app.state.dialogs.history_scrubber.is_open())
@@ -217,78 +222,87 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
     }
 }
 
+/// What the History panel asked for this frame, applied once the panel is drawn.
+#[derive(Default)]
+struct PanelOutcome {
+    navigate: Option<(u64, u64)>,
+    timeline: Option<timeline::Action>,
+    forgotten: Option<u64>,
+    reopen: Option<selection::ArchivedFile>,
+}
+
 fn show_history(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let (mut state, old_selected, first) = prepare_history_state(ctx, app);
-    let mut action = None;
-    let mut forgotten = None;
-    let mut reopen = None;
-    let mut focus = false;
-    let mut timeline_action = None;
+    let mut outcome = PanelOutcome::default();
     let should_close = panel::show(ctx, app, &mut state, |ui, app, state| {
-        if state.open_error {
-            ui.colored_label(
-                ui.visuals().error_fg_color,
-                "Could not open that history target. Details are in status history.",
-            );
-        }
-        if state.pending_file.is_some() {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label("Opening document…");
-            });
-        }
-        if state.all_files {
-            recent::search(ui, state);
-        } else {
-            reopen = recent::picker(ui, app, state);
-        }
-        footer::validate(app, state);
-        forgotten = footer::panel(ui, app, state);
-        let height = ui.available_height().max(30.0);
-        if state.all_files {
-            timeline_action = timeline::show(ui, app, state, height);
-            focus = timeline_action.is_some() || std::mem::take(&mut state.restore_focus);
-            history_focus(ui, ctx, app, focus, first);
-            return;
-        }
-        let outcome = list::show(ui, app, state, height);
-        action = outcome.navigate;
-        focus = outcome.focus || std::mem::take(&mut state.restore_focus);
-        history_focus(ui, ctx, app, focus, first);
+        outcome = panel_contents(ui, app, state, first);
     });
-    let activate =
-        if action.is_none() && (state.file_picked || old_selected != state.selected) && !first {
-            state.selected
-        } else {
-            None
-        };
+    let picked = state.file_picked || old_selected != state.selected;
+    let activate = (outcome.navigate.is_none() && picked && !first)
+        .then_some(state.selected)
+        .flatten();
     ctx.data_mut(|d| d.insert_temp(state_key(), state));
     if let Some(id) = activate {
         selection::activate(ctx, app, id);
     }
-    if let Some(action) = timeline_action {
+    if let Some(action) = outcome.timeline {
         timeline::apply(ctx, app, action);
     }
-    if let Some((buffer, node)) = action {
+    if let Some((buffer, node)) = outcome.navigate {
         navigate(ctx, app, buffer, node);
     }
-    if let Some(id) = forgotten {
+    if let Some(id) = outcome.forgotten {
         mutation::clear_text_history(app, &[id]);
     }
-    if let Some(file) = reopen {
+    if let Some(file) = outcome.reopen {
         selection::reopen(ctx, app, file);
     }
     if should_close {
         close(ctx, app);
-    } else if ctx.memory(|m| m.has_focus(focus_id()))
-        && let Some(view) = app
-            .tab_manager
-            .active_tab()
-            .and_then(|t| t.layout.active_view())
-            .map(|v| v.id)
-    {
-        accessors::consume_focus_request(app, view);
+    } else if ctx.memory(|m| m.has_focus(focus_id())) {
+        keep_focus_from_editor(app);
     }
+}
+
+/// Notices, the file picker or search, the footer, then the timeline or one file's list.
+fn panel_contents(
+    ui: &mut egui::Ui,
+    app: &ScratchpadApp,
+    state: &mut HistoryUi,
+    first: bool,
+) -> PanelOutcome {
+    let mut outcome = PanelOutcome::default();
+    if state.open_error {
+        ui.colored_label(
+            ui.visuals().error_fg_color,
+            "Could not open that history target. Details are in status history.",
+        );
+    }
+    if state.pending_file.is_some() {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label("Opening document…");
+        });
+    }
+    if state.all_files {
+        recent::search(ui, state);
+    } else {
+        outcome.reopen = recent::picker(ui, app, state);
+    }
+    footer::validate(app, state);
+    outcome.forgotten = footer::panel(ui, app, state);
+    let height = ui.available_height().max(30.0);
+    let acted = if state.all_files {
+        outcome.timeline = timeline::show(ui, app, state, height);
+        outcome.timeline.is_some()
+    } else {
+        let list = list::show(ui, app, state, height);
+        outcome.navigate = list.navigate;
+        list.focus
+    };
+    let focus = acted || std::mem::take(&mut state.restore_focus);
+    history_focus(ui, app, focus, first);
+    outcome
 }
 
 fn prepare_history_state(
@@ -336,13 +350,7 @@ fn prepare_history_state(
     (state, old_selected, first)
 }
 
-fn history_focus(
-    ui: &egui::Ui,
-    ctx: &egui::Context,
-    app: &ScratchpadApp,
-    focus: bool,
-    first: bool,
-) {
+fn history_focus(ui: &egui::Ui, app: &ScratchpadApp, focus: bool, first: bool) {
     let response = crate::app::ui::widget_ids::interact(
         ui,
         ui.min_rect(),
@@ -355,7 +363,7 @@ fn history_focus(
         response.request_focus();
     }
     if response.has_focus() {
-        style::lock_navigation_focus(ctx, focus_id());
+        style::lock_navigation_focus(ui.ctx(), focus_id());
     }
 }
 

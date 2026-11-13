@@ -1,3 +1,4 @@
+use crate::app::chrome::{MenuRow, menu_row_button, with_flat_row_visuals};
 use crate::app::services::settings_store::{TabListPosition, TabOrderDirection, TabOrderMode};
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
@@ -5,7 +6,7 @@ use crate::app::theme::{
     action_bg, action_hover_bg, border, tab_active_bg, tab_selected_accent, tab_selected_bg,
     text_primary,
 };
-use crate::app::ui::{visuals::with_visual_overrides, widget_ids};
+use crate::app::ui::{panel_style, visuals::with_visual_overrides, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT, ARROW_UP, CARET_RIGHT, SORT_ASCENDING, SORT_DESCENDING,
@@ -18,8 +19,7 @@ pub(super) const ORDER_SUBMENU_WIDTH: f32 = 116.0;
 pub(super) const OPEN_FILE_SUBMENU_WIDTH: f32 = 380.0;
 pub(super) const ROW_HEIGHT: f32 = 28.0;
 pub(super) const CARET_WIDTH: f32 = 28.0;
-pub(super) const ORDER_DIRECTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
-pub(super) const OPEN_DISPOSITION_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
+pub(super) const ICON_CHOICE_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
 
 pub(super) fn menu_button(
     ui: &mut egui::Ui,
@@ -28,7 +28,7 @@ pub(super) fn menu_button(
     icon: Option<&str>,
     enabled: bool,
 ) -> bool {
-    let keys = menu_shortcut(label).and_then(|action| shortcut_tooltips::keys(ui.ctx(), action));
+    let keys = menu_shortcut_keys(ui, label);
     menu_value_button(ui, width, label, icon, keys.as_deref(), enabled)
 }
 
@@ -41,28 +41,19 @@ pub(super) fn menu_value_button(
     value: Option<&str>,
     enabled: bool,
 ) -> bool {
-    with_row_visuals(ui, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            ("tab_context.menu_button", label),
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add_enabled(
-                    enabled,
-                    egui::Button::new("")
-                        .min_size(egui::vec2(width, ROW_HEIGHT))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
-        paint_row_label(ui, response.rect, icon, label, value, enabled);
-        let clicked = response.clicked();
-        if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui, label) {
-            response.on_hover_text(tooltip);
-        }
-        clicked
-    })
+    let row = MenuRow {
+        label,
+        icon,
+        trailing: value,
+        tooltip: shortcut_tooltip_for_menu_label(ui, label),
+        enabled,
+    };
+    menu_row_button(
+        ui,
+        ("tab_context.menu_button", label),
+        egui::vec2(width, ROW_HEIGHT),
+        row,
+    )
 }
 
 pub(super) fn selectable_menu_button(
@@ -71,7 +62,7 @@ pub(super) fn selectable_menu_button(
     label: &str,
     selected: bool,
 ) -> bool {
-    with_row_visuals(ui, |ui| {
+    with_flat_row_visuals(ui, |ui| {
         let response = widget_ids::surface_response(
             ui,
             ("tab_context.selectable_menu_button", label),
@@ -87,7 +78,7 @@ pub(super) fn selectable_menu_button(
         if selected {
             paint_selected_row(ui, response.rect);
         }
-        paint_row_label(ui, response.rect, None, label, None, true);
+        panel_style::paint_menu_row(ui, response.rect, None, label, None, true);
         response.clicked()
     })
 }
@@ -98,37 +89,17 @@ pub(super) fn order_direction_button(
     selected: bool,
 ) -> bool {
     let (icon, tooltip) = tab_order_direction_icon_and_tooltip(direction);
-    with_order_direction_button_visuals(ui, selected, |ui| {
-        let selected_stroke = if selected {
-            egui::Stroke::new(1.5, tab_selected_accent(ui).gamma_multiply(0.95))
-        } else {
-            egui::Stroke::new(1.0, border(ui))
-        };
-        let button = egui::Button::new("")
-            .min_size(ORDER_DIRECTION_BUTTON_SIZE)
-            .stroke(selected_stroke)
-            .corner_radius(egui::CornerRadius::ZERO);
-
-        let response = widget_ids::surface_response(
-            ui,
-            ("tab_context.order_direction", direction),
-            widget_ids::WidgetRole::IconButton,
-            |ui| ui.add(button),
-        );
-        ui.painter().text(
-            response.rect.center(),
-            egui::Align2::CENTER_CENTER,
-            icon,
-            egui_phosphor::font_id(17.0),
-            text_primary(ui),
-        );
-        let clicked = response.clicked() || response.clicked_by(egui::PointerButton::Secondary);
-        response.on_hover_text(tooltip);
-        clicked
-    })
+    icon_choice_button(
+        ui,
+        ("tab_context.order_direction", direction),
+        icon,
+        tooltip,
+        selected,
+    )
 }
 
-pub(super) fn open_disposition_button(
+/// A square icon button in a pick-one group; the selected choice is outlined.
+pub(super) fn icon_choice_button(
     ui: &mut egui::Ui,
     id_source: impl Hash,
     icon: &str,
@@ -142,7 +113,7 @@ pub(super) fn open_disposition_button(
             egui::Stroke::new(1.0, border(ui))
         };
         let button = egui::Button::new("")
-            .min_size(OPEN_DISPOSITION_BUTTON_SIZE)
+            .min_size(ICON_CHOICE_BUTTON_SIZE)
             .stroke(selected_stroke)
             .corner_radius(egui::CornerRadius::ZERO);
 
@@ -161,14 +132,6 @@ pub(super) fn open_disposition_button(
         response.on_hover_text(tooltip);
         clicked
     })
-}
-
-fn with_order_direction_button_visuals<R>(
-    ui: &mut egui::Ui,
-    selected: bool,
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
-    with_icon_choice_button_visuals(ui, selected, add_contents)
 }
 
 fn with_icon_choice_button_visuals<R>(
@@ -208,6 +171,7 @@ pub(super) fn primary_menu_button(
     primary_menu_button_enabled(ui, id_source, label, icon, true)
 }
 
+/// The action half of a split row whose caret opens a submenu.
 pub(super) fn primary_menu_button_enabled(
     ui: &mut egui::Ui,
     id_source: impl Hash,
@@ -215,37 +179,20 @@ pub(super) fn primary_menu_button_enabled(
     icon: &str,
     enabled: bool,
 ) -> bool {
-    with_row_visuals(ui, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            id_source,
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add_enabled(
-                    enabled,
-                    egui::Button::new("")
-                        .min_size(egui::vec2(WIDTH - CARET_WIDTH, ROW_HEIGHT))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
-        let keys =
-            menu_shortcut(label).and_then(|action| shortcut_tooltips::keys(ui.ctx(), action));
-        paint_row_label(
-            ui,
-            response.rect,
-            Some(icon),
-            label,
-            keys.as_deref(),
-            enabled,
-        );
-        let clicked = response.clicked();
-        if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui, label) {
-            response.on_hover_text(tooltip);
-        }
-        clicked
-    })
+    let keys = menu_shortcut_keys(ui, label);
+    let row = MenuRow {
+        label,
+        icon: Some(icon),
+        trailing: keys.as_deref(),
+        tooltip: shortcut_tooltip_for_menu_label(ui, label),
+        enabled,
+    };
+    menu_row_button(
+        ui,
+        id_source,
+        egui::vec2(WIDTH - CARET_WIDTH, ROW_HEIGHT),
+        row,
+    )
 }
 
 pub(super) fn submenu_button(
@@ -262,7 +209,7 @@ pub(super) fn submenu_button_sized(
     width: f32,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
-    with_row_visuals(ui, |ui| {
+    with_flat_row_visuals(ui, |ui| {
         let button = egui::Button::new(
             egui::RichText::new(CARET_RIGHT)
                 .font(egui_phosphor::font_id(14.0))
@@ -276,9 +223,7 @@ pub(super) fn submenu_button_sized(
                 .config(
                     egui::containers::menu::MenuConfig::new()
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                        .style(crate::app::ui::panel_style::menu_style(
-                            ui.visuals().window_fill,
-                        )),
+                        .style(panel_style::menu_style(ui.visuals().window_fill)),
                 )
                 .ui(ui, |ui| {
                     ui.set_min_width(width);
@@ -332,6 +277,10 @@ fn shortcut_tooltip_for_menu_label(ui: &egui::Ui, label: &str) -> Option<String>
     ))
 }
 
+fn menu_shortcut_keys(ui: &egui::Ui, label: &str) -> Option<String> {
+    shortcut_tooltips::keys(ui.ctx(), menu_shortcut(label)?)
+}
+
 fn menu_shortcut(label: &str) -> Option<ShortcutAction> {
     Some(match label {
         "New tab" => ShortcutAction::NewTab,
@@ -356,17 +305,6 @@ pub(super) fn tab_list_position_icon(position: TabListPosition) -> &'static str 
     }
 }
 
-fn paint_row_label(
-    ui: &egui::Ui,
-    rect: egui::Rect,
-    icon: Option<&str>,
-    label: &str,
-    trailing: Option<&str>,
-    enabled: bool,
-) {
-    crate::app::ui::panel_style::paint_menu_row(ui, rect, icon, label, trailing, enabled);
-}
-
 fn paint_selected_row(ui: &egui::Ui, rect: egui::Rect) {
     ui.painter().rect_filled(rect, 0, tab_selected_bg(ui));
     ui.painter().rect_filled(
@@ -374,15 +312,4 @@ fn paint_selected_row(ui: &egui::Ui, rect: egui::Rect) {
         0,
         tab_selected_accent(ui),
     );
-}
-
-fn apply_row_hover_style(ui: &mut egui::Ui) {
-    crate::app::ui::panel_style::flat_rows(ui);
-}
-
-pub(super) fn with_row_visuals<R>(
-    ui: &mut egui::Ui,
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
-    with_visual_overrides(ui, apply_row_hover_style, add_contents)
 }

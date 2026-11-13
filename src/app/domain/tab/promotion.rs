@@ -145,3 +145,50 @@ impl WorkspaceTab {
         self.buffers.take_by_id(buffer_id, replacement_buffer_id)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::app::domain::{BufferState, SplitAxis, WorkspaceTab};
+
+    #[test]
+    fn into_tabs_per_file_keeps_each_buffer_with_its_own_views_in_layout_order() {
+        let first = BufferState::new("first.txt".into(), "one".into(), None);
+        let first_id = first.id;
+        let mut tab = WorkspaceTab::new(first);
+        let first_view = tab.layout.active_view_id();
+        let second = BufferState::new("second.txt".into(), "two".into(), None);
+        let second_id = second.id;
+        tab.open_buffer_as_split(second, SplitAxis::Vertical, true, 0.5)
+            .unwrap();
+        let second_split = tab.split_active_view(SplitAxis::Horizontal).unwrap();
+        let mut layout_order = Vec::new();
+        for view_id in tab.ordered_view_ids_in_layout_order() {
+            let buffer_id = tab.layout.view(view_id).unwrap().buffer_id;
+            if !layout_order.contains(&buffer_id) {
+                layout_order.push(buffer_id);
+            }
+        }
+
+        let tabs = tab.into_tabs_per_file();
+
+        let tab_buffers = tabs
+            .iter()
+            .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tab_buffers,
+            layout_order.iter().map(|id| vec![*id]).collect::<Vec<_>>()
+        );
+        let tab_for = |id| {
+            tabs.iter()
+                .find(|tab| tab.active_buffer().id == id)
+                .unwrap()
+        };
+        // The file without the active view falls back to its first view; the
+        // active file keeps its active view and both of its split views.
+        assert_eq!(tab_for(first_id).layout.active_view_id(), first_view);
+        assert_eq!(tab_for(first_id).layout.views().len(), 1);
+        assert_eq!(tab_for(second_id).layout.active_view_id(), second_split);
+        assert_eq!(tab_for(second_id).layout.views().len(), 2);
+    }
+}

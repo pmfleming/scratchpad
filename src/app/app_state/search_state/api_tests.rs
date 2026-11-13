@@ -3,6 +3,7 @@ use crate::app::app_state::test_support::test_app;
 use crate::app::commands::{AppCommand, SearchCommand, WorkspaceCommand};
 use crate::app::domain::{BufferState, WorkspaceTab};
 use crate::app::services::search::find_matches;
+use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::ops::Range;
 use std::time::{Duration, Instant};
 
@@ -214,16 +215,7 @@ fn active_buffer_search_counts_matches() {
 
 #[test]
 fn all_open_tabs_search_counts_matches_across_tabs() {
-    let mut app = app_with_search_text("needle one");
-    app.tab_manager.tabs.as_mut_slice()[0].buffers.buffer.name = "one.txt".to_owned();
-    crate::app::app_state::workspace_controller::append_tab(
-        &mut app,
-        WorkspaceTab::new(BufferState::new(
-            "two.txt".to_owned(),
-            "needle two needle".to_owned(),
-            None,
-        )),
-    );
+    let mut app = app_with_second_tab("needle one", "needle two needle");
 
     assert!(search(&mut app, SearchCommand::Open));
     assert!(search(
@@ -240,16 +232,7 @@ fn all_open_tabs_search_counts_matches_across_tabs() {
 
 #[test]
 fn replace_all_changes_every_buffer_in_scope() {
-    let mut app = app_with_search_text("foo one");
-    app.tab_manager.tabs.as_mut_slice()[0].buffers.buffer.name = "one.txt".to_owned();
-    crate::app::app_state::workspace_controller::append_tab(
-        &mut app,
-        WorkspaceTab::new(BufferState::new(
-            "two.txt".to_owned(),
-            "foo two foo".to_owned(),
-            None,
-        )),
-    );
+    let mut app = app_with_second_tab("foo one", "foo two foo");
 
     assert!(search(&mut app, SearchCommand::OpenAndReplace));
     assert!(search(
@@ -362,14 +345,56 @@ fn app_with_search_text(text: &str) -> ScratchpadApp {
     app
 }
 
-fn seed_matches_for_plan_lines(app: &mut ScratchpadApp, ranges: &[Range<usize>]) {
-    let tab = &app.tab_manager.tabs.as_slice()[0];
+fn app_with_second_tab(first: &str, second: &str) -> ScratchpadApp {
+    let mut app = app_with_search_text(first);
+    app.tab_manager.tabs.as_mut_slice()[0].buffers.buffer.name = "one.txt".to_owned();
+    crate::app::app_state::workspace_controller::append_tab(
+        &mut app,
+        WorkspaceTab::new(BufferState::new(
+            "two.txt".to_owned(),
+            second.to_owned(),
+            None,
+        )),
+    );
+    app
+}
+
+fn start_replace(app: &mut ScratchpadApp, query: &str, replacement: &str) {
+    super::api::open_search_and_replace(app);
+    super::api::set_search_query(app, query);
+    super::api::set_search_replacement(app, replacement);
+}
+
+fn skip_replace_review(app: &mut ScratchpadApp) {
+    let unlimited = crate::app::services::settings_store::ReviewThreshold::UNLIMITED;
+    app.state.app_settings.search.review_files_above = unlimited;
+    app.state.app_settings.search.review_matches_above = unlimited;
+}
+
+fn poll_until(
+    app: &mut ScratchpadApp,
+    attempts: usize,
+    poll: fn(&mut ScratchpadApp),
+    done: fn(&ScratchpadApp) -> bool,
+) {
+    for _ in 0..attempts {
+        poll(app);
+        if done(app) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(done(app));
+}
+
+fn set_matches(app: &mut ScratchpadApp, tab_index: usize, ranges: Vec<Range<usize>>) {
+    let tab = &app.tab_manager.tabs.as_slice()[tab_index];
     let buffer = &tab.buffers.buffer;
-    app.state.search_state.results.matches = ranges
-        .iter()
-        .cloned()
+    let results = &mut app.state.search_state.results;
+    results.matches = ranges
+        .into_iter()
         .map(|range| SearchMatch {
-            tab_index: 0,
+            tab_index,
             view_id: tab.layout.active_view_id,
             buffer_id: buffer.id,
             buffer_label: buffer.display_name().into(),
@@ -379,9 +404,12 @@ fn seed_matches_for_plan_lines(app: &mut ScratchpadApp, ranges: &[Range<usize>])
             range,
         })
         .collect();
-    app.state.search_state.results.total_match_count = app.state.search_state.results.matches.len();
-    app.state.search_state.results.displayed_match_count =
-        app.state.search_state.results.matches.len();
+    results.total_match_count = results.matches.len();
+    results.displayed_match_count = results.matches.len();
+}
+
+fn seed_matches_for_plan_lines(app: &mut ScratchpadApp, ranges: &[Range<usize>]) {
+    set_matches(app, 0, ranges.to_vec());
 }
 
 fn seed_search_matches(app: &mut ScratchpadApp, query: &str) {
@@ -394,50 +422,23 @@ fn seed_search_matches(app: &mut ScratchpadApp, query: &str) {
 
     let text = active_buffer_text(app);
     let ranges = find_matches(&text, query, app.state.search_state.search_options());
-    let tab = &app.tab_manager.tabs.as_slice()[app.tab_manager.active_tab_index];
-    let buffer = &tab.buffers.buffer;
-    app.state.search_state.results.matches = ranges
-        .into_iter()
-        .map(|range| SearchMatch {
-            tab_index: app.tab_manager.active_tab_index,
-            view_id: tab.layout.active_view_id,
-            buffer_id: buffer.id,
-            buffer_label: buffer.display_name().into(),
-            target_revision: buffer.document_revision(),
-            target_identity: buffer.document_snapshot().revision_key(),
-            matched_text: None,
-            range,
-        })
-        .collect();
-    app.state.search_state.results.total_match_count = app.state.search_state.results.matches.len();
-    app.state.search_state.results.displayed_match_count =
-        app.state.search_state.results.matches.len();
+    set_matches(app, app.tab_manager.active_tab_index, ranges);
+}
+
+fn active_buffer(app: &ScratchpadApp) -> &BufferState {
+    let tab = app.tab_manager.active_tab().expect("active tab");
+    tab.layout
+        .active_view()
+        .and_then(|view| tab.buffer_by_id(view.buffer_id))
+        .expect("active buffer")
 }
 
 fn active_buffer_text(app: &ScratchpadApp) -> String {
-    app.tab_manager
-        .active_tab()
-        .and_then(|tab| tab.layout.active_view())
-        .and_then(|view| {
-            app.tab_manager
-                .active_tab()
-                .and_then(|tab| tab.buffer_by_id(view.buffer_id))
-        })
-        .map(|buffer| buffer.text())
-        .expect("active buffer text")
+    active_buffer(app).text()
 }
 
 fn active_buffer_revision(app: &ScratchpadApp) -> u64 {
-    app.tab_manager
-        .active_tab()
-        .and_then(|tab| tab.layout.active_view())
-        .and_then(|view| {
-            app.tab_manager
-                .active_tab()
-                .and_then(|tab| tab.buffer_by_id(view.buffer_id))
-        })
-        .map(|buffer| buffer.document_revision())
-        .expect("active buffer revision")
+    active_buffer(app).document_revision()
 }
 
 fn active_view_replacement_preview(
@@ -624,9 +625,7 @@ fn locked_selection_survives_navigation_and_replacement() {
 fn review_holds_exact_plan_exclusions_and_grouped_undo() {
     use crate::app::services::session_store::activity::ActivityKind;
     let mut app = app_with_search_text("foo foo foo");
-    super::api::open_search_and_replace(&mut app);
-    super::api::set_search_query(&mut app, "foo");
-    super::api::set_search_replacement(&mut app, "bar");
+    start_replace(&mut app, "foo", "bar");
     wait_for_search_results(&mut app);
     app.state.app_settings.search.review_matches_above =
         crate::app::services::settings_store::ReviewThreshold::Count(0);
@@ -656,13 +655,8 @@ fn review_holds_exact_plan_exclusions_and_grouped_undo() {
 #[test]
 fn unlimited_thresholds_skip_review_but_stale_preparation_changes_nothing() {
     let mut app = app_with_search_text(&"foo ".repeat(400));
-    super::api::open_search_and_replace(&mut app);
-    super::api::set_search_query(&mut app, "foo");
-    super::api::set_search_replacement(&mut app, "bar");
-    app.state.app_settings.search.review_files_above =
-        crate::app::services::settings_store::ReviewThreshold::UNLIMITED;
-    app.state.app_settings.search.review_matches_above =
-        crate::app::services::settings_store::ReviewThreshold::UNLIMITED;
+    start_replace(&mut app, "foo", "bar");
+    skip_replace_review(&mut app);
     wait_for_search_results(&mut app);
     assert!(app.replace_all_search_matches());
     assert!(app.state.search_state.replace.pending.is_some());
@@ -671,18 +665,13 @@ fn unlimited_thresholds_skip_review_but_stale_preparation_changes_nothing() {
     buffer
         .replace_char_ranges_with_undo(
             &[(0..3, "edit".into())],
-            Default::default(),
-            Default::default(),
+            CursorRange::default(),
+            CursorRange::default(),
         )
         .unwrap();
-    for _ in 0..500 {
-        super::replace::transaction::poll(&mut app);
-        if app.state.search_state.replace.pending.is_none() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    assert!(app.state.search_state.replace.pending.is_none());
+    poll_until(&mut app, 500, super::replace::transaction::poll, |app| {
+        app.state.search_state.replace.pending.is_none()
+    });
     assert!(active_buffer_text(&app).starts_with("edit foo"));
     assert!(!active_buffer_text(&app).contains("bar"));
     assert!(app.state.search_state.replace.last_operation.is_none());
@@ -693,13 +682,8 @@ fn result_limit_keeps_bounded_previews_and_reviews_every_replacement() {
     let mut app = app_with_search_text(&"foo ".repeat(50_002));
     app.state.app_settings.search.result_limit =
         crate::app::services::settings_store::SearchResultLimit::from_matches(50_000);
-    app.state.app_settings.search.review_files_above =
-        crate::app::services::settings_store::ReviewThreshold::UNLIMITED;
-    app.state.app_settings.search.review_matches_above =
-        crate::app::services::settings_store::ReviewThreshold::UNLIMITED;
-    super::api::open_search_and_replace(&mut app);
-    super::api::set_search_query(&mut app, "foo");
-    super::api::set_search_replacement(&mut app, "bar");
+    skip_replace_review(&mut app);
+    start_replace(&mut app, "foo", "bar");
     wait_for_search_results(&mut app);
     assert_eq!(app.search_match_count(), 50_000);
     assert!(matches!(
@@ -707,14 +691,9 @@ fn result_limit_keeps_bounded_previews_and_reviews_every_replacement() {
         super::SearchStatus::Error(_)
     ));
     assert!(app.replace_all_search_matches());
-    for _ in 0..30000 {
-        super::replace::limited::poll(&mut app);
-        if app.state.search_state.replace.planning.is_none() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    assert!(app.state.search_state.replace.planning.is_none());
+    poll_until(&mut app, 30000, super::replace::limited::poll, |app| {
+        app.state.search_state.replace.planning.is_none()
+    });
     assert_eq!(
         app.state
             .search_state
@@ -727,32 +706,17 @@ fn result_limit_keeps_bounded_previews_and_reviews_every_replacement() {
     );
     assert!(active_buffer_text(&app).starts_with("foo"));
     assert!(app.replace_all_search_matches());
-    for _ in 0..30000 {
-        super::replace::transaction::poll(&mut app);
-        if app.state.search_state.replace.pending.is_none() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    assert!(app.state.search_state.replace.pending.is_none());
+    poll_until(&mut app, 30000, super::replace::transaction::poll, |app| {
+        app.state.search_state.replace.pending.is_none()
+    });
     assert_eq!(active_buffer_text(&app), "bar ".repeat(50_002));
 }
 
 #[test]
 fn multi_file_replace_is_atomic_and_undo_refuses_to_discard_later_work() {
-    let mut app = app_with_search_text("foo first");
-    crate::app::app_state::workspace_controller::append_tab(
-        &mut app,
-        WorkspaceTab::new(BufferState::new(
-            "second.txt".into(),
-            "foo second".into(),
-            None,
-        )),
-    );
-    super::api::open_search_and_replace(&mut app);
+    let mut app = app_with_second_tab("foo first", "foo second");
+    start_replace(&mut app, "foo", "bar");
     super::api::set_search_scope(&mut app, super::SearchScope::AllOpenTabs);
-    super::api::set_search_query(&mut app, "foo");
-    super::api::set_search_replacement(&mut app, "bar");
     wait_for_search_results(&mut app);
     assert!(!app.replace_all_search_matches());
     assert!(app.replace_all_search_matches());
@@ -779,8 +743,8 @@ fn multi_file_replace_is_atomic_and_undo_refuses_to_discard_later_work() {
         .active_buffer_mut()
         .replace_char_ranges_with_undo(
             &[(0..3, "new".into())],
-            Default::default(),
-            Default::default(),
+            CursorRange::default(),
+            CursorRange::default(),
         )
         .unwrap();
     assert!(!super::replace::transaction::undo(

@@ -1,15 +1,15 @@
 use super::widgets::{
     EDITOR_CONTEXT_CARET_WIDTH, EDITOR_CONTEXT_MENU_WIDTH, EDITOR_CONTEXT_ROW_HEIGHT,
     EDITOR_UNICODE_DESCRIPTION_X, EDITOR_UNICODE_DIVIDER_X, EDITOR_UNICODE_INSERT_SUBMENU_WIDTH,
-    EDITOR_UNICODE_LABEL_X, apply_context_menu_row_hover_style, menu_action_button,
-    paint_context_menu_row_label, set_menu_width,
+    EDITOR_UNICODE_LABEL_X, menu_action_button, paint_context_menu_row_label, set_menu_width,
 };
 use crate::app::app_state::{
     ScratchpadApp,
     workspace::{accessors as workspace_accessors, editing as workspace_editing},
 };
+use crate::app::chrome::with_flat_row_visuals;
 use crate::app::theme::{border, text_muted, text_primary};
-use crate::app::ui::{visuals::with_visual_overrides, widget_ids};
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_U_UP_LEFT, CARET_RIGHT, TEXT_AA, TEXT_ALIGN_JUSTIFY, TEXT_ALIGN_LEFT, TEXT_ALIGN_RIGHT,
@@ -175,7 +175,7 @@ fn unicode_submenu_row(
     icon: &str,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
+    with_flat_row_visuals(ui, |ui| {
         let button = egui::Button::new("")
             .min_size(egui::vec2(
                 EDITOR_CONTEXT_MENU_WIDTH,
@@ -209,7 +209,7 @@ fn unicode_submenu_row(
 }
 
 fn unicode_control_char_button(ui: &mut egui::Ui, control: &UnicodeControlChar) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
+    with_flat_row_visuals(ui, |ui| {
         let response = widget_ids::surface_response(
             ui,
             ("editor_context.unicode_control", control.short_label),

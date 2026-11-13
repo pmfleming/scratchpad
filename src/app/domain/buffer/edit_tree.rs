@@ -123,21 +123,12 @@ impl EditTree {
             self.parents.get(&target)?.1
         };
         if target == ROOT || self.route.get(depth - 1) == Some(&target) {
+            // Moving along the selected route only shifts the position.
+            let undone = self.route.get(depth..self.position).unwrap_or_default();
+            let redone = self.route.get(self.position..depth).unwrap_or_default();
             return Some(Navigation {
-                undo: if depth < self.position {
-                    self.route[depth..self.position]
-                        .iter()
-                        .rev()
-                        .copied()
-                        .collect()
-                } else {
-                    Vec::new()
-                },
-                redo: if depth > self.position {
-                    self.route[self.position..depth].to_vec()
-                } else {
-                    Vec::new()
-                },
+                undo: undone.iter().rev().copied().collect(),
+                redo: redone.to_vec(),
                 route: None,
                 position: depth,
             });
@@ -146,15 +137,7 @@ impl EditTree {
         let route = if self.route.starts_with(&target_path) {
             self.route.clone()
         } else {
-            // Stable IDs reflect creation order. A descendant must have a larger
-            // ID than its parent; the newest descendant is necessarily a leaf.
-            let mut descendants = std::collections::BTreeSet::from([target]);
-            for (&id, (parent, _)) in self.parents.range(target..) {
-                if descendants.contains(parent) {
-                    descendants.insert(id);
-                }
-            }
-            self.path(*descendants.last()?)?
+            self.path(self.newest_leaf_under(target)?)?
         };
         let common = self.route[..self.position]
             .iter()
@@ -171,6 +154,18 @@ impl EditTree {
             route: Some(route),
             position: target_path.len(),
         })
+    }
+
+    /// Stable IDs reflect creation order. A descendant must have a larger ID
+    /// than its parent, so the newest descendant is necessarily a leaf.
+    fn newest_leaf_under(&self, target: NodeId) -> Option<NodeId> {
+        let mut descendants = std::collections::BTreeSet::from([target]);
+        for (&id, (parent, _)) in self.parents.range(target..) {
+            if descendants.contains(parent) {
+                descendants.insert(id);
+            }
+        }
+        descendants.last().copied()
     }
 
     pub fn commit(&mut self, navigation: Navigation) {
@@ -214,7 +209,7 @@ impl EditTree {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{EditTree, Navigation, NodeId, ROOT};
 
     fn go(tree: &mut EditTree, target: NodeId) -> Navigation {
         let navigation = tree.navigation(target).unwrap();

@@ -34,9 +34,7 @@ pub(super) fn slot_cell_context<'a>(
     axis: TabDropAxis,
 ) -> SlotCellContext<'a> {
     SlotCellContext {
-        active_slot_index: crate::app::app_state::workspace::display_tabs::active_tab_slot_index(
-            app,
-        ),
+        active_slot_index: display_tabs::active_tab_slot_index(app),
         duplicate_name_counts,
         pending_scroll_to_active: app.tab_manager.pending_scroll_to_active,
         showing_settings: crate::app::app_state::settings_state::showing_settings(app),
@@ -56,9 +54,8 @@ pub(super) fn collect_slot_entries(
     app: &mut ScratchpadApp,
     context: &SlotCellContext<'_>,
     outcome: &mut TabStripOutcome,
-    mut on_rect: impl FnMut(usize, egui::Rect),
 ) -> Vec<TabRectEntry> {
-    let total_slots = crate::app::app_state::workspace::display_tabs::total_tab_slots(app);
+    let total_slots = display_tabs::total_tab_slots(app);
     let ranges = visible_slot_ranges(ui, total_slots, context);
     let visible_slots = ranges
         .iter()
@@ -71,13 +68,10 @@ pub(super) fn collect_slot_entries(
         add_virtual_slot_space(ui, range.start.saturating_sub(next_slot), context);
         for slot_index in range.clone() {
             let cell_outcome = render_tab_slot_cell(ui, app, slot_index, context, outcome);
-            on_rect(slot_index, cell_outcome.rect);
             entries.push(tab_rect_entry(
                 slot_index,
                 cell_outcome.rect,
-                !crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(
-                    app, slot_index,
-                ),
+                !display_tabs::tab_slot_is_settings(app, slot_index),
             ));
         }
         next_slot = range.end;
@@ -187,8 +181,7 @@ fn render_tab_slot_cell(
         )
         .expect("workspace tab slots have a presentation");
         let is_active = !context.showing_settings && context.active_slot_index == slot_index;
-        let is_selected =
-            crate::app::app_state::workspace::display_tabs::tab_slot_selected(app, slot_index);
+        let is_selected = display_tabs::tab_slot_selected(app, slot_index);
         let cell_outcome = render_tab_cell_sized(
             ui,
             app,
@@ -211,8 +204,7 @@ fn render_tab_slot_cell(
     }
 
     let is_active = context.showing_settings && context.active_slot_index == slot_index;
-    let is_selected =
-        crate::app::app_state::workspace::display_tabs::tab_slot_selected(app, slot_index);
+    let is_selected = display_tabs::tab_slot_selected(app, slot_index);
     let (tab_response, _, close_response, _) = tab_button_with_actions(
         ui,
         ("tab_strip.slot", slot_index),
@@ -282,8 +274,7 @@ fn finish_tab_slot_cell(
 }
 
 fn workspace_tab_for_slot(app: &ScratchpadApp, slot_index: usize) -> Option<&WorkspaceTab> {
-    let workspace_index =
-        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)?;
+    let workspace_index = display_tabs::workspace_index_for_slot(app, slot_index)?;
     app.tab_manager.tabs.as_slice().get(workspace_index)
 }
 
@@ -316,38 +307,24 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn vertical_virtual_tabs_advance_by_height_not_panel_width() {
+    fn virtual_tabs_advance_by_row_height_or_tab_width_plus_spacing() {
         let duplicate_name_counts = HashMap::new();
-        let context = SlotCellContext {
-            duplicate_name_counts: &duplicate_name_counts,
-            active_slot_index: 0,
-            pending_scroll_to_active: false,
-            showing_settings: false,
-            width: 320.0,
-            spacing: 4.0,
-            axis: TabDropAxis::Vertical,
-            label_font_id: egui::FontId::proportional(14.0),
-            row_height: 96.0,
-        };
-
-        assert_eq!(slot_advance(&context), 100.0);
-    }
-
-    #[test]
-    fn horizontal_virtual_tabs_advance_by_width() {
-        let duplicate_name_counts = HashMap::new();
-        let context = SlotCellContext {
-            duplicate_name_counts: &duplicate_name_counts,
-            active_slot_index: 0,
-            pending_scroll_to_active: false,
-            showing_settings: false,
-            width: 160.0,
-            spacing: 4.0,
-            axis: TabDropAxis::Horizontal,
-            label_font_id: egui::FontId::proportional(14.0),
-            row_height: 96.0,
-        };
-
-        assert_eq!(slot_advance(&context), 164.0);
+        for (axis, width, advance) in [
+            (TabDropAxis::Vertical, 320.0, 100.0),
+            (TabDropAxis::Horizontal, 160.0, 164.0),
+        ] {
+            let context = SlotCellContext {
+                duplicate_name_counts: &duplicate_name_counts,
+                active_slot_index: 0,
+                pending_scroll_to_active: false,
+                showing_settings: false,
+                width,
+                spacing: 4.0,
+                axis,
+                label_font_id: egui::FontId::proportional(14.0),
+                row_height: 96.0,
+            };
+            assert_eq!(slot_advance(&context), advance);
+        }
     }
 }

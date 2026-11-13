@@ -1,6 +1,6 @@
 use super::{
     Database, ReadScope,
-    tests::{database, insert, request, tab},
+    test_fixture::{database, exec, insert, request, scalar, tab, texts},
 };
 use futures_lite::future::block_on;
 use std::collections::HashMap;
@@ -64,9 +64,7 @@ fn cold_damage_keeps_healthy_saves_and_retains_original_data_across_restart() {
             "healthy edits"
         );
         assert_eq!(
-            db.integer("SELECT count(*) FROM document_pieces WHERE body=x'00'")
-                .await
-                .unwrap(),
+            scalar(&db, "SELECT count(*) FROM document_pieces WHERE body=x'00'").await,
             1
         );
         assert_eq!(archive(&db).await, original_bytes);
@@ -79,24 +77,14 @@ fn cold_damage_keeps_healthy_saves_and_retains_original_data_across_restart() {
         tabs[0].buffers.buffer.replace_text("after restart".into());
         db.persist(request(&tabs), 1).await.unwrap();
         assert_eq!(archive(&db).await, original_bytes);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM document_pieces").await, 2);
         assert_eq!(
-            db.integer("SELECT count(*) FROM document_pieces")
-                .await
-                .unwrap(),
-            2
-        );
-        assert_eq!(
-            db.integer("SELECT count(*) FROM document_pieces WHERE body=x'00'")
-                .await
-                .unwrap(),
+            scalar(&db, "SELECT count(*) FROM document_pieces WHERE body=x'00'").await,
             1
         );
         assert_eq!(
-            db.load(ReadScope::Active)
+            texts(&mut db, ReadScope::Active)
                 .await
-                .unwrap()
-                .unwrap()
-                .text_contents()
                 .values()
                 .next()
                 .unwrap(),
@@ -257,23 +245,15 @@ fn missing_cold_content_detected_by_a_save_is_quarantined_after_rollback() {
         assert_eq!(db.quarantined.len(), 1);
         db.persist(captured(), 3).await.unwrap();
         assert_eq!(
-            db.load(ReadScope::Active)
+            texts(&mut db, ReadScope::Active)
                 .await
-                .unwrap()
-                .unwrap()
-                .text_contents()
                 .values()
                 .next()
                 .unwrap(),
             "new protected edit"
         );
         // Deleting a snapshot now cascades its parts, rather than leaving orphans.
-        assert_eq!(
-            db.integer("SELECT count(*) FROM document_pieces")
-                .await
-                .unwrap(),
-            1
-        );
+        assert_eq!(scalar(&db, "SELECT count(*) FROM document_pieces").await, 1);
     });
 }
 
@@ -293,16 +273,13 @@ fn malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures() {
             insert(&mut tabs[1], 0, "history");
             db.persist(request(&tabs), 1).await.unwrap();
             if sql.contains("SET seq") {
-                db.conn
-                    .execute("PRAGMA foreign_keys=OFF", ())
-                    .await
-                    .unwrap();
+                exec(&db, "PRAGMA foreign_keys=OFF").await;
             }
             db.conn
                 .execute(sql, [tabs[1].buffers.buffer.temp_id.as_str()])
                 .await
                 .unwrap();
-            db.conn.execute("PRAGMA foreign_keys=ON", ()).await.unwrap();
+            exec(&db, "PRAGMA foreign_keys=ON").await;
             assert!(
                 db.hydrate(request(&tabs).tabs.pop().unwrap().session_tab)
                     .await
@@ -316,11 +293,8 @@ fn malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures() {
                 .replace_text("still protected".into());
             db.persist(request(&tabs), 2).await.unwrap();
             assert_eq!(
-                db.load(ReadScope::Active)
+                texts(&mut db, ReadScope::Active)
                     .await
-                    .unwrap()
-                    .unwrap()
-                    .text_contents()
                     .values()
                     .next()
                     .unwrap(),
@@ -337,7 +311,7 @@ fn archive_write_failure_blocks_every_save() {
         let tabs = vec![tab("healthy"), tab("bad")];
         db.persist(request(&tabs), 1).await.unwrap();
         damage(&db, &tabs[1].buffers.buffer.temp_id).await;
-        db.conn.execute_batch("CREATE TRIGGER refuse_archive BEFORE INSERT ON quarantine BEGIN SELECT RAISE(ABORT, 'archive unavailable'); END;").await.unwrap();
+        exec(&db, "CREATE TRIGGER refuse_archive BEFORE INSERT ON quarantine BEGIN SELECT RAISE(ABORT, 'archive unavailable'); END;").await;
         assert!(
             db.hydrate(request(&tabs).tabs.pop().unwrap().session_tab)
                 .await
@@ -345,7 +319,7 @@ fn archive_write_failure_blocks_every_save() {
         );
         assert!(db.blocked.is_some());
         assert!(db.persist(request(&[]), 2).await.is_err());
-        assert_eq!(db.integer("SELECT count(*) FROM tabs").await.unwrap(), 2);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM tabs").await, 2);
     });
 }
 
@@ -376,10 +350,7 @@ fn old_schema_is_rejected_and_schema_batch_rolls_back() {
         db.persist(request(&[tab("before upgrade")]), 1)
             .await
             .unwrap();
-        db.conn
-            .execute_batch("DROP TABLE quarantine; PRAGMA user_version=1;")
-            .await
-            .unwrap();
+        exec(&db, "DROP TABLE quarantine; PRAGMA user_version=1;").await;
         drop(db);
         assert!(Database::open(directory.path()).await.is_err());
         let (_fresh, mut db) = database().await;
@@ -390,9 +361,11 @@ fn old_schema_is_rejected_and_schema_batch_rolls_back() {
         );
         assert!(db.conn.is_autocommit().unwrap());
         assert_eq!(
-            db.integer("SELECT count(*) FROM sqlite_master WHERE name='partial_schema'")
-                .await
-                .unwrap(),
+            scalar(
+                &db,
+                "SELECT count(*) FROM sqlite_master WHERE name='partial_schema'"
+            )
+            .await,
             0
         );
     });
@@ -417,11 +390,11 @@ fn schema_batch_parses_triggers_and_quoted_semicolons_atomically() {
                 .is_err()
         );
         assert!(db.conn.is_autocommit().unwrap());
-        assert_eq!(db.integer("SELECT count(*) FROM sqlite_master WHERE name IN ('schema_source','schema_audit','schema_trigger')").await.unwrap(), 0);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM sqlite_master WHERE name IN ('schema_source','schema_audit','schema_trigger')").await, 0);
 
         db.create_schema(schema).await.unwrap();
         assert!(db.conn.is_autocommit().unwrap());
-        assert_eq!(db.integer("SELECT count(*) FROM schema_audit WHERE value IN ('first; entry','quoted; value; second')").await.unwrap(), 2);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM schema_audit WHERE value IN ('first; entry','quoted; value; second')").await, 2);
     });
 }
 
@@ -439,15 +412,10 @@ fn supplied_document_pieces_are_retained_even_if_capture_policy_changes() {
             captured
         };
         db.persist(captured(), 1).await.unwrap();
-        db.conn.execute_batch("CREATE TRIGGER no_rewrite BEFORE INSERT ON chunk_bodies BEGIN SELECT RAISE(ABORT, 'rewritten'); END;").await.unwrap();
+        exec(&db, "CREATE TRIGGER no_rewrite BEFORE INSERT ON chunk_bodies BEGIN SELECT RAISE(ABORT, 'rewritten'); END;").await;
         let second = db.persist(captured(), 2).await.unwrap();
         assert_eq!(second.manifest_write_ns, 0);
-        assert_eq!(
-            db.integer("SELECT count(*) FROM document_pieces")
-                .await
-                .unwrap(),
-            1
-        );
+        assert_eq!(scalar(&db, "SELECT count(*) FROM document_pieces").await, 1);
     });
 }
 
@@ -457,12 +425,7 @@ fn lengths_and_hashes_describe_the_bytes_emitted_including_empty_and_unicode() {
         let (_root, mut db) = database().await;
         let tabs = vec![tab(""), tab(&"aλ🦀\0\r\n".repeat(100_000))];
         db.persist(request(&tabs), 1).await.unwrap();
-        assert!(
-            db.integer("SELECT count(*) FROM document_text")
-                .await
-                .unwrap()
-                > 1
-        );
+        assert!(scalar(&db, "SELECT count(*) FROM document_text").await > 1);
         let contents = db.read_all_contents().await.unwrap();
         for tab in &tabs {
             let id = &tab.active_buffer().temp_id;

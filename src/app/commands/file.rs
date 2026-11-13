@@ -5,102 +5,62 @@ use crate::app::services::file_controller::FileController;
 
 pub(super) fn handle_file_command(app: &mut ScratchpadApp, command: FileCommand) -> bool {
     match command {
-        FileCommand::OpenFile => {
-            workspace_controller::open_file(app);
-            true
-        }
-        FileCommand::OpenFileHere => {
-            workspace_controller::open_file_here(app);
-            true
-        }
-        FileCommand::OpenUserManual => {
-            workspace_controller::open_user_manual(app);
-            true
-        }
+        FileCommand::OpenFile => workspace_controller::open_file(app),
+        FileCommand::OpenFileHere => workspace_controller::open_file_here(app),
+        FileCommand::OpenUserManual => workspace_controller::open_user_manual(app),
+        FileCommand::SaveFile => workspace_controller::save_file(app),
+        FileCommand::SaveAllFiles => workspace_controller::save_all_files(app),
+        FileCommand::SaveFileAs => workspace_controller::save_file_as(app),
         FileCommand::ReopenBufferWithEncoding {
             tab_index,
             encoding_name,
-        } => reopen_buffer_with_encoding_command(app, tab_index, &encoding_name),
-        FileCommand::SaveFile => {
-            workspace_controller::save_file(app);
-            true
-        }
-        FileCommand::SaveAllFiles => {
-            workspace_controller::save_all_files(app);
-            true
-        }
-        FileCommand::SaveFileAs => {
-            workspace_controller::save_file_as(app);
-            true
-        }
+        } => return FileController::reopen_buffer_with_encoding(app, tab_index, &encoding_name),
         FileCommand::SaveFileWithEncoding {
             tab_index,
             encoding_name,
             bom,
-        } => FileController::save_file_with_encoding_at(app, tab_index, &encoding_name, bom),
+        } => {
+            return FileController::save_file_with_encoding_at(app, tab_index, &encoding_name, bom);
+        }
         FileCommand::SaveConflictOverwrite { tab_index, view_id } => {
-            save_conflict_overwrite_command(app, tab_index, view_id)
+            return run_pending_view_action(
+                app,
+                tab_index,
+                view_id,
+                FileController::save_conflict_overwrite,
+            );
         }
         FileCommand::ReloadBufferFromDisk { tab_index, view_id } => {
-            reload_buffer_from_disk_command(app, tab_index, view_id)
+            return run_pending_view_action(
+                app,
+                tab_index,
+                view_id,
+                FileController::reload_buffer_from_disk,
+            );
         }
         FileCommand::SaveConflictAsCopy { tab_index, view_id } => {
-            save_conflict_as_copy_command(app, tab_index, view_id)
+            return run_pending_view_action(
+                app,
+                tab_index,
+                view_id,
+                FileController::save_conflict_as_copy,
+            );
         }
         FileCommand::SaveMissingAs { tab_index, view_id } => {
-            run_save_conflict_command(app, tab_index, view_id, FileController::save_file_as_at)
+            return run_pending_view_action(
+                app,
+                tab_index,
+                view_id,
+                FileController::save_file_as_at,
+            );
         }
     }
+    true
 }
 
-fn reopen_buffer_with_encoding_command(
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    encoding_name: &str,
-) -> bool {
-    FileController::reopen_buffer_with_encoding(app, tab_index, encoding_name)
-}
-
-fn save_conflict_overwrite_command(
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-) -> bool {
-    run_save_conflict_command(
-        app,
-        tab_index,
-        view_id,
-        FileController::save_conflict_overwrite,
-    )
-}
-
-fn reload_buffer_from_disk_command(
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-) -> bool {
-    run_save_conflict_command(
-        app,
-        tab_index,
-        view_id,
-        FileController::reload_buffer_from_disk,
-    )
-}
-
-fn save_conflict_as_copy_command(
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-) -> bool {
-    run_save_conflict_command(
-        app,
-        tab_index,
-        view_id,
-        FileController::save_conflict_as_copy,
-    )
-}
-
-fn run_save_conflict_command(
+/// Activate the view a pending file prompt belongs to, run its resolution and
+/// clear the prompt when the action succeeds.
+fn run_pending_view_action(
     app: &mut ScratchpadApp,
     tab_index: usize,
     view_id: ViewId,

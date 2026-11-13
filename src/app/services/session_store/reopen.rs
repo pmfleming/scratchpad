@@ -1,6 +1,8 @@
 //! Reopening restores one retained document tree, then reconciles observed disk text.
 use super::{Restorer, SessionStore, model::SessionTab};
-use crate::app::{CanonicalPathKey, domain::WorkspaceTab, services::file_service::FileService};
+use crate::app::domain::{BufferState, PieceSource, WorkspaceTab};
+use crate::app::services::chunk_store::{ChunkStoreHandle, ImportContext};
+use crate::app::{CanonicalPathKey, services::file_service::FileService};
 use futures_lite::future::block_on;
 use std::{io, path::Path};
 
@@ -16,35 +18,37 @@ pub(crate) enum RetainedTarget {
 pub(super) fn restore_reopened(
     tab: SessionTab,
     claimed: &[CanonicalPathKey],
-    store: Option<crate::app::services::chunk_store::ChunkStoreHandle>,
+    store: Option<ChunkStoreHandle>,
 ) -> io::Result<WorkspaceTab> {
-    let context = crate::app::services::chunk_store::ImportContext {
+    let context = ImportContext {
         store,
         ..Default::default()
     };
     restore_reopened_with_context(tab, claimed, &context)
 }
+/// Display preferences a reopened buffer keeps even when its disk text changed:
+/// show control characters, right-to-left reading order, settings file.
+type Preferences = (bool, bool, bool);
+
 fn restore_reopened_with_context(
     mut tab: SessionTab,
     claimed: &[CanonicalPathKey],
-    context: &crate::app::services::chunk_store::ImportContext,
+    context: &ImportContext,
 ) -> io::Result<WorkspaceTab> {
     context.check()?;
     let paths: Vec<_> = tab
         .buffers
         .iter_mut()
         .filter_map(|buffer| {
-            buffer.path.take().map(|path| {
-                (
-                    buffer.id,
-                    path,
-                    (
-                        buffer.show_control_chars,
-                        buffer.right_to_left_reading_order,
-                        buffer.is_settings_file,
-                    ),
-                )
-            })
+            let preferences = (
+                buffer.show_control_chars,
+                buffer.right_to_left_reading_order,
+                buffer.is_settings_file,
+            );
+            buffer
+                .path
+                .take()
+                .map(|path| (buffer.id, path, preferences))
         })
         .collect();
     let mut restored = Restorer::restore_tab_with_summary(tab)?.0;
@@ -58,38 +62,9 @@ fn restore_reopened_with_context(
             continue;
         }
         match FileService::observe_decoded_digest_with_context(&path, context) {
-            Ok((state, mut digest)) => {
-                let changed = match buffer
-                    .observed_disk_digest
-                    .as_deref()
-                    .or(buffer.disk_content_digest.as_deref())
-                {
-                    Some(baseline) => digest != baseline,
-                    None => digest != buffer.document().try_content_digest()?,
-                };
+            Ok((state, digest)) => {
                 buffer.disk_state = Some(state);
-                if changed {
-                    let observed = FileService::read_observed_file_with_context(&path, context)?;
-                    digest.clone_from(&observed.digest);
-                    let original_document = Box::new(buffer.document().clone());
-                    let previous = buffer.document().history_now();
-                    let loaded = FileService::buffer_from_observed(&path, observed);
-                    if !buffer.replace_from_loaded_buffer_source(
-                        loaded,
-                        crate::app::domain::buffer::PieceSource::External,
-                    ) {
-                        return Err(io::Error::other("Reopened text is unreadable"));
-                    }
-                    if buffer.document().history_now() != previous {
-                        buffer.pending_reopen_external = Some(buffer.document().history_now());
-                        buffer.pending_reopen_original = Some(original_document);
-                    }
-                    (
-                        buffer.show_control_chars,
-                        buffer.right_to_left_reading_order,
-                        buffer.is_settings_file,
-                    ) = preferences;
-                }
+                let digest = reconcile_disk_text(buffer, &path, digest, preferences, context)?;
                 buffer.set_path(Some(path));
                 buffer.observed_disk_digest = Some(digest);
                 buffer.observed_disk_missing = false;
@@ -108,6 +83,47 @@ fn restore_reopened_with_context(
     Ok(restored)
 }
 
+/// Replaces the restored text with the file's when it changed on disk since it
+/// was retained, keeping the retained state as the previous history position.
+/// Returns the digest of the text now observed on disk.
+fn reconcile_disk_text(
+    buffer: &mut BufferState,
+    path: &Path,
+    digest: String,
+    preferences: Preferences,
+    context: &ImportContext,
+) -> io::Result<String> {
+    let baseline = buffer
+        .observed_disk_digest
+        .as_deref()
+        .or(buffer.disk_content_digest.as_deref());
+    let changed = match baseline {
+        Some(baseline) => digest != baseline,
+        None => digest != buffer.document().try_content_digest()?,
+    };
+    if !changed {
+        return Ok(digest);
+    }
+    let observed = FileService::read_observed_file_with_context(path, context)?;
+    let digest = observed.digest.clone();
+    let original_document = Box::new(buffer.document().clone());
+    let previous = buffer.document().history_now();
+    let loaded = FileService::buffer_from_observed(path, observed);
+    if !buffer.replace_from_loaded_buffer_source(loaded, PieceSource::External) {
+        return Err(io::Error::other("Reopened text is unreadable"));
+    }
+    if buffer.document().history_now() != previous {
+        buffer.pending_reopen_external = Some(buffer.document().history_now());
+        buffer.pending_reopen_original = Some(original_document);
+    }
+    (
+        buffer.show_control_chars,
+        buffer.right_to_left_reading_order,
+        buffer.is_settings_file,
+    ) = preferences;
+    Ok(digest)
+}
+
 impl SessionStore {
     pub(crate) fn reopen_target(
         &self,
@@ -121,9 +137,7 @@ impl SessionStore {
                 let tab = self
                     .worker()?
                     .call(move |db| block_on(db.load_retained_document(&id)))?;
-                let mut tab = restore_reopened(tab, claimed, self.opened_chunk_store())?;
-                self.bind_tab(&mut tab)?;
-                Ok(tab)
+                self.restore_reopened_bound(tab, claimed)
             }
         }
     }
@@ -141,6 +155,13 @@ impl SessionStore {
         let tab = self
             .worker()?
             .call(move |db| block_on(db.read_closed_tab(&token)))?;
+        self.restore_reopened_bound(tab, claimed)
+    }
+    fn restore_reopened_bound(
+        &self,
+        tab: SessionTab,
+        claimed: &[CanonicalPathKey],
+    ) -> io::Result<WorkspaceTab> {
         let mut tab = restore_reopened(tab, claimed, self.opened_chunk_store())?;
         self.bind_tab(&mut tab)?;
         Ok(tab)
@@ -170,7 +191,7 @@ impl SessionStore {
         self.reopen_path_with_context(
             path,
             claimed,
-            &crate::app::services::chunk_store::ImportContext {
+            &ImportContext {
                 store: self.opened_chunk_store(),
                 ..Default::default()
             },
@@ -180,7 +201,7 @@ impl SessionStore {
         &self,
         path: &Path,
         claimed: &[CanonicalPathKey],
-        context: &crate::app::services::chunk_store::ImportContext,
+        context: &ImportContext,
     ) -> io::Result<Option<WorkspaceTab>> {
         let key = CanonicalPathKey::from_path(path);
         let retained = self

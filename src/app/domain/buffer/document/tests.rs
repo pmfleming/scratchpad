@@ -525,33 +525,30 @@ fn cached_history_byte_usage_tracks_history_mutations() {
 }
 
 #[test]
-fn backspace_across_hard_dividers_starts_new_entries() {
-    let mut document = TextDocument::new("a.b".to_owned());
+fn deleting_across_hard_dividers_starts_new_entries() {
+    // (direction, three single-char deletions as (range, cursor before, cursor after),
+    // deleted text of each resulting entry)
+    let backspace = [(2..3, 3, 2), (1..2, 2, 1), (0..1, 1, 0)];
+    let forward_delete = [(0..1, 0, 0), (0..1, 0, 0), (0..1, 0, 0)];
+    for (direction, deletions, entries) in [
+        ("backspace", backspace, ["b", ".", "a"]),
+        ("forward delete", forward_delete, ["a", ".", "b"]),
+    ] {
+        let mut document = TextDocument::new("a.b".to_owned());
+        for (range, previous, next) in deletions {
+            delete_edit(&mut document, range, previous, next);
+        }
 
-    delete_edit(&mut document, 2..3, 3, 2);
-    delete_edit(&mut document, 1..2, 2, 1);
-    delete_edit(&mut document, 0..1, 1, 0);
-
-    assert_eq!(document.extract_text(), "");
-    assert_eq!(document.operation_undo_depth(), 4);
-    assert_eq!(entry_record(&document, 1).edits[0].deleted_text, "b");
-    assert_eq!(entry_record(&document, 2).edits[0].deleted_text, ".");
-    assert_eq!(entry_record(&document, 3).edits[0].deleted_text, "a");
-}
-
-#[test]
-fn forward_delete_across_hard_divider_starts_new_entries() {
-    let mut document = TextDocument::new("a.b".to_owned());
-
-    delete_edit(&mut document, 0..1, 0, 0);
-    delete_edit(&mut document, 0..1, 0, 0);
-    delete_edit(&mut document, 0..1, 0, 0);
-
-    assert_eq!(document.extract_text(), "");
-    assert_eq!(document.operation_undo_depth(), 4);
-    assert_eq!(entry_record(&document, 1).edits[0].deleted_text, "a");
-    assert_eq!(entry_record(&document, 2).edits[0].deleted_text, ".");
-    assert_eq!(entry_record(&document, 3).edits[0].deleted_text, "b");
+        assert_eq!(document.extract_text(), "", "{direction}");
+        assert_eq!(document.operation_undo_depth(), 4, "{direction}");
+        for (index, deleted) in entries.into_iter().enumerate() {
+            assert_eq!(
+                entry_record(&document, index + 1).edits[0].deleted_text,
+                deleted,
+                "{direction}"
+            );
+        }
+    }
 }
 
 #[test]

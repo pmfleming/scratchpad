@@ -1,16 +1,11 @@
 //! Production captures, including absence of eager body reads during restore.
 use super::{
     Database, ReadScope,
-    tests::{database, insert, tab},
+    test_fixture::{capture, database, exec, insert, scalar, tab, texts},
 };
-use crate::app::domain::{CharCursor, CursorRange, WorkspaceTab};
-use crate::app::services::session_store::SessionPersistRequest;
+use crate::app::domain::{CharCursor, CursorRange};
 use futures_lite::future::block_on;
 use std::sync::Arc;
-
-fn capture(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
-    SessionPersistRequest::capture(tabs, 0, 14.0, false)
-}
 
 #[test]
 fn later_piece_deletion_and_undo_update_total_bytes_without_rewriting_first_part() {
@@ -27,14 +22,9 @@ fn later_piece_deletion_and_undo_update_total_bytes_without_rewriting_first_part
         let original = "xa".repeat(800);
         let id = tabs[0].active_buffer().temp_id.clone();
         db.persist(capture(&tabs), 1).await.unwrap();
-        assert!(
-            db.integer("SELECT count(*) FROM document_pieces")
-                .await
-                .unwrap()
-                > 1
-        );
+        assert!(scalar(&db, "SELECT count(*) FROM document_pieces").await > 1);
         // Updating the independent byte count must not rewrite unchanged body data.
-        db.conn.execute_batch("CREATE TRIGGER unchanged_first_part BEFORE UPDATE OF body,digest ON document_pieces WHEN old.part=0 BEGIN SELECT RAISE(ABORT,'first piece part rewritten'); END;").await.unwrap();
+        exec(&db, "CREATE TRIGGER unchanged_first_part BEFORE UPDATE OF body,digest ON document_pieces WHEN old.part=0 BEGIN SELECT RAISE(ABORT,'first piece part rewritten'); END;").await;
         tabs[0]
             .active_buffer_mut()
             .document_mut()
@@ -70,14 +60,7 @@ fn later_piece_deletion_and_undo_update_total_bytes_without_rewriting_first_part
         db.persist(capture(&tabs), 1).await.unwrap();
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
-        assert_eq!(
-            db.load(ReadScope::All)
-                .await
-                .unwrap()
-                .unwrap()
-                .text_contents()[&id],
-            original
-        );
+        assert_eq!(texts(&mut db, ReadScope::All).await[&id], original);
     });
 }
 
@@ -94,7 +77,7 @@ fn batched_layouts_rollback_then_preserve_splits_and_reopened_reordering() {
             }
             tabs.push(next);
         }
-        db.conn.execute_batch("CREATE TRIGGER fail_split BEFORE INSERT ON layout_views WHEN new.ordinal=1 BEGIN SELECT RAISE(ABORT,'injected split failure'); END;").await.unwrap();
+        exec(&db, "CREATE TRIGGER fail_split BEFORE INSERT ON layout_views WHEN new.ordinal=1 BEGIN SELECT RAISE(ABORT,'injected split failure'); END;").await;
         assert!(db.persist(capture(&tabs), 2).await.is_err());
         let committed = db.load(ReadScope::All).await.unwrap().unwrap();
         assert_eq!(committed.manifest.tabs.len(), 1);
@@ -102,10 +85,7 @@ fn batched_layouts_rollback_then_preserve_splits_and_reopened_reordering() {
             committed.text_contents().into_values().next().unwrap(),
             "committed"
         );
-        db.conn
-            .execute("DROP TRIGGER fail_split", ())
-            .await
-            .unwrap();
+        exec(&db, "DROP TRIGGER fail_split").await;
         db.persist(capture(&tabs), 3).await.unwrap();
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
@@ -131,12 +111,9 @@ fn batched_small_documents_survive_failed_manifest_retry_with_exact_history() {
             .map(|i| format!("{i}: café 東京\n").repeat(300))
             .collect();
         let tabs: Vec<_> = texts.iter().map(|text| tab(text)).collect();
-        db.conn.execute_batch("CREATE TRIGGER fail_batch BEFORE INSERT ON document_pieces BEGIN SELECT RAISE(ABORT,'injected'); END;").await.unwrap();
+        exec(&db, "CREATE TRIGGER fail_batch BEFORE INSERT ON document_pieces BEGIN SELECT RAISE(ABORT,'injected'); END;").await;
         assert!(db.persist(capture(&tabs), 1).await.is_err());
-        db.conn
-            .execute_batch("DROP TRIGGER fail_batch;")
-            .await
-            .unwrap();
+        exec(&db, "DROP TRIGGER fail_batch;").await;
         db.persist(capture(&tabs), 2).await.unwrap();
         let restored = db.load(ReadScope::All).await.unwrap().unwrap();
         assert_eq!(restored.manifest.tabs.len(), texts.len());
@@ -173,18 +150,13 @@ fn forget_releases_whole_chunks_without_rewriting_logical_offsets_or_old_clones(
             .document_mut()
             .clear_operation_history();
         db.persist(capture(&tabs), 2).await.unwrap();
-        assert_eq!(
-            db.integer("SELECT count(*) FROM document_text")
-                .await
-                .unwrap(),
-            1
-        );
+        assert_eq!(scalar(&db, "SELECT count(*) FROM document_text").await, 1);
         assert_eq!(old.active_buffer().text(), text);
         drop(old);
         for _ in 0..4 {
             db.collect_chunk_batch().await.unwrap();
         }
-        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 1);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM chunks").await, 1);
         let mut document = db
             .load(ReadScope::All)
             .await
@@ -221,9 +193,11 @@ fn large_entries_use_packed_spans_and_keep_exact_replay_after_restore() {
             .unwrap();
         db.persist(capture(&tabs), 1).await.unwrap();
         assert_eq!(
-            db.integer("SELECT count(*) FROM history WHERE packed_spans IS NOT NULL")
-                .await
-                .unwrap(),
+            scalar(
+                &db,
+                "SELECT count(*) FROM history WHERE packed_spans IS NOT NULL"
+            )
+            .await,
             1
         );
         let mut document = db
@@ -266,17 +240,19 @@ fn reference_restore_is_lazy_and_preserves_unicode_branches_and_export() {
         let expected = tabs[0].active_buffer().text();
         db.persist(capture(&tabs), 1).await.unwrap();
         assert_eq!(
-            db.integer(
+            scalar(
+                &db,
                 "SELECT count(*) FROM sqlite_master WHERE name IN ('snapshots','parts','blobs')"
             )
-            .await
-            .unwrap(),
+            .await,
             0
         );
         assert_eq!(
-            db.integer("SELECT count(*) FROM pragma_table_info('history') WHERE name='entry'")
-                .await
-                .unwrap(),
+            scalar(
+                &db,
+                "SELECT count(*) FROM pragma_table_info('history') WHERE name='entry'"
+            )
+            .await,
             0
         );
         drop(db);
@@ -322,18 +298,11 @@ fn typing_writes_tail_suffixes_and_navigation_changes_no_history_rows() {
             db.persist(capture(&tabs), index as u64 + 1).await.unwrap();
         }
         assert_eq!(
-            db.integer("SELECT sum(length(body)) FROM document_tail")
-                .await
-                .unwrap(),
+            scalar(&db, "SELECT sum(length(body)) FROM document_tail").await,
             128
         );
-        assert_eq!(
-            db.integer("SELECT count(*) FROM document_tail")
-                .await
-                .unwrap(),
-            64
-        );
-        db.conn.execute_batch("CREATE TABLE changes(kind TEXT) STRICT; CREATE TRIGGER update_entry AFTER UPDATE ON history BEGIN INSERT INTO changes VALUES('entry'); END; CREATE TRIGGER update_position AFTER UPDATE ON document_history BEGIN INSERT INTO changes VALUES('position'); END;").await.unwrap();
+        assert_eq!(scalar(&db, "SELECT count(*) FROM document_tail").await, 64);
+        exec(&db, "CREATE TABLE changes(kind TEXT) STRICT; CREATE TRIGGER update_entry AFTER UPDATE ON history BEGIN INSERT INTO changes VALUES('entry'); END; CREATE TRIGGER update_position AFTER UPDATE ON document_history BEGIN INSERT INTO changes VALUES('position'); END;").await;
         tabs[0]
             .active_buffer_mut()
             .document_mut()
@@ -341,21 +310,15 @@ fn typing_writes_tail_suffixes_and_navigation_changes_no_history_rows() {
             .unwrap();
         db.persist(capture(&tabs), 65).await.unwrap();
         assert_eq!(
-            db.integer("SELECT count(*) FROM changes WHERE kind='entry'")
-                .await
-                .unwrap(),
+            scalar(&db, "SELECT count(*) FROM changes WHERE kind='entry'").await,
             0
         );
         assert_eq!(
-            db.integer("SELECT count(*) FROM changes WHERE kind='position'")
-                .await
-                .unwrap(),
+            scalar(&db, "SELECT count(*) FROM changes WHERE kind='position'").await,
             1
         );
         assert_eq!(
-            db.integer("SELECT sum(length(body)) FROM document_tail")
-                .await
-                .unwrap(),
+            scalar(&db, "SELECT sum(length(body)) FROM document_tail").await,
             128
         );
     });
@@ -390,7 +353,7 @@ fn completed_collection_sweep_does_not_query_again_until_its_idle_delay_expires(
         db.collect_idle_chunk_batch(now).await.unwrap();
         // Any attempted collection query now fails, so successful calls below
         // demonstrate that the worker's idle path does not touch the database.
-        db.conn.execute("DROP TABLE chunks", ()).await.unwrap();
+        exec(&db, "DROP TABLE chunks").await;
         db.statements.lock().unwrap().clear();
         for tick in 1..50 {
             db.collect_idle_chunk_batch(now + std::time::Duration::from_millis(tick * 100))
@@ -420,11 +383,11 @@ fn idle_collection_rechecks_dropped_live_handles_without_another_write() {
         db.collect_idle_chunk_batch(now + std::time::Duration::from_secs(1))
             .await
             .unwrap();
-        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 1);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM chunks").await, 1);
         db.collect_idle_chunk_batch(now + std::time::Duration::from_secs(5))
             .await
             .unwrap();
-        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 0);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM chunks").await, 0);
     });
 }
 
@@ -442,7 +405,7 @@ fn successful_writes_resume_collection_during_the_idle_delay() {
         db.collect_idle_chunk_batch(std::time::Instant::now())
             .await
             .unwrap();
-        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 0);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM chunks").await, 0);
     });
 }
 
@@ -464,10 +427,7 @@ fn idle_collection_keeps_scanning_past_live_batches_before_backing_off() {
             db.collect_idle_chunk_batch(std::time::Instant::now())
                 .await
                 .unwrap();
-            assert_eq!(
-                db.integer("SELECT count(*) FROM chunks").await.unwrap(),
-                expected
-            );
+            assert_eq!(scalar(&db, "SELECT count(*) FROM chunks").await, expected);
         }
         assert_eq!(db.collection_cursor, 0);
         for (n, chunk) in chunks.iter().enumerate() {
@@ -497,16 +457,10 @@ fn many_live_only_rows_cost_few_scans_before_the_idle_delay() {
         for _ in 0..3 {
             db.collect_idle_chunk_batch(now).await.unwrap();
         }
-        assert_eq!(
-            db.integer("SELECT count(*) FROM chunks").await.unwrap(),
-            300
-        );
+        assert_eq!(scalar(&db, "SELECT count(*) FROM chunks").await, 300);
         assert_eq!(db.collection_cursor, 0);
-        db.conn
-            .execute("DROP TABLE chunk_bodies", ())
-            .await
-            .unwrap();
-        db.conn.execute("DROP TABLE chunks", ()).await.unwrap();
+        exec(&db, "DROP TABLE chunk_bodies").await;
+        exec(&db, "DROP TABLE chunks").await;
         db.statements.lock().unwrap().clear();
         // The completed sweep is paused, so no further query runs.
         db.collect_idle_chunk_batch(now + std::time::Duration::from_secs(4))
@@ -530,11 +484,11 @@ fn collection_batches_never_skip_rows_past_the_delete_limit() {
         drop(chunks);
         // Ten deletable rows: 4 + 4 + 2, with the last batch completing the sweep.
         assert!(!db.collect_chunk_batch().await.unwrap());
-        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 6);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM chunks").await, 6);
         assert!(!db.collect_chunk_batch().await.unwrap());
-        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 2);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM chunks").await, 2);
         assert!(db.collect_chunk_batch().await.unwrap());
-        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 0);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM chunks").await, 0);
         assert_eq!(db.collection_cursor, 0);
     });
 }
@@ -550,7 +504,7 @@ fn collection_keeps_live_only_handles_and_durable_history_roots() {
         for _ in 0..3 {
             db.collect_chunk_batch().await.unwrap();
         }
-        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 1);
+        assert_eq!(scalar(&db, "SELECT count(*) FROM chunks").await, 1);
         assert_eq!(
             chunk.load(true, false).unwrap().as_str(),
             "live-only λ".repeat(1024)
@@ -560,7 +514,7 @@ fn collection_keeps_live_only_handles_and_durable_history_roots() {
             db.collect_chunk_batch().await.unwrap();
         }
         assert_eq!(
-            db.integer("SELECT count(*) FROM chunks").await.unwrap(),
+            scalar(&db, "SELECT count(*) FROM chunks").await,
             0,
             "row {row}"
         );

@@ -1,5 +1,6 @@
 use super::{FileContent, FileService};
 use crate::app::domain::{BufferState, DiskFileState};
+use crate::app::services::chunk_store::ImportContext;
 use std::{
     io::{self, Read},
     path::Path,
@@ -25,14 +26,14 @@ impl FileService {
             path,
             materialize,
             known_digest,
-            &super::super::chunk_store::ImportContext::default(),
+            &ImportContext::default(),
         )
     }
     pub(crate) fn read_observed_buffer_with_context(
         path: &Path,
         materialize: bool,
         known_digest: Option<&str>,
-        context: &super::super::chunk_store::ImportContext,
+        context: &ImportContext,
     ) -> io::Result<BufferState> {
         context.check()?;
         let (state, digest) = Self::observe_decoded_digest_with_context(path, context)?;
@@ -54,94 +55,63 @@ impl FileService {
     /// Decoder state preserves split code points/BOMs and CRLF across reads.
     #[cfg(test)]
     pub(crate) fn observe_decoded_digest(path: &Path) -> io::Result<(DiskFileState, String)> {
-        Self::observe_decoded_digest_with_context(
-            path,
-            &super::super::chunk_store::ImportContext::default(),
-        )
+        Self::observe_decoded_digest_with_context(path, &ImportContext::default())
     }
     pub(crate) fn observe_decoded_digest_with_context(
         path: &Path,
-        context: &super::super::chunk_store::ImportContext,
+        context: &ImportContext,
     ) -> io::Result<(DiskFileState, String)> {
-        for _ in 0..3 {
-            let before = Self::read_disk_state(path)?;
-            let prefix = super::read::inspect_file_prefix(path)?;
-            let mut decoder = if prefix.has_bom {
-                prefix.encoding.new_decoder_with_bom_removal()
-            } else {
-                prefix.encoding.new_decoder_without_bom_handling()
-            };
-            let mut file = std::fs::File::open(path)?;
-            let mut raw = [0_u8; 16 * 1024];
-            let mut decoded = [0_u8; 32 * 1024];
-            let mut hasher = blake3::Hasher::new();
-            loop {
-                context.check()?;
-                let read = file.read(&mut raw)?;
-                let last = read == 0;
-                let mut consumed = 0;
-                loop {
-                    let (result, taken, written, _warnings) =
-                        decoder.decode_to_utf8(&raw[consumed..read], &mut decoded, last);
-                    consumed += taken;
-                    if decoded[..written].contains(&0) {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Binary files are not supported",
-                        ));
-                    }
-                    hasher.update(&decoded[..written]);
-                    if result == encoding_rs::CoderResult::InputEmpty {
-                        break;
-                    }
-                }
-                if last {
-                    break;
-                }
-            }
-            let after = Self::read_disk_state(path)?;
-            if before == after {
-                return Ok((after, hasher.finalize().to_hex().to_string()));
-            }
-        }
-        Err(io::Error::new(
-            io::ErrorKind::WouldBlock,
+        Self::read_while_unchanged(
+            path,
             "File kept changing during observation. Current text was kept.",
-        ))
+            || hash_decoded_file(path, context),
+        )
     }
     /// Run on an I/O worker. Hash decoded text before accepting its metadata;
     /// retry replacements/writes that occur while the file is being read.
     #[cfg(test)]
     pub(crate) fn read_observed_file(path: &Path) -> io::Result<ObservedFile> {
-        Self::read_observed_file_with_context(
-            path,
-            &super::super::chunk_store::ImportContext::default(),
-        )
+        Self::read_observed_file_with_context(path, &ImportContext::default())
     }
     pub(crate) fn read_observed_file_with_context(
         path: &Path,
-        context: &super::super::chunk_store::ImportContext,
+        context: &ImportContext,
     ) -> io::Result<ObservedFile> {
-        for _ in 0..3 {
+        let (state, (content, digest)) = Self::read_while_unchanged(
+            path,
+            "File kept changing while it was being read. Current text was kept.",
+            || {
+                let content = Self::read_file_with_context(path, context)?;
+                let digest = content
+                    .decoded_digest
+                    .clone()
+                    .map_or_else(|| content.document.try_content_digest(), Ok)?;
+                Ok((content, digest))
+            },
+        )?;
+        Ok(ObservedFile {
+            content,
+            state,
+            digest,
+        })
+    }
+
+    /// Runs `read` until the file's disk state is identical before and after
+    /// it, giving up with `WouldBlock` after a few attempts.
+    fn read_while_unchanged<T>(
+        path: &Path,
+        still_changing: &'static str,
+        mut read: impl FnMut() -> io::Result<T>,
+    ) -> io::Result<(DiskFileState, T)> {
+        for _ in 0..OBSERVATION_ATTEMPTS {
             let before = Self::read_disk_state(path)?;
-            let content = Self::read_file_with_context(path, context)?;
-            let digest = content
-                .decoded_digest
-                .clone()
-                .map_or_else(|| content.document.try_content_digest(), Ok)?;
+            let value = read()?;
             let after = Self::read_disk_state(path)?;
             if before == after {
-                return Ok(ObservedFile {
-                    content,
-                    state: after,
-                    digest,
-                });
+                return Ok((after, value));
             }
         }
-        Err(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "File kept changing while it was being read. Current text was kept.",
-        ))
+        Err(io::Error::new(io::ErrorKind::WouldBlock, still_changing))
     }
 
     pub(crate) fn buffer_from_observed(path: &Path, observed: ObservedFile) -> BufferState {
@@ -154,10 +124,62 @@ impl FileService {
     }
 }
 
+const OBSERVATION_ATTEMPTS: usize = 3;
+
+/// Hash the same decoded UTF-8 as adoption while retaining bounded buffers.
+/// Decoder state preserves split code points/BOMs and CRLF across reads.
+fn hash_decoded_file(path: &Path, context: &ImportContext) -> io::Result<String> {
+    let prefix = super::read::inspect_file_prefix(path)?;
+    let mut decoder = if prefix.has_bom {
+        prefix.encoding.new_decoder_with_bom_removal()
+    } else {
+        prefix.encoding.new_decoder_without_bom_handling()
+    };
+    let mut file = std::fs::File::open(path)?;
+    let mut raw = [0_u8; 16 * 1024];
+    let mut decoded = [0_u8; 32 * 1024];
+    let mut hasher = blake3::Hasher::new();
+    loop {
+        context.check()?;
+        let read = file.read(&mut raw)?;
+        let last = read == 0;
+        hash_decoded_chunk(&mut decoder, &raw[..read], last, &mut decoded, &mut hasher)?;
+        if last {
+            return Ok(hasher.finalize().to_hex().to_string());
+        }
+    }
+}
+
+/// Decodes one raw chunk into `hasher`, rejecting binary (NUL) content.
+fn hash_decoded_chunk(
+    decoder: &mut encoding_rs::Decoder,
+    mut raw: &[u8],
+    last: bool,
+    decoded: &mut [u8],
+    hasher: &mut blake3::Hasher,
+) -> io::Result<()> {
+    loop {
+        let (result, taken, written, _warnings) = decoder.decode_to_utf8(raw, decoded, last);
+        raw = &raw[taken..];
+        let output = &decoded[..written];
+        if output.contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Binary files are not supported",
+            ));
+        }
+        hasher.update(output);
+        if result == encoding_rs::CoderResult::InputEmpty {
+            return Ok(());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::io::Write;
+    use super::FileService;
+    use crate::app::domain::BufferState;
+    use std::io::{self, Write};
 
     #[test]
     fn replacement_text_survives_source_changes_beyond_the_file_chunk_cache() {
@@ -288,7 +310,7 @@ mod tests {
 
 #[cfg(test)]
 mod reference_adoption_tests {
-    use super::*;
+    use super::FileService;
     use crate::app::domain::{PieceSource, WorkspaceTab};
     use crate::app::services::{chunk_store::ImportContext, session_store::SessionStore};
     #[test]

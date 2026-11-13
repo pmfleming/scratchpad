@@ -1,5 +1,15 @@
-use super::*;
-use crate::app::services::session_store::{CapturedClosedTab, SessionPersistRequest};
+use super::super::{ROW_HEIGHT, shared};
+use crate::app::{
+    app_state::{
+        ScratchpadApp,
+        test_support::{add_tab, app_ui_harness},
+    },
+    domain::{BufferState, WorkspaceTab},
+    services::session_store::{CapturedClosedTab, SessionPersistRequest},
+    ui::dialogs::text_history::tests::{app, text},
+};
+use eframe::egui;
+use egui_kittest::kittest::Queryable;
 
 fn settle(h: &mut egui_kittest::Harness<'_, ScratchpadApp>) {
     for _ in 0..200 {
@@ -37,8 +47,7 @@ fn endpoints_and_now_scroll_across_pages_without_navigating_or_selecting() {
         .session_store
         .persist_request(save)
         .unwrap();
-    let mut h = harness(app);
-    h.run_steps(3);
+    let mut h = app_ui_harness(app);
     h.get_by_label("Timeline").click();
     settle(&mut h);
     let before = text(h.state());
@@ -105,15 +114,12 @@ fn endpoints_and_now_scroll_across_pages_without_navigating_or_selecting() {
 fn now_tracks_document_navigation_file_switching_and_empty_root() {
     let root = tempfile::tempdir().unwrap();
     let mut app = app(root.path());
-    let original = app.tab_manager.active_tab().unwrap().clone();
     let mut other = BufferState::new("other.txt".into(), "base".into(), None);
     other
         .document_mut()
         .replace_exact_with_history("other edit");
-    app.tab_manager
-        .set_tabs(vec![original, WorkspaceTab::new(other)], 0);
-    let mut h = harness(app);
-    h.run_steps(3);
+    add_tab(&mut app, other);
+    let mut h = app_ui_harness(app);
     h.get_by_label("Timeline").click();
     settle(&mut h);
     let first = h.get_by_label("Now for note.txt").rect();

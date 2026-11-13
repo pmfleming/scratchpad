@@ -1,6 +1,12 @@
 //! Reproducible manual fixture: cached UI frames and durable saves, no timing assertions.
-use super::*;
+use super::app;
 use crate::app::services::session_store::{CapturedClosedTab, SessionPersistRequest};
+use crate::app::{
+    app_state::test_support::app_ui_harness,
+    domain::{BufferState, WorkspaceTab},
+};
+use eframe::egui;
+use egui_kittest::kittest::Queryable;
 use std::time::Instant;
 
 #[test]
@@ -63,8 +69,7 @@ fn profile_retained_history_timeline() {
         }
         saves.sort_by(f64::total_cmp);
         app.state.dialogs.text_history.open();
-        let mut h = harness(app);
-        h.run_steps(3);
+        let mut h = app_ui_harness(app);
         h.get_by_label("Timeline").click();
         for _ in 0..30 {
             h.run_steps(1);

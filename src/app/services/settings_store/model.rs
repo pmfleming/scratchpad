@@ -11,7 +11,6 @@ pub const DEFAULT_FONT_SIZE: f32 = 14.0;
 pub const DEFAULT_WORD_WRAP: bool = true;
 pub const DEFAULT_EDITOR_GUTTER: u8 = 0;
 pub const DEFAULT_EDITOR_TAB_WIDTH: u8 = 4;
-pub const DEFAULT_TAB_DISPLAY: TabDisplayMode = TabDisplayMode::Hidden;
 pub const DEFAULT_EDITOR_TEXT_COLOR: &str = "#ffffff";
 pub const DEFAULT_EDITOR_BACKGROUND_COLOR: &str = "#15181d";
 pub const DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR: &str = "#fff36d";
@@ -83,8 +82,6 @@ pub enum IndentationStyle {
 }
 
 impl IndentationStyle {
-    pub const ALL: [Self; 2] = [Self::Spaces, Self::TabCharacter];
-
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
@@ -162,8 +159,6 @@ impl<'de> Deserialize<'de> for TabDisplayMode {
 }
 
 impl EditorAppearanceSource {
-    pub const ALL: [Self; 2] = [Self::App, Self::System];
-
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
@@ -542,7 +537,7 @@ impl SearchResultLimit {
 
 #[cfg(test)]
 mod search_limit_tests {
-    use super::*;
+    use super::{AppSettings, SearchResultLimit};
     #[test]
     fn search_limit_defaults_and_persistence_preserve_the_user_choice() {
         let defaults: AppSettings = toml::from_str("").unwrap();

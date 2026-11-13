@@ -42,15 +42,7 @@ impl<'a> Iterator for ByteSlice<'a> {
             return Some(
                 self.tree
                     .storage
-                    .try_text_for_span(
-                        super::ByteSpan {
-                            buffer: piece.buffer,
-                            start_byte: piece.start_byte as u64,
-                            byte_len: piece.byte_len as u64,
-                            char_len: piece.char_len as u64,
-                        },
-                        false,
-                    )
+                    .try_text_for_span(piece.byte_span(), false)
                     .map(|text| (text, range)),
             );
         }

@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    Arc, BufferState, EditorViewState, TextEditOptions, build_editor_galley, egui,
+    viewport_text_slice,
+};
 use crate::app::ui::editor_content::native_editor::EditorHighlightStyle;
 
 #[test]

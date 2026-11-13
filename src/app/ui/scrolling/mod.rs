@@ -22,9 +22,7 @@ mod target;
 
 pub use anchor::ScrollAnchor;
 pub use area::{ScrollArea, ScrollAreaOutput};
-pub use display::{
-    DisplayPoint, DisplayRow, DisplayRowFlags, DisplayRowRecord, DisplaySnapshot, ViewportSlice,
-};
+pub use display::{DisplayRow, DisplaySnapshot};
 pub use intent::{Axis, ScrollIntent};
 pub use manager::{
     ScrollManager, display_aware_anchor_to_row, naive_anchor_to_row, naive_row_to_anchor,
@@ -32,4 +30,4 @@ pub use manager::{
 pub use metrics::{ContentExtent, ViewportMetrics};
 pub use source::ScrollSource;
 pub use state::ScrollState;
-pub use target::{ScrollAlign, ScrollTarget, ScrollbarPolicy};
+pub use target::{ScrollAlign, ScrollbarPolicy};

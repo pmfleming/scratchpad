@@ -1,6 +1,6 @@
 use super::{
     ReadScope,
-    tests::{database, insert, tab},
+    test_fixture::{database, exec, insert, tab},
 };
 use crate::app::services::session_store::SessionPersistRequest;
 use futures_lite::future::block_on;
@@ -76,13 +76,13 @@ fn failed_reference_manifest_is_retryable_without_rescanning_immutable_text() {
             .await
             .unwrap();
         insert(&mut tabs[0], 100, "local edit");
-        db.conn.execute_batch("CREATE TRIGGER fail_save BEFORE INSERT ON document_pieces BEGIN SELECT RAISE(ABORT,'injected'); END;").await.unwrap();
+        exec(&db, "CREATE TRIGGER fail_save BEFORE INSERT ON document_pieces BEGIN SELECT RAISE(ABORT,'injected'); END;").await;
         assert!(
             db.persist(SessionPersistRequest::capture(&tabs, 0, 14.0, false), 2)
                 .await
                 .is_err()
         );
-        db.conn.execute("DROP TRIGGER fail_save", ()).await.unwrap();
+        exec(&db, "DROP TRIGGER fail_save").await;
         let reads = db.chunk_store().unwrap().epoch().read_count();
         let retry = db
             .persist(SessionPersistRequest::capture(&tabs, 0, 14.0, false), 3)

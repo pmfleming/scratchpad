@@ -2,7 +2,7 @@ use super::{render_file_actions, render_recently_closed_files};
 use crate::app::{
     app_state::{
         ScratchpadApp, settings_controller,
-        test_support::{test_app, wait_for_background_io},
+        test_support::{test_app, ui_harness, wait_for_background_io},
         workspace::lifecycle,
     },
     domain::{BufferState, WorkspaceTab},
@@ -30,21 +30,10 @@ fn open_file_submenu_contains_closed_files_without_a_separate_menu_item() {
                 lifecycle::perform_close_tab(&mut app, 0);
                 crate::app::app_state::test_support::wait_for_background_io(&mut app);
             }
-            let mut harness = Harness::builder()
-                .with_context_setup(|ctx| {
-                    let mut fonts = egui::FontDefinitions::default();
-                    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-                    ctx.set_fonts(fonts);
-                })
-                .with_size(egui::vec2(800.0, 600.0))
-                .build_ui_state(
-                    |ui, app| {
-                        ui.set_max_width(super::TAB_CONTEXT_MENU_WIDTH);
-                        render_file_actions(ui, app, 0, Some(0), true, true, true);
-                    },
-                    app,
-                );
-            harness.run();
+            let mut harness = ui_harness(egui::vec2(800.0, 600.0), app, |ui, app| {
+                ui.set_max_width(super::TAB_CONTEXT_MENU_WIDTH);
+                render_file_actions(ui, app, 0, Some(0), true, true, true);
+            });
             harness.get_by_role_and_label(
                 egui::Role::Button,
                 if recent_files {
@@ -127,14 +116,9 @@ fn recently_closed_menu_has_single_action_rows_and_reopens_retained_and_disk_ent
         if missing {
             std::fs::remove_file(&path).unwrap();
         }
-        let mut harness = Harness::builder()
-            .with_context_setup(|ctx| {
-                let mut fonts = egui::FontDefinitions::default();
-                egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-                ctx.set_fonts(fonts);
-            })
-            .with_size(egui::vec2(1000.0, 700.0))
-            .build_ui_state(|ui, app| render_recently_closed_files(ui, app, 0), app);
+        let mut harness = ui_harness(egui::vec2(1000.0, 700.0), app, |ui, app| {
+            render_recently_closed_files(ui, app, 0);
+        });
         wait_for_menu_entry(&mut harness, "note.txt");
         assert_closed_menu_layout(&harness, missing);
         harness

@@ -507,17 +507,15 @@ fn editor_interaction_id(view_id: ViewId) -> egui::Id {
     widget_ids::surface_role(("native_editor", view_id), WidgetRole::TextEdit)
 }
 
-pub(super) fn galley_origin(
-    rect: egui::Rect,
-    logical_line_base: usize,
-    row_height: f32,
-    display_column_base: usize,
-) -> egui::Pos2 {
-    rect.min
-        + egui::vec2(
-            display_column_base as f32 * editor_column_width(row_height),
-            logical_line_base as f32 * row_height,
-        )
+impl EditorGalleyContext {
+    /// Screen position of this slice's galley inside the full-document `rect`.
+    pub(super) fn origin(&self, rect: egui::Rect, row_height: f32) -> egui::Pos2 {
+        rect.min
+            + egui::vec2(
+                self.display_column_base as f32 * editor_column_width(row_height),
+                self.logical_line_base as f32 * row_height,
+            )
+    }
 }
 
 fn editor_content_height(galley: &egui::Galley, row_height: f32) -> f32 {

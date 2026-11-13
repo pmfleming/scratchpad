@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use super::inspection::TextInspection;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LineEndingStyle {
@@ -74,12 +72,6 @@ pub fn platform_default_line_ending() -> LineEndingStyle {
     } else {
         LineEndingStyle::Lf
     }
-}
-
-#[must_use]
-pub fn analyze_line_endings(text: &str) -> (LineEndingCounts, LineEndingStyle) {
-    let inspection = TextInspection::inspect(text);
-    (inspection.line_ending_counts, inspection.line_endings)
 }
 
 #[cfg(test)]

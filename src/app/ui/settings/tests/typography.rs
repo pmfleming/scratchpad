@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    EditorAppearanceSource, EditorFontPreset, PREVIEW_QUOTES, SettingsUi, app, egui, widgets,
+};
+use crate::app::app_state::test_support::apply_test_fonts;
+use egui_kittest::Harness;
 
 #[test]
 fn labels_tabs_and_both_previews_share_the_configured_font() {
@@ -171,7 +175,7 @@ fn large_tab_labels_fit_in_each_tab_list_position() {
 fn horizontal_tab_width_keeps_typical_names_readable_at_large_sizes() {
     for size in [14.0, 48.0, 72.0] {
         let ctx = egui::Context::default();
-        setup(&ctx);
+        apply_test_fonts(&ctx);
         let mut truncated = true;
         let mut output = ctx.run_ui(
             egui::RawInput {
