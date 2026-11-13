@@ -30,13 +30,6 @@ impl Default for ViewportMetrics {
     }
 }
 
-impl ViewportMetrics {
-    #[must_use]
-    pub fn viewport_size(&self) -> Vec2 {
-        self.viewport_rect.size()
-    }
-}
-
 /// Total content extent. Derived from the display-row pipeline (Phase 3), not
 /// from logical line count.
 #[derive(Clone, Copy, Debug, Default)]

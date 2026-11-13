@@ -15,18 +15,6 @@ use std::sync::Arc;
 const CURSOR_REVEAL_MARGIN_PX: f32 = 24.0;
 const PREVIEW_MAX_CHARS: usize = 80;
 
-#[derive(Clone, Copy)]
-struct ReplacementPreviewContext<'a> {
-    ui: &'a egui::Ui,
-    galley: &'a Arc<egui::Galley>,
-    galley_pos: egui::Pos2,
-    rect: egui::Rect,
-    options: TextEditOptions<'a>,
-    char_offset_base: usize,
-    slice_end: usize,
-    display_map: Option<&'a DisplayTextMap>,
-}
-
 pub(super) struct EditorFrame<'a> {
     pub(super) buffer: &'a crate::app::domain::BufferState,
     pub(super) galley: &'a Arc<egui::Galley>,
@@ -48,10 +36,11 @@ pub(super) struct EditorFrame<'a> {
     pub(super) replacement_preview: Option<&'a SearchReplacementPreview>,
 }
 
+/// The laid-out text slice shared by every overlay painted on top of it.
 #[derive(Clone, Copy)]
-struct SelectionPaintContext<'a> {
+struct SlicePaintContext<'a> {
     ui: &'a egui::Ui,
-    galley: &'a egui::Galley,
+    galley: &'a Arc<egui::Galley>,
     galley_pos: egui::Pos2,
     rect: egui::Rect,
     options: TextEditOptions<'a>,
@@ -60,16 +49,39 @@ struct SelectionPaintContext<'a> {
     display_map: Option<&'a DisplayTextMap>,
 }
 
-#[derive(Clone, Copy)]
-struct ImePreeditPaintContext<'a> {
-    ui: &'a egui::Ui,
-    galley: &'a Arc<egui::Galley>,
-    galley_pos: egui::Pos2,
-    rect: egui::Rect,
-    options: TextEditOptions<'a>,
-    focused: bool,
-    char_offset_base: usize,
-    display_map: Option<&'a DisplayTextMap>,
+impl SlicePaintContext<'_> {
+    fn slice_end(&self) -> usize {
+        self.char_offset_base.saturating_add(self.slice_chars)
+    }
+
+    /// Galley cursor index for a slice-local document char offset.
+    fn display_cursor(&self, doc_local: usize) -> usize {
+        self.display_map
+            .map_or(doc_local, |map| map.doc_to_display_cursor(doc_local))
+    }
+
+    /// Galley cursor range for the part of a document range inside this slice.
+    fn local_display_range(&self, range: &Range<usize>) -> Range<usize> {
+        let slice_start = self.char_offset_base;
+        let doc_local_start = range.start.max(slice_start).saturating_sub(slice_start);
+        let doc_local_end = range.end.min(self.slice_end()).saturating_sub(slice_start);
+        self.display_cursor(doc_local_start)..self.display_cursor(doc_local_end)
+    }
+
+    fn cursor_pos(&self, index: usize) -> egui::Rect {
+        self.galley
+            .pos_from_cursor(CharCursor::new(index).to_egui_ccursor())
+    }
+
+    fn overlay_painter(&self) -> egui::Painter {
+        self.ui.painter_at(self.rect.expand(1.0))
+    }
+
+    fn highlight_fill(&self) -> egui::Color32 {
+        self.options
+            .highlight_style
+            .active_background(self.ui.visuals().dark_mode)
+    }
 }
 
 struct CursorPaintContext<'a> {
@@ -95,61 +107,28 @@ pub(super) struct CursorPaintOutcome {
 pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> CursorPaintOutcome {
     paint_tablines(ui, request.rect, request.options);
     super::history_feedback::paint(ui, &request);
-    paint_contiguous_selection_background(
-        SelectionPaintContext {
-            ui,
-            galley: request.galley,
-            galley_pos: request.galley_pos,
-            rect: request.rect,
-            options: request.options,
-            char_offset_base: request.char_offset_base,
-            slice_chars: request.slice_chars,
-            display_map: request.display_map,
-        },
-        request.active_selection,
-    );
+    let slice = SlicePaintContext {
+        ui,
+        galley: request.galley,
+        galley_pos: request.galley_pos,
+        rect: request.rect,
+        options: request.options,
+        char_offset_base: request.char_offset_base,
+        slice_chars: request.slice_chars,
+        display_map: request.display_map,
+    };
+    paint_contiguous_selection_background(slice, request.active_selection);
     paint_galley(
         ui,
         request.galley,
         request.galley_pos,
         request.options.text_color,
     );
-    paint_tab_markers(
-        ui,
-        request.galley,
-        request.galley_pos,
-        request.rect,
-        request.options,
-        request.display_map,
-        request.tab_offsets,
-    );
-    paint_replacement_previews(
-        ReplacementPreviewContext {
-            ui,
-            galley: request.galley,
-            galley_pos: request.galley_pos,
-            rect: request.rect,
-            options: request.options,
-            char_offset_base: request.char_offset_base,
-            display_map: request.display_map,
-            slice_end: request.char_offset_base.saturating_add(request.slice_chars),
-        },
-        request.replacement_preview,
-    );
-    paint_ime_preedit(
-        ImePreeditPaintContext {
-            ui,
-            galley: request.galley,
-            galley_pos: request.galley_pos,
-            rect: request.rect,
-            options: request.options,
-            focused: request.focused,
-            char_offset_base: request.char_offset_base,
-            display_map: request.display_map,
-        },
-        request.ime_preedit,
-        request.cursor_range.as_ref(),
-    );
+    paint_tab_markers(slice, request.tab_offsets);
+    paint_replacement_previews(slice, request.replacement_preview);
+    if request.focused {
+        paint_ime_preedit(slice, request.ime_preedit, request.cursor_range.as_ref());
+    }
 
     // History owns keyboard focus while its target still needs to be revealed.
     // Layout already follows that target, so skipping the scroll can leave the
@@ -237,32 +216,21 @@ fn paint_tablines(ui: &egui::Ui, editor_rect: egui::Rect, options: TextEditOptio
     }
 }
 
-fn paint_tab_markers(
-    ui: &egui::Ui,
-    galley: &egui::Galley,
-    galley_pos: egui::Pos2,
-    editor_rect: egui::Rect,
-    options: TextEditOptions<'_>,
-    display_map: Option<&DisplayTextMap>,
-    tab_offsets: &[usize],
-) {
+fn paint_tab_markers(context: SlicePaintContext<'_>, tab_offsets: &[usize]) {
     if tab_offsets.is_empty() {
         return;
     }
 
-    let screen_offset = galley_screen_offset(galley, galley_pos).to_vec2();
-    let painter = ui.painter_at(editor_rect.expand(1.0));
-    let base = options.text_color;
+    let editor_rect = context.rect;
+    let screen_offset = galley_screen_offset(context.galley, context.galley_pos).to_vec2();
+    let painter = context.overlay_painter();
+    let base = context.options.text_color;
     let color = egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 110);
     let stroke = egui::Stroke::new(1.0, color);
 
     for &doc_offset in tab_offsets {
-        let start = display_map.map_or(doc_offset, |map| map.doc_to_display_cursor(doc_offset));
-        let end = display_map.map_or(doc_offset + 1, |map| {
-            map.doc_to_display_cursor(doc_offset + 1)
-        });
-        let start_rect = galley.pos_from_cursor(CharCursor::new(start).to_egui_ccursor());
-        let end_rect = galley.pos_from_cursor(CharCursor::new(end).to_egui_ccursor());
+        let start_rect = context.cursor_pos(context.display_cursor(doc_offset));
+        let end_rect = context.cursor_pos(context.display_cursor(doc_offset + 1));
         if (start_rect.center().y - end_rect.center().y).abs() > 1.0 {
             continue;
         }
@@ -284,7 +252,7 @@ fn paint_tab_markers(
 }
 
 fn paint_ime_preedit(
-    context: ImePreeditPaintContext<'_>,
+    context: SlicePaintContext<'_>,
     ime_preedit: Option<&ImePreeditState>,
     cursor_range: Option<&CursorRange>,
 ) {
@@ -294,10 +262,6 @@ fn paint_ime_preedit(
     let Some(cursor_range) = cursor_range else {
         return;
     };
-    if !context.focused {
-        return;
-    }
-
     let cursor_rect = cursor_rect_for_galley(
         context.ui,
         context.galley,
@@ -325,7 +289,7 @@ fn paint_ime_preedit(
         return;
     }
 
-    let painter = context.ui.painter_at(context.rect.expand(1.0));
+    let painter = context.overlay_painter();
     painter.galley(origin, galley, text_color);
     let underline_y = (origin.y + preedit_rect.height()).min(context.rect.bottom());
     painter.line_segment(
@@ -433,68 +397,65 @@ fn cursor_rect_for_galley(
 }
 
 fn paint_contiguous_selection_background(
-    context: SelectionPaintContext<'_>,
+    context: SlicePaintContext<'_>,
     active_selection: Option<&Range<usize>>,
 ) {
     let Some(selection) = active_selection.filter(|range| range.start < range.end) else {
         return;
     };
-    let slice_start = context.char_offset_base;
-    let slice_end = context.char_offset_base.saturating_add(context.slice_chars);
-    let doc_local_start = selection.start.max(slice_start).saturating_sub(slice_start);
-    let doc_local_end = selection.end.min(slice_end).saturating_sub(slice_start);
-    let local_start = context.display_map.map_or(doc_local_start, |map| {
-        map.doc_to_display_cursor(doc_local_start)
-    });
-    let local_end = context.display_map.map_or(doc_local_end, |map| {
-        map.doc_to_display_cursor(doc_local_end)
-    });
-    if local_start >= local_end {
+    let local = context.local_display_range(selection);
+    if local.is_empty() {
         return;
     }
 
-    let fill = context
-        .options
-        .highlight_style
-        .active_background(context.ui.visuals().dark_mode);
-    let painter = context.ui.painter_at(context.rect.expand(1.0));
+    let fill = context.highlight_fill();
+    let painter = context.overlay_painter();
     let mut row_start = 0usize;
     for row in &context.galley.rows {
-        let row_text_chars = usize::from(row.char_count_excluding_newline());
         let row_end = row_start.saturating_add(row.char_count_including_newline().into());
-        if local_start < row_end && local_end > row_start {
-            let start_col = local_start.saturating_sub(row_start).min(row_text_chars);
-            let end_col = local_end.saturating_sub(row_start).min(row_text_chars);
-            let selection_reaches_line_end =
-                row.ends_with_newline && local_end > row_start + row_text_chars;
-            let selection_covers_whole_row = local_start <= row_start && local_end >= row_end;
-            let left = row_screen_x(
-                context.galley,
-                context.galley_pos,
-                row.pos.x,
-                row.x_offset(egui::text::CharIndex(start_col)),
-            );
-            let right = if selection_reaches_line_end || selection_covers_whole_row {
-                context.rect.right()
-            } else {
-                row_screen_x(
-                    context.galley,
-                    context.galley_pos,
-                    row.pos.x,
-                    row.x_offset(egui::text::CharIndex(end_col)),
-                )
-            };
-            let highlight_rect = egui::Rect::from_min_max(
-                egui::pos2(left.min(right), context.galley_pos.y + row.min_y()),
-                egui::pos2(left.max(right), context.galley_pos.y + row.max_y()),
-            )
-            .intersect(context.rect.expand(1.0));
-            if highlight_rect.width() > 0.0 && highlight_rect.height() > 0.0 {
-                painter.rect_filled(highlight_rect, egui::CornerRadius::ZERO, fill);
-            }
+        if let Some(rect) = selection_row_rect(context, row, row_start..row_end, &local) {
+            painter.rect_filled(rect, egui::CornerRadius::ZERO, fill);
         }
         row_start = row_end;
     }
+}
+
+/// Screen rect of the part of `selection` (galley chars) on one galley row.
+/// Selections continuing past the row's end extend to the editor's right edge.
+fn selection_row_rect(
+    context: SlicePaintContext<'_>,
+    row: &egui::epaint::text::PlacedRow,
+    row_chars: Range<usize>,
+    selection: &Range<usize>,
+) -> Option<egui::Rect> {
+    if selection.start >= row_chars.end || selection.end <= row_chars.start {
+        return None;
+    }
+    let row_text_chars = usize::from(row.char_count_excluding_newline());
+    let column_x = |index: usize| {
+        let column = index.saturating_sub(row_chars.start).min(row_text_chars);
+        row_screen_x(
+            context.galley,
+            context.galley_pos,
+            row.pos.x,
+            row.x_offset(egui::text::CharIndex(column)),
+        )
+    };
+    let reaches_line_end =
+        row.ends_with_newline && selection.end > row_chars.start + row_text_chars;
+    let covers_whole_row = selection.start <= row_chars.start && selection.end >= row_chars.end;
+    let left = column_x(selection.start);
+    let right = if reaches_line_end || covers_whole_row {
+        context.rect.right()
+    } else {
+        column_x(selection.end)
+    };
+    let rect = egui::Rect::from_min_max(
+        egui::pos2(left.min(right), context.galley_pos.y + row.min_y()),
+        egui::pos2(left.max(right), context.galley_pos.y + row.max_y()),
+    )
+    .intersect(context.rect.expand(1.0));
+    (rect.width() > 0.0 && rect.height() > 0.0).then_some(rect)
 }
 
 fn row_screen_x(galley: &egui::Galley, galley_pos: egui::Pos2, row_x: f32, column_x: f32) -> f32 {
@@ -502,18 +463,18 @@ fn row_screen_x(galley: &egui::Galley, galley_pos: egui::Pos2, row_x: f32, colum
 }
 
 fn paint_replacement_previews(
-    context: ReplacementPreviewContext<'_>,
+    context: SlicePaintContext<'_>,
     preview: Option<&SearchReplacementPreview>,
 ) {
     let Some(preview) = preview else {
         return;
     };
-    let slice_range = context.char_offset_base..context.slice_end;
+    let slice_range = context.char_offset_base..context.slice_end();
     for entry in visible_preview_entries(preview, &slice_range) {
         if !slice_range.contains(&entry.range.start) {
             continue;
         }
-        paint_replacement_preview(context, entry.range.clone(), &entry.replacement);
+        paint_replacement_preview(context, &entry.range, &entry.replacement);
     }
 }
 
@@ -531,31 +492,17 @@ fn visible_preview_entries<'a>(
 }
 
 fn paint_replacement_preview(
-    context: ReplacementPreviewContext<'_>,
-    range: Range<usize>,
+    context: SlicePaintContext<'_>,
+    range: &Range<usize>,
     replacement: &str,
 ) {
-    let doc_local_start = range.start.saturating_sub(context.char_offset_base);
-    let doc_local_end = range
-        .end
-        .min(context.slice_end)
-        .saturating_sub(context.char_offset_base);
-    let local_start = context.display_map.map_or(doc_local_start, |map| {
-        map.doc_to_display_cursor(doc_local_start)
-    });
-    let local_end = context.display_map.map_or(doc_local_end, |map| {
-        map.doc_to_display_cursor(doc_local_end)
-    });
-    if local_start > local_end {
+    let local = context.local_display_range(range);
+    if local.start > local.end {
         return;
     }
 
-    let start_pos = context
-        .galley
-        .pos_from_cursor(CharCursor::new(local_start).to_egui_ccursor());
-    let end_pos = context
-        .galley
-        .pos_from_cursor(CharCursor::new(local_end).to_egui_ccursor());
+    let start_pos = context.cursor_pos(local.start);
+    let end_pos = context.cursor_pos(local.end);
     let row_height = context
         .ui
         .fonts_mut(|fonts| fonts.row_height(context.options.editor_font_id));
@@ -582,11 +529,8 @@ fn paint_replacement_preview(
         return;
     }
 
-    let painter = context.ui.painter_at(context.rect.expand(1.0));
-    let fill = context
-        .options
-        .highlight_style
-        .active_background(context.ui.visuals().dark_mode);
+    let painter = context.overlay_painter();
+    let fill = context.highlight_fill();
     let stroke = egui::Stroke::new(
         1.0,
         context

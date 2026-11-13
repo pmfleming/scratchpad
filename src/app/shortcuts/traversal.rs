@@ -1,4 +1,4 @@
-use super::consume_app_shortcut;
+use super::first_consumed;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::domain::ViewId;
@@ -9,14 +9,11 @@ pub(super) fn handle_region_traversal_shortcut(
     app: &mut ScratchpadApp,
     ctx: &egui::Context,
 ) -> bool {
-    let direction = if consume_app_shortcut(app, ctx, ShortcutAction::TraverseRegionForward) {
-        Some(1)
-    } else if consume_app_shortcut(app, ctx, ShortcutAction::TraverseRegionBackward) {
-        Some(-1)
-    } else {
-        None
-    };
-    let Some(direction) = direction else {
+    let traversals = [
+        (ShortcutAction::TraverseRegionForward, 1),
+        (ShortcutAction::TraverseRegionBackward, -1),
+    ];
+    let Some(direction) = first_consumed(app, ctx, &traversals) else {
         return false;
     };
     let Some(next_view_id) = next_view_for_region_traversal(app, direction) else {
@@ -63,12 +60,15 @@ mod tests {
     use super::next_region_index;
 
     #[test]
-    fn f6_traversal_wraps_forward() {
-        assert_eq!(next_region_index(2, 3, 1), Some(0));
-    }
-
-    #[test]
-    fn shift_f6_traversal_wraps_backward() {
-        assert_eq!(next_region_index(0, 3, -1), Some(2));
+    fn region_traversal_wraps_in_both_directions() {
+        for (current, len, direction, expected) in [
+            (2, 3, 1, Some(0)),
+            (0, 3, -1, Some(2)),
+            (1, 3, 1, Some(2)),
+            (1, 3, -1, Some(0)),
+            (0, 1, 1, None),
+        ] {
+            assert_eq!(next_region_index(current, len, direction), expected);
+        }
     }
 }

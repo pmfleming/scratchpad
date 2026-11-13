@@ -41,28 +41,6 @@ impl StartupOptions {
             ..Default::default()
         }
     }
-
-    #[must_use]
-    pub fn describe(&self) -> String {
-        let target = match self.open_target {
-            StartupOpenTarget::SeparateTabs => "separate-tabs".to_owned(),
-            StartupOpenTarget::ActiveTab => "active-tab".to_owned(),
-            StartupOpenTarget::TabIndex(index) => format!("tab-index-{}", index + 1),
-        };
-        let files = self
-            .files
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!(
-            "restore_session={}, open_target={}, files=[{}], notice={}",
-            self.restore_session,
-            target,
-            files,
-            self.startup_notice.as_deref().unwrap_or("none")
-        )
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

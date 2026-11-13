@@ -75,14 +75,13 @@ pub struct CapacityMetricsSnapshot {
     pub frame_shortcuts_max_ns: u64,
     pub frame_finish_total_ns: u64,
     pub frame_finish_max_ns: u64,
-    pub history_evictions_per_file: u64,
-    pub history_evictions_aggregate: u64,
-    pub history_evicted_bytes: u64,
 }
 
 macro_rules! capacity_counters {
     ($($name:ident),+ $(,)?) => {
         $(static $name: AtomicU64 = AtomicU64::new(0);)+
+        /// Every scalar counter above, for resetting between measurements.
+        static SCALAR_COUNTERS: &[&AtomicU64] = &[$(&$name),+];
     };
 }
 
@@ -104,34 +103,10 @@ capacity_counters! {
     SEARCH_MAX_QUEUE_DEPTH,
     LAYOUT_CACHE_HIT_COUNT,
     LAYOUT_CACHE_MISS_COUNT,
-    HISTORY_EVICTIONS_PER_FILE,
-    HISTORY_EVICTIONS_AGGREGATE,
-    HISTORY_EVICTED_BYTES,
 }
 
 pub fn reset_capacity_metrics() {
-    reset_counters(&[
-        &FULL_TEXT_FLATTEN_COUNT,
-        &FULL_TEXT_FLATTEN_BYTES,
-        &RANGE_FLATTEN_COUNT,
-        &RANGE_FLATTEN_BYTES,
-        &LAYOUT_JOB_COUNT,
-        &LAYOUT_INPUT_BYTES,
-        &LAYOUT_TIME_NS,
-        &SEARCH_REQUEST_COUNT,
-        &SEARCH_RESULT_GROUPS_RENDERED,
-        &SEARCH_RESULT_GROUPS_SKIPPED,
-        &SEARCH_TARGET_COUNT,
-        &SEARCH_CHUNK_COUNT,
-        &SEARCH_INTRA_BUFFER_MAX_WORKERS,
-        &SEARCH_WORKER_ACTIVE_NS,
-        &SEARCH_MAX_QUEUE_DEPTH,
-        &LAYOUT_CACHE_HIT_COUNT,
-        &LAYOUT_CACHE_MISS_COUNT,
-        &HISTORY_EVICTIONS_PER_FILE,
-        &HISTORY_EVICTIONS_AGGREGATE,
-        &HISTORY_EVICTED_BYTES,
-    ]);
+    SCALAR_COUNTERS.iter().copied().for_each(reset_counter);
     background_io::reset();
     frame::reset();
 }
@@ -196,20 +171,7 @@ pub fn capacity_metrics_snapshot() -> CapacityMetricsSnapshot {
         frame_shortcuts_max_ns: frame.shortcuts.max_ns,
         frame_finish_total_ns: frame.finish.total_ns,
         frame_finish_max_ns: frame.finish.max_ns,
-        history_evictions_per_file: load_counter(&HISTORY_EVICTIONS_PER_FILE),
-        history_evictions_aggregate: load_counter(&HISTORY_EVICTIONS_AGGREGATE),
-        history_evicted_bytes: load_counter(&HISTORY_EVICTED_BYTES),
     }
-}
-
-pub fn record_history_eviction_per_file(bytes: usize) {
-    HISTORY_EVICTIONS_PER_FILE.fetch_add(1, Ordering::Relaxed);
-    HISTORY_EVICTED_BYTES.fetch_add(saturating_u64(bytes), Ordering::Relaxed);
-}
-
-pub fn record_history_eviction_aggregate(bytes: usize) {
-    HISTORY_EVICTIONS_AGGREGATE.fetch_add(1, Ordering::Relaxed);
-    HISTORY_EVICTED_BYTES.fetch_add(saturating_u64(bytes), Ordering::Relaxed);
 }
 
 pub fn record_full_text_flatten(bytes: usize) {
@@ -262,12 +224,6 @@ pub fn record_layout_cache_miss() {
     LAYOUT_CACHE_MISS_COUNT.fetch_add(1, Ordering::Relaxed);
 }
 
-fn reset_counters(counters: &[&AtomicU64]) {
-    for counter in counters {
-        reset_counter(counter);
-    }
-}
-
 fn reset_counter(counter: &AtomicU64) {
     counter.store(0, Ordering::Relaxed);
 }
@@ -276,7 +232,7 @@ fn load_counter(counter: &AtomicU64) -> u64 {
     counter.load(Ordering::Relaxed)
 }
 
-fn update_max(counter: &AtomicU64, value: u64) {
+pub(crate) fn update_max(counter: &AtomicU64, value: u64) {
     let mut current = counter.load(Ordering::Relaxed);
     while value > current {
         match counter.compare_exchange_weak(current, value, Ordering::Relaxed, Ordering::Relaxed) {

@@ -41,7 +41,7 @@ pub(super) fn publish(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{BufferState, EditorViewState, egui, publish};
     use crate::app::domain::CursorRange;
 
     #[test]

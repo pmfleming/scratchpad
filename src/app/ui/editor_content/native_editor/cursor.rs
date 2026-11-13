@@ -224,35 +224,36 @@ fn horizontal_goal_for_document_movement(
 fn horizontal_movement_target(
     context: HorizontalMovementContext<'_>,
 ) -> Option<egui::text::CCursor> {
-    match context.key {
-        egui::Key::ArrowLeft if is_wordwise_movement(context.modifiers) => {
-            Some(local_cursor_for_document_index(
-                word_boundary::find_word_boundary_left(context.piece_tree, context.current_index),
-                context.char_offset_base,
-                context.slice_chars,
-                context.display_map,
-            ))
+    let wordwise = is_wordwise_movement(context.modifiers);
+    let word_boundary = match (context.key, wordwise) {
+        (egui::Key::ArrowLeft, false) => {
+            return Some(
+                context
+                    .galley
+                    .cursor_left_one_character(context.egui_cursor),
+            );
         }
-        egui::Key::ArrowLeft => Some(
-            context
-                .galley
-                .cursor_left_one_character(context.egui_cursor),
-        ),
-        egui::Key::ArrowRight if is_wordwise_movement(context.modifiers) => {
-            Some(local_cursor_for_document_index(
-                word_boundary::find_word_boundary_right(context.piece_tree, context.current_index),
-                context.char_offset_base,
-                context.slice_chars,
-                context.display_map,
-            ))
+        (egui::Key::ArrowRight, false) => {
+            return Some(
+                context
+                    .galley
+                    .cursor_right_one_character(context.egui_cursor),
+            );
         }
-        egui::Key::ArrowRight => Some(
-            context
-                .galley
-                .cursor_right_one_character(context.egui_cursor),
-        ),
-        _ => None,
-    }
+        (egui::Key::ArrowLeft, true) => {
+            word_boundary::find_word_boundary_left(context.piece_tree, context.current_index)
+        }
+        (egui::Key::ArrowRight, true) => {
+            word_boundary::find_word_boundary_right(context.piece_tree, context.current_index)
+        }
+        _ => return None,
+    };
+    Some(local_cursor_for_document_index(
+        word_boundary,
+        context.char_offset_base,
+        context.slice_chars,
+        context.display_map,
+    ))
 }
 
 fn visual_row_movement_target(

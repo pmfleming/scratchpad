@@ -618,25 +618,18 @@ mod tests {
     }
 
     #[test]
-    fn wordwise_backspace_removes_previous_word_after_whitespace() {
-        let mut buffer = buffer("alpha  beta");
+    fn wordwise_deletion_removes_a_word_and_the_whitespace_toward_it() {
+        type Delete = fn(&mut BufferState, &CursorRange, &egui::Modifiers) -> CursorRange;
         let wordwise = modifiers(|modifiers| modifiers.ctrl = true);
-
-        let next = apply_backspace(&mut buffer, &cursor(11), &wordwise);
-
-        assert_eq!(buffer.text(), "alpha  ");
-        assert_eq!(next, cursor(7));
-    }
-
-    #[test]
-    fn wordwise_delete_removes_current_word_and_following_whitespace() {
-        let mut buffer = buffer("alpha  beta");
-        let wordwise = modifiers(|modifiers| modifiers.ctrl = true);
-
-        let next = apply_delete(&mut buffer, &cursor(0), &wordwise);
-
-        assert_eq!(buffer.text(), "beta");
-        assert_eq!(next.primary.index, 0);
+        for (delete, at, expected_text, expected_index) in [
+            (apply_backspace as Delete, 11, "alpha  ", 7),
+            (apply_delete as Delete, 0, "beta", 0),
+        ] {
+            let mut buffer = buffer("alpha  beta");
+            let next = delete(&mut buffer, &cursor(at), &wordwise);
+            assert_eq!(buffer.text(), expected_text);
+            assert_eq!(next.primary.index, expected_index);
+        }
     }
 
     #[test]
@@ -666,62 +659,38 @@ mod tests {
     }
 
     #[test]
-    fn outdent_removes_leading_tab_on_current_line() {
-        let mut buffer = buffer("one\n\tword");
+    fn single_line_outdent_removes_at_most_one_indent_level() {
+        // (text, cursor, indentation width, outdented text, cursor after)
+        for (text, at, width, expected_text, expected_cursor) in [
+            ("one\n\tword", 4, 4, "one\nword", 4),
+            ("    indented", 6, 4, "indented", 2),
+            ("    word", 6, 2, "  word", 4),
+        ] {
+            let mut buffer = buffer(text);
+            let next = apply_outdent(&mut buffer, &cursor(at), width).unwrap();
+            assert_eq!(buffer.text(), expected_text);
+            assert_eq!(next, cursor(expected_cursor));
+        }
 
-        let next = apply_outdent(&mut buffer, &cursor(4), 4).unwrap();
-
-        assert_eq!(buffer.text(), "one\nword");
-        assert_eq!(next, cursor(4));
-    }
-
-    #[test]
-    fn outdent_removes_up_to_four_leading_spaces() {
-        let mut buffer = buffer("    indented");
-
-        let next = apply_outdent(&mut buffer, &cursor(6), 4).unwrap();
-
-        assert_eq!(buffer.text(), "indented");
-        assert_eq!(next, cursor(2));
-    }
-
-    #[test]
-    fn outdent_without_indent_is_noop() {
         let mut buffer = buffer("plain");
-
         assert_eq!(apply_outdent(&mut buffer, &cursor(2), 4), None);
         assert_eq!(buffer.text(), "plain");
         assert_eq!(buffer.document().operation_undo_depth(), 1);
     }
 
     #[test]
-    fn spaces_indent_advances_to_the_next_tab_stop() {
-        let mut buffer = buffer("ab");
-
-        let next = apply_indent(&mut buffer, &cursor(2), IndentationStyle::Spaces, 4);
-
-        assert_eq!(buffer.text(), "ab  ");
-        assert_eq!(next, cursor(4));
-    }
-
-    #[test]
-    fn spaces_indent_uses_the_configured_width() {
-        let mut buffer = buffer("a");
-
-        let next = apply_indent(&mut buffer, &cursor(1), IndentationStyle::Spaces, 3);
-
-        assert_eq!(buffer.text(), "a  ");
-        assert_eq!(next, cursor(3));
-    }
-
-    #[test]
-    fn tab_indent_inserts_an_actual_tab_character() {
-        let mut buffer = buffer("ab");
-
-        let next = apply_indent(&mut buffer, &cursor(2), IndentationStyle::TabCharacter, 4);
-
-        assert_eq!(buffer.text(), "ab\t");
-        assert_eq!(next, cursor(3));
+    fn single_line_indent_inserts_a_tab_or_spaces_to_the_next_stop() {
+        for (text, style, width, expected_text) in [
+            ("ab", IndentationStyle::Spaces, 4, "ab  "),
+            ("a", IndentationStyle::Spaces, 3, "a  "),
+            ("ab", IndentationStyle::TabCharacter, 4, "ab\t"),
+        ] {
+            let mut buffer = buffer(text);
+            let end = text.chars().count();
+            let next = apply_indent(&mut buffer, &cursor(end), style, width);
+            assert_eq!(buffer.text(), expected_text);
+            assert_eq!(next, cursor(expected_text.chars().count()));
+        }
     }
 
     #[test]
@@ -755,14 +724,5 @@ mod tests {
         assert_eq!(buffer.document().operation_undo_depth(), 2);
         assert_eq!(buffer.undo_last_text_operation(), Some(selected));
         assert_eq!(buffer.text(), "\tone\n    two\nthree");
-    }
-
-    #[test]
-    fn outdent_removes_no_more_than_the_configured_width() {
-        let mut buffer = buffer("    word");
-
-        apply_outdent(&mut buffer, &cursor(6), 2).unwrap();
-
-        assert_eq!(buffer.text(), "  word");
     }
 }

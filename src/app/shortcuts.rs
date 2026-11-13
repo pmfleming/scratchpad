@@ -21,59 +21,86 @@ pub(crate) fn handle_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     handle_tab_shortcuts(app, ctx);
 }
 
+/// When a global shortcut is live.
+#[derive(Clone, Copy)]
+enum GlobalScope {
+    Always,
+    OutsideSettings,
+    InSettings,
+    SearchOpen,
+}
+
+impl GlobalScope {
+    fn applies(self, app: &ScratchpadApp) -> bool {
+        let showing_settings = || crate::app::app_state::settings_state::showing_settings(app);
+        match self {
+            Self::Always => true,
+            Self::OutsideSettings => !showing_settings(),
+            Self::InSettings => showing_settings(),
+            Self::SearchOpen => app.state.search_state.open(),
+        }
+    }
+}
+
+/// Global shortcuts in priority order; the first one consumed wins.
+/// The flag requests a repaint so search panels open or close immediately.
+fn global_shortcuts() -> [(ShortcutAction, GlobalScope, AppCommand, bool); 6] {
+    use GlobalScope::{Always, InSettings, OutsideSettings, SearchOpen};
+    [
+        (
+            ShortcutAction::OpenUserManual,
+            Always,
+            AppCommand::File(FileCommand::OpenUserManual),
+            false,
+        ),
+        (
+            ShortcutAction::OpenSearch,
+            OutsideSettings,
+            AppCommand::Search(SearchCommand::Open),
+            true,
+        ),
+        (
+            ShortcutAction::OpenReplace,
+            OutsideSettings,
+            AppCommand::Search(SearchCommand::OpenAndReplace),
+            true,
+        ),
+        (
+            ShortcutAction::OpenSettings,
+            Always,
+            AppCommand::Settings(SettingsCommand::OpenSettings),
+            false,
+        ),
+        (
+            ShortcutAction::CloseSettings,
+            InSettings,
+            AppCommand::Settings(SettingsCommand::CloseSettings),
+            false,
+        ),
+        (
+            ShortcutAction::CloseSearch,
+            SearchOpen,
+            AppCommand::Search(SearchCommand::Close),
+            true,
+        ),
+    ]
+}
+
 fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if !crate::app::app_state::settings_state::showing_settings(app)
+    if GlobalScope::OutsideSettings.applies(app)
         && traversal::handle_region_traversal_shortcut(app, ctx)
     {
         return;
     }
 
-    if consume_app_shortcut(app, ctx, ShortcutAction::OpenUserManual) {
-        crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenUserManual));
-        return;
-    }
-
-    if !crate::app::app_state::settings_state::showing_settings(app)
-        && consume_app_shortcut(app, ctx, ShortcutAction::OpenSearch)
-    {
-        crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Open));
-        ctx.request_repaint();
-        return;
-    }
-
-    if !crate::app::app_state::settings_state::showing_settings(app)
-        && consume_app_shortcut(app, ctx, ShortcutAction::OpenReplace)
-    {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Search(SearchCommand::OpenAndReplace),
-        );
-        ctx.request_repaint();
-        return;
-    }
-
-    if consume_app_shortcut(app, ctx, ShortcutAction::OpenSettings) {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Settings(SettingsCommand::OpenSettings),
-        );
-        return;
-    }
-
-    if crate::app::app_state::settings_state::showing_settings(app)
-        && consume_app_shortcut(app, ctx, ShortcutAction::CloseSettings)
-    {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Settings(SettingsCommand::CloseSettings),
-        );
-        return;
-    }
-
-    if app.state.search_state.open() && consume_app_shortcut(app, ctx, ShortcutAction::CloseSearch)
-    {
-        crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Close));
-        ctx.request_repaint();
+    for (action, scope, command, repaint) in global_shortcuts() {
+        if scope.applies(app) && consume_app_shortcut(app, ctx, action) {
+            crate::app::commands::handle_command(app, command);
+            if repaint {
+                ctx.request_repaint();
+            }
+            return;
+        }
     }
 }
 
@@ -147,4 +174,15 @@ pub(super) fn consume_app_shortcut(
         &app.state.app_settings.shortcuts,
         action,
     )
+}
+
+/// Consume the first pressed shortcut in `bindings` and return its value.
+pub(super) fn first_consumed<T: Copy>(
+    app: &ScratchpadApp,
+    ctx: &egui::Context,
+    bindings: &[(ShortcutAction, T)],
+) -> Option<T> {
+    bindings
+        .iter()
+        .find_map(|&(action, value)| consume_app_shortcut(app, ctx, action).then_some(value))
 }

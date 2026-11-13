@@ -16,8 +16,6 @@ pub enum EditorFontSource {
 }
 
 impl EditorFontSource {
-    pub const ALL: [Self; 2] = [Self::Scratchpad, Self::Os];
-
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {

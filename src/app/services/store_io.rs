@@ -69,6 +69,8 @@ mod tests {
 
     #[test]
     fn failed_atomic_writes_preserve_the_target_and_remove_staging_files() {
+        // A failed write or a failed final rename (the target is a directory)
+        // must leave the original bytes and no staging file behind.
         for replace_failure in [false, true] {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("state");
@@ -79,13 +81,14 @@ mod tests {
                 path.clone()
             };
             fs::write(&original, b"old").unwrap();
+            let write_result = if replace_failure {
+                Ok(())
+            } else {
+                Err(io::Error::other("injected write failure"))
+            };
             let error = write_atomic_with(&path, |file| {
                 file.write_all(b"partial")?;
-                if replace_failure {
-                    Ok(())
-                } else {
-                    Err(io::Error::other("injected write failure"))
-                }
+                write_result
             })
             .unwrap_err();
             if !replace_failure {
@@ -93,16 +96,19 @@ mod tests {
             }
             assert_eq!(fs::read(original).unwrap(), b"old");
             assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
-            let invoked = std::cell::Cell::new(false);
-            assert!(
-                write_atomic_with(&directory.path().join("missing/state"), |_| {
-                    invoked.set(true);
-                    Ok(())
-                })
-                .is_err()
-            );
-            assert!(!invoked.get());
         }
+
+        // A missing parent fails before the writer runs.
+        let directory = tempfile::tempdir().unwrap();
+        let invoked = std::cell::Cell::new(false);
+        assert!(
+            write_atomic_with(&directory.path().join("missing/state"), |_| {
+                invoked.set(true);
+                Ok(())
+            })
+            .is_err()
+        );
+        assert!(!invoked.get());
     }
 
     #[test]

@@ -7,7 +7,6 @@ pub const TAB_SELECTED_BG: Color32 = Color32::from_rgb(34, 43, 59);
 pub const TAB_SELECTED_ACCENT: Color32 = Color32::from_rgb(104, 154, 232);
 pub const ACTION_BG: Color32 = Color32::from_rgb(38, 43, 50);
 pub const ACTION_HOVER_BG: Color32 = Color32::from_rgb(52, 58, 68);
-pub const CLOSE_BG: Color32 = Color32::from_rgb(124, 49, 49);
 pub const CLOSE_HOVER_BG: Color32 = Color32::from_rgb(164, 58, 58);
 pub const BORDER: Color32 = Color32::from_rgb(59, 66, 76);
 pub const TEXT_PRIMARY: Color32 = Color32::WHITE;
@@ -105,7 +104,10 @@ pub fn tab_list_scroll_style() -> egui::style::ScrollStyle {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        Color32, HEADER_BG, HEADER_BG_LIGHT, TEXT_MUTED, TEXT_MUTED_LIGHT, TEXT_PRIMARY,
+        TEXT_PRIMARY_LIGHT,
+    };
 
     fn luminance(color: Color32) -> f32 {
         let linear = |channel: u8| {

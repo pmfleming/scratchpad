@@ -29,138 +29,162 @@ fn viewport_slice_ignores_offscreen_cursor_without_pending_reveal() {
     assert_eq!(cursor_line_for_viewport_slice(&buffer, &view), Some(120));
 }
 
-#[test]
-fn visible_control_text_maps_newline_marker_to_single_document_char() {
-    let display = display_text_slice("a\nb", true);
-    let map = display.map.as_ref().unwrap();
+type CursorPairs = &'static [(usize, usize)];
+type Replacements = Vec<(std::ops::Range<usize>, &'static str)>;
 
-    assert_eq!(display.text, "a\u{240A}\nb");
-    assert_eq!(map.doc_to_display_cursor(1), 1);
-    assert_eq!(map.doc_to_display_cursor(2), 3);
-    assert_eq!(map.display_to_doc_cursor(1), 1);
-    assert_eq!(map.display_to_doc_cursor(2), 1);
-    assert_eq!(map.display_to_doc_cursor(3), 2);
+fn assert_cursor_maps(
+    map: &super::DisplayTextMap,
+    doc_to_display: CursorPairs,
+    display_to_doc: CursorPairs,
+    case: &str,
+) {
+    for &(doc, display) in doc_to_display {
+        assert_eq!(map.doc_to_display_cursor(doc), display, "{case}: doc {doc}");
+    }
+    for &(display, doc) in display_to_doc {
+        assert_eq!(
+            map.display_to_doc_cursor(display),
+            doc,
+            "{case}: display {display}"
+        );
+    }
 }
 
 #[test]
-fn visible_unicode_controls_use_private_use_glyphs() {
-    let display = display_text_slice("a\u{200E}b", true);
-    let map = display.map.as_ref().unwrap();
-
-    assert_eq!(display.text, "a\u{F003}b");
+fn visible_controls_use_glyphs_and_map_cursors_to_document_chars() {
+    let cases: [(&str, &str, CursorPairs, CursorPairs); 5] = [
+        // A newline marker plus row break is a single document char.
+        (
+            "a\nb",
+            "a\u{240A}\nb",
+            &[(1, 1), (2, 3)],
+            &[(1, 1), (2, 1), (3, 2)],
+        ),
+        // A bare CR still breaks the display row.
+        ("a\rb", "a\u{240D}\nb", &[(1, 1), (2, 3)], &[(2, 1), (3, 2)]),
+        // CRLF pins each line-ending char.
+        (
+            "a\r\nb",
+            "a\u{240D}\u{240A}\nb",
+            &[(1, 1), (2, 2), (3, 4)],
+            &[(2, 2), (3, 2), (4, 3)],
+        ),
+        // Unicode format controls use private-use glyphs.
+        (
+            "a\u{200E}b",
+            "a\u{F003}b",
+            &[(1, 1), (2, 2)],
+            &[(1, 1), (2, 2)],
+        ),
+        // C0 and DEL controls use control pictures.
+        (
+            "\u{0000}\u{001B}\u{007F}",
+            "\u{2400}\u{241B}\u{2421}",
+            &[],
+            &[],
+        ),
+    ];
+    for (text, expected, doc_to_display, display_to_doc) in cases {
+        let display = display_text_slice(text, true);
+        assert_eq!(display.text, expected, "{text:?}");
+        let map = display.map.as_ref().unwrap();
+        assert_cursor_maps(map, doc_to_display, display_to_doc, text);
+    }
+    let map = display_text_slice("a\u{200E}b", true).map.unwrap();
     assert_eq!(map.doc_range_to_display(1..2), Some(1..2));
-    assert_eq!(map.display_to_doc_cursor(1), 1);
-    assert_eq!(map.display_to_doc_cursor(2), 2);
-}
-
-#[test]
-fn visible_c0_and_del_controls_use_control_pictures() {
-    let display = display_text_slice("\u{0000}\u{001B}\u{007F}", true);
-
-    assert_eq!(display.text, "\u{2400}\u{241B}\u{2421}");
-}
-
-#[test]
-fn visible_bare_cr_creates_display_row_break() {
-    let display = display_text_slice("a\rb", true);
-    let map = display.map.as_ref().unwrap();
-
-    assert_eq!(display.text, "a\u{240D}\nb");
-    assert_eq!(map.doc_to_display_cursor(1), 1);
-    assert_eq!(map.doc_to_display_cursor(2), 3);
-    assert_eq!(map.display_to_doc_cursor(2), 1);
-    assert_eq!(map.display_to_doc_cursor(3), 2);
+    assert!(display_text_slice("a\nb", false).map.is_none());
 }
 
 #[test]
 fn preview_text_slice_projects_replacements_without_changing_original_coordinates() {
-    let preview = replacement_preview(4..7, "barley");
-    let slice = preview_text_slice("foo foo baz", 0..11, Some(&preview));
-    let map = slice.map.as_ref().expect("preview map");
+    // (slice text, slice start, replacements, projected text, doc->display, display->doc)
+    let cases: [(&str, usize, Replacements, &str, CursorPairs, CursorPairs); 7] = [
+        (
+            "foo foo baz",
+            0,
+            vec![(4..7, "barley")],
+            "foo barley baz",
+            &[(4, 4), (7, 10)],
+            &[(10, 7)],
+        ),
+        (
+            "foo foo baz",
+            0,
+            vec![(4..7, "")],
+            "foo  baz",
+            &[(4, 4), (7, 4)],
+            &[],
+        ),
+        (
+            "fooqux!",
+            0,
+            vec![(0..3, "bar"), (3..6, "bazooka")],
+            "barbazooka!",
+            &[(0, 0), (3, 3), (6, 10)],
+            &[(10, 6)],
+        ),
+        (
+            "foo foo",
+            0,
+            vec![(4..7, "barley")],
+            "foo barley",
+            &[(7, 10)],
+            &[(10, 7)],
+        ),
+        ("foo foo", 0, vec![(4..7, "")], "foo ", &[(7, 4)], &[]),
+        // Overlapping replacements keep the first.
+        (
+            "abcdef",
+            0,
+            vec![(0..3, "X"), (1..4, "Y")],
+            "Xdef",
+            &[(3, 1)],
+            &[],
+        ),
+        // Document ranges are relative to the slice start.
+        (
+            "foo baz",
+            10,
+            vec![(14..17, "quxx")],
+            "foo quxx",
+            &[(7, 8)],
+            &[(8, 7)],
+        ),
+    ];
+    for (text, slice_start, entries, expected, doc_to_display, display_to_doc) in cases {
+        let preview = replacement_preview(entries);
+        let slice_range = slice_start..slice_start + text.chars().count();
+        let slice = preview_text_slice(text, slice_range, Some(&preview));
+        assert_eq!(slice.text, expected);
+        let map = slice.map.as_ref().expect("preview map");
+        assert_cursor_maps(map, doc_to_display, display_to_doc, expected);
+    }
 
-    assert_eq!(slice.text, "foo barley baz");
-    assert_eq!(map.doc_to_display_cursor(4), 4);
-    assert_eq!(map.doc_to_display_cursor(7), 10);
-    assert_eq!(map.display_to_doc_cursor(10), 7);
-    assert_eq!(map.doc_range_to_display(4..7), Some(4..10));
-}
-
-#[test]
-fn preview_text_slice_can_project_deletion() {
-    let preview = replacement_preview(4..7, "");
-    let slice = preview_text_slice("foo foo baz", 0..11, Some(&preview));
-    let map = slice.map.as_ref().expect("preview map");
-
-    assert_eq!(slice.text, "foo  baz");
-    assert_eq!(map.doc_to_display_cursor(4), 4);
-    assert_eq!(map.doc_to_display_cursor(7), 4);
-    assert_eq!(map.doc_range_to_display(4..7), None);
-}
-
-#[test]
-fn preview_text_slice_projects_adjacent_replacements() {
-    let preview = SearchReplacementPreview::new(vec![
-        SearchReplacementPreviewEntry {
-            range: 0..3,
-            replacement: "bar".to_owned(),
-        },
-        SearchReplacementPreviewEntry {
-            range: 3..6,
-            replacement: "bazooka".to_owned(),
-        },
-    ]);
-
-    let slice = preview_text_slice("fooqux!", 0..7, Some(&preview));
-    let map = slice.map.as_ref().expect("preview map");
-
-    assert_eq!(slice.text, "barbazooka!");
-    assert_eq!(map.doc_to_display_cursor(0), 0);
-    assert_eq!(map.doc_to_display_cursor(3), 3);
-    assert_eq!(map.doc_to_display_cursor(6), 10);
-    assert_eq!(map.display_to_doc_cursor(10), 6);
-}
-
-#[test]
-fn preview_text_slice_projects_replacement_at_eof() {
-    let preview = replacement_preview(4..7, "barley");
-    let slice = preview_text_slice("foo foo", 0..7, Some(&preview));
-    let map = slice.map.as_ref().expect("preview map");
-
-    assert_eq!(slice.text, "foo barley");
-    assert_eq!(map.doc_to_display_cursor(7), 10);
-    assert_eq!(map.display_to_doc_cursor(10), 7);
-}
-
-#[test]
-fn preview_text_slice_projects_deletion_at_eof() {
-    let preview = replacement_preview(4..7, "");
-    let slice = preview_text_slice("foo foo", 0..7, Some(&preview));
-    let map = slice.map.as_ref().expect("preview map");
-
-    assert_eq!(slice.text, "foo ");
-    assert_eq!(map.doc_to_display_cursor(7), 4);
+    let replaced = preview_text_slice(
+        "foo foo baz",
+        0..11,
+        Some(&replacement_preview(vec![(4..7, "barley")])),
+    );
+    assert_eq!(
+        replaced.map.unwrap().doc_range_to_display(4..7),
+        Some(4..10)
+    );
+    let deleted = preview_text_slice(
+        "foo foo baz",
+        0..11,
+        Some(&replacement_preview(vec![(4..7, "")])),
+    );
+    assert_eq!(deleted.map.unwrap().doc_range_to_display(4..7), None);
 }
 
 #[test]
 fn preview_text_slice_ignores_replacement_outside_slice() {
-    let preview = replacement_preview(10..13, "BAR");
+    let preview = replacement_preview(vec![(10..13, "BAR")]);
     let slice = preview_text_slice("01234", 0..5, Some(&preview));
 
     assert_eq!(slice.text, "01234");
-}
-
-#[test]
-fn visible_crlf_pins_each_line_ending_char() {
-    let display = display_text_slice("a\r\nb", true);
-    let map = display.map.as_ref().unwrap();
-
-    assert_eq!(display.text, "a\u{240D}\u{240A}\nb");
-    assert_eq!(map.doc_to_display_cursor(1), 1);
-    assert_eq!(map.doc_to_display_cursor(2), 2);
-    assert_eq!(map.doc_to_display_cursor(3), 4);
-    assert_eq!(map.display_to_doc_cursor(2), 2);
-    assert_eq!(map.display_to_doc_cursor(3), 2);
-    assert_eq!(map.display_to_doc_cursor(4), 3);
+    assert!(slice.map.is_none());
+    assert!(preview_text_slice("01234", 0..5, None).map.is_none());
 }
 
 fn view_with_cursor_at_line(buffer: &BufferState, line: usize) -> EditorViewState {
@@ -171,14 +195,16 @@ fn view_with_cursor_at_line(buffer: &BufferState, line: usize) -> EditorViewStat
     view
 }
 
-fn replacement_preview(
-    range: std::ops::Range<usize>,
-    replacement: &str,
-) -> SearchReplacementPreview {
-    SearchReplacementPreview::new(vec![SearchReplacementPreviewEntry {
-        range,
-        replacement: replacement.to_owned(),
-    }])
+fn replacement_preview(entries: Replacements) -> SearchReplacementPreview {
+    SearchReplacementPreview::new(
+        entries
+            .into_iter()
+            .map(|(range, replacement)| SearchReplacementPreviewEntry {
+                range,
+                replacement: replacement.to_owned(),
+            })
+            .collect(),
+    )
 }
 
 fn numbered_lines(count: usize) -> String {

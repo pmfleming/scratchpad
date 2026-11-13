@@ -152,40 +152,40 @@ mod tests {
     }
 
     #[test]
-    fn body_viewport_uses_text_lane_width_after_gutter() {
-        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 40.0), egui::vec2(900.0, 300.0));
-        let clip_rect = egui::Rect::from_min_size(egui::pos2(10.0, 40.0), egui::vec2(900.0, 300.0));
-        let body_rect =
-            egui::Rect::from_min_size(egui::pos2(70.0, 40.0), egui::vec2(1200.0, 300.0));
-
-        let narrowed = body_viewport(Some(viewport), clip_rect, body_rect).unwrap();
-
-        assert_eq!(narrowed.min, viewport.min);
-        assert_eq!(narrowed.height(), 300.0);
-        assert_eq!(narrowed.width(), 840.0);
-    }
-
-    #[test]
-    fn body_viewport_uses_visible_viewport_instead_of_stale_available_width() {
-        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 240.0));
-        let clip_rect = egui::Rect::from_min_size(egui::pos2(100.0, 0.0), viewport.size());
-        let body_rect =
-            egui::Rect::from_min_size(egui::pos2(124.0, 0.0), egui::vec2(1200.0, 240.0));
-
-        let narrowed = body_viewport(Some(viewport), clip_rect, body_rect).unwrap();
-
-        assert_eq!(narrowed.width(), 576.0);
-    }
-
-    #[test]
-    fn body_viewport_tolerates_negative_transient_viewport_size() {
-        let viewport = egui::Rect::from_min_max(egui::pos2(10.0, 10.0), egui::pos2(8.0, 8.0));
-        let clip_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
-        let body_rect = egui::Rect::from_min_size(egui::pos2(24.0, 0.0), egui::vec2(100.0, 100.0));
-
-        let narrowed = body_viewport(Some(viewport), clip_rect, body_rect).unwrap();
-
-        assert_eq!(narrowed.width(), 1.0);
-        assert_eq!(narrowed.height(), 0.0);
+    fn body_viewport_is_the_visible_text_lane_after_the_gutter() {
+        let rect = |x: f32, y: f32, w: f32, h: f32| {
+            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h))
+        };
+        // (viewport, clip rect, body rect, expected width, expected height)
+        for (viewport, clip_rect, body_rect, width, height) in [
+            // The gutter narrows the visible lane.
+            (
+                rect(0.0, 40.0, 900.0, 300.0),
+                rect(10.0, 40.0, 900.0, 300.0),
+                rect(70.0, 40.0, 1200.0, 300.0),
+                840.0,
+                300.0,
+            ),
+            // The visible viewport wins over a stale available width.
+            (
+                rect(0.0, 0.0, 600.0, 240.0),
+                rect(100.0, 0.0, 600.0, 240.0),
+                rect(124.0, 0.0, 1200.0, 240.0),
+                576.0,
+                240.0,
+            ),
+            // A negative transient viewport still yields a usable lane.
+            (
+                egui::Rect::from_min_max(egui::pos2(10.0, 10.0), egui::pos2(8.0, 8.0)),
+                rect(0.0, 0.0, 100.0, 100.0),
+                rect(24.0, 0.0, 100.0, 100.0),
+                1.0,
+                0.0,
+            ),
+        ] {
+            let narrowed = body_viewport(Some(viewport), clip_rect, body_rect).unwrap();
+            assert_eq!(narrowed.min, viewport.min);
+            assert_eq!((narrowed.width(), narrowed.height()), (width, height));
+        }
     }
 }

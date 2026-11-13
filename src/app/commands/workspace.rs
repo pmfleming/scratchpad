@@ -8,6 +8,9 @@ use crate::app::domain::{BufferId, PendingAction, SplitAxis, SplitPath, TileDire
 use crate::app::services::file_controller::FileController;
 use std::path::PathBuf;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn handle_workspace_command(app: &mut ScratchpadApp, command: WorkspaceCommand) -> bool {
     match command {
         WorkspaceCommand::ActivateTab { index } => activate_tab(app, index),
@@ -149,71 +152,73 @@ pub(crate) fn perform_close_view_committed(app: &mut ScratchpadApp, view_id: Vie
     else {
         return;
     };
-    if let Some(buffer) = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .get(index)
-        .and_then(|tab| {
-            (tab.is_last_view_for_buffer(view_id) == Some(true))
-                .then(|| tab.buffer_for_view(view_id))
-                .flatten()
-        })
-        .map(|buffer| buffer.id)
-    {
+    if let Some(buffer) = buffer_closing_with_view(app, index, view_id) {
         crate::app::app_state::workspace::lifecycle::cancel_loading_previews(app, &[buffer]);
     }
 
-    let open_buffer_ids_before = app
+    let open_buffer_ids_before = tab_buffer_ids(app, index);
+    let open_file_paths_before = tab_buffer_paths(app, index);
+    let Some(next_active_view) = app
         .tab_manager
+        .tabs
+        .as_mut_slice()
+        .get_mut(index)
+        .and_then(|tab| tab.close_view(view_id).then(|| tab.layout.active_view_id()))
+    else {
+        return;
+    };
+    if let Some(mut cold) = app.tab_manager.take_cold_session_tab(index) {
+        cold.retain_workspace_layout(&app.tab_manager.tabs.as_slice()[index]);
+        app.tab_manager.set_cold_session_tab(index, cold);
+    }
+    let closed_buffer_ids = removed_buffer_ids(open_buffer_ids_before, &tab_buffer_ids(app, index));
+    let closed_file_paths = removed_buffer_paths(&open_file_paths_before, &closed_buffer_ids);
+    crate::app::app_state::workspace_controller::record_recently_closed_file_paths(
+        app,
+        closed_file_paths,
+    );
+    app.tab_manager.rebuild_buffer_tab_index();
+    crate::app::app_state::frame::begin_layout_transition(app);
+    crate::app::app_state::search_runtime::mark_search_dirty(app);
+    if app.tab_manager.active_tab_index == index {
+        workspace_accessors::request_focus_for_view(app, next_active_view);
+    }
+    app.tab_manager.mark_session_dirty();
+}
+
+/// The buffer that leaves the tab when `view_id`, its last view, closes.
+fn buffer_closing_with_view(
+    app: &ScratchpadApp,
+    index: usize,
+    view_id: ViewId,
+) -> Option<BufferId> {
+    let tab = app.tab_manager.tabs.as_slice().get(index)?;
+    if tab.is_last_view_for_buffer(view_id) != Some(true) {
+        return None;
+    }
+    tab.buffer_for_view(view_id).map(|buffer| buffer.id)
+}
+
+fn tab_buffer_ids(app: &ScratchpadApp, index: usize) -> Vec<BufferId> {
+    app.tab_manager
         .tabs
         .as_slice()
         .get(index)
-        .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
-        .unwrap_or_default();
-    let open_file_paths_before = app
-        .tab_manager
+        .map(|tab| tab.buffers().map(|buffer| buffer.id).collect())
+        .unwrap_or_default()
+}
+
+fn tab_buffer_paths(app: &ScratchpadApp, index: usize) -> Vec<(BufferId, PathBuf)> {
+    app.tab_manager
         .tabs
         .as_slice()
         .get(index)
         .map(|tab| {
             tab.buffers()
                 .filter_map(|buffer| buffer.path.clone().map(|path| (buffer.id, path)))
-                .collect::<Vec<_>>()
+                .collect()
         })
-        .unwrap_or_default();
-    let mut next_active_view = None;
-    if let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(index)
-        && tab.close_view(view_id)
-    {
-        next_active_view = Some(tab.layout.active_view_id());
-    }
-    if let Some(next_active_view) = next_active_view {
-        if let Some(mut cold) = app.tab_manager.take_cold_session_tab(index) {
-            cold.retain_workspace_layout(&app.tab_manager.tabs.as_slice()[index]);
-            app.tab_manager.set_cold_session_tab(index, cold);
-        }
-        let open_buffer_ids_after = app
-            .tab_manager
-            .tabs
-            .as_slice()
-            .get(index)
-            .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
-            .unwrap_or_default();
-        let closed_buffer_ids = removed_buffer_ids(open_buffer_ids_before, &open_buffer_ids_after);
-        let closed_file_paths = removed_buffer_paths(&open_file_paths_before, &closed_buffer_ids);
-        crate::app::app_state::workspace_controller::record_recently_closed_file_paths(
-            app,
-            closed_file_paths,
-        );
-        app.tab_manager.rebuild_buffer_tab_index();
-        crate::app::app_state::frame::begin_layout_transition(app);
-        crate::app::app_state::search_runtime::mark_search_dirty(app);
-        if app.tab_manager.active_tab_index == index {
-            workspace_accessors::request_focus_for_view(app, next_active_view);
-        }
-        app.tab_manager.mark_session_dirty();
-    }
+        .unwrap_or_default()
 }
 
 fn request_close_tab(app: &mut ScratchpadApp, index: usize) -> bool {
@@ -251,47 +256,31 @@ fn reorder_display_tab_command(
 }
 
 fn resize_split_command(app: &mut ScratchpadApp, path: SplitPath, ratio: f32) -> bool {
-    let index = app.tab_manager.active_tab_index;
-    if let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(index)
-        && tab.layout.root_pane.resize_split(&path, ratio)
-    {
-        crate::app::app_state::frame::begin_layout_transition(app);
-        app.tab_manager.mark_session_dirty();
-        return true;
-    }
-    false
+    let resized = edit_active_tab(app, |tab| {
+        tab.layout
+            .root_pane
+            .resize_split(&path, ratio)
+            .then_some(())
+    });
+    finish_tile_resize(app, resized.is_some())
 }
 
 const KEYBOARD_TILE_RESIZE_STEP: f32 = 0.05;
 
 fn resize_active_tile_command(app: &mut ScratchpadApp, direction: TileDirection) -> bool {
-    let index = app.tab_manager.active_tab_index;
-    if let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(index)
-        && tab.resize_active_view_in_direction(direction, KEYBOARD_TILE_RESIZE_STEP)
-    {
-        crate::app::app_state::frame::begin_layout_transition(app);
-        app.tab_manager.mark_session_dirty();
-        return true;
-    }
-    false
+    let resized = edit_active_tab(app, |tab| {
+        tab.resize_active_view_in_direction(direction, KEYBOARD_TILE_RESIZE_STEP)
+            .then_some(())
+    });
+    finish_tile_resize(app, resized.is_some())
 }
 
 fn move_active_tile_command(app: &mut ScratchpadApp, direction: TileDirection) -> bool {
-    let index = app.tab_manager.active_tab_index;
-    let mut active_view = None;
-    if let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(index)
-        && tab.move_active_view_in_direction(direction)
-    {
-        active_view = Some(tab.layout.active_view_id());
-    }
-    if let Some(active_view) = active_view {
-        crate::app::app_state::frame::begin_layout_transition(app);
-        crate::app::app_state::search_runtime::mark_search_dirty(app);
-        workspace_accessors::request_focus_for_view(app, active_view);
-        app.tab_manager.mark_session_dirty();
-        return true;
-    }
-    false
+    let active_view = edit_active_tab(app, |tab| {
+        tab.move_active_view_in_direction(direction)
+            .then(|| tab.layout.active_view_id())
+    });
+    finish_view_rearrangement(app, active_view)
 }
 
 fn split_active_view_command(
@@ -300,23 +289,40 @@ fn split_active_view_command(
     new_view_first: bool,
     ratio: f32,
 ) -> bool {
-    let index = app.tab_manager.active_tab_index;
-    let mut new_active_view = None;
-    if let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(index)
-        && tab
-            .split_active_view_with_placement(axis, new_view_first, ratio)
-            .is_some()
-    {
-        new_active_view = Some(tab.layout.active_view_id());
+    let new_active_view = edit_active_tab(app, |tab| {
+        tab.split_active_view_with_placement(axis, new_view_first, ratio)
+            .map(|_| tab.layout.active_view_id())
+    });
+    finish_view_rearrangement(app, new_active_view)
+}
+
+fn edit_active_tab<T>(
+    app: &mut ScratchpadApp,
+    edit: impl FnOnce(&mut crate::app::domain::WorkspaceTab) -> Option<T>,
+) -> Option<T> {
+    app.tab_manager.active_tab_mut().and_then(edit)
+}
+
+/// Split ratios changed; the views and their order did not.
+fn finish_tile_resize(app: &mut ScratchpadApp, resized: bool) -> bool {
+    if !resized {
+        return false;
     }
-    if let Some(new_active_view) = new_active_view {
-        crate::app::app_state::frame::begin_layout_transition(app);
-        crate::app::app_state::search_runtime::mark_search_dirty(app);
-        workspace_accessors::request_focus_for_view(app, new_active_view);
-        app.tab_manager.mark_session_dirty();
-        return true;
-    }
-    false
+    crate::app::app_state::frame::begin_layout_transition(app);
+    app.tab_manager.mark_session_dirty();
+    true
+}
+
+/// Views moved or were added; search order and focus follow the new layout.
+fn finish_view_rearrangement(app: &mut ScratchpadApp, active_view: Option<ViewId>) -> bool {
+    let Some(active_view) = active_view else {
+        return false;
+    };
+    crate::app::app_state::frame::begin_layout_transition(app);
+    crate::app::app_state::search_runtime::mark_search_dirty(app);
+    workspace_accessors::request_focus_for_view(app, active_view);
+    app.tab_manager.mark_session_dirty();
+    true
 }
 
 pub(crate) fn activate_pending_view_command(

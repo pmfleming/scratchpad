@@ -12,20 +12,14 @@ impl DisplayTextMap {
         &self,
         cursor: usize,
     ) -> usize {
-        self.doc_to_display
-            .get(cursor)
-            .copied()
-            .unwrap_or_else(|| *self.doc_to_display.last().unwrap_or(&0))
+        clamped_lookup(&self.doc_to_display, cursor)
     }
 
     pub(in crate::app::ui::editor_content::native_editor) fn display_to_doc_cursor(
         &self,
         cursor: usize,
     ) -> usize {
-        self.display_to_doc
-            .get(cursor)
-            .copied()
-            .unwrap_or_else(|| *self.display_to_doc.last().unwrap_or(&0))
+        clamped_lookup(&self.display_to_doc, cursor)
     }
 
     pub(in crate::app::ui::editor_content::native_editor) fn display_len(&self) -> usize {
@@ -45,14 +39,23 @@ impl DisplayTextMap {
     }
 }
 
+/// Cursors past the end of a map clamp to its last entry.
+fn clamped_lookup(map: &[usize], cursor: usize) -> usize {
+    map.get(cursor).or_else(|| map.last()).copied().unwrap_or(0)
+}
+
 pub(super) struct DisplayTextSlice<'a> {
     pub(super) text: Cow<'a, str>,
     pub(super) map: Option<DisplayTextMap>,
 }
 
-pub(super) struct PreviewTextSlice<'a> {
-    pub(super) text: Cow<'a, str>,
-    pub(super) map: Option<DisplayTextMap>,
+impl<'a> DisplayTextSlice<'a> {
+    fn unmapped(text: &'a str) -> Self {
+        Self {
+            text: Cow::Borrowed(text),
+            map: None,
+        }
+    }
 }
 
 enum CursorSubstitutionPolicy {
@@ -104,10 +107,7 @@ const C0_CONTROL_PICTURES: [&str; 32] = [
 
 pub(super) fn display_text_slice(text: &str, show_control_chars: bool) -> DisplayTextSlice<'_> {
     if !show_control_chars {
-        return DisplayTextSlice {
-            text: Cow::Borrowed(text),
-            map: None,
-        };
+        return DisplayTextSlice::unmapped(text);
     }
 
     let doc_len = text.chars().count();
@@ -151,97 +151,29 @@ pub(super) fn preview_text_slice<'a>(
     text: &'a str,
     slice_range: std::ops::Range<usize>,
     preview: Option<&SearchReplacementPreview>,
-) -> PreviewTextSlice<'a> {
-    let Some(preview) = preview.filter(|preview| !preview.entries().is_empty()) else {
-        return PreviewTextSlice {
-            text: Cow::Borrowed(text),
-            map: None,
-        };
-    };
-
-    let visible_entries = visible_preview_entries(preview, &slice_range);
+) -> DisplayTextSlice<'a> {
+    let visible_entries = preview.map_or_else(Vec::new, |preview| {
+        visible_preview_entries(preview, &slice_range)
+    });
     if visible_entries.is_empty() {
-        return PreviewTextSlice {
-            text: Cow::Borrowed(text),
-            map: None,
-        };
+        return DisplayTextSlice::unmapped(text);
     }
 
     let original_chars = text.chars().collect::<Vec<_>>();
     let original_len = original_chars.len();
-    let mut projected = String::with_capacity(text.len());
-    let mut doc_to_display = vec![0; original_len + 1];
-    let mut display_to_doc = vec![0];
+    let mut projection = TextProjection::new(text.len(), original_len);
     let mut original_cursor = 0usize;
-    let mut projected_cursor = 0usize;
-
-    let mut entries = visible_entries
-        .into_iter()
-        .filter_map(|entry| {
-            let start = entry.range.start.max(slice_range.start);
-            let end = entry.range.end.min(slice_range.end);
-            (start < end).then_some((
-                start.saturating_sub(slice_range.start),
-                end.saturating_sub(slice_range.start),
-                entry.replacement.as_str(),
-            ))
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by_key(|(start, _, _)| *start);
-
-    for (start, end, replacement) in entries {
+    for (start, end, replacement) in slice_local_replacements(visible_entries, &slice_range) {
+        // Overlapping replacements keep the first one.
         if start < original_cursor {
             continue;
         }
-        copy_original_chars(
-            &original_chars,
-            original_cursor,
-            start,
-            &mut projected,
-            &mut doc_to_display,
-            &mut display_to_doc,
-            &mut projected_cursor,
-        );
-
-        doc_to_display[start] = projected_cursor;
-        projected.push_str(replacement);
-        let replacement_len = replacement.chars().count();
-        for boundary in 1..=replacement_len {
-            projected_cursor += 1;
-            if boundary == replacement_len {
-                display_to_doc.push(end);
-            } else {
-                display_to_doc.push(start);
-            }
-        }
-        for display_cursor in doc_to_display
-            .iter_mut()
-            .take(end.min(original_len) + 1)
-            .skip(start + 1)
-        {
-            *display_cursor = projected_cursor;
-        }
+        projection.copy_original(&original_chars, original_cursor..start);
+        projection.replace(start, end, replacement);
         original_cursor = end;
     }
-
-    copy_original_chars(
-        &original_chars,
-        original_cursor,
-        original_len,
-        &mut projected,
-        &mut doc_to_display,
-        &mut display_to_doc,
-        &mut projected_cursor,
-    );
-    doc_to_display[original_len] = projected_cursor;
-
-    PreviewTextSlice {
-        text: Cow::Owned(projected),
-        map: Some(DisplayTextMap {
-            doc_to_display,
-            display_to_doc,
-        }),
-    }
+    projection.copy_original(&original_chars, original_cursor..original_len);
+    projection.finish(original_len)
 }
 
 fn visible_preview_entries<'a>(
@@ -257,20 +189,93 @@ fn visible_preview_entries<'a>(
     preview.entries()[start_index..end_index].iter().collect()
 }
 
-fn copy_original_chars(
-    original_chars: &[char],
-    start: usize,
-    end: usize,
-    projected: &mut String,
-    doc_to_display: &mut [usize],
-    display_to_doc: &mut Vec<usize>,
-    projected_cursor: &mut usize,
-) {
-    for index in start..end {
-        doc_to_display[index] = *projected_cursor;
-        projected.push(original_chars[index]);
-        *projected_cursor += 1;
-        display_to_doc.push(index + 1);
+/// Non-empty replacements clipped to the slice, in slice-local char offsets,
+/// sorted by start.
+fn slice_local_replacements<'a>(
+    entries: Vec<&'a crate::app::domain::SearchReplacementPreviewEntry>,
+    slice_range: &std::ops::Range<usize>,
+) -> Vec<(usize, usize, &'a str)> {
+    let mut replacements = entries
+        .into_iter()
+        .filter_map(|entry| {
+            let start = entry.range.start.max(slice_range.start);
+            let end = entry.range.end.min(slice_range.end);
+            (start < end).then_some((
+                start - slice_range.start,
+                end - slice_range.start,
+                entry.replacement.as_str(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    replacements.sort_by_key(|(start, _, _)| *start);
+    replacements
+}
+
+/// Projected text plus the cursor maps between it and the original text.
+/// The projected cursor is always `display_to_doc.len() - 1`.
+struct TextProjection {
+    text: String,
+    doc_to_display: Vec<usize>,
+    display_to_doc: Vec<usize>,
+}
+
+impl TextProjection {
+    fn new(byte_capacity: usize, doc_len: usize) -> Self {
+        Self {
+            text: String::with_capacity(byte_capacity),
+            doc_to_display: vec![0; doc_len + 1],
+            display_to_doc: vec![0],
+        }
+    }
+
+    fn display_cursor(&self) -> usize {
+        self.display_to_doc.len() - 1
+    }
+
+    fn copy_original(&mut self, original_chars: &[char], range: std::ops::Range<usize>) {
+        for index in range {
+            self.doc_to_display[index] = self.display_cursor();
+            self.text.push(original_chars[index]);
+            self.display_to_doc.push(index + 1);
+        }
+    }
+
+    /// Project original chars `start..end` as `replacement`. Display cursors
+    /// inside the replacement map back to `start`, its end maps to `end`, and
+    /// original cursors inside the replaced span map to the replacement's end.
+    fn replace(&mut self, start: usize, end: usize, replacement: &str) {
+        self.doc_to_display[start] = self.display_cursor();
+        self.text.push_str(replacement);
+        let replacement_len = replacement.chars().count();
+        self.display_to_doc
+            .extend((1..=replacement_len).map(|boundary| {
+                if boundary == replacement_len {
+                    end
+                } else {
+                    start
+                }
+            }));
+        let replacement_end = self.display_cursor();
+        let last_doc_cursor = end.min(self.doc_to_display.len() - 1);
+        for display_cursor in self
+            .doc_to_display
+            .iter_mut()
+            .take(last_doc_cursor + 1)
+            .skip(start + 1)
+        {
+            *display_cursor = replacement_end;
+        }
+    }
+
+    fn finish(mut self, doc_len: usize) -> DisplayTextSlice<'static> {
+        self.doc_to_display[doc_len] = self.display_cursor();
+        DisplayTextSlice {
+            text: Cow::Owned(self.text),
+            map: Some(DisplayTextMap {
+                doc_to_display: self.doc_to_display,
+                display_to_doc: self.display_to_doc,
+            }),
+        }
     }
 }
 
@@ -306,42 +311,34 @@ fn push_display_cursor_boundaries(
     display_len: usize,
     policy: CursorSubstitutionPolicy,
 ) {
-    for boundary in 1..=display_len {
-        let doc_cursor = match policy {
-            CursorSubstitutionPolicy::SingleCell => {
-                if boundary < display_len && boundary < display_len.div_ceil(2) {
-                    doc_index
-                } else {
-                    doc_index + 1
-                }
-            }
-            CursorSubstitutionPolicy::LineEndingMarker => {
-                if boundary < display_len {
-                    doc_index
-                } else {
-                    doc_index + 1
-                }
-            }
-        };
-        display_to_doc.push(doc_cursor);
-    }
+    // Display boundaries before `split` stay on the substituted char; the rest
+    // (including the substitution's end) move past it.
+    let split = match policy {
+        CursorSubstitutionPolicy::SingleCell => display_len.div_ceil(2),
+        CursorSubstitutionPolicy::LineEndingMarker => display_len,
+    };
+    display_to_doc.extend((1..=display_len).map(|boundary| {
+        if boundary < split {
+            doc_index
+        } else {
+            doc_index + 1
+        }
+    }));
 }
 
 fn visible_control_char(ch: char, next: Option<char>) -> Option<VisibleControlSubstitution> {
-    let (text, cursor_policy) = if ch == '\t' {
-        ("\u{2409}", CursorSubstitutionPolicy::SingleCell)
-    } else if ch == '\n' {
-        ("\u{240A}\n", CursorSubstitutionPolicy::LineEndingMarker)
-    } else if ch == '\r' && next == Some('\n') {
-        ("\u{240D}", CursorSubstitutionPolicy::SingleCell)
-    } else if ch == '\r' {
-        ("\u{240D}\n", CursorSubstitutionPolicy::LineEndingMarker)
-    } else if ch == '\u{007F}' {
-        ("\u{2421}", CursorSubstitutionPolicy::SingleCell)
-    } else {
-        let text = visible_unicode_control_glyph(ch)
-            .or_else(|| (ch.is_control() && (ch as u32) <= 0x1F).then(|| control_picture(ch)))?;
-        (text, CursorSubstitutionPolicy::SingleCell)
+    let (text, cursor_policy) = match (ch, next) {
+        ('\t', _) => ("\u{2409}", CursorSubstitutionPolicy::SingleCell),
+        ('\n', _) => ("\u{240A}\n", CursorSubstitutionPolicy::LineEndingMarker),
+        ('\r', Some('\n')) => ("\u{240D}", CursorSubstitutionPolicy::SingleCell),
+        ('\r', _) => ("\u{240D}\n", CursorSubstitutionPolicy::LineEndingMarker),
+        ('\u{007F}', _) => ("\u{2421}", CursorSubstitutionPolicy::SingleCell),
+        _ => {
+            let text = visible_unicode_control_glyph(ch).or_else(|| {
+                (ch.is_control() && (ch as u32) <= 0x1F).then(|| control_picture(ch))
+            })?;
+            (text, CursorSubstitutionPolicy::SingleCell)
+        }
     };
     Some(VisibleControlSubstitution {
         text,
