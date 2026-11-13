@@ -256,17 +256,8 @@ fn detail_or_unknown(value: Option<&str>) -> String {
     value.unwrap_or("<unknown>").to_owned()
 }
 
-#[must_use]
-pub fn default_error_log_path() -> PathBuf {
-    std::env::temp_dir().join("scratchpad").join(ERROR_LOG_NAME)
-}
-
 pub(crate) fn error_log_path(root: &Path) -> PathBuf {
     root.join(ERROR_LOG_NAME)
-}
-
-pub fn initialize_default() {
-    initialize(default_error_log_path());
 }
 
 pub(crate) fn initialize(log_path: PathBuf) {

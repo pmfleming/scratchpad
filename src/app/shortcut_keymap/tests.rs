@@ -1,7 +1,7 @@
 use super::{
     ALT_SHIFT, CTRL_SHIFT, Key, KeyBinding, Modifiers, ShortcutAction, configured_bindings,
-    consume_shortcut, default_bindings, effective_bindings, invalid_shortcut_overrides,
-    key_event_matches_binding, parse_binding_list, parse_key_binding, resolved_bindings,
+    consume_shortcut, default_bindings, invalid_shortcut_overrides, key_event_matches_binding,
+    parse_binding_list, parse_key_binding, resolved_bindings,
 };
 use crate::app::platform::PlatformProfile;
 use crate::app::services::settings_store::ShortcutSettings;
@@ -151,10 +151,6 @@ fn overrides_fall_back_atomically_and_report_only_known_invalid_actions() {
             parsed
                 .as_deref()
                 .unwrap_or(default_bindings(profile, ShortcutAction::SplitLeft))
-        );
-        assert_eq!(
-            effective_bindings(profile, &shortcuts, ShortcutAction::SplitLeft),
-            resolved.as_ref()
         );
         let invalid = invalid_shortcut_overrides(&shortcuts);
         assert_eq!(invalid.len(), usize::from(expected.is_none()));

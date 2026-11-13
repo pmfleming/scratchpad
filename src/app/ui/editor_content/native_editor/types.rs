@@ -35,26 +35,6 @@ impl EditorHighlightStyle {
     pub(super) fn text_color(self) -> egui::Color32 {
         self.text
     }
-
-    #[must_use]
-    pub fn active_text_format(self, font_id: egui::FontId, dark_mode: bool) -> egui::TextFormat {
-        egui::TextFormat {
-            font_id,
-            color: self.text_color(),
-            background: self.active_background(dark_mode),
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    pub fn passive_text_format(self, font_id: egui::FontId) -> egui::TextFormat {
-        egui::TextFormat {
-            font_id,
-            color: self.text_color(),
-            background: self.passive_background(),
-            ..Default::default()
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -123,31 +103,6 @@ impl CharCursor {
     }
 }
 
-impl CursorRange {
-    #[must_use]
-    pub fn to_egui(&self) -> egui::text::CCursorRange {
-        egui::text::CCursorRange {
-            primary: self.primary.to_egui_ccursor(),
-            secondary: self.secondary.to_egui_ccursor(),
-            h_pos: None,
-        }
-    }
-
-    #[must_use]
-    pub fn from_egui(range: egui::text::CCursorRange) -> Self {
-        Self {
-            primary: CharCursor {
-                index: range.primary.index.into(),
-                prefer_next_row: range.primary.prefer_next_row,
-            },
-            secondary: CharCursor {
-                index: range.secondary.index.into(),
-                prefer_next_row: range.secondary.prefer_next_row,
-            },
-        }
-    }
-}
-
 pub(super) fn selection_char_range(cursor_range: &CursorRange) -> Option<Range<usize>> {
     (!cursor_range.is_empty()).then(|| cursor_range.as_sorted_char_range())
 }
@@ -174,7 +129,7 @@ mod tests {
     use super::{CharCursor, CursorRange, selection_char_range};
 
     #[test]
-    fn domain_selections_keep_direction_and_row_affinity_through_egui() {
+    fn domain_selections_keep_direction() {
         for (a, b, expected) in [(2, 9, 2..9), (9, 2, 2..9), (0, 0, 0..0)] {
             let selection = CursorRange {
                 primary: CharCursor {
@@ -189,7 +144,6 @@ mod tests {
                 selection_char_range(&selection),
                 (a != b).then_some(expected)
             );
-            assert_eq!(CursorRange::from_egui(selection.to_egui()), selection);
         }
     }
 }

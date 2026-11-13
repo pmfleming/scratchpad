@@ -10,17 +10,14 @@ mod shortcut_reference;
 pub use recently_closed::RecentlyClosedFile;
 
 pub use model::{
-    AppSettings, AppThemeMode, DEFAULT_AUTO_HIDE_TAB_LIST, DEFAULT_EDITOR_BACKGROUND_COLOR,
-    DEFAULT_EDITOR_GUTTER, DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR,
-    DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_RECENT_FILES_ENABLED,
-    DEFAULT_STATUS_BAR_VISIBLE, DEFAULT_TAB_DISPLAY, DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS,
-    DEFAULT_TAB_LIST_WIDTH, DEFAULT_WINDOW_INNER_SIZE, DEFAULT_WORD_WRAP, DefaultSearchScope,
-    EditorAppearanceSource, EditorSettings, FileOpenDisposition, HistorySettings, IndentationStyle,
+    AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
+    DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
+    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, DEFAULT_WINDOW_INNER_SIZE, DefaultSearchScope,
+    EditorAppearanceSource, FileOpenDisposition, IndentationStyle,
     LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
-    LIGHT_EDITOR_TEXT_COLOR, MIN_WINDOW_INNER_SIZE, NewTabPlacement, PlatformSettings,
-    ReviewThreshold, SearchResultLimit, SearchSettings, ShortcutSettings, StartupSessionBehavior,
-    TabDisplayMode, TabListPosition, TabOrderDirection, TabOrderMode, UiSettings, WindowState,
-    WorkspaceSettings,
+    LIGHT_EDITOR_TEXT_COLOR, MIN_WINDOW_INNER_SIZE, NewTabPlacement, ReviewThreshold,
+    SearchResultLimit, ShortcutSettings, StartupSessionBehavior, TabDisplayMode, TabListPosition,
+    TabOrderDirection, TabOrderMode, WindowState,
 };
 pub(crate) use model::{color_from_hex, color_to_hex};
 
@@ -169,7 +166,7 @@ mod tests {
 
 #[cfg(test)]
 mod search_migration_tests {
-    use super::*;
+    use super::{SearchResultLimit, parse_toml_settings};
     #[test]
     fn search_category_migrates_legacy_limit_with_explicit_new_key_winning() {
         let settings = parse_toml_settings(

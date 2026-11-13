@@ -434,16 +434,6 @@ pub(crate) fn resolved_bindings(
     )
 }
 
-/// Returns an owned copy of the effective bindings for callers that need one.
-#[must_use]
-pub fn effective_bindings(
-    profile: PlatformProfile,
-    shortcuts: &ShortcutSettings,
-    action: ShortcutAction,
-) -> Vec<KeyBinding> {
-    resolved_bindings(profile, shortcuts, action).into_owned()
-}
-
 #[must_use]
 pub(crate) fn invalid_shortcut_overrides(
     shortcuts: &ShortcutSettings,
