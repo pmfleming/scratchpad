@@ -364,6 +364,15 @@ impl Drop for Worker {
     }
 }
 
+fn publish_notices(database: &mut Database, notices: &Mutex<Vec<super::super::RestoreStatus>>) {
+    if !database.startup_notices.is_empty() {
+        notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .append(&mut database.startup_notices);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Database, DatabaseWorker, Health, Job, block_on, error};
@@ -559,14 +568,5 @@ mod tests {
             })
             .unwrap();
         assert!(chunks.iter().all(|c| c.reference().is_some()));
-    }
-}
-
-fn publish_notices(database: &mut Database, notices: &Mutex<Vec<super::super::RestoreStatus>>) {
-    if !database.startup_notices.is_empty() {
-        notices
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .append(&mut database.startup_notices);
     }
 }

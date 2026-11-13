@@ -43,12 +43,11 @@ pub(in crate::app::services::session_store) fn start_new_session(
     }
     let old = worker.map(DatabaseWorker::chunk_store);
     let previous_path = old.as_ref().and_then(|store| store.epoch().path());
-    let ownership = match worker {
-        Some(worker) => take_over(root, worker, old.as_ref())?,
-        None => {
-            create_private_directory(root)?;
-            lock_root(root)?
-        }
+    let ownership = if let Some(worker) = worker {
+        take_over(root, worker, old.as_ref())?
+    } else {
+        create_private_directory(root)?;
+        lock_root(root)?
     };
     let live_path = root.join("session.db");
     let backup = match backup_session_files(root, &std::env::temp_dir()) {

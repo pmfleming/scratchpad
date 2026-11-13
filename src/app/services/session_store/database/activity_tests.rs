@@ -365,8 +365,8 @@ fn replace_operation_and_group_members_survive_database_reopen() {
             buffer
                 .replace_char_ranges_with_undo(
                     &[(0..count, "bar".into())],
-                    Default::default(),
-                    Default::default(),
+                    crate::app::domain::CursorRange::default(),
+                    crate::app::domain::CursorRange::default(),
                 )
                 .unwrap();
         }

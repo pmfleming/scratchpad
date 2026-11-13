@@ -16,6 +16,8 @@ const TRUNCATED: &str = "remaining text omitted from this 32 MiB recovery copy";
 
 /// Recovered pieces: verified text, or `None` for a missing or damaged region.
 type Fragments = Vec<Option<String>>;
+/// Verified text segments of one buffer, by start byte.
+type Segments = [(usize, String)];
 
 pub(super) struct RecoveredText {
     pub text: String,
@@ -26,7 +28,7 @@ pub(super) struct RecoveredText {
 
 impl RecoveredText {
     /// The verified segments of the span's buffer and the span's byte range in it.
-    fn locate(&self, span: ByteSpan) -> Option<(&[(usize, String)], usize, usize)> {
+    fn locate(&self, span: ByteSpan) -> Option<(&Segments, usize, usize)> {
         let start = usize::try_from(span.start_byte).ok()?;
         let len = usize::try_from(span.byte_len).ok()?;
         if len > RECOVERY_LIMIT {
