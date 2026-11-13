@@ -240,22 +240,59 @@ fn show_row(
         .replace
         .excluded
         .contains(&match_index);
-    let dot = if entry.active {
+    let row = RowLook {
+        rect,
+        active: entry.active,
+        replacing,
+        included,
+    };
+    paint_row(ui, app, &entry, file, &row);
+    if replacing && inclusion_toggle(ui, match_index, rect, included) {
+        let whole_file = ui.input(|i| i.modifiers.shift);
+        toggle_inclusion(app, &state.result_groups, match_index, whole_file);
+    }
+    let response = response.on_hover_text(match group {
+        Some(group) if group.tab_label != group.buffer_label => {
+            format!("{}\nTab: {}", group.buffer_label, group.tab_label)
+        }
+        _ => file.to_owned(),
+    });
+    if response.clicked() {
+        actions.selected_match_index = Some(entry.match_index);
+    }
+}
+
+struct RowLook {
+    rect: egui::Rect,
+    active: bool,
+    replacing: bool,
+    included: bool,
+}
+
+/// Rail, icon, line metadata, title and file subtitle, laid out like History's rows.
+fn paint_row(
+    ui: &egui::Ui,
+    app: &ScratchpadApp,
+    entry: &SearchResultEntry,
+    file: &str,
+    row: &RowLook,
+) {
+    let rect = row.rect;
+    let dot = if row.active {
         panel_style::RailDot::Current
-    } else if !replacing || included {
+    } else if !row.replacing || row.included {
         panel_style::RailDot::Filled
     } else {
         panel_style::RailDot::Hollow
     };
     panel_style::rail(ui, rect, rect.left() + RAIL_X, rect.top() + DOT_Y, dot);
-
-    let title_left = if replacing {
+    let title_left = if row.replacing {
         panel_style::text(
             ui,
             egui::Rect::from_min_size(rect.min + egui::vec2(ICON_X, 0.0), egui::vec2(20.0, 25.0)),
             egui_phosphor::regular::SWAP,
             14.0,
-            if included {
+            if row.included {
                 theme::tab_selected_accent(ui)
             } else {
                 theme::text_muted(ui)
@@ -276,17 +313,20 @@ fn show_row(
         SUBTITLE_SIZE,
         theme::text_muted(ui),
     );
-    let title_rect = egui::Rect::from_min_max(
-        rect.min + egui::vec2(title_left, 2.0),
-        egui::pos2(meta_left - 6.0, rect.top() + 23.0),
-    );
-    let job = if replacing {
-        replacement_title(ui, app, match_index, included)
+    let job = if row.replacing {
+        replacement_title(ui, app, entry.match_index, row.included)
     } else {
-        hit_title(ui, app, &entry)
+        hit_title(ui, app, entry)
     };
-    paint_job(ui, title_rect, job);
-    let subtitle = if replacing && !included {
+    paint_job(
+        ui,
+        egui::Rect::from_min_max(
+            rect.min + egui::vec2(title_left, 2.0),
+            egui::pos2(meta_left - 6.0, rect.top() + 23.0),
+        ),
+        job,
+    );
+    let subtitle = if row.replacing && !row.included {
         format!("Excluded · {file}")
     } else {
         file.to_owned()
@@ -301,41 +341,30 @@ fn show_row(
         SUBTITLE_SIZE,
         theme::text_muted(ui),
     );
+}
 
-    if replacing {
-        let dot_rect = egui::Rect::from_min_size(rect.min, egui::vec2(ICON_X, ROW_HEIGHT));
-        let toggle = widget_ids::interact(
-            ui,
-            dot_rect,
-            egui::Id::unique(("search.results.include", match_index)),
-            egui::Sense::click(),
-            "search-result-include",
-        );
-        toggle.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::Role::CheckBox,
-                true,
-                included,
-                format!("Include match {}", match_index + 1),
-            )
-        });
-        let toggle = toggle.on_hover_text(
-            "Include this match in Replace all. Shift+click toggles every match in this file.",
-        );
-        if toggle.clicked() {
-            let whole_file = ui.input(|i| i.modifiers.shift);
-            toggle_inclusion(app, &state.result_groups, match_index, whole_file);
-        }
-    }
-    let response = response.on_hover_text(match group {
-        Some(group) if group.tab_label != group.buffer_label => {
-            format!("{}\nTab: {}", group.buffer_label, group.tab_label)
-        }
-        _ => file.to_owned(),
+/// The rail dot's hit area; returns true when clicked.
+fn inclusion_toggle(ui: &egui::Ui, match_index: usize, rect: egui::Rect, included: bool) -> bool {
+    let toggle = widget_ids::interact(
+        ui,
+        egui::Rect::from_min_size(rect.min, egui::vec2(ICON_X, ROW_HEIGHT)),
+        egui::Id::unique(("search.results.include", match_index)),
+        egui::Sense::click(),
+        "search-result-include",
+    );
+    toggle.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::Role::CheckBox,
+            true,
+            included,
+            format!("Include match {}", match_index + 1),
+        )
     });
-    if response.clicked() {
-        actions.selected_match_index = Some(entry.match_index);
-    }
+    toggle
+        .on_hover_text(
+            "Include this match in Replace all. Shift+click toggles every match in this file.",
+        )
+        .clicked()
 }
 
 pub(super) fn set_included(

@@ -98,11 +98,24 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         });
         return;
     }
+    apply_panel_actions(app, &state, &actions);
+    apply_list_navigation(app, &actions);
+    if actions.close_requested {
+        crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Close));
+        return;
+    }
+
+    dispatch_search_actions(app, state.target_focus(), actions);
+}
+
+fn apply_panel_actions(
+    app: &mut ScratchpadApp,
+    state: &SearchStripState,
+    actions: &SearchStripActions,
+) {
+    use crate::app::app_state::search_state::{api, recent, replace};
     if actions.recapture_selection {
-        crate::app::app_state::search_state::api::set_search_scope(
-            app,
-            crate::app::app_state::SearchScope::SelectionOnly,
-        );
+        api::set_search_scope(app, crate::app::app_state::SearchScope::SelectionOnly);
     }
     if actions.cancel_review {
         app.state
@@ -111,13 +124,13 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             .pending_replace_all_confirmation = None;
     }
     if let Some((id, files)) = actions.undo_all {
-        crate::app::app_state::search_state::replace::transaction::undo(app, id, files);
+        replace::transaction::undo(app, id, files);
     }
     if let Some(index) = actions.recent_index
         && let Some(recent) = state.recent.get(index)
     {
-        crate::app::app_state::search_state::api::set_search_query(app, recent.query.clone());
-        crate::app::app_state::search_state::api::set_search_mode(
+        api::set_search_query(app, recent.query.clone());
+        api::set_search_mode(
             app,
             if recent.regex {
                 crate::app::services::search::SearchMode::Regex
@@ -125,19 +138,12 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 crate::app::services::search::SearchMode::PlainText
             },
         );
-        crate::app::app_state::search_state::api::set_search_match_case(app, recent.match_case);
-        crate::app::app_state::search_state::api::set_search_whole_word(app, recent.whole_word);
+        api::set_search_match_case(app, recent.match_case);
+        api::set_search_whole_word(app, recent.whole_word);
     }
     if actions.next_requested || actions.previous_requested {
-        crate::app::app_state::search_state::recent::commit(app);
+        recent::commit(app);
     }
-    apply_list_navigation(app, &actions);
-    if actions.close_requested {
-        crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Close));
-        return;
-    }
-
-    dispatch_search_actions(app, state.target_focus(), actions);
 }
 
 /// Keyboard moves through results keep focus in the list; only Enter goes to the editor.
