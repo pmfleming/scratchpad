@@ -144,28 +144,16 @@ mod tests {
     }
 
     #[test]
-    fn edge_autoscroll_offset_advances_without_snap_back() {
-        let offset = edge_autoscroll_offset(
-            egui::vec2(0.0, 40.0),
-            egui::vec2(0.0, 100.0),
-            0.5,
-            egui::vec2(200.0, 400.0),
-            egui::vec2(200.0, 100.0),
-        );
-
-        assert_eq!(offset, egui::vec2(0.0, 90.0));
-    }
-
-    #[test]
-    fn edge_autoscroll_offset_clamps_to_scroll_extent() {
-        let offset = edge_autoscroll_offset(
-            egui::vec2(0.0, 290.0),
-            egui::vec2(0.0, 100.0),
-            0.5,
-            egui::vec2(200.0, 400.0),
-            egui::vec2(200.0, 100.0),
-        );
-
-        assert_eq!(offset, egui::vec2(0.0, 300.0));
+    fn edge_autoscroll_offset_advances_without_snap_back_and_clamps_to_extent() {
+        for (current_y, expected_y) in [(40.0, 90.0), (290.0, 300.0)] {
+            let offset = edge_autoscroll_offset(
+                egui::vec2(0.0, current_y),
+                egui::vec2(0.0, 100.0),
+                0.5,
+                egui::vec2(200.0, 400.0),
+                egui::vec2(200.0, 100.0),
+            );
+            assert_eq!(offset, egui::vec2(0.0, expected_y), "from {current_y}");
+        }
     }
 }

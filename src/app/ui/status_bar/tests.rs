@@ -150,42 +150,24 @@ fn path_width_stays_pinned_while_items_disappear() {
         status_item(StatusBarItemKind::Cursor, 40.0),
     ];
 
+    for (available, visible_start, path_width) in [
+        (200.0, 0, 120.0),
+        (180.0, 0, 100.0),
+        (160.0, 1, 100.0),
+        (120.0, 2, 100.0),
+    ] {
+        assert_eq!(
+            status_bar_path_layout(available, 100.0, &items),
+            StatusBarPathLayout {
+                visible_start,
+                path_width,
+            },
+            "{available}"
+        );
+    }
+    // Only once every item is hidden does the path shrink below its floor.
     assert_eq!(
-        status_bar_path_layout(200.0, 100.0, &items),
-        StatusBarPathLayout {
-            visible_start: 0,
-            path_width: 120.0,
-        }
-    );
-    assert_eq!(
-        status_bar_path_layout(180.0, 100.0, &items),
-        StatusBarPathLayout {
-            visible_start: 0,
-            path_width: 100.0,
-        }
-    );
-    assert_eq!(
-        status_bar_path_layout(160.0, 100.0, &items),
-        StatusBarPathLayout {
-            visible_start: 1,
-            path_width: 100.0,
-        }
-    );
-    assert_eq!(
-        status_bar_path_layout(120.0, 100.0, &items),
-        StatusBarPathLayout {
-            visible_start: 2,
-            path_width: 100.0,
-        }
-    );
-}
-
-#[test]
-fn path_width_only_shrinks_below_floor_when_no_space_remains() {
-    let items = [status_item(StatusBarItemKind::LineCount, 40.0)];
-
-    assert_eq!(
-        status_bar_path_layout(80.0, 100.0, &items),
+        status_bar_path_layout(80.0, 100.0, &items[..1]),
         StatusBarPathLayout {
             visible_start: 1,
             path_width: 80.0,
