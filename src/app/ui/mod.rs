@@ -20,3 +20,4 @@ pub(crate) mod visuals;
 pub mod widget_ids;
 
 pub(crate) mod notice;
+pub(crate) mod panel_style;

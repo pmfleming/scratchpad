@@ -2,9 +2,9 @@ use crate::app::{theme, ui::widget_ids};
 use eframe::egui;
 use std::hash::Hash;
 
-pub(super) const ROW_HEIGHT: f32 = 30.0;
+pub(crate) const ROW_HEIGHT: f32 = 30.0;
 
-pub(super) fn on_accent(ui: &egui::Ui) -> egui::Color32 {
+pub(crate) fn on_accent(ui: &egui::Ui) -> egui::Color32 {
     if ui.visuals().dark_mode {
         egui::Color32::BLACK
     } else {
@@ -12,7 +12,7 @@ pub(super) fn on_accent(ui: &egui::Ui) -> egui::Color32 {
     }
 }
 
-pub(super) fn text_end(
+pub(crate) fn text_end(
     ui: &egui::Ui,
     rect: egui::Rect,
     label: &str,
@@ -40,7 +40,7 @@ pub(super) fn text_end(
     text(ui, rect, &format!("…{}", &label[suffix..]), size, color);
 }
 
-pub(super) fn text_right(
+pub(crate) fn text_right(
     ui: &egui::Ui,
     rect: egui::Rect,
     label: &str,
@@ -64,7 +64,7 @@ pub(super) fn text_right(
     );
 }
 
-pub(in crate::app::ui::dialogs) fn apply(ui: &mut egui::Ui) {
+pub(crate) fn apply(ui: &mut egui::Ui) {
     let accent = theme::tab_selected_accent(ui);
     let selected = theme::tab_selected_bg(ui);
     let danger = theme::diff_del(ui);
@@ -87,7 +87,7 @@ pub(in crate::app::ui::dialogs) fn apply(ui: &mut egui::Ui) {
     }
 }
 
-pub(in crate::app::ui::dialogs) fn icon_button(
+pub(crate) fn icon_button(
     ui: &mut egui::Ui,
     key: impl Hash,
     icon: &str,
@@ -108,7 +108,7 @@ pub(in crate::app::ui::dialogs) fn icon_button(
     .inner
 }
 
-pub(super) fn text(ui: &egui::Ui, rect: egui::Rect, label: &str, size: f32, color: egui::Color32) {
+pub(crate) fn text(ui: &egui::Ui, rect: egui::Rect, label: &str, size: f32, color: egui::Color32) {
     if rect.width() <= 0.0 {
         return;
     }
@@ -135,7 +135,7 @@ pub(super) fn text(ui: &egui::Ui, rect: egui::Rect, label: &str, size: f32, colo
         .galley(pos, galley, color);
 }
 
-pub(super) fn font(ui: &egui::Ui, size: f32) -> egui::FontId {
+pub(crate) fn font(ui: &egui::Ui, size: f32) -> egui::FontId {
     let mut font = ui
         .style()
         .override_font_id
@@ -145,7 +145,7 @@ pub(super) fn font(ui: &egui::Ui, size: f32) -> egui::FontId {
     font
 }
 
-pub(super) fn icon_label(
+pub(crate) fn icon_label(
     ui: &egui::Ui,
     icon: &str,
     text: &str,
@@ -162,7 +162,7 @@ pub(super) fn icon_label(
     job
 }
 
-pub(super) fn now_badge(ui: &egui::Ui, rect: egui::Rect) {
+pub(crate) fn now_badge(ui: &egui::Ui, rect: egui::Rect) {
     ui.painter()
         .rect_filled(rect, 0, theme::tab_selected_accent(ui));
     text(
@@ -172,4 +172,29 @@ pub(super) fn now_badge(ui: &egui::Ui, rect: egui::Rect) {
         10.0,
         on_accent(ui),
     );
+}
+
+/// How a rail marker is drawn: the list's emphasis, a filled step, or an open step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RailDot {
+    Current,
+    Filled,
+    Hollow,
+}
+
+/// Paints the vertical rail through `rect` at `x` with a marker at `dot_y`.
+pub(crate) fn rail(ui: &egui::Ui, rect: egui::Rect, x: f32, dot_y: f32, dot: RailDot) {
+    let accent = theme::tab_selected_accent(ui);
+    ui.painter().line_segment(
+        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+        egui::Stroke::new(1.5, accent),
+    );
+    let center = egui::pos2(x, dot_y);
+    let (radius, fill, width) = match dot {
+        RailDot::Current => (5.0, theme::text_primary(ui), 2.5),
+        RailDot::Filled => (3.0, accent, 1.5),
+        RailDot::Hollow => (3.0, ui.visuals().panel_fill, 1.5),
+    };
+    ui.painter()
+        .circle(center, radius, fill, egui::Stroke::new(width, accent));
 }

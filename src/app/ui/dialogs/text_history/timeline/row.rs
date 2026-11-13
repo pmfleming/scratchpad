@@ -178,33 +178,14 @@ fn paint_labels(ui: &egui::Ui, row: &TimelineRow, response: &egui::Response, sta
 }
 
 fn paint_rail(ui: &egui::Ui, rect: egui::Rect, edit: bool, state: &RowState) {
-    let center = egui::pos2(rect.left() + RAIL_X, rect.top() + 12.5);
-    let accent = theme::tab_selected_accent(ui);
-    let top = rect.top();
-    let bottom = rect.bottom();
-    ui.painter().line_segment(
-        [egui::pos2(center.x, top), egui::pos2(center.x, bottom)],
-        egui::Stroke::new(1.5, accent),
-    );
-    if state.current || state.selected {
-        ui.painter().circle(
-            center,
-            5.0,
-            theme::text_primary(ui),
-            egui::Stroke::new(2.5, theme::tab_selected_accent(ui)),
-        );
+    let dot = if state.current || state.selected {
+        style::RailDot::Current
+    } else if edit {
+        style::RailDot::Filled
     } else {
-        ui.painter().circle(
-            center,
-            3.0,
-            if edit {
-                accent
-            } else {
-                ui.visuals().panel_fill
-            },
-            egui::Stroke::new(1.5, accent),
-        );
-    }
+        style::RailDot::Hollow
+    };
+    style::rail(ui, rect, rect.left() + RAIL_X, rect.top() + 12.5, dot);
 }
 
 fn metadata(ui: &egui::Ui, row: &TimelineRow, response: &egui::Response, state: &RowState) -> f32 {

@@ -6,7 +6,7 @@ mod presentation;
 mod recent;
 mod scrubber;
 mod selection;
-pub(super) mod style;
+pub(super) use crate::app::ui::panel_style as style;
 #[cfg(test)]
 mod tests;
 mod timeline;
