@@ -740,104 +740,119 @@ impl Chunk {
     /// bodies in the foreground cache. A separate bounded scan cache can retain
     /// verified committed bodies; returned Arcs remain valid through eviction.
     pub fn load(&self, background: bool, retain: bool) -> io::Result<Arc<String>> {
+        let reference = match self.claim_load(background, retain)? {
+            LoadClaim::Ready(body) => return Ok(body),
+            LoadClaim::Read(reference) => reference,
+        };
+        let result = self.read_committed(&reference, background);
+        if let Err(cause) = &result {
+            self.record_read_fault(cause);
+        }
+        self.finish_load(&result);
+        if let (Ok(body), Some(core)) = (&result, self.core.upgrade()) {
+            self.cache_body(&core, retain, body.clone());
+        }
+        result
+    }
+    /// Returns a pending or still-resident body, or claims the one read of this
+    /// chunk. Concurrent loaders wait for the claimed read until the deadline.
+    fn claim_load(&self, background: bool, retain: bool) -> io::Result<LoadClaim> {
         let deadline = Instant::now()
             + if background {
                 Duration::from_secs(5)
             } else {
                 Duration::from_millis(250)
             };
-        let reference = {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            loop {
-                match &mut *state {
-                    State::Pending(body) => return Ok(body.clone()),
-                    State::Committed {
-                        reference,
-                        resident,
-                        loading,
-                    } => {
-                        if let Some(body) = resident.upgrade() {
-                            if let Some(core) = self.core.upgrade() {
-                                core.retained_reads.fetch_add(1, Ordering::Relaxed);
-                                (if retain {
-                                    &core.cache
-                                } else {
-                                    &core.scan_cache
-                                })
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .insert(
-                                    self.id,
-                                    self.owner,
-                                    body.clone(),
-                                );
-                            }
-                            return Ok(body);
-                        }
-                        if !*loading {
-                            *loading = true;
-                            break reference.clone();
-                        }
-                        let remaining = deadline.saturating_duration_since(Instant::now());
-                        if remaining.is_zero() {
-                            return Err(io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                "coalesced chunk read deadline exceeded",
-                            ));
-                        }
-                        state = self
-                            .changed
-                            .wait_timeout(state, remaining)
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .0;
-                    }
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            let (reference, resident, loading) = match &mut *state {
+                State::Pending(body) => return Ok(LoadClaim::Ready(body.clone())),
+                State::Committed {
+                    reference,
+                    resident,
+                    loading,
+                } => (reference, resident, loading),
+            };
+            if let Some(body) = resident.upgrade() {
+                if let Some(core) = self.core.upgrade() {
+                    core.retained_reads.fetch_add(1, Ordering::Relaxed);
+                    self.cache_body(&core, retain, body.clone());
                 }
+                return Ok(LoadClaim::Ready(body));
             }
-        };
-        let result = self.read_committed(&reference, background);
-        if let Err(cause) = &result
-            && cause.kind() != io::ErrorKind::Interrupted
-            && let Some(core) = self.core.upgrade()
-        {
-            core.owner_faults
-                .lock()
+            if !*loading {
+                *loading = true;
+                return Ok(LoadClaim::Read(reference.clone()));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "coalesced chunk read deadline exceeded",
+                ));
+            }
+            state = self
+                .changed
+                .wait_timeout(state, remaining)
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .entry(self.owner)
-                .or_insert_with(|| cause.to_string());
-            core.faults.fetch_add(1, Ordering::AcqRel);
-            if cause.kind() == io::ErrorKind::BrokenPipe {
-                ChunkStoreHandle(core).set_health(Health::Unavailable(cause.to_string()));
-            }
+                .0;
         }
-        {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let State::Committed {
-                resident, loading, ..
-            } = &mut *state
-            {
-                *loading = false;
-                if let Ok(body) = &result {
-                    *resident = Arc::downgrade(body);
-                }
-            }
-            self.changed.notify_all();
+    }
+    /// Faults the owner on a real read failure; a broken reader also makes the
+    /// store unavailable. Deliberate reader pauses stay retryable.
+    fn record_read_fault(&self, cause: &io::Error) {
+        if cause.kind() == io::ErrorKind::Interrupted {
+            return;
         }
-        if let (Ok(body), Some(core)) = (&result, self.core.upgrade()) {
-            (if retain {
-                &core.cache
-            } else {
-                &core.scan_cache
-            })
+        let Some(core) = self.core.upgrade() else {
+            return;
+        };
+        core.owner_faults
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(self.id, self.owner, body.clone());
+            .entry(self.owner)
+            .or_insert_with(|| cause.to_string());
+        core.faults.fetch_add(1, Ordering::AcqRel);
+        if cause.kind() == io::ErrorKind::BrokenPipe {
+            ChunkStoreHandle(core).set_health(Health::Unavailable(cause.to_string()));
         }
-        result
     }
+    /// Releases the read claim, keeps a weak resident handle to a successful
+    /// read, and wakes loaders waiting on the claim.
+    fn finish_load(&self, result: &io::Result<Arc<String>>) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let State::Committed {
+            resident, loading, ..
+        } = &mut *state
+        {
+            *loading = false;
+            if let Ok(body) = result {
+                *resident = Arc::downgrade(body);
+            }
+        }
+        self.changed.notify_all();
+    }
+    /// Retained reads use the foreground cache; scans use the scan cache.
+    fn cache_body(&self, core: &Core, retain: bool, body: Arc<String>) {
+        let cache = if retain {
+            &core.cache
+        } else {
+            &core.scan_cache
+        };
+        cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(self.id, self.owner, body);
+    }
+}
+
+enum LoadClaim {
+    Ready(Arc<String>),
+    Read(ChunkReference),
 }
