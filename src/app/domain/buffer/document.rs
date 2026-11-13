@@ -293,11 +293,6 @@ impl TextDocument {
         self.history.byte_usage
     }
 
-    #[must_use]
-    pub fn oldest_history_global_seq(&self) -> Option<u64> {
-        self.history.entries.first().map(|entry| entry.global_seq)
-    }
-
     pub fn set_history_budget(&mut self, budget: TextHistoryBudget) {
         self.history.budget = budget.sanitized();
     }

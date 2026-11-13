@@ -1,5 +1,4 @@
 use super::inspection::TextInspection;
-use super::line_endings::LineEndingStyle;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextArtifactSummary {
@@ -34,11 +33,6 @@ impl TextArtifactSummary {
     #[must_use]
     pub fn from_text(text: &str) -> Self {
         TextInspection::inspect(text).artifact_summary
-    }
-
-    #[must_use]
-    pub fn from_text_with_line_endings(text: &str, line_endings: LineEndingStyle) -> Self {
-        TextInspection::inspect_with_line_endings(text, Some(line_endings)).artifact_summary
     }
 
     #[must_use]

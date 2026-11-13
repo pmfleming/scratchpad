@@ -10,7 +10,7 @@ pub(super) mod preview;
 pub(crate) mod query;
 mod runtime;
 mod slice;
-pub use slice::{PieceTreeSlice, TryPieceTreeSlice};
+pub use slice::PieceTreeSlice;
 pub use storage::TextPin;
 mod persistence;
 mod storage;

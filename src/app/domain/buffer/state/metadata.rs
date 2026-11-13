@@ -41,17 +41,6 @@ impl BufferState {
         self.refresh.line_ending_metadata_exact = false;
     }
 
-    pub fn recheck_encoding_compliance(&mut self) {
-        if !self.refresh.encoding_compliance_stale {
-            return;
-        }
-        let tree = self.document.piece_tree();
-        self.has_non_compliant_characters = self.format.has_non_compliant_characters_spans(
-            tree.spans_for_range(0..tree.len_chars()).map(|s| s.text),
-        );
-        self.refresh.encoding_compliance_stale = false;
-    }
-
     #[must_use]
     pub fn encoding_compliance_refresh_needed(&self) -> bool {
         self.refresh.encoding_compliance_stale

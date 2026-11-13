@@ -78,22 +78,6 @@ impl TextFormatMetadata {
     }
 
     #[must_use]
-    pub fn encoding_tooltip(&self) -> String {
-        let source = match self.encoding_source {
-            EncodingSource::Bom => "Detected from BOM",
-            EncodingSource::Heuristic => "Detected heuristically",
-            EncodingSource::ExplicitUserChoice => "Selected explicitly",
-            EncodingSource::DefaultForNewFile => "Default for new files",
-        };
-        let ascii = if self.is_ascii_subset {
-            "; ASCII-only content"
-        } else {
-            ""
-        };
-        format!("{source}{ascii}")
-    }
-
-    #[must_use]
     pub fn line_endings_label(&self) -> &'static str {
         self.line_endings.label()
     }
@@ -139,38 +123,6 @@ impl TextFormatMetadata {
 
         let (_, _, had_replacements) = encoding.encode(text);
         had_replacements
-    }
-
-    pub fn has_non_compliant_characters_spans(
-        &self,
-        spans: impl Iterator<Item = impl AsRef<str>>,
-    ) -> bool {
-        let Some(encoding) = Encoding::for_label(self.encoding_name.as_bytes()) else {
-            return true;
-        };
-
-        if encoding == encoding_rs::UTF_8 {
-            return false;
-        }
-
-        let mut encoder = encoding.new_encoder();
-        let mut dst = [0u8; 4096];
-        for span in spans {
-            let mut src = span.as_ref();
-            loop {
-                let (result, read, _written, had_errors) =
-                    encoder.encode_from_utf8(src, &mut dst, false);
-                if had_errors {
-                    return true;
-                }
-                src = &src[read..];
-                if result == encoding_rs::CoderResult::InputEmpty {
-                    break;
-                }
-            }
-        }
-        let (_result, _read, _written, had_errors) = encoder.encode_from_utf8("", &mut dst, true);
-        had_errors
     }
 
     pub(super) fn apply_inspection(&mut self, inspection: &TextInspection) {

@@ -10,7 +10,7 @@ use self::anchors::{
     sync_optional_cursor_anchor_range, take_cursor_anchors, take_search_anchors,
 };
 pub(crate) use caret_animation::CaretAnimationState;
-pub use layout_cache::{LayoutCache, LayoutCacheEntry, LayoutCacheKey};
+pub use layout_cache::{LayoutCache, LayoutCacheKey};
 
 use crate::app::domain::BufferId;
 use crate::app::domain::CursorRange;

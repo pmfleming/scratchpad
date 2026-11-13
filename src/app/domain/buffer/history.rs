@@ -7,7 +7,7 @@ pub use budget::TextHistoryBudget;
 #[cfg(test)]
 pub(crate) use coalescing::TEXT_HISTORY_SOFT_DIVIDER_PAUSE;
 pub(crate) use coalescing::{CoalescedEdit, coalesced_local_edit_record, entry_sealed_by_divider};
-pub use persistence::{PersistedCursorRange, PersistedHistoryEdit, PersistedHistoryEntry};
+pub use persistence::{PersistedHistoryEdit, PersistedHistoryEntry};
 pub(crate) use persistence::{persist_cursor_range, restore_cursor_range};
 pub use provenance::{ByteSpan, PieceSource};
 
@@ -96,19 +96,6 @@ impl PieceHistoryEdit {
             .copied()
             .chain(self.inserted_span())
     }
-
-    pub fn each_span_mut(&mut self, mut visit: impl FnMut(&mut ByteSpan)) {
-        match self {
-            Self::Inserted { span, .. } => visit(span),
-            Self::Deleted { spans, .. } => spans.iter_mut().for_each(&mut visit),
-            Self::Replaced {
-                deleted, inserted, ..
-            } => {
-                deleted.iter_mut().for_each(&mut visit);
-                visit(inserted);
-            }
-        }
-    }
 }
 
 /// Exact, bounded payload used only for history labels, never replay.
@@ -186,18 +173,6 @@ pub(crate) fn register_text_history_global_seq(seq: u64) {
             Ok(_) => break,
             Err(next_current) => current = next_current,
         }
-    }
-}
-
-#[must_use]
-pub fn source_label(source: PieceSource) -> &'static str {
-    match source {
-        PieceSource::Load => "Load",
-        PieceSource::Edit => "Editor",
-        PieceSource::Paste => "Paste",
-        PieceSource::Cut => "Cut",
-        PieceSource::SearchReplace => "Search/replace",
-        PieceSource::External => "External changes loaded",
     }
 }
 

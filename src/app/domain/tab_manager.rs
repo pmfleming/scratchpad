@@ -1,8 +1,6 @@
 use crate::app::CanonicalPathKey;
-use crate::app::domain::tab::summary;
 use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
 use crate::app::services::session_store::ColdSessionTab;
-use crate::app::theme;
 use std::collections::HashMap;
 
 mod display;
@@ -110,16 +108,6 @@ impl TabManager {
                 tab.clear_transient_view_state();
             }
         }
-    }
-
-    #[must_use]
-    pub fn estimated_tab_strip_width(&self, spacing: f32) -> f32 {
-        if self.tabs.is_empty() {
-            return 0.0;
-        }
-
-        (self.tabs.len() as f32 * theme::TAB_BUTTON_WIDTH)
-            + ((self.tabs.len().saturating_sub(1)) as f32 * spacing)
     }
 
     pub fn append_tab(&mut self, tab: WorkspaceTab) {
@@ -248,17 +236,6 @@ impl TabManager {
     #[must_use]
     pub(crate) fn find_tab_by_path_key(&self, key: &CanonicalPathKey) -> Option<(usize, ViewId)> {
         self.path_owner(key).map(|(_, tab, view)| (tab, view))
-    }
-
-    pub fn describe_tab_at(&self, index: usize) -> String {
-        self.tabs
-            .get(index)
-            .map_or_else(|| format!("tab#{index}<missing>"), summary::display_name)
-    }
-
-    #[must_use]
-    pub fn describe_active_tab(&self) -> String {
-        self.describe_tab_at(self.active_tab_index)
     }
 }
 

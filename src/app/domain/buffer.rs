@@ -19,7 +19,7 @@ pub(crate) use analysis::{
 };
 pub use analysis::{
     EncodingSource, LineEndingCounts, LineEndingStyle, TextArtifactSummary, TextFormatMetadata,
-    analyze_line_endings, display_line_count, platform_default_line_ending,
+    platform_default_line_ending,
 };
 pub(crate) use document::HistorySnapshot;
 pub use document::TextDocument;
@@ -32,13 +32,12 @@ pub(crate) use history::{
     register_text_history_global_seq,
 };
 pub use history::{
-    OperationRecord, PersistedCursorRange, PersistedHistoryEdit, PersistedHistoryEntry,
-    PieceSource, TextDocumentEditOperation, TextHistoryBudget, source_label,
+    OperationRecord, PersistedHistoryEdit, PersistedHistoryEntry, PieceSource,
+    TextDocumentEditOperation, TextHistoryBudget,
 };
 pub use piece_tree::{
-    AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharCursor, PieceTreeCharPosition,
-    PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics,
-    PieceTreeSlice, PieceTreeSpan, PieceTreeText, TextPin, TryPieceTreeSlice,
+    AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeLineInfo, PieceTreeLite,
+    PieceTreeMetrics, PieceTreeSlice, PieceTreeText, TextPin,
 };
 pub(crate) use piece_tree::{PieceBuffer, StorageBlock, StorageCapture};
 pub(crate) use snapshot::SnapshotRevision;

@@ -29,11 +29,6 @@ impl<'a> PieceTreeCharCursor<'a> {
         self.position
     }
 
-    pub fn seek(&mut self, position: usize) {
-        self.position = position.min(self.tree.len_chars());
-        self.text = None;
-    }
-
     #[must_use]
     pub fn peek_next(&mut self) -> Option<char> {
         self.ensure_next_piece()?;

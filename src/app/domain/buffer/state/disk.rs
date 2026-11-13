@@ -78,17 +78,6 @@ impl BufferState {
     }
 
     #[must_use]
-    pub fn disk_status_label(&self) -> Option<&'static str> {
-        match self.freshness {
-            BufferFreshness::InSync => None,
-            BufferFreshness::AutoReloaded => Some("Auto reloaded"),
-            BufferFreshness::StaleOnDisk => Some("On disk changed"),
-            BufferFreshness::ConflictOnDisk => Some("Disk conflict"),
-            BufferFreshness::MissingOnDisk => Some("File missing"),
-        }
-    }
-
-    #[must_use]
     pub fn disk_status_message(&self) -> Option<String> {
         let path_label = self
             .path

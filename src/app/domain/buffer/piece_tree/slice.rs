@@ -75,19 +75,10 @@ impl PieceTreeLite {
         }
         Ok(pin)
     }
-    pub fn try_line_info(&self, line: usize) -> io::Result<super::PieceTreeLineInfo> {
-        let _pin = self.pin_lines(line..line)?;
-        Ok(self.line_info(line))
-    }
     pub fn try_line_index_at_offset(&self, offset: usize) -> io::Result<usize> {
         let offset = offset.min(self.len_chars());
         let _pin = self.pin_range(offset..offset)?;
         Ok(self.line_index_at_offset(offset))
-    }
-    #[must_use]
-    pub fn spans_for_line(&self, target_line: usize) -> PieceTreeSlice<'_> {
-        let line = self.line_info(target_line);
-        self.spans_for_range(line.start_char..line.start_char + line.char_len)
     }
 
     #[must_use]
