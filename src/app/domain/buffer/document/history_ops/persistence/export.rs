@@ -87,7 +87,7 @@ impl HistorySnapshot {
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::TextDocument;
     use crate::app::domain::{CharCursor, CursorRange, PersistedHistoryEntry};
     #[test]
     fn streamed_json_matches_export_and_replays_unicode_with_bounded_payload_windows() {

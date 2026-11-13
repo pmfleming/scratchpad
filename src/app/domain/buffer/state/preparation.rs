@@ -412,7 +412,10 @@ impl PreparedText {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        BufferState, CharCursor, CursorRange, PieceSource, TextDocument,
+        normalize_inserted_text_line_endings, try_analyze_piece_tree_text,
+    };
     use crate::app::services::session_store::SessionStore;
     #[test]
     fn preparation_inspects_owned_input_without_reading_newly_sealed_bodies() {
@@ -525,7 +528,7 @@ mod tests {
 
 #[cfg(test)]
 mod history_preparation_tests {
-    use super::*;
+    use super::{BufferState, CursorRange, PieceSource};
     use crate::app::services::session_store::SessionStore;
     #[test]
     fn prepared_history_is_atomic_and_reuses_existing_text_without_new_body_writes() {

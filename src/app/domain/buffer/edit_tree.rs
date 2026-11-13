@@ -214,7 +214,7 @@ impl EditTree {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{EditTree, Navigation, NodeId, ROOT};
 
     fn go(tree: &mut EditTree, target: NodeId) -> Navigation {
         let navigation = tree.navigation(target).unwrap();

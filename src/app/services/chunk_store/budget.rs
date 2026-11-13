@@ -41,7 +41,7 @@ pub fn total_memory() -> u64 {
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{FailureRamBudget, MIB, total_memory};
     #[test]
     fn automatic_uses_total_memory_and_overrides_are_clamped() {
         assert_eq!(FailureRamBudget::for_total(2 * 1024 * MIB).bytes, 512 * MIB);

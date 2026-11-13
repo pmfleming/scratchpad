@@ -241,7 +241,7 @@ impl TabManager {
 
 #[cfg(test)]
 mod inactive_cleanup_tests {
-    use super::*;
+    use super::{TabManager, WorkspaceTab};
     #[test]
     fn activation_and_background_installation_evict_inactive_views() {
         let mut manager =

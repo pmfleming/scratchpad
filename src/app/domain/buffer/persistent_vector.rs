@@ -179,7 +179,7 @@ impl<T: std::fmt::Debug> std::fmt::Debug for PersistentVector<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::PersistentVector;
     #[test]
     fn captures_remain_immutable_across_growth_edits_and_shrinking() {
         let mut values = PersistentVector::default();
