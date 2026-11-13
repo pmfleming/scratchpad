@@ -70,42 +70,7 @@ pub(super) fn show(ui: &mut egui::Ui, app: &ScratchpadApp, state: &mut HistoryUi
         .flat_map(|tab| tab.buffers())
         .find(|buffer| Some(buffer.id) == state.forget.or(state.selected));
     if let Some(buffer) = buffer.filter(|buffer| state.forget == Some(buffer.id)) {
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(format!("Forget history for {}?", buffer.name)).strong(),
-            )
-            .truncate(),
-        )
-        .on_hover_text(crate::app::text_history::buffer_label(buffer));
-        if buffer.path.is_some() {
-            let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 18.0));
-            let path = crate::app::text_history::buffer_label(buffer);
-            style::text_end(ui, rect, &path, 11.0, theme::text_muted(ui));
-            widget_ids::interact(
-                ui,
-                rect,
-                egui::Id::unique(("history.forget.target", buffer.id)),
-                egui::Sense::hover(),
-                "history-forget-target",
-            )
-            .on_hover_text(path);
-        }
-        ui.label("Forget every branch for this file? Current text is kept. This cannot be undone.");
-        let mut forgotten = None;
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("Cancel").clicked() {
-                state.forget = None;
-            }
-            let button = egui::Button::new(
-                egui::RichText::new("Forget this file's history").color(egui::Color32::WHITE),
-            )
-            .fill(theme::CLOSE_HOVER_BG);
-            if ui.add(button).clicked() {
-                forgotten = Some(buffer.id);
-                state.forget = None;
-            }
-        });
-        return forgotten;
+        return forget_confirmation(ui, buffer, state);
     }
     ui.horizontal(|ui| {
         if ui.available_width() > 380.0 || state.all_files {
@@ -124,4 +89,49 @@ pub(super) fn show(ui: &mut egui::Ui, app: &ScratchpadApp, state: &mut HistoryUi
         }
     });
     None
+}
+
+/// Replaces the footer until the user forgets the file's history or cancels.
+/// Returns the buffer whose history should be forgotten.
+fn forget_confirmation(
+    ui: &mut egui::Ui,
+    buffer: &BufferState,
+    state: &mut HistoryUi,
+) -> Option<u64> {
+    let label = crate::app::text_history::buffer_label(buffer);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(format!("Forget history for {}?", buffer.name)).strong(),
+        )
+        .truncate(),
+    )
+    .on_hover_text(&label);
+    if buffer.path.is_some() {
+        let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), 18.0));
+        style::text_end(ui, rect, &label, 11.0, theme::text_muted(ui));
+        widget_ids::interact(
+            ui,
+            rect,
+            egui::Id::unique(("history.forget.target", buffer.id)),
+            egui::Sense::hover(),
+            "history-forget-target",
+        )
+        .on_hover_text(label);
+    }
+    ui.label("Forget every branch for this file? Current text is kept. This cannot be undone.");
+    let mut forgotten = None;
+    ui.horizontal_wrapped(|ui| {
+        if ui.button("Cancel").clicked() {
+            state.forget = None;
+        }
+        let button = egui::Button::new(
+            egui::RichText::new("Forget this file's history").color(egui::Color32::WHITE),
+        )
+        .fill(theme::CLOSE_HOVER_BG);
+        if ui.add(button).clicked() {
+            forgotten = Some(buffer.id);
+            state.forget = None;
+        }
+    });
+    forgotten
 }
