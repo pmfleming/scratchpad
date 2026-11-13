@@ -1,7 +1,5 @@
 use crate::app::app_state::{ScratchpadApp, frame};
-use crate::app::chrome::{
-    PhosphorButtonColors, phosphor_button, phosphor_button_with_hover_icon_color,
-};
+use crate::app::chrome::{PhosphorButtonColors, phosphor_button, phosphor_button_with_colors};
 use crate::app::commands::{AppCommand, FileCommand, SearchCommand};
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
@@ -330,7 +328,7 @@ fn render_button(
         (action_bg(ui), action_hover_bg(ui))
     };
     let response = if is_close {
-        phosphor_button_with_hover_icon_color(
+        phosphor_button_with_colors(
             ui,
             button.action.id_key(),
             button.icon,
