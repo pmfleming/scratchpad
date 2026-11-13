@@ -23,16 +23,6 @@ pub struct ScrollManager {
     metrics: ViewportMetrics,
     /// Most recent content extent, populated each frame by the renderer.
     extent: ContentExtent,
-    /// True if the user has scrolled since the last reveal/programmatic move.
-    /// Suppresses cursor snap-back when reveal margins would overrule a manual
-    /// scroll position the user is happy with.
-    user_scrolled: bool,
-    /// Pending edge-autoscroll velocity (pixels/sec on Y) from a selection
-    /// drag. Applied per-frame until cleared.
-    edge_autoscroll_y: f32,
-    /// Pending edge-autoscroll velocity (pixels/sec on X) from a selection
-    /// drag. Applied per-frame until cleared.
-    edge_autoscroll_x: f32,
 }
 
 impl ScrollManager {
@@ -59,11 +49,6 @@ impl ScrollManager {
     #[must_use]
     pub fn extent(&self) -> ContentExtent {
         self.extent
-    }
-
-    #[must_use]
-    pub fn user_scrolled(&self) -> bool {
-        self.user_scrolled
     }
 
     pub fn set_metrics(&mut self, metrics: ViewportMetrics) {
@@ -101,70 +86,17 @@ impl ScrollManager {
         row_to_anchor: impl Fn(f32) -> ScrollAnchor,
     ) {
         match intent {
-            ScrollIntent::Wheel { delta_x, delta_y } => {
-                self.apply_wheel(delta_x, delta_y, &anchor_to_row, &row_to_anchor);
-            }
             ScrollIntent::ScrollbarTo {
                 axis,
                 offset_pixels,
             } => self.apply_scrollbar(axis, offset_pixels, &row_to_anchor),
-            ScrollIntent::Lines(n) => self.scroll_rows(n as f32, &anchor_to_row, &row_to_anchor),
-            ScrollIntent::Pages(n) => self.scroll_pages(n, &anchor_to_row, &row_to_anchor),
-            ScrollIntent::Top => self.jump_to_top(),
-            ScrollIntent::Bottom => self.jump_to_bottom(&row_to_anchor),
             ScrollIntent::Reveal {
                 rect,
                 align_y,
                 align_x,
-            } => {
-                self.reveal(rect, align_y, align_x, &anchor_to_row, &row_to_anchor);
-                self.user_scrolled = false;
-            }
-            ScrollIntent::RestoreAnchor(anchor) => {
-                self.anchor = anchor;
-                self.user_scrolled = false;
-            }
-            ScrollIntent::EdgeAutoscroll { axis, velocity } => match axis {
-                Axis::Y => self.edge_autoscroll_y = velocity,
-                Axis::X => self.edge_autoscroll_x = velocity,
-            },
+            } => self.reveal(rect, align_y, align_x, &anchor_to_row, &row_to_anchor),
         }
         self.clamp(&anchor_to_row, &row_to_anchor);
-    }
-
-    /// Apply per-frame edge-autoscroll velocity. `dt` is seconds since the last
-    /// frame.
-    pub fn tick_edge_autoscroll(
-        &mut self,
-        dt: f32,
-        anchor_to_row: impl Fn(ScrollAnchor) -> f32,
-        row_to_anchor: impl Fn(f32) -> ScrollAnchor,
-    ) {
-        if self.edge_autoscroll_y != 0.0 || self.edge_autoscroll_x != 0.0 {
-            self.scroll_pixels(
-                self.edge_autoscroll_x * dt,
-                self.edge_autoscroll_y * dt,
-                &anchor_to_row,
-                &row_to_anchor,
-            );
-            self.clamp(&anchor_to_row, &row_to_anchor);
-        }
-    }
-
-    pub fn clear_edge_autoscroll(&mut self) {
-        self.edge_autoscroll_y = 0.0;
-        self.edge_autoscroll_x = 0.0;
-    }
-
-    fn apply_wheel(
-        &mut self,
-        delta_x: f32,
-        delta_y: f32,
-        anchor_to_row: &dyn Fn(ScrollAnchor) -> f32,
-        row_to_anchor: &dyn Fn(f32) -> ScrollAnchor,
-    ) {
-        self.scroll_pixels(-delta_x, -delta_y, anchor_to_row, row_to_anchor);
-        self.user_scrolled = true;
     }
 
     fn apply_scrollbar(
@@ -177,62 +109,6 @@ impl ScrollManager {
             Axis::X => self.horizontal_px = offset_pixels.max(0.0),
             Axis::Y => self.set_pixel_offset_y(offset_pixels, row_to_anchor),
         }
-        self.user_scrolled = true;
-    }
-
-    fn scroll_rows(
-        &mut self,
-        delta_rows: f32,
-        anchor_to_row: &dyn Fn(ScrollAnchor) -> f32,
-        row_to_anchor: &dyn Fn(f32) -> ScrollAnchor,
-    ) {
-        self.anchor = row_to_anchor(self.offset_row(anchor_to_row, delta_rows));
-        self.user_scrolled = true;
-    }
-
-    fn scroll_pages(
-        &mut self,
-        page_count: i32,
-        anchor_to_row: &dyn Fn(ScrollAnchor) -> f32,
-        row_to_anchor: &dyn Fn(f32) -> ScrollAnchor,
-    ) {
-        let visible_rows = self.metrics.visible_rows.max(1) as f32;
-        self.scroll_rows(
-            page_count as f32 * visible_rows,
-            anchor_to_row,
-            row_to_anchor,
-        );
-    }
-
-    fn jump_to_top(&mut self) {
-        self.anchor = ScrollAnchor::TOP;
-        self.user_scrolled = false;
-    }
-
-    fn jump_to_bottom(&mut self, row_to_anchor: &dyn Fn(f32) -> ScrollAnchor) {
-        let last_row = self.extent.display_rows.saturating_sub(1) as f32;
-        self.anchor = row_to_anchor(last_row);
-        self.user_scrolled = false;
-    }
-
-    fn scroll_pixels(
-        &mut self,
-        dx: f32,
-        dy: f32,
-        anchor_to_row: &dyn Fn(ScrollAnchor) -> f32,
-        row_to_anchor: &dyn Fn(f32) -> ScrollAnchor,
-    ) {
-        if dx != 0.0 {
-            self.horizontal_px = (self.horizontal_px + dx).max(0.0);
-        }
-        if dy != 0.0 && self.metrics.row_height > 0.0 {
-            let drows = dy / self.metrics.row_height;
-            self.anchor = row_to_anchor(self.offset_row(anchor_to_row, drows));
-        }
-    }
-
-    fn offset_row(&self, anchor_to_row: &dyn Fn(ScrollAnchor) -> f32, delta_rows: f32) -> f32 {
-        (anchor_to_row(self.anchor) + self.anchor.display_row_offset() + delta_rows).max(0.0)
     }
 
     fn set_pixel_offset_y(&mut self, pixels: f32, row_to_anchor: &dyn Fn(f32) -> ScrollAnchor) {

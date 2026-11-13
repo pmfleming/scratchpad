@@ -13,6 +13,8 @@ use super::source::ScrollSource;
 use super::state::{ScrollState, finite_vec2};
 use super::target::ScrollbarPolicy;
 
+const SCROLLBAR_THICKNESS: f32 = 7.0;
+
 const WHEEL_ACCELERATION_CONFIG: ScrollAccelerationConfig = ScrollAccelerationConfig {
     reset_after_seconds: 0.22,
     ramp_per_second: 2.7,
@@ -39,11 +41,8 @@ pub struct ScrollArea {
     scrollbar_x: ScrollbarPolicy,
     scrollbar_y: ScrollbarPolicy,
     eof_overscroll: bool,
-    scrollbar_thickness: f32,
     reserve_vertical_gutter: bool,
     min_content_size: Vec2,
-    /// Optional fixed outer size; if `None`, fills `ui.available_rect_before_wrap()`.
-    max_size: Option<Vec2>,
 }
 
 impl ScrollArea {
@@ -52,14 +51,12 @@ impl ScrollArea {
         Self {
             id,
             interaction_id: id,
-            source: ScrollSource::EDITOR,
+            source: ScrollSource::ALL,
             scrollbar_x: ScrollbarPolicy::VisibleWhenNeeded,
             scrollbar_y: ScrollbarPolicy::VisibleWhenNeeded,
             eof_overscroll: true,
-            scrollbar_thickness: 7.0,
             reserve_vertical_gutter: false,
             min_content_size: Vec2::ZERO,
-            max_size: None,
         }
     }
 
@@ -93,12 +90,6 @@ impl ScrollArea {
         self
     }
 
-    #[must_use]
-    pub fn scrollbar_thickness(mut self, px: f32) -> Self {
-        self.scrollbar_thickness = px;
-        self
-    }
-
     /// Keep text wrapping stable when the vertical scrollbar appears/disappears.
     /// Visibility and interaction still follow the scrollbar policy.
     #[must_use]
@@ -110,12 +101,6 @@ impl ScrollArea {
     #[must_use]
     pub fn min_content_size(mut self, size: Vec2) -> Self {
         self.min_content_size = size;
-        self
-    }
-
-    #[must_use]
-    pub fn max_size(mut self, size: Vec2) -> Self {
-        self.max_size = Some(size);
         self
     }
 
@@ -132,7 +117,7 @@ impl ScrollArea {
         let mut state = ScrollState::load(ui, self.id);
         state.sanitize();
         state.content_size = content_size_with_minimum(state.content_size, self.min_content_size);
-        let outer_rect = scroll_area_outer_rect(ui, self.max_size);
+        let outer_rect = ui.available_rect_before_wrap();
 
         // Determine which scrollbars will be visible from the previous frame's
         // content/viewport sizes. This causes a one-frame lag on first show
@@ -141,17 +126,16 @@ impl ScrollArea {
         let mut bars = visible_scrollbars(
             self.scrollbar_x,
             self.scrollbar_y,
-            self.scrollbar_thickness,
+            SCROLLBAR_THICKNESS,
             &layout_state,
             outer_rect,
         );
         if self.reserve_vertical_gutter {
-            bars.y_extent = self.scrollbar_thickness;
+            bars.y_extent = SCROLLBAR_THICKNESS;
         }
         let inner_rect = inner_rect_for_bars(outer_rect, bars);
 
         state.viewport_size = inner_rect.size();
-        apply_pending_target(&mut state, self.source, inner_rect);
 
         // Hover gates wheel/scrollbar input.
         let outer_response = widget_ids::interact(
@@ -209,7 +193,7 @@ impl ScrollArea {
                         id: self.id.with(id_suffix),
                         outer_rect,
                         axis,
-                        thickness: self.scrollbar_thickness,
+                        thickness: SCROLLBAR_THICKNESS,
                         cross_gap,
                         eof_overscroll: self.eof_overscroll,
                         interactive: self.source.scroll_bar,
@@ -249,13 +233,6 @@ struct PassStableScrollLayout {
     viewport_size: Vec2,
 }
 
-fn scroll_area_outer_rect(ui: &Ui, max_size: Option<Vec2>) -> Rect {
-    max_size.map_or_else(
-        || ui.available_rect_before_wrap(),
-        |size| Rect::from_min_size(ui.available_rect_before_wrap().min, size),
-    )
-}
-
 fn pass_stable_layout_state(ui: &Ui, id: Id, state: ScrollState) -> ScrollState {
     let storage_id = id.with("__pass_stable_layout_state");
     let frame = ui.ctx().cumulative_frame_nr();
@@ -281,57 +258,6 @@ fn pass_stable_layout_state(ui: &Ui, id: Id, state: ScrollState) -> ScrollState 
             viewport_size: layout.viewport_size,
             ..state
         })
-}
-
-fn apply_pending_target(state: &mut ScrollState, source: ScrollSource, inner_rect: Rect) {
-    if !source.programmatic {
-        return;
-    }
-    let Some(target) = state.pending_target.take() else {
-        return;
-    };
-    state.offset = resolved_target_offset(state, target, inner_rect);
-    state.user_scrolled = false;
-}
-
-fn resolved_target_offset(
-    state: &ScrollState,
-    target: super::target::ScrollTarget,
-    inner_rect: Rect,
-) -> Vec2 {
-    Vec2::new(
-        resolve_target_axis(
-            target.align_x,
-            target.rect.min.x..=target.rect.max.x,
-            inner_rect.width(),
-            state.content_size.x,
-            state.offset.x,
-        ),
-        resolve_target_axis(
-            target.align_y,
-            target.rect.min.y..=target.rect.max.y,
-            inner_rect.height(),
-            state.content_size.y,
-            state.offset.y,
-        ),
-    )
-}
-
-fn resolve_target_axis(
-    align: Option<super::target::ScrollAlign>,
-    range: std::ops::RangeInclusive<f32>,
-    viewport_size: f32,
-    content_size: f32,
-    current_offset: f32,
-) -> f32 {
-    align.map_or(current_offset, |align| {
-        align.resolve(
-            egui::Rangef::new(*range.start(), *range.end()),
-            viewport_size,
-            content_size,
-            current_offset,
-        )
-    })
 }
 
 fn apply_mouse_wheel(
@@ -364,7 +290,6 @@ fn apply_mouse_wheel(
         return;
     }
     consume_wheel_axes(ui, previous, state.offset);
-    state.user_scrolled = true;
 }
 
 fn accelerated_wheel_delta(
@@ -462,7 +387,9 @@ fn child_content_rect_size(content_size: Vec2, viewport_size: Vec2) -> Vec2 {
 
 #[cfg(test)]
 mod source_tests {
-    use super::*;
+    use super::{
+        Id, Rect, ScrollArea, ScrollState, ScrollbarPolicy, Vec2, accelerated_wheel_delta, egui,
+    };
 
     #[test]
     fn reserved_gutter_keeps_wrapping_width_stable_when_content_grows_and_shrinks() {

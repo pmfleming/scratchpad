@@ -1,14 +1,13 @@
 //! Display-row viewport pipeline.
 //!
 //! Phase 3 contract: every editor renders through one viewport-first path.
-//! Display rows are the scroll unit (after wrap/folds). The renderer asks for
-//! a `ViewportSlice` from a `DisplaySnapshot` and paints from that.
+//! Display rows are the scroll unit (after wrap/folds).
 //!
 //! The snapshot stores only the row metadata it needs (tops, char ranges,
-//! logical-line mapping, overlay flags). It does NOT retain the
-//! `egui::Galley` it was built from; the painter constructs an ephemeral
-//! galley at paint time from the cached layout. This guarantees we cannot
-//! accidentally hold onto a full-document galley behind the snapshot.
+//! logical-line mapping). It does NOT retain the `egui::Galley` it was built
+//! from; the painter constructs an ephemeral galley at paint time from the
+//! cached layout. This guarantees we cannot accidentally hold onto a
+//! full-document galley behind the snapshot.
 
 use std::ops::Range;
 
@@ -19,20 +18,8 @@ use eframe::egui::Galley;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DisplayRow(pub u32);
 
-/// A visual row + column position used for cursor geometry and hit testing.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct DisplayPoint {
-    pub row: DisplayRow,
-    /// Pixel x within the display row (not column count — horizontal is pixels).
-    pub x: f32,
-}
-
 /// Snapshot of a buffer's wrap-aware display rows. Owned by a view; rebuilt
 /// whenever wrap width, font size, or content changes.
-///
-/// The snapshot is detached from any underlying `egui::Galley`: it stores
-/// only row metadata. The painter rebuilds an ephemeral galley for the
-/// current viewport slice at paint time.
 #[derive(Clone)]
 pub struct DisplaySnapshot {
     row_height: f32,
@@ -45,71 +32,23 @@ pub struct DisplaySnapshot {
     row_logical_lines: Vec<Option<u32>>,
     /// Source char range in the underlying text for each display row.
     row_char_ranges: Vec<Range<u32>>,
-    row_records: Vec<DisplayRowRecord>,
-    max_line_width: f32,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct DisplayRowFlags {
-    pub ascii: bool,
-    pub has_selection: bool,
-    pub has_search: bool,
-    pub long_line: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DisplayRowRecord {
-    pub logical_line: u32,
-    pub char_range: Range<u32>,
-    pub y_top: f32,
-    pub height: f32,
-    pub wrap_index: u16,
-    pub flags: DisplayRowFlags,
 }
 
 impl DisplaySnapshot {
     /// Extract row metadata from the given galley. The galley itself is
-    /// dropped at the end of this call -- only `DisplayRowRecord`s are
-    /// retained.
+    /// dropped at the end of this call -- only row metadata is retained.
     #[must_use]
-    pub fn from_galley(galley: &Galley, row_height: f32) -> Self {
-        Self::from_galley_with_base(galley, row_height, 0, 0)
-    }
-
-    #[must_use]
-    pub fn from_galley_with_base(
+    pub fn from_galley(
         galley: &Galley,
         row_height: f32,
         char_offset_base: usize,
         logical_line_base: usize,
-    ) -> Self {
-        Self::from_galley_with_base_and_overlays(
-            galley,
-            row_height,
-            char_offset_base,
-            logical_line_base,
-            None,
-            &[],
-        )
-    }
-
-    #[must_use]
-    pub fn from_galley_with_base_and_overlays(
-        galley: &Galley,
-        row_height: f32,
-        char_offset_base: usize,
-        logical_line_base: usize,
-        selection_range: Option<Range<usize>>,
-        search_ranges: &[Range<usize>],
     ) -> Self {
         let mut row_tops = Vec::with_capacity(galley.rows.len() + 1);
         let mut row_logical_lines = Vec::with_capacity(galley.rows.len());
         let mut row_char_ranges = Vec::with_capacity(galley.rows.len());
-        let mut row_records = Vec::with_capacity(galley.rows.len());
-        let mut max_line_width: f32 = 0.0;
         let mut current_logical = saturating_u32(logical_line_base);
         let mut current_char = saturating_u32(char_offset_base);
-        let mut wrap_index: u16 = 0;
         let y_base = logical_line_base as f32 * row_height;
 
         for row in &galley.rows {
@@ -119,36 +58,13 @@ impl DisplaySnapshot {
             current_char = current_char.saturating_add(saturating_u32(usize::from(
                 row.char_count_including_newline(),
             )));
-            let char_range = row_start..current_char;
-            row_char_ranges.push(char_range.clone());
-            let row_width = row.glyphs.last().map_or(0.0, |g| g.pos.x + g.advance_width);
-            max_line_width = max_line_width.max(row_width);
-            row_records.push(DisplayRowRecord {
-                logical_line: current_logical,
-                char_range,
-                y_top: y_base + row.pos.y,
-                height: row_height,
-                wrap_index,
-                flags: DisplayRowFlags {
-                    ascii: true,
-                    has_selection: selection_range.as_ref().is_some_and(|selection| {
-                        ranges_overlap_u32(selection, &row_start, &current_char)
-                    }),
-                    has_search: search_ranges
-                        .iter()
-                        .any(|range| ranges_overlap_u32(range, &row_start, &current_char)),
-                    long_line: row_width > 4_096.0,
-                },
-            });
+            row_char_ranges.push(row_start..current_char);
             if row.ends_with_newline {
                 current_logical = current_logical.saturating_add(1);
-                wrap_index = 0;
-            } else {
-                wrap_index = wrap_index.saturating_add(1);
             }
         }
-        row_tops.push(y_base + galley.rect.height());
         let content_height = y_base + galley.rect.height();
+        row_tops.push(content_height);
 
         Self {
             row_height,
@@ -157,8 +73,6 @@ impl DisplaySnapshot {
             row_tops,
             row_logical_lines,
             row_char_ranges,
-            row_records,
-            max_line_width,
         }
     }
 
@@ -175,11 +89,6 @@ impl DisplaySnapshot {
     #[must_use]
     pub fn content_height(&self) -> f32 {
         self.content_height
-    }
-
-    #[must_use]
-    pub fn max_line_width(&self) -> f32 {
-        self.max_line_width
     }
 
     #[must_use]
@@ -200,24 +109,11 @@ impl DisplaySnapshot {
         self.row_char_ranges.get(row.0 as usize).cloned()
     }
 
-    #[must_use]
-    pub fn row_record(&self, row: DisplayRow) -> Option<&DisplayRowRecord> {
-        self.row_records.get(row.0 as usize)
-    }
-
-    #[must_use]
-    pub fn row_records(&self) -> &[DisplayRowRecord] {
-        &self.row_records
-    }
-
     /// Locate the snapshot-local display row that contains the given char
     /// offset. Returns `None` when the offset is outside this snapshot's
     /// sliced char range.
     #[must_use]
     pub fn row_for_char_offset(&self, char_offset: u32) -> Option<DisplayRow> {
-        if self.row_char_ranges.is_empty() {
-            return None;
-        }
         let first = self.row_char_ranges.first()?;
         let last = self.row_char_ranges.last()?;
         if char_offset < first.start || char_offset > last.end {
@@ -233,8 +129,7 @@ impl DisplaySnapshot {
     /// Document display row for a snapshot-local row.
     #[must_use]
     pub fn document_row_for_snapshot_row(&self, row: DisplayRow) -> Option<f32> {
-        self.row_record(row)?;
-        Some(self.display_row_base.saturating_add(row.0) as f32)
+        (row.0 < self.row_count()).then(|| self.display_row_base.saturating_add(row.0) as f32)
     }
 
     #[must_use]
@@ -260,45 +155,8 @@ impl DisplaySnapshot {
     pub fn pixel_y_for_char_offset(&self, char_offset: u32) -> Option<f32> {
         Some(self.document_row_for_char_offset(char_offset)? * self.row_height)
     }
-
-    /// Compute the visible row range for a given scroll offset (top display
-    /// row) and viewport height in pixels. `overscan_rows` adds a margin on
-    /// both sides for smoother scrolling.
-    #[must_use]
-    pub fn viewport_slice(
-        &self,
-        top_row: f32,
-        viewport_height: f32,
-        overscan_rows: u32,
-    ) -> ViewportSlice {
-        let row_h = self.row_height.max(1.0);
-        let visible_rows = (viewport_height / row_h).ceil() as u32 + 1;
-        let total = self.row_count();
-        let start = (top_row.floor() as i32 - overscan_rows as i32).max(0) as u32;
-        let end = (top_row.ceil() as u32 + visible_rows + overscan_rows).min(total);
-        ViewportSlice {
-            rows: start..end,
-            top_row_fractional: top_row,
-            pixel_offset_y: top_row * row_h,
-        }
-    }
 }
 
 fn saturating_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
-}
-
-fn ranges_overlap_u32(range: &Range<usize>, row_start: &u32, row_end: &u32) -> bool {
-    let start = saturating_u32(range.start);
-    let end = saturating_u32(range.end);
-    start < *row_end && end > *row_start
-}
-
-/// A range of display rows to paint, with the fractional top-of-viewport row
-/// for sub-pixel scroll positioning.
-#[derive(Clone, Debug)]
-pub struct ViewportSlice {
-    pub rows: Range<u32>,
-    pub top_row_fractional: f32,
-    pub pixel_offset_y: f32,
 }

@@ -13,8 +13,7 @@ mod word_boundary;
 
 pub use highlighting::build_layouter;
 pub use types::{
-    CharCursor, CursorRange, EditOperation, EditorHighlightStyle, LayouterFn, OperationRecord,
-    TextEditOptions,
+    CharCursor, CursorRange, EditOperation, EditorHighlightStyle, OperationRecord, TextEditOptions,
 };
 
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
@@ -431,17 +430,11 @@ fn store_latest_snapshot(
     char_offset_base: usize,
     logical_line_base: usize,
 ) {
-    let selection_range = view
-        .cursor_range
-        .as_ref()
-        .and_then(types::selection_char_range);
-    view.latest_display_snapshot = Some(DisplaySnapshot::from_galley_with_base_and_overlays(
+    view.latest_display_snapshot = Some(DisplaySnapshot::from_galley(
         galley,
         row_height,
         char_offset_base,
         logical_line_base,
-        selection_range,
-        &view.search_highlights.ranges,
     ));
     view.latest_display_snapshot_revision = Some(revision);
 }

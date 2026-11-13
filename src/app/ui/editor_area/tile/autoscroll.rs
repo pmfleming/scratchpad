@@ -27,7 +27,6 @@ pub(super) fn apply_selection_edge_autoscroll_intent(
         return;
     };
     if velocity == egui::Vec2::ZERO {
-        clear_edge_autoscroll(tab, view_id);
         return;
     }
     ui.ctx().request_repaint();
@@ -58,12 +57,6 @@ fn selection_edge_autoscroll_velocity(
         pointer_pos,
         row_height,
     ))
-}
-
-fn clear_edge_autoscroll(tab: &mut WorkspaceTab, view_id: ViewId) {
-    if let Some(view) = tab.layout.view_mut(view_id) {
-        view.scroll.clear_edge_autoscroll();
-    }
 }
 
 fn apply_edge_autoscroll_velocity(

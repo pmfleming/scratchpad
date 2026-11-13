@@ -335,7 +335,6 @@ fn start_scrollbar_drag(
         origin_offset: initial_offset,
     });
     state.offset[geometry.axis_index] = initial_offset;
-    state.user_scrolled = true;
 }
 
 fn track_offset_for_pointer(
@@ -373,5 +372,4 @@ fn continue_scrollbar_drag(
     };
     state.offset[geometry.axis_index] =
         (drag.origin_offset + delta_offset).clamp(0.0, geometry.max_offset);
-    state.user_scrolled = true;
 }

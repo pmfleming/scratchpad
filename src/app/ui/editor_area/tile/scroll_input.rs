@@ -10,8 +10,6 @@ pub(super) fn local_scroll_source(
     scrolling::ScrollSource {
         scroll_bar: true,
         mouse_wheel: true,
-        drag: false,
-        programmatic: true,
     }
 }
 
@@ -68,7 +66,6 @@ mod tests {
 
         assert!(source.mouse_wheel);
         assert!(source.scroll_bar);
-        assert!(!source.drag);
     }
 
     #[test]

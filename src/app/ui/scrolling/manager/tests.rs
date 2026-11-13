@@ -71,14 +71,3 @@ fn reveal_nearest_scrolls_to_hidden_rect_with_margin() {
 
     assert_offset_y(&manager, 75.0);
 }
-
-#[test]
-fn scrollbar_scroll_marks_user_scrolled_but_reveal_clears_it() {
-    let mut manager = manager();
-    scroll_y(&mut manager, 100.0);
-    assert!(manager.user_scrolled());
-
-    apply_intent(&mut manager, reveal_intent(10.0, ScrollAlign::Center));
-
-    assert!(!manager.user_scrolled());
-}

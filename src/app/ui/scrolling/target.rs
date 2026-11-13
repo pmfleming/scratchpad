@@ -1,19 +1,13 @@
-use eframe::egui::{Rangef, Rect};
+use eframe::egui::Rangef;
 
 /// How a target rect should be aligned within the viewport when scrolled into
 /// view.
-///
-/// `0.0` = leading edge (top/left), `1.0` = trailing edge (bottom/right),
-/// `0.5` = center. `Min`/`Center`/`Max` are convenience aliases.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScrollAlign {
-    Min,
     Center,
-    Max,
     /// Reveal with margin: scroll only the minimum amount needed to make the
     /// target visible, leaving the given pixel margin from the nearest edge.
     NearestWithMargin(f32),
-    Fraction(f32),
 }
 
 impl ScrollAlign {
@@ -36,15 +30,9 @@ impl ScrollAlign {
         let view_min = current_offset;
         let view_max = current_offset + viewport_size;
         let new = match self {
-            ScrollAlign::Min => target.min,
-            ScrollAlign::Max => target.max - viewport_size,
             ScrollAlign::Center => {
                 let mid = 0.5 * (target.min + target.max);
                 mid - 0.5 * viewport_size
-            }
-            ScrollAlign::Fraction(f) => {
-                let f = f.clamp(0.0, 1.0);
-                target.min - f * (viewport_size - (target.max - target.min))
             }
             ScrollAlign::NearestWithMargin(margin) => {
                 if target.min < view_min + margin {
@@ -57,38 +45,6 @@ impl ScrollAlign {
             }
         };
         new.clamp(0.0, max_offset)
-    }
-}
-
-/// Programmatic scroll target. Both axes optional so callers can request
-/// vertical-only or horizontal-only reveals.
-#[derive(Clone, Copy, Debug)]
-pub struct ScrollTarget {
-    pub rect: Rect,
-    pub align_x: Option<ScrollAlign>,
-    pub align_y: Option<ScrollAlign>,
-}
-
-impl ScrollTarget {
-    #[must_use]
-    pub fn new(rect: Rect) -> Self {
-        Self {
-            rect,
-            align_x: None,
-            align_y: Some(ScrollAlign::NearestWithMargin(0.0)),
-        }
-    }
-
-    #[must_use]
-    pub fn with_y(mut self, align: ScrollAlign) -> Self {
-        self.align_y = Some(align);
-        self
-    }
-
-    #[must_use]
-    pub fn with_x(mut self, align: ScrollAlign) -> Self {
-        self.align_x = Some(align);
-        self
     }
 }
 
