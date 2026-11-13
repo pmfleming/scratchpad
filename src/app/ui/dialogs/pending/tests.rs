@@ -1,26 +1,17 @@
 use super::show_pending_action_modal;
-use crate::app::app_state::{ScratchpadApp, test_support::test_app, workspace::accessors};
+use crate::app::app_state::{
+    ScratchpadApp,
+    test_support::{test_app, ui_harness},
+    workspace::accessors,
+};
 use crate::app::domain::{BufferFreshness, BufferState, PendingAction, WorkspaceTab};
 use eframe::egui;
 use egui_kittest::{Harness, kittest::Queryable};
 
 fn harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
-    let mut harness = Harness::builder()
-        .with_size(egui::vec2(1100.0, 800.0))
-        .with_context_setup(|ctx| {
-            crate::app::fonts::apply_editor_fonts(
-                ctx,
-                &crate::app::fonts::EditorFontSelection::scratchpad(
-                    crate::app::fonts::EditorFontPreset::Standard,
-                ),
-                4.0,
-            )
-            .unwrap();
-            ctx.options_mut(|o| o.warn_on_id_clash = true);
-        })
-        .build_ui_state(|ui, app| show_pending_action_modal(ui.ctx(), app), app);
-    harness.run_steps(3);
-    harness
+    ui_harness(egui::vec2(1100.0, 800.0), app, |ui, app| {
+        show_pending_action_modal(ui.ctx(), app)
+    })
 }
 
 /// A dirty tab for `path`; the file itself is written only when `disk` is set.
