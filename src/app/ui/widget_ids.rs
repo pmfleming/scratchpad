@@ -167,35 +167,6 @@ pub(crate) fn child(id: Id, key: impl Hash) -> Id {
     id.with((ID_NAMESPACE, hash_key(&key)))
 }
 
-pub(crate) fn read_deferred_persisted<T: Clone + Send + Sync + 'static>(
-    ctx: &egui::Context,
-    pending_id: Id,
-    active_id: Id,
-) -> Option<T> {
-    let frame = ctx.cumulative_frame_nr();
-    ctx.data_mut(|data| {
-        if let Some((value, apply_frame)) = data.get_persisted::<(T, u64)>(pending_id)
-            && apply_frame <= frame
-        {
-            data.insert_persisted(active_id, value.clone());
-            return Some(value);
-        }
-        data.get_persisted::<T>(active_id)
-    })
-}
-
-pub(crate) fn write_deferred_persisted<T: Clone + Send + Sync + 'static>(
-    ctx: &egui::Context,
-    pending_id: Id,
-    value: T,
-) {
-    let apply_frame = ctx.cumulative_frame_nr().saturating_add(1);
-    ctx.data_mut(|data| {
-        data.insert_persisted(pending_id, (value, apply_frame));
-    });
-    ctx.request_repaint();
-}
-
 pub(crate) fn feature_scope<R>(
     ui: &mut egui::Ui,
     feature: &'static str,

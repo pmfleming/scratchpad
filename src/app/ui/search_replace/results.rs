@@ -1,28 +1,59 @@
-use super::result_model::{
-    active_match_local_row, empty_message, match_count_label, match_preview,
-    search_result_group_key,
-};
-use super::state::{
-    SearchStripActions, SearchStripState, row_top, virtual_rows_for_clip, virtual_total_height,
-};
-use crate::app::app_state::{ScratchpadApp, SearchResultEntry, SearchResultGroup};
+//! A flat, virtualized list of matches on History's rail.
+use super::result_model::{empty_message, match_preview};
+use super::state::{SearchStripActions, SearchStripState};
+use crate::app::app_state::{ScratchpadApp, SearchResultEntry, SearchResultGroup, SearchStatus};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
-use crate::app::theme::{border, tab_selected_accent, tab_selected_bg, text_muted, text_primary};
-use crate::app::ui::widget_ids;
+use crate::app::theme;
+use crate::app::ui::{panel_style, widget_ids};
 use eframe::egui;
-use egui_phosphor::regular::{CARET_DOWN, CARET_RIGHT};
 
-const SEARCH_RESULT_FILE_SPACING: f32 = 10.0;
-const SEARCH_RESULT_LINE_SPACING: f32 = 2.0;
-const SEARCH_RESULT_LINE_PILL_CORNER_RADIUS: u8 = 8;
-const SEARCH_RESULT_FILE_PILL_HEIGHT: f32 = 44.0;
-const SEARCH_RESULT_LINE_PILL_HEIGHT: f32 = 34.0;
-const SEARCH_RESULT_LINE_GUTTER_WIDTH: f32 = 48.0;
-const SEARCH_RESULT_LINE_DIVIDER_GAP: f32 = 8.0;
-const SEARCH_RESULT_ROW_OVERSCAN: usize = 2;
+pub(super) const ROW_HEIGHT: f32 = 44.0;
+const RAIL_X: f32 = 11.0;
+const DOT_Y: f32 = 12.5;
+const ICON_X: f32 = 26.0;
+const TITLE_X: f32 = 50.0;
+const META_WIDTH: f32 = 72.0;
+const TITLE_SIZE: f32 = 13.0;
+const SUBTITLE_SIZE: f32 = 11.0;
+/// Characters of context kept before a hit so it stays visible in narrow windows.
+const LEADING_CONTEXT_CHARS: usize = 24;
 
 #[cfg(test)]
 mod tests;
+
+#[derive(Clone, Copy, Default)]
+struct Scroll {
+    revealed: Option<usize>,
+    offset: f32,
+    viewport: f32,
+}
+
+fn scroll_key() -> egui::Id {
+    egui::Id::unique("search.results.scroll")
+}
+
+pub(super) fn row_count(groups: &[SearchResultGroup]) -> usize {
+    groups
+        .last()
+        .map_or(0, |group| group.first_match_index + group.total_match_count)
+}
+
+pub(super) fn group_for(
+    groups: &[SearchResultGroup],
+    match_index: usize,
+) -> Option<&SearchResultGroup> {
+    let index = groups
+        .partition_point(|group| group.first_match_index <= match_index)
+        .checked_sub(1)?;
+    groups
+        .get(index)
+        .filter(|group| match_index < group.first_match_index + group.total_match_count)
+}
+
+pub(super) fn reviewing(app: &ScratchpadApp) -> bool {
+    app.state.search_state.panel.replace_open
+        && app.state.search_state.runtime.status == SearchStatus::Ready
+}
 
 pub(super) fn show_search_results(
     ui: &mut egui::Ui,
@@ -30,443 +61,343 @@ pub(super) fn show_search_results(
     state: &SearchStripState,
     actions: &mut SearchStripActions,
 ) {
-    let results_height = ui.available_height().max(SEARCH_RESULT_FILE_PILL_HEIGHT);
-    let empty_message = empty_message(state);
-
-    egui::ScrollArea::vertical()
-        .id_salt(widget_ids::scroll_id(ui, "search_results_list"))
-        .max_height(results_height)
-        .min_scrolled_height(results_height)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            if let Some(message) = empty_message {
-                ui.add_space(results_height * 0.3);
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        egui::RichText::new(message)
-                            .size(13.0)
-                            .color(text_muted(ui)),
-                    );
-                });
-                return;
-            }
-
-            let mut collapsed_height = None;
-            let mut rendered = 0;
-            for (index, group) in state.result_groups.iter().enumerate() {
-                let (height, painted) = show_result_group(
-                    ui,
-                    app,
-                    index,
-                    group,
-                    state.active_match_index,
-                    actions,
-                    collapsed_height,
-                );
-                collapsed_height = height.or(collapsed_height);
-                rendered += usize::from(painted);
-                if index + 1 < state.result_groups.len() {
-                    ui.add_space(SEARCH_RESULT_FILE_SPACING);
-                }
-            }
-            crate::app::capacity_metrics::record_search_result_groups(
-                rendered,
-                state.result_groups.len() - rendered,
+    if let Some(message) = empty_message(state) {
+        ui.add_space(ui.available_height() * 0.3);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                egui::RichText::new(message)
+                    .size(TITLE_SIZE)
+                    .color(theme::text_muted(ui)),
             );
         });
-}
-
-fn show_result_group(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    group_index: usize,
-    group: &SearchResultGroup,
-    active_match_index: Option<usize>,
-    actions: &mut SearchStripActions,
-    collapsed_height: Option<f32>,
-) -> (Option<f32>, bool) {
-    let active_id = search_result_group_expanded_id(group);
-    let pending_id = search_result_group_expanded_pending_id(group);
-    let expanded = widget_ids::read_deferred_persisted::<bool>(ui.ctx(), pending_id, active_id)
-        .unwrap_or(group.active && active_match_index.is_some());
-    // Calibrate from a real row each frame so font/style/scale changes cannot
-    // leave a stale height. Expanded groups retain their match-row virtualization
-    // and active-match reveal even when their header is outside the viewport.
-    if !expanded && let Some(height) = collapsed_height {
-        let size = egui::vec2(ui.available_width(), height);
-        let rect = egui::Rect::from_min_size(ui.cursor().min, size);
-        if !ui.is_rect_visible(rect.expand(height * SEARCH_RESULT_ROW_OVERSCAN as f32)) {
-            ui.allocate_space(size);
-            return (Some(height), false);
-        }
-    }
-    let response = widget_ids::surface_scope(ui, ("search_result_group", group_index), |ui| {
-        if app.state.search_state.panel.replace_open
-            && app.state.search_state.runtime.status == crate::app::app_state::SearchStatus::Ready
-        {
-            let indices =
-                group.first_match_index..group.first_match_index + group.total_match_count;
-            let count = indices
-                .clone()
-                .filter(|i| !app.state.search_state.replace.excluded.contains(i))
-                .count();
-            let mut included = count > 0;
-            let response = ui.add(
-                egui::Checkbox::new(&mut included, "Include file")
-                    .indeterminate(count > 0 && count < group.total_match_count),
-            );
-            if response.changed() {
-                for index in indices {
-                    if included {
-                        app.state.search_state.replace.excluded.remove(&index);
-                    } else {
-                        app.state.search_state.replace.excluded.insert(index);
-                    }
-                }
-                app.state
-                    .search_state
-                    .replace
-                    .pending_replace_all_confirmation = None;
-            }
-        }
-        let (group_response, toggle_requested) = show_group_pill(ui, group_index, group, expanded);
-        if group_response.clicked() && group.total_match_count > 0 {
-            actions.focused_file_match_index = Some(group.first_match_index);
-        }
-
-        if toggle_requested {
-            widget_ids::write_deferred_persisted(ui.ctx(), pending_id, !expanded);
-        }
-
-        if !expanded {
-            return;
-        }
-
-        ui.add_space(SEARCH_RESULT_LINE_SPACING);
-        ui.indent(
-            widget_ids::local(ui, ("search_result_indent", group.buffer_id)),
-            |ui| {
-                show_virtual_match_rows(ui, app, group, active_match_index, actions);
-            },
-        );
-    });
-    ((!expanded).then_some(response.response.rect.height()), true)
-}
-
-fn show_virtual_match_rows(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    group: &SearchResultGroup,
-    active_match_index: Option<usize>,
-    actions: &mut SearchStripActions,
-) {
-    let total_rows = group.total_match_count;
-    if total_rows == 0 {
         return;
     }
-
-    let start_y = ui.cursor().min.y;
-    let total_height = result_rows_height(total_rows);
-    maybe_scroll_active_match_into_view(ui, group, active_match_index, start_y);
-    let visible_rows = virtual_rows_for_clip(
-        total_rows,
-        start_y,
-        ui.clip_rect(),
-        SEARCH_RESULT_LINE_PILL_HEIGHT,
-        SEARCH_RESULT_LINE_SPACING,
-        SEARCH_RESULT_ROW_OVERSCAN,
-    );
-
-    if visible_rows.first >= visible_rows.last {
-        ui.add_space(total_height);
-        return;
-    }
-
-    ui.add_space(visible_rows.leading_space);
-    for row_offset in visible_rows.first..visible_rows.last {
-        let match_index = group.first_match_index + row_offset;
-        if let Some(entry) = app.search_result_entry_at(match_index) {
-            if app.state.search_state.panel.replace_open
-                && app.state.search_state.runtime.status
-                    == crate::app::app_state::SearchStatus::Ready
-            {
-                ui.horizontal(|ui| {
-                    let mut included = !app.state.search_state.replace.excluded.contains(&match_index);
-                    if ui.checkbox(&mut included, "").accessible_name(format!("Include match {}", match_index+1)).changed() {
-                        if included { app.state.search_state.replace.excluded.remove(&match_index); } else { app.state.search_state.replace.excluded.insert(match_index); }
-                        app.state.search_state.replace.pending_replace_all_confirmation = None;
-                    }
-                    let matched = app.state.search_state.results.matches.get(match_index).cloned();
-                    let replacement = matched.as_ref().and_then(|m| crate::app::app_state::search_state::replace::replacement_for_match(app, m).ok());
-                    if let (Some(matched), Some(replacement)) = (matched, replacement) {
-                        let old = crate::app::app_state::search_state::replace::matched_text_for_search_match(app, &matched).unwrap_or_default();
-                        let mut job = egui::text::LayoutJob::default();
-                        append_text(&mut job, &format!("{}  ", entry.line_number), text_muted(ui), 12.5);
-                        append_text(&mut job, &old.replace('\n', "⏎"), crate::app::theme::diff_del(ui), 12.5);
-                        append_text(&mut job, " → ", text_muted(ui), 12.5);
-                        append_text(&mut job, &replacement.replace('\n', "⏎"), crate::app::theme::diff_add(ui), 12.5);
-                        if ui.add_sized([ui.available_width(), SEARCH_RESULT_LINE_PILL_HEIGHT], egui::Button::new(job).frame(false).selected(entry.active).truncate()).clicked() { actions.selected_match_index = Some(entry.match_index); }
-                    } else { ui.add_space(SEARCH_RESULT_LINE_PILL_HEIGHT); }
-                });
-            } else if show_match_pill(ui, &entry).clicked() {
-                actions.selected_match_index = Some(entry.match_index);
-            }
-        } else {
-            ui.add_space(SEARCH_RESULT_LINE_PILL_HEIGHT);
-        }
-        if row_offset + 1 < total_rows {
-            ui.add_space(SEARCH_RESULT_LINE_SPACING);
-        }
-    }
-
-    ui.add_space(visible_rows.trailing_space);
-}
-
-fn result_row_top(row_index: usize) -> f32 {
-    row_top(
-        row_index,
-        SEARCH_RESULT_LINE_PILL_HEIGHT,
-        SEARCH_RESULT_LINE_SPACING,
-    )
-}
-
-fn result_rows_height(row_count: usize) -> f32 {
-    virtual_total_height(
-        row_count,
-        SEARCH_RESULT_LINE_PILL_HEIGHT,
-        SEARCH_RESULT_LINE_SPACING,
-    )
-}
-
-fn maybe_scroll_active_match_into_view(
-    ui: &mut egui::Ui,
-    group: &SearchResultGroup,
-    active_match_index: Option<usize>,
-    start_y: f32,
-) {
-    let Some(active_match_index) = active_match_index else {
-        return;
-    };
-    let Some(local_row) = active_match_local_row(group, Some(active_match_index)) else {
-        return;
-    };
-
-    let reveal_id = search_result_active_reveal_id(group);
-    let already_revealed = ui
+    let total = row_count(&state.result_groups);
+    let mut scroll = ui
         .ctx()
-        .data(|data| data.get_temp::<usize>(reveal_id))
-        .is_some_and(|revealed| revealed == active_match_index);
-    if already_revealed {
+        .data(|d| d.get_temp::<Scroll>(scroll_key()))
+        .unwrap_or_default();
+    let mut area = egui::ScrollArea::vertical()
+        .id_salt(widget_ids::scroll_id(ui, "search_results_list"))
+        .auto_shrink([false, false]);
+    if let Some(active) = state.active_match_index
+        && scroll.revealed != Some(active)
+    {
+        scroll.revealed = Some(active);
+        let top = active as f32 * ROW_HEIGHT;
+        if top < scroll.offset || top + ROW_HEIGHT > scroll.offset + scroll.viewport {
+            area =
+                area.vertical_scroll_offset((top - (scroll.viewport - ROW_HEIGHT) * 0.5).max(0.0));
+        }
+    }
+    let replacing = reviewing(app);
+    let output = ui
+        .scope(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            area.show_rows(ui, ROW_HEIGHT, total, |ui, range| {
+                let rendered = range.len();
+                for match_index in range {
+                    show_row(ui, app, state, match_index, replacing, actions);
+                }
+                crate::app::capacity_metrics::record_search_result_groups(
+                    rendered,
+                    total - rendered,
+                );
+            })
+        })
+        .inner;
+    scroll.offset = output.state.clamped_offset().y;
+    scroll.viewport = output.inner_rect.height();
+    ui.ctx().data_mut(|d| d.insert_temp(scroll_key(), scroll));
+}
+
+fn show_row(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    state: &SearchStripState,
+    match_index: usize,
+    replacing: bool,
+    actions: &mut SearchStripActions,
+) {
+    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), ROW_HEIGHT));
+    let Some(entry) = app.search_result_entry_at(match_index) else {
         return;
-    }
-
-    let rect = egui::Rect::from_min_size(
-        egui::pos2(
-            ui.available_rect_before_wrap().left(),
-            start_y + result_row_top(local_row),
-        ),
-        egui::vec2(
-            ui.available_width().max(1.0),
-            SEARCH_RESULT_LINE_PILL_HEIGHT,
-        ),
+    };
+    let group = group_for(&state.result_groups, match_index);
+    let response = widget_ids::interact(
+        ui,
+        rect,
+        egui::Id::unique(("search.results.row", match_index)),
+        egui::Sense::click(),
+        "search-result-row",
     );
-    ui.scroll_to_rect(rect, Some(egui::Align::Center));
-    ui.ctx()
-        .data_mut(|data| data.insert_temp(reveal_id, active_match_index));
-}
-
-fn search_result_group_expanded_id(group: &SearchResultGroup) -> egui::Id {
-    widget_ids::ctx_key((
-        "search_result_group.expanded",
-        search_result_group_key(group),
-    ))
-}
-
-fn search_result_group_expanded_pending_id(group: &SearchResultGroup) -> egui::Id {
-    widget_ids::ctx_key((
-        "search_result_group.expanded.pending",
-        search_result_group_key(group),
-    ))
-}
-
-fn search_result_active_reveal_id(group: &SearchResultGroup) -> egui::Id {
-    widget_ids::ctx_key((
-        "search_result.active_revealed",
-        search_result_group_key(group),
-    ))
-}
-
-fn show_group_pill(
-    ui: &mut egui::Ui,
-    group_index: usize,
-    group: &SearchResultGroup,
-    expanded: bool,
-) -> (egui::Response, bool) {
-    ui.separator();
-    let inner = ui.horizontal(|ui| {
-        let caret_clicked = show_group_caret(ui, group_index, expanded).clicked();
-        let response = show_group_body(ui, group_index, group);
-        show_group_match_count(ui, group.total_match_count);
-        (response, caret_clicked)
+    let file = group.map_or(entry.buffer_label.as_str(), |g| g.buffer_label.as_str());
+    let label = format!(
+        "Line {} · {} · {}",
+        entry.line_number,
+        match_preview(&entry),
+        file
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::ListBoxOption, true, entry.active, &label)
     });
-    inner.inner
-}
-
-fn show_group_caret(ui: &mut egui::Ui, group_index: usize, expanded: bool) -> egui::Response {
-    widget_ids::surface_scope(ui, ("search_result_group.caret", group_index), |ui| {
-        ui.add_sized(
-            egui::vec2(26.0, 26.0),
-            egui::Button::new(
-                egui::RichText::new(group_caret_icon(expanded))
-                    .font(egui_phosphor::font_id(14.0))
-                    .color(text_muted(ui)),
-            )
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-        )
-    })
-    .inner
-    .on_hover_text(group_caret_tooltip(expanded))
-}
-
-fn group_caret_icon(expanded: bool) -> &'static str {
-    if expanded { CARET_DOWN } else { CARET_RIGHT }
-}
-
-fn group_caret_tooltip(expanded: bool) -> &'static str {
-    if expanded {
-        "Collapse results for this file"
-    } else {
-        "Expand results for this file"
-    }
-}
-
-fn show_group_body(
-    ui: &mut egui::Ui,
-    group_index: usize,
-    group: &SearchResultGroup,
-) -> egui::Response {
-    let label_width = (ui.available_width() - 110.0).max(120.0);
-    let response = widget_ids::surface_scope(ui, ("search_result_group.body", group_index), |ui| {
-        ui.add_sized(
-            egui::vec2(label_width, SEARCH_RESULT_FILE_PILL_HEIGHT),
-            egui::Button::new(group_body(ui, group))
-                .truncate()
-                .fill(egui::Color32::TRANSPARENT)
-                .stroke(egui::Stroke::NONE),
-        )
-    })
-    .inner
-    .on_hover_text(&group.buffer_label);
-    if group.tab_label == group.buffer_label {
-        response
-    } else {
-        response.on_hover_text(format!("Tab: {}", group.tab_label))
-    }
-}
-
-fn show_group_match_count(ui: &mut egui::Ui, match_count: usize) {
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        ui.label(
-            egui::RichText::new(match_count_label(match_count))
-                .size(12.0)
-                .color(text_muted(ui)),
-        );
-    });
-}
-
-fn show_match_pill(ui: &mut egui::Ui, entry: &SearchResultEntry) -> egui::Response {
-    widget_ids::surface_scope(ui, ("search_result.match", entry.match_index), |ui| {
-        let row_width = ui.available_width();
-        let response = widget_ids::allocate_exact_interact(
-            ui,
-            egui::vec2(row_width, SEARCH_RESULT_LINE_PILL_HEIGHT),
-            widget_ids::surface_id(("search_result.match", entry.match_index)),
-            egui::Sense::click(),
-            "search_result.match",
-        );
-        let rect = response.rect;
+    if entry.active || response.hovered() {
         ui.painter().rect_filled(
             rect,
-            SEARCH_RESULT_LINE_PILL_CORNER_RADIUS,
-            match_fill(ui, entry.active),
+            0,
+            if entry.active {
+                theme::tab_selected_bg(ui)
+            } else {
+                theme::action_bg(ui)
+            },
         );
-
-        paint_match_row(ui, rect.shrink2(egui::vec2(10.0, 0.0)), entry);
-        response
-    })
-    .inner
-}
-
-fn group_body(ui: &egui::Ui, group: &SearchResultGroup) -> egui::WidgetText {
-    let mut job = egui::text::LayoutJob::default();
-    append_text(
-        &mut job,
-        &group.buffer_label,
-        if group.active {
-            tab_selected_accent(ui)
-        } else {
-            text_muted(ui)
-        },
-        12.5,
-    );
-    job.into()
-}
-
-fn append_text(job: &mut egui::text::LayoutJob, text: &str, color: egui::Color32, size: f32) {
-    job.append(
-        text,
-        0.0,
-        egui::TextFormat {
-            font_id: egui::FontId::new(size, egui::FontFamily::Name(EDITOR_FONT_FAMILY.into())),
-            color,
-            ..Default::default()
-        },
-    );
-}
-
-fn paint_match_row(ui: &egui::Ui, rect: egui::Rect, entry: &SearchResultEntry) {
-    let painter = ui.painter();
-    let editor_font = egui::FontId::new(12.5, egui::FontFamily::Name(EDITOR_FONT_FAMILY.into()));
-    let gutter_rect = egui::Rect::from_min_max(
-        rect.min,
-        egui::pos2(rect.left() + SEARCH_RESULT_LINE_GUTTER_WIDTH, rect.bottom()),
-    );
-    let divider_x = gutter_rect.right() + SEARCH_RESULT_LINE_DIVIDER_GAP;
-    let preview_rect = egui::Rect::from_min_max(
-        egui::pos2(divider_x + SEARCH_RESULT_LINE_DIVIDER_GAP, rect.top()),
-        rect.max,
-    );
-
-    painter.text(
-        egui::pos2(gutter_rect.left(), rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        format!("{:>4}", entry.line_number),
-        editor_font.clone(),
-        text_muted(ui),
-    );
-
-    painter.line_segment(
-        [
-            egui::pos2(divider_x, rect.top() + 5.0),
-            egui::pos2(divider_x, rect.bottom() - 5.0),
-        ],
-        egui::Stroke::new(1.0, border(ui).gamma_multiply(0.65)),
-    );
-
-    painter.with_clip_rect(preview_rect).text(
-        egui::pos2(preview_rect.left(), rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        match_preview(entry),
-        editor_font,
-        text_primary(ui).gamma_multiply(0.92),
-    );
-}
-
-fn match_fill(ui: &egui::Ui, active: bool) -> egui::Color32 {
-    if active {
-        tab_selected_bg(ui)
-    } else {
-        egui::Color32::TRANSPARENT
     }
+    let included = !app
+        .state
+        .search_state
+        .replace
+        .excluded
+        .contains(&match_index);
+    let dot = if entry.active {
+        panel_style::RailDot::Current
+    } else if !replacing || included {
+        panel_style::RailDot::Filled
+    } else {
+        panel_style::RailDot::Hollow
+    };
+    panel_style::rail(ui, rect, rect.left() + RAIL_X, rect.top() + DOT_Y, dot);
+
+    let title_left = if replacing {
+        panel_style::text(
+            ui,
+            egui::Rect::from_min_size(rect.min + egui::vec2(ICON_X, 0.0), egui::vec2(20.0, 25.0)),
+            egui_phosphor::regular::SWAP,
+            14.0,
+            if included {
+                theme::tab_selected_accent(ui)
+            } else {
+                theme::text_muted(ui)
+            },
+        );
+        TITLE_X
+    } else {
+        ICON_X
+    };
+    let meta_left = rect.right() - META_WIDTH;
+    panel_style::text_right(
+        ui,
+        egui::Rect::from_min_max(
+            egui::pos2(meta_left, rect.top()),
+            egui::pos2(rect.right() - 8.0, rect.top() + 25.0),
+        ),
+        &format!("Ln {}", entry.line_number),
+        SUBTITLE_SIZE,
+        theme::text_muted(ui),
+    );
+    let title_rect = egui::Rect::from_min_max(
+        rect.min + egui::vec2(title_left, 2.0),
+        egui::pos2(meta_left - 6.0, rect.top() + 23.0),
+    );
+    let job = if replacing {
+        replacement_title(ui, app, match_index, included)
+    } else {
+        hit_title(ui, app, &entry)
+    };
+    paint_job(ui, title_rect, job);
+    let subtitle = if replacing && !included {
+        format!("Excluded · {file}")
+    } else {
+        file.to_owned()
+    };
+    panel_style::text_end(
+        ui,
+        egui::Rect::from_min_max(
+            rect.min + egui::vec2(title_left, 22.0),
+            egui::pos2(rect.right() - 8.0, rect.bottom() - 2.0),
+        ),
+        &subtitle,
+        SUBTITLE_SIZE,
+        theme::text_muted(ui),
+    );
+
+    if replacing {
+        let dot_rect = egui::Rect::from_min_size(rect.min, egui::vec2(ICON_X, ROW_HEIGHT));
+        let toggle = widget_ids::interact(
+            ui,
+            dot_rect,
+            egui::Id::unique(("search.results.include", match_index)),
+            egui::Sense::click(),
+            "search-result-include",
+        );
+        toggle.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::Role::CheckBox,
+                true,
+                included,
+                format!("Include match {}", match_index + 1),
+            )
+        });
+        let toggle = toggle.on_hover_text(
+            "Include this match in Replace all. Shift+click toggles every match in this file.",
+        );
+        if toggle.clicked() {
+            let whole_file = ui.input(|i| i.modifiers.shift);
+            let indices = match group.filter(|_| whole_file) {
+                Some(group) => {
+                    group.first_match_index..group.first_match_index + group.total_match_count
+                }
+                None => match_index..match_index + 1,
+            };
+            set_included(app, indices, !included);
+        }
+    }
+    let response = response.on_hover_text(match group {
+        Some(group) if group.tab_label != group.buffer_label => {
+            format!("{}\nTab: {}", group.buffer_label, group.tab_label)
+        }
+        _ => file.to_owned(),
+    });
+    if response.clicked() {
+        actions.selected_match_index = Some(entry.match_index);
+    }
+}
+
+pub(super) fn set_included(
+    app: &mut ScratchpadApp,
+    indices: std::ops::Range<usize>,
+    included: bool,
+) {
+    let excluded = &mut app.state.search_state.replace.excluded;
+    for index in indices {
+        if included {
+            excluded.remove(&index);
+        } else {
+            excluded.insert(index);
+        }
+    }
+    app.state
+        .search_state
+        .replace
+        .pending_replace_all_confirmation = None;
+}
+
+fn editor_font(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name(EDITOR_FONT_FAMILY.into()))
+}
+
+fn append(job: &mut egui::text::LayoutJob, text: &str, format: egui::TextFormat) {
+    if !text.is_empty() {
+        job.append(text, 0.0, format);
+    }
+}
+
+/// The line preview with the hit emphasized; leading context is shortened to keep it visible.
+fn hit_title(
+    ui: &egui::Ui,
+    app: &ScratchpadApp,
+    entry: &SearchResultEntry,
+) -> egui::text::LayoutJob {
+    let preview = match_preview(entry);
+    let plain = egui::TextFormat::simple(editor_font(TITLE_SIZE), theme::text_primary(ui));
+    let mut job = egui::text::LayoutJob::default();
+    let matched = app
+        .state
+        .search_state
+        .results
+        .matches
+        .get(entry.match_index)
+        .and_then(|m| {
+            crate::app::app_state::search_state::replace::matched_text_for_search_match(app, m)
+        });
+    let Some((start, end)) = matched.and_then(|text| hit_span(preview, &text, entry.column_number))
+    else {
+        append(&mut job, preview, plain);
+        return job;
+    };
+    let before = &preview[..start];
+    let skip = before.chars().count().saturating_sub(LEADING_CONTEXT_CHARS);
+    if skip > 0 {
+        let cut = before.char_indices().nth(skip).map_or(start, |(i, _)| i);
+        append(&mut job, "…", plain.clone());
+        append(&mut job, &before[cut..], plain.clone());
+    } else {
+        append(&mut job, before, plain.clone());
+    }
+    append(
+        &mut job,
+        &preview[start..end],
+        egui::TextFormat {
+            color: theme::tab_selected_accent(ui),
+            background: theme::tab_selected_bg(ui),
+            ..plain.clone()
+        },
+    );
+    append(&mut job, &preview[end..], plain);
+    job
+}
+
+/// Byte span of the hit in a trimmed preview. Trimming only removes leading text, so
+/// the hit is the last occurrence that starts at or before its 1-based line column.
+pub(super) fn hit_span(preview: &str, matched: &str, column: usize) -> Option<(usize, usize)> {
+    if matched.is_empty() || matched.contains('\n') {
+        return None;
+    }
+    let column_byte = preview
+        .char_indices()
+        .nth(column.saturating_sub(1))
+        .map_or(preview.len(), |(i, _)| i);
+    let start = preview
+        .match_indices(matched)
+        .map(|(i, _)| i)
+        .take_while(|&i| i <= column_byte)
+        .last()?;
+    Some((start, start + matched.len()))
+}
+
+fn replacement_title(
+    ui: &egui::Ui,
+    app: &ScratchpadApp,
+    match_index: usize,
+    included: bool,
+) -> egui::text::LayoutJob {
+    use crate::app::app_state::search_state::replace;
+    let font = editor_font(TITLE_SIZE);
+    let muted = egui::TextFormat::simple(font.clone(), theme::text_muted(ui));
+    let mut job = egui::text::LayoutJob::default();
+    let matched = app.state.search_state.results.matches.get(match_index);
+    let old = matched.and_then(|m| replace::matched_text_for_search_match(app, m));
+    let new = matched.and_then(|m| replace::replacement_for_match(app, m).ok());
+    let (Some(old), Some(new)) = (old, new) else {
+        append(&mut job, "Preview unavailable", muted);
+        return job;
+    };
+    let (old_format, new_format) = if included {
+        (
+            egui::TextFormat {
+                strikethrough: egui::Stroke::new(1.0, theme::diff_del(ui)),
+                ..egui::TextFormat::simple(font.clone(), theme::diff_del(ui))
+            },
+            egui::TextFormat::simple(font, theme::diff_add(ui)),
+        )
+    } else {
+        (muted.clone(), muted.clone())
+    };
+    append(&mut job, &old.replace('\n', "⏎"), old_format);
+    append(&mut job, " → ", muted);
+    append(&mut job, &new.replace('\n', "⏎"), new_format);
+    job
+}
+
+fn paint_job(ui: &egui::Ui, rect: egui::Rect, mut job: egui::text::LayoutJob) {
+    if rect.width() <= 0.0 {
+        return;
+    }
+    job.wrap.max_width = rect.width();
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let pos = egui::pos2(rect.left(), rect.center().y - galley.size().y * 0.5);
+    ui.painter()
+        .with_clip_rect(rect.intersect(ui.clip_rect()))
+        .galley(pos, galley, theme::text_primary(ui));
 }

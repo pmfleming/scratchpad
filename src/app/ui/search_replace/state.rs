@@ -21,7 +21,6 @@ pub(super) struct SearchStripActions {
     pub(super) undo_all: Option<(u64, usize)>,
     pub(super) recent_index: Option<usize>,
     pub(super) recapture_selection: bool,
-    pub(super) focused_file_match_index: Option<usize>,
     pub(super) selected_match_index: Option<usize>,
 }
 
@@ -52,14 +51,6 @@ pub(super) struct SearchProgressSnapshot {
     pub(super) target_count: usize,
     pub(super) status: SearchStatus,
     pub(super) freshness: SearchFreshness,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct VirtualRows {
-    pub(super) first: usize,
-    pub(super) last: usize,
-    pub(super) leading_space: f32,
-    pub(super) trailing_space: f32,
 }
 
 impl SearchStripState {
@@ -118,105 +109,5 @@ impl SearchProgressSnapshot {
             status: progress.status,
             freshness: progress.freshness,
         }
-    }
-}
-
-pub(super) fn virtual_rows_for_clip(
-    row_count: usize,
-    start_y: f32,
-    clip: egui::Rect,
-    row_height: f32,
-    row_spacing: f32,
-    overscan: usize,
-) -> VirtualRows {
-    if row_count == 0 {
-        return VirtualRows {
-            first: 0,
-            last: 0,
-            leading_space: 0.0,
-            trailing_space: 0.0,
-        };
-    }
-
-    let row_step = virtual_row_step(row_height, row_spacing);
-    let first_visible = ((clip.top() - start_y) / row_step).floor().max(0.0) as usize;
-    let last_visible = ((clip.bottom() - start_y) / row_step).ceil().max(0.0) as usize + 1;
-    let first = first_visible.saturating_sub(overscan).min(row_count);
-    let last = last_visible.saturating_add(overscan).min(row_count);
-    let rendered_end = if first >= last {
-        row_top(first, row_height, row_spacing)
-    } else {
-        row_top(last - 1, row_height, row_spacing) + row_height
-    };
-
-    let total_height = virtual_total_height(row_count, row_height, row_spacing);
-    VirtualRows {
-        first,
-        last,
-        leading_space: row_top(first, row_height, row_spacing).min(total_height),
-        trailing_space: (total_height - rendered_end).max(0.0),
-    }
-}
-
-pub(super) fn virtual_total_height(row_count: usize, row_height: f32, row_spacing: f32) -> f32 {
-    if row_count == 0 {
-        0.0
-    } else {
-        row_count as f32 * row_height + row_count.saturating_sub(1) as f32 * row_spacing
-    }
-}
-
-pub(super) fn row_top(row_index: usize, row_height: f32, row_spacing: f32) -> f32 {
-    row_index as f32 * virtual_row_step(row_height, row_spacing)
-}
-
-fn virtual_row_step(row_height: f32, row_spacing: f32) -> f32 {
-    row_height + row_spacing
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{egui, row_top, virtual_rows_for_clip, virtual_total_height};
-
-    const ROW_HEIGHT: f32 = 34.0;
-    const ROW_SPACING: f32 = 2.0;
-
-    #[test]
-    fn virtual_total_height_counts_rows_without_trailing_gap() {
-        assert_eq!(virtual_total_height(0, ROW_HEIGHT, ROW_SPACING), 0.0);
-        assert_eq!(virtual_total_height(1, ROW_HEIGHT, ROW_SPACING), ROW_HEIGHT);
-        assert_eq!(
-            virtual_total_height(3, ROW_HEIGHT, ROW_SPACING),
-            ROW_HEIGHT * 3.0 + ROW_SPACING * 2.0
-        );
-    }
-
-    #[test]
-    fn virtual_rows_for_clip_adds_bounded_overscan() {
-        let clip = egui::Rect::from_min_max(egui::pos2(0.0, 92.0), egui::pos2(100.0, 184.0));
-        let rows = virtual_rows_for_clip(20, 0.0, clip, ROW_HEIGHT, ROW_SPACING, 1);
-
-        assert_eq!(rows.first, 1);
-        assert_eq!(rows.last, 8);
-        assert_eq!(rows.leading_space, row_top(1, ROW_HEIGHT, ROW_SPACING));
-        assert_eq!(
-            rows.trailing_space,
-            virtual_total_height(20, ROW_HEIGHT, ROW_SPACING)
-                - (row_top(7, ROW_HEIGHT, ROW_SPACING) + ROW_HEIGHT)
-        );
-    }
-
-    #[test]
-    fn virtual_rows_for_clip_clamps_outside_content() {
-        let clip = egui::Rect::from_min_max(egui::pos2(0.0, 10_000.0), egui::pos2(100.0, 10_100.0));
-        let rows = virtual_rows_for_clip(5, 0.0, clip, ROW_HEIGHT, ROW_SPACING, 2);
-
-        assert_eq!(rows.first, 5);
-        assert_eq!(rows.last, 5);
-        assert_eq!(
-            rows.leading_space,
-            virtual_total_height(5, ROW_HEIGHT, ROW_SPACING)
-        );
-        assert_eq!(rows.trailing_space, 0.0);
     }
 }

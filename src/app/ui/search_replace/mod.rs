@@ -237,12 +237,6 @@ fn dispatch_search_actions(
         dispatch_requested_command(app, target_focus, requested, command);
     }
 
-    if let Some(match_index) = actions.focused_file_match_index {
-        crate::app::commands::handle_command(
-            app,
-            AppCommand::Search(SearchCommand::FocusSearchResultFile { match_index }),
-        );
-    }
     if let Some(match_index) = actions.selected_match_index {
         crate::app::commands::handle_command(
             app,

@@ -1,124 +1,134 @@
 use super::*;
 use crate::app::{
     app_state::test_support::test_app,
-    fonts::{EditorFontPreset, EditorFontSelection, apply_editor_fonts},
+    commands::{AppCommand, SearchCommand},
+    domain::{BufferState, WorkspaceTab},
 };
 use egui_kittest::{Harness, kittest::Queryable};
+use std::time::{Duration, Instant};
 
-struct State {
-    app: ScratchpadApp,
-    groups: Vec<SearchResultGroup>,
-    cull: bool,
-    offset: f32,
-    height: f32,
-    rendered: usize,
-    focused: Option<usize>,
+fn group(first_match_index: usize, total_match_count: usize) -> SearchResultGroup {
+    SearchResultGroup {
+        tab_index: 0,
+        buffer_id: first_match_index as u64 + 1,
+        buffer_label: format!("file-{first_match_index}"),
+        tab_label: "Tab".to_owned(),
+        first_match_index,
+        total_match_count,
+        active: false,
+    }
 }
 
-fn harness(cull: bool, offset: f32) -> (tempfile::TempDir, Harness<'static, State>) {
-    let root = tempfile::tempdir().unwrap();
-    let state = State {
-        app: test_app(root.path()),
-        cull,
-        offset,
-        height: 0.0,
-        rendered: 0,
-        focused: None,
-        groups: (0..200)
-            .map(|index| SearchResultGroup {
-                tab_index: index,
-                buffer_id: index as u64 + 1,
-                buffer_label: if index == 50 {
-                    "長い名前λ".repeat(100)
-                } else {
-                    format!("file-{index}")
-                },
-                tab_label: format!("file-{index}"),
-                first_match_index: index * 3,
-                total_match_count: 3,
-                active: index == 0,
-            })
-            .collect(),
-    };
-    let harness = Harness::builder()
-        .with_size(egui::vec2(620.0, 360.0))
+#[test]
+fn rows_map_back_to_their_file() {
+    let groups = [group(0, 3), group(3, 1), group(4, 2)];
+    assert_eq!(row_count(&groups), 6);
+    assert_eq!(row_count(&[]), 0);
+    assert_eq!(group_for(&groups, 0).unwrap().first_match_index, 0);
+    assert_eq!(group_for(&groups, 2).unwrap().first_match_index, 0);
+    assert_eq!(group_for(&groups, 3).unwrap().first_match_index, 3);
+    assert_eq!(group_for(&groups, 5).unwrap().first_match_index, 4);
+    assert!(group_for(&groups, 6).is_none());
+}
+
+#[test]
+fn hit_span_finds_the_match_in_a_trimmed_preview() {
+    // "    let needle = needle;" trimmed; the second needle starts at column 18.
+    let preview = "let needle = needle;";
+    assert_eq!(hit_span(preview, "needle", 18), Some((13, 19)));
+    assert_eq!(hit_span(preview, "needle", 9), Some((4, 10)));
+    assert_eq!(hit_span("λ needle", "needle", 3), Some((3, 9)));
+    assert_eq!(hit_span(preview, "", 1), None);
+    assert_eq!(hit_span(preview, "a\nb", 1), None);
+    assert_eq!(hit_span(preview, "absent", 1), None);
+}
+
+fn searched_app(root: &std::path::Path, lines: usize) -> ScratchpadApp {
+    let mut app = test_app(root);
+    let text = (0..lines)
+        .map(|i| format!("line {i} has a needle"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    app.tab_manager.tabs.as_mut_slice()[0] =
+        WorkspaceTab::new(BufferState::new("needles.txt".into(), text, None));
+    for command in [
+        SearchCommand::Open,
+        SearchCommand::SetSearchQuery {
+            query: "needle".into(),
+        },
+    ] {
+        crate::app::commands::handle_command(&mut app, AppCommand::Search(command));
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.state.search_state.runtime.searching || app.state.search_state.runtime.dirty {
+        assert!(Instant::now() < deadline, "search did not settle");
+        app.poll_search();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app
+}
+
+fn list_harness(app: ScratchpadApp) -> Harness<'static, ScratchpadApp> {
+    Harness::builder()
+        .with_size(egui::vec2(480.0, 400.0))
         .with_context_setup(|ctx| {
-            apply_editor_fonts(
+            crate::app::fonts::apply_editor_fonts(
                 ctx,
-                &EditorFontSelection::scratchpad(EditorFontPreset::Standard),
+                &crate::app::fonts::EditorFontSelection::scratchpad(
+                    crate::app::fonts::EditorFontPreset::Standard,
+                ),
                 4.0,
             )
             .unwrap();
         })
         .build_ui_state(
-            |ui, state: &mut State| {
+            |ui, app| {
+                let state = SearchStripState::from_app(app);
                 let mut actions = SearchStripActions::default();
-                let mut height = None;
-                let mut rendered = 0;
-                let output = egui::ScrollArea::vertical()
-                    .max_height(240.0)
-                    .vertical_scroll_offset(state.offset)
-                    .show(ui, |ui| {
-                        for (index, group) in state.groups.iter().enumerate() {
-                            let (measured, painted) = show_result_group(
-                                ui,
-                                &mut state.app,
-                                index,
-                                group,
-                                None,
-                                &mut actions,
-                                if state.cull { height } else { None },
-                            );
-                            height = measured.or(height);
-                            rendered += usize::from(painted);
-                            if index + 1 < state.groups.len() {
-                                ui.add_space(SEARCH_RESULT_FILE_SPACING);
-                            }
-                        }
-                    });
-                state.height = output.content_size.y;
-                state.rendered = rendered;
-                if actions.focused_file_match_index.is_some() {
-                    state.focused = actions.focused_file_match_index;
+                show_search_results(ui, app, &state, &mut actions);
+                if let Some(index) = actions.selected_match_index {
+                    crate::app::commands::handle_command(
+                        app,
+                        AppCommand::Search(SearchCommand::ActivateSearchMatch {
+                            match_index: index,
+                        }),
+                    );
                 }
             },
-            state,
-        );
-    (root, harness)
+            app,
+        )
 }
 
 #[test]
-fn culling_preserves_scroll_extent_with_unicode_labels_and_expanded_groups() {
-    for offset in [0.0, 3000.0, 12000.0] {
-        let (_root, mut culled) = harness(true, offset);
-        let (_reference_root, mut reference) = harness(false, offset);
-        for h in [&mut culled, &mut reference] {
-            let expanded_id = search_result_group_expanded_id(&h.state().groups[20]);
-            h.ctx
-                .data_mut(|data| data.insert_persisted(expanded_id, true));
-            h.run_steps(3);
-        }
-        assert!(
-            (culled.state().height - reference.state().height).abs() < 1.0,
-            "scroll extent differs at {offset}: {} vs {}",
-            culled.state().height,
-            reference.state().height
-        );
-        assert!(
-            culled.state().rendered < 20,
-            "rendered {} groups",
-            culled.state().rendered
-        );
-        assert_eq!(reference.state().rendered, 200);
-    }
-}
-
-#[test]
-fn visible_group_remains_clickable_after_culling() {
-    let (_root, mut h) = harness(true, 0.0);
-    h.run_steps(3);
-    h.get_by_role_and_label(egui::Role::Button, "file-1")
+fn only_visible_rows_are_painted_and_rows_activate_matches() {
+    let root = tempfile::tempdir().unwrap();
+    let mut harness = list_harness(searched_app(root.path(), 500));
+    harness.run_steps(3);
+    let rows = harness.query_all_by_role(egui::Role::ListBoxOption).count();
+    assert!((1..30).contains(&rows), "painted {rows} of 500 rows");
+    harness
+        .get_by_label("Line 3 · line 2 has a needle · needles.txt")
         .click();
-    h.run_steps(3);
-    assert_eq!(h.state().focused, Some(3));
+    harness.run_steps(3);
+    assert_eq!(harness.state().search_active_match_index(), Some(2));
+}
+
+#[test]
+fn shift_clicking_a_dot_toggles_every_match_in_the_file() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = searched_app(root.path(), 6);
+    crate::app::app_state::search_state::api::set_search_replace_open(&mut app, true);
+    let mut harness = list_harness(app);
+    harness.run_steps(3);
+    harness.get_by_label("Include match 2").click();
+    harness.run_steps(2);
+    assert_eq!(
+        harness.state().state.search_state.replace.excluded,
+        [1].into_iter().collect()
+    );
+    harness
+        .get_by_label("Include match 4")
+        .click_modifiers(egui::Modifiers::SHIFT);
+    harness.run_steps(2);
+    assert_eq!(harness.state().state.search_state.replace.excluded.len(), 6);
 }

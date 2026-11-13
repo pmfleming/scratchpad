@@ -1,22 +1,5 @@
 use super::state::SearchStripState;
-use crate::app::app_state::{SearchResultEntry, SearchResultGroup};
-
-pub(super) type SearchResultGroupKey = (usize, u64, usize);
-
-pub(super) fn active_match_local_row(
-    group: &SearchResultGroup,
-    active_match_index: Option<usize>,
-) -> Option<usize> {
-    let active_match_index = active_match_index?;
-    let group_range = group.first_match_index..group.first_match_index + group.total_match_count;
-    group_range
-        .contains(&active_match_index)
-        .then(|| active_match_index - group.first_match_index)
-}
-
-pub(super) fn search_result_group_key(group: &SearchResultGroup) -> SearchResultGroupKey {
-    (group.tab_index, group.buffer_id, group.first_match_index)
-}
+use crate::app::app_state::SearchResultEntry;
 
 pub(super) fn match_count_label(match_count: usize) -> String {
     if match_count == 1 {
@@ -74,23 +57,8 @@ fn empty_message_from_parts(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        active_match_local_row, empty_message_from_parts, match_count_label, match_preview,
-        search_result_group_key,
-    };
-    use crate::app::app_state::{SearchResultEntry, SearchResultGroup};
-
-    fn group(first_match_index: usize, total_match_count: usize) -> SearchResultGroup {
-        SearchResultGroup {
-            tab_index: 2,
-            buffer_id: 7,
-            buffer_label: "notes.txt".to_owned(),
-            tab_label: "Tab".to_owned(),
-            first_match_index,
-            total_match_count,
-            active: false,
-        }
-    }
+    use super::{empty_message_from_parts, match_count_label, match_preview};
+    use crate::app::app_state::SearchResultEntry;
 
     fn entry(preview: &str) -> SearchResultEntry {
         SearchResultEntry {
@@ -102,22 +70,6 @@ mod tests {
             preview: preview.to_owned(),
             active: false,
         }
-    }
-
-    #[test]
-    fn active_match_local_row_requires_match_inside_group() {
-        let group = group(10, 4);
-
-        assert_eq!(active_match_local_row(&group, Some(10)), Some(0));
-        assert_eq!(active_match_local_row(&group, Some(13)), Some(3));
-        assert_eq!(active_match_local_row(&group, Some(9)), None);
-        assert_eq!(active_match_local_row(&group, Some(14)), None);
-        assert_eq!(active_match_local_row(&group, None), None);
-    }
-
-    #[test]
-    fn search_result_group_key_uses_stable_identity_fields() {
-        assert_eq!(search_result_group_key(&group(10, 4)), (2, 7, 10));
     }
 
     #[test]
