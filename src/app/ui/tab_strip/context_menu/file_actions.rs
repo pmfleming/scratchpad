@@ -1,8 +1,8 @@
 use super::activate_slot;
 use super::menu_ui::{
-    OPEN_DISPOSITION_BUTTON_SIZE, OPEN_FILE_SUBMENU_WIDTH, SUBMENU_WIDTH,
-    WIDTH as TAB_CONTEXT_MENU_WIDTH, menu_button, open_disposition_button,
-    primary_menu_button_enabled, submenu_button, submenu_button_sized,
+    ICON_CHOICE_BUTTON_SIZE, OPEN_FILE_SUBMENU_WIDTH, SUBMENU_WIDTH,
+    WIDTH as TAB_CONTEXT_MENU_WIDTH, icon_choice_button, menu_button, primary_menu_button_enabled,
+    submenu_button, submenu_button_sized,
 };
 use crate::app::app_state::{ScratchpadApp, workspace::accessors as workspace_accessors};
 use crate::app::commands::{AppCommand, FileCommand, WorkspaceCommand};
@@ -115,12 +115,12 @@ fn render_open_file_actions(
 fn render_open_file_disposition_buttons(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let current = app.state.app_settings.file_open_disposition();
     let spacing = 6.0;
-    let group_width = OPEN_DISPOSITION_BUTTON_SIZE.x * 2.0 + spacing;
+    let group_width = ICON_CHOICE_BUTTON_SIZE.x * 2.0 + spacing;
     let leading_space = (OPEN_FILE_SUBMENU_WIDTH - group_width).max(0.0) * 0.5;
     ui.horizontal(|ui| {
         ui.add_space(leading_space);
         ui.spacing_mut().item_spacing.x = spacing;
-        if open_disposition_button(
+        if icon_choice_button(
             ui,
             "tab_context.open_file.new_tab",
             FILE_PLUS,
@@ -132,7 +132,7 @@ fn render_open_file_disposition_buttons(ui: &mut egui::Ui, app: &mut ScratchpadA
                 FileOpenDisposition::NewTab,
             );
         }
-        if open_disposition_button(
+        if icon_choice_button(
             ui,
             "tab_context.open_file.current_tab",
             ARROW_SQUARE_IN,

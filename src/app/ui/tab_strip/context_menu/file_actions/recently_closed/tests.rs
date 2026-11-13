@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    ClosedTabInfo, DiskStatus, FILE, FILE_X, Path, PathBuf, RecentlyClosedFile, ReopenList,
+    ReopenTarget, WARNING_CIRCLE, io, merged_entries, recovery,
+};
 
 fn file(path: &Path, at: Option<i64>) -> RecentlyClosedFile {
     RecentlyClosedFile {
@@ -52,6 +55,21 @@ fn merge_sorts_sources_together_deduplicates_paths_and_keeps_archive_versions() 
     assert_eq!(entries[0].disk_icon(), Some(FILE));
     assert!(!entries[2].unsaved);
     assert_eq!(entries[0].paths[0].1, DiskStatus::OnDisk);
+    assert!(entries[0].enabled(true));
+    assert!(!entries[0].enabled(false));
+    let list = ReopenList {
+        entries,
+        archive_error: None,
+    };
+    assert_eq!(
+        list.labels(),
+        [
+            format!("note.txt · {}", recovery::timestamp(30)),
+            "recent.txt".to_owned(),
+            format!("note.txt · {}", recovery::timestamp(10)),
+            "legacy.txt".to_owned(),
+        ]
+    );
 }
 
 #[test]

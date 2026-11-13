@@ -6,8 +6,8 @@ use eframe::egui;
 use egui_phosphor::regular::{PUSH_PIN, TABS};
 
 use super::menu_ui::{
-    CARET_WIDTH, ORDER_DIRECTION_BUTTON_SIZE, ORDER_SUBMENU_WIDTH, ROW_HEIGHT, SUBMENU_WIDTH,
-    WIDTH, menu_button, order_direction_button, primary_menu_button, selectable_menu_button,
+    CARET_WIDTH, ICON_CHOICE_BUTTON_SIZE, ORDER_SUBMENU_WIDTH, ROW_HEIGHT, SUBMENU_WIDTH, WIDTH,
+    menu_button, order_direction_button, primary_menu_button, selectable_menu_button,
     submenu_button, submenu_button_sized, tab_list_position_icon, tab_order_mode_label,
 };
 
@@ -99,7 +99,7 @@ fn render_tab_order_direction_controls(ui: &mut egui::Ui, app: &mut ScratchpadAp
     ui.horizontal(|ui| {
         let spacing = 4.0;
         ui.spacing_mut().item_spacing.x = spacing;
-        let icons_width = ORDER_DIRECTION_BUTTON_SIZE.x * 2.0 + spacing;
+        let icons_width = ICON_CHOICE_BUTTON_SIZE.x * 2.0 + spacing;
         ui.add_space(((ui.available_width() - icons_width) * 0.5).max(0.0));
         for direction in [TabOrderDirection::Ascending, TabOrderDirection::Descending] {
             let selected = app.state.app_settings.tab_order_direction() == direction;
