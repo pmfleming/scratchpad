@@ -1,8 +1,21 @@
 //! Best-effort extraction trusts only checksummed metadata and text. Gaps stay explicit.
+use super::rows::byte_span;
 use super::{Database, error, invalid};
 use crate::app::domain::buffer::{ByteSpan, PieceBuffer};
 use crate::app::services::session_store::recovery::RECOVERY_LIMIT;
 use std::{collections::BTreeMap, io};
+
+/// Stored piece maps are split into parts of this many bytes.
+const PIECE_PART: usize = 65536;
+/// The map starts with a version header (`1`, little-endian) padded to this size.
+const MAP_HEADER: usize = 24;
+/// Each piece is seven little-endian u64 fields: buffer, start_byte, byte_len,
+/// char_len, newline_count, is_ascii, ends_with_lf.
+const PIECE_RECORD: usize = 56;
+const TRUNCATED: &str = "remaining text omitted from this 32 MiB recovery copy";
+
+/// Recovered pieces: verified text, or `None` for a missing or damaged region.
+type Fragments = Vec<Option<String>>;
 
 pub(super) struct RecoveredText {
     pub text: String,
@@ -12,16 +25,21 @@ pub(super) struct RecoveredText {
 }
 
 impl RecoveredText {
-    fn fragments(&self, span: ByteSpan) -> Option<Vec<Option<String>>> {
+    /// The verified segments of the span's buffer and the span's byte range in it.
+    fn locate(&self, span: ByteSpan) -> Option<(&[(usize, String)], usize, usize)> {
         let start = usize::try_from(span.start_byte).ok()?;
         let len = usize::try_from(span.byte_len).ok()?;
         if len > RECOVERY_LIMIT {
             return None;
         }
-        let end = start.checked_add(len)?;
+        let segments = &self.segments[usize::from(span.buffer == PieceBuffer::Add)];
+        Some((segments, start, start.checked_add(len)?))
+    }
+    fn fragments(&self, span: ByteSpan) -> Option<Fragments> {
+        let (segments, start, end) = self.locate(span)?;
         let mut at = start;
         let mut fragments = Vec::new();
-        for (base, body) in &self.segments[usize::from(span.buffer == PieceBuffer::Add)] {
+        for (base, body) in segments {
             let block_end = base.checked_add(body.len())?;
             if block_end <= at || *base >= end {
                 continue;
@@ -43,16 +61,10 @@ impl RecoveredText {
         Some(fragments)
     }
     pub fn span(&self, span: ByteSpan) -> Option<String> {
-        let side = usize::from(span.buffer == PieceBuffer::Add);
-        let start = usize::try_from(span.start_byte).ok()?;
-        let len = usize::try_from(span.byte_len).ok()?;
-        if len > RECOVERY_LIMIT {
-            return None;
-        }
-        let end = start.checked_add(len)?;
+        let (segments, start, end) = self.locate(span)?;
         let mut at = start;
         let mut text = String::new();
-        for (base, body) in &self.segments[side] {
+        for (base, body) in segments {
             if at == end {
                 break;
             }
@@ -65,19 +77,40 @@ impl RecoveredText {
         }
         (at == end && text.chars().count() as u64 == span.char_len).then_some(text)
     }
+    /// Text for one piece record, or `None` when the record itself is unusable.
+    fn piece_fragments(&self, record: &[u8]) -> Option<Fragments> {
+        let f = record
+            .chunks_exact(8)
+            .map(|b| b.try_into().ok().map(u64::from_le_bytes))
+            .collect::<Option<Vec<_>>>()?;
+        if f[0] > 1 || f[2] == 0 || f[3] == 0 || f[5] > 1 || f[6] > 1 {
+            return None;
+        }
+        let span = byte_span([f[0], f[1], f[2], f[3]]);
+        let Some(text) = self.span(span) else {
+            let fragments = self.fragments(span)?;
+            // Fully present bytes with wrong character metrics are not a missing
+            // region. Do not present them as verified text.
+            return fragments.iter().any(Option::is_none).then_some(fragments);
+        };
+        (text.bytes().filter(|b| *b == b'\n').count() as u64 == f[4]
+            && u64::from(text.is_ascii()) == f[5]
+            && u64::from(text.ends_with('\n')) == f[6])
+            .then_some(vec![Some(text)])
+    }
     fn reconstruct_pieces(&mut self, parts: &BTreeMap<usize, Vec<u8>>, end: usize) {
         let bytes_at = |start: usize, len: usize| -> Option<Vec<u8>> {
             (start..start.checked_add(len)?)
-                .map(|at| parts.get(&(at / 65536 * 65536))?.get(at % 65536).copied())
+                .map(|at| {
+                    let part = parts.get(&(at / PIECE_PART * PIECE_PART))?;
+                    part.get(at % PIECE_PART).copied()
+                })
                 .collect()
         };
-        let header = bytes_at(0, 24);
-        if header.as_ref().is_none_or(|h| {
-            h.get(..8)
-                .and_then(|b| b.try_into().ok())
-                .map(u64::from_le_bytes)
-                != Some(1)
-        }) {
+        let version = bytes_at(0, MAP_HEADER)
+            .and_then(|header| Some(u64::from_le_bytes(header.get(..8)?.try_into().ok()?)));
+        // A map shorter than its header never has one, so this also covers a missing map.
+        if version != Some(1) {
             self.gap("the text map header is missing or damaged; text order cannot be established");
             return;
         }
@@ -87,63 +120,44 @@ impl RecoveredText {
             return;
         }
         let mut unknown = false;
-        'pieces: for at in (24..end).step_by(56) {
+        for at in (MAP_HEADER..end).step_by(PIECE_RECORD) {
             if self.text.len() >= RECOVERY_LIMIT {
-                self.gap("remaining text omitted from this 32 MiB recovery copy");
-                self.truncated = true;
-                break;
+                self.truncate();
+                return;
             }
-            let text = bytes_at(at, 56).and_then(|bytes| {
-                let f = bytes
-                    .chunks_exact(8)
-                    .map(|b| b.try_into().ok().map(u64::from_le_bytes))
-                    .collect::<Option<Vec<_>>>()?;
-                if f[0] > 1 || f[2] == 0 || f[3] == 0 || f[5] > 1 || f[6] > 1 {
-                    return None;
-                }
-                let span = ByteSpan {
-                    buffer: if f[0] == 0 {
-                        PieceBuffer::Original
-                    } else {
-                        PieceBuffer::Add
-                    },
-                    start_byte: f[1],
-                    byte_len: f[2],
-                    char_len: f[3],
-                };
-                let Some(text) = self.span(span) else {
-                    let fragments = self.fragments(span)?;
-                    // Fully present bytes with wrong character metrics are not a missing
-                    // region. Do not present them as verified text.
-                    return fragments.iter().any(Option::is_none).then_some(fragments);
-                };
-                (text.bytes().filter(|b| *b == b'\n').count() as u64 == f[4]
-                    && u64::from(text.is_ascii()) == f[5]
-                    && u64::from(text.ends_with('\n')) == f[6])
-                    .then_some(vec![Some(text)])
-            });
-            for text in text.unwrap_or_else(|| vec![None]) {
-                match text {
-                    Some(text) if self.text.len().saturating_add(text.len()) <= RECOVERY_LIMIT => {
-                        self.text.push_str(&text);
-                        unknown = false;
-                    }
-                    Some(_) => {
-                        self.gap("remaining text omitted from this 32 MiB recovery copy");
-                        self.truncated = true;
-                        break 'pieces;
-                    }
-                    None if !unknown => {
-                        self.gap("text or its position is missing or damaged");
-                        unknown = true;
-                    }
-                    None => {}
-                }
+            let fragments = bytes_at(at, PIECE_RECORD)
+                .and_then(|record| self.piece_fragments(&record))
+                .unwrap_or_else(|| vec![None]);
+            if !self.append(fragments, &mut unknown) {
+                return;
             }
         }
-        if end < 24 {
-            self.gap("text map missing");
+    }
+    /// Appends verified text and marks each run of unknown regions once.
+    /// Returns false when the recovery limit truncated the copy.
+    fn append(&mut self, fragments: Fragments, unknown: &mut bool) -> bool {
+        for text in fragments {
+            match text {
+                Some(text) if self.text.len().saturating_add(text.len()) <= RECOVERY_LIMIT => {
+                    self.text.push_str(&text);
+                    *unknown = false;
+                }
+                Some(_) => {
+                    self.truncate();
+                    return false;
+                }
+                None if !*unknown => {
+                    self.gap("text or its position is missing or damaged");
+                    *unknown = true;
+                }
+                None => {}
+            }
         }
+        true
+    }
+    fn truncate(&mut self) {
+        self.gap(TRUNCATED);
+        self.truncated = true;
     }
 
     fn gap(&mut self, message: &str) {
@@ -252,10 +266,10 @@ impl Database {
         for (part, body, digest) in rows {
             let start = usize::try_from(part)
                 .ok()
-                .and_then(|p| p.checked_mul(65536))
+                .and_then(|p| p.checked_mul(PIECE_PART))
                 .ok_or_else(|| invalid("invalid piece part"))?;
             end = end.max(start.saturating_add(body.len()));
-            if body.len() <= 65536 && blake3::hash(&body).as_bytes().as_slice() == digest {
+            if body.len() <= PIECE_PART && blake3::hash(&body).as_bytes().as_slice() == digest {
                 parts.insert(start, body);
             }
         }
