@@ -179,29 +179,34 @@ fn for_each_loaded(
         .min(total);
     let chunk_size = total.div_ceil(worker_count);
     let mut indexed = requests.into_iter().enumerate();
+    let chunks = std::iter::from_fn(|| {
+        let chunk = indexed.by_ref().take(chunk_size).collect::<Vec<_>>();
+        (!chunk.is_empty()).then_some(chunk)
+    });
     let (load_tx, load_rx) = mpsc::channel::<(usize, LoadedPathResult)>();
 
     thread::scope(|scope| {
-        loop {
-            let chunk = indexed.by_ref().take(chunk_size).collect::<Vec<_>>();
-            if chunk.is_empty() {
-                break;
-            }
+        for chunk in chunks {
             let load_tx = load_tx.clone();
-            // Each worker stops early once the consumer has gone away.
-            scope.spawn(move || {
-                for (index, request) in chunk {
-                    if load_tx.send((index, load_one(request))).is_err() {
-                        return;
-                    }
-                }
-            });
+            scope.spawn(move || load_chunk(chunk, &load_tx));
         }
         drop(load_tx);
         for (index, result) in load_rx {
             consume(index, result);
         }
     });
+}
+
+/// Loads `chunk` in order, stopping early once the consumer has gone away.
+fn load_chunk(
+    chunk: Vec<(usize, PathLoadRequest)>,
+    load_tx: &mpsc::Sender<(usize, LoadedPathResult)>,
+) {
+    for (index, request) in chunk {
+        if load_tx.send((index, load_one(request))).is_err() {
+            return;
+        }
+    }
 }
 
 /// Stream individual `PathsLoaded` messages as each path finishes loading,
