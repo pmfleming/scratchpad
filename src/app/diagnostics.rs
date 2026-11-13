@@ -156,26 +156,15 @@ impl DiagnosticsState {
             .with_source(format!("log::{level}:{target}"))
             .with_frame(self.frame);
 
-        if diagnostic.kind == AppDiagnosticKind::EguiWarning
-            && message.starts_with("Widget rect ")
-            && message.contains("changed id between passes")
-        {
+        if diagnostic.kind == AppDiagnosticKind::EguiWarning && is_changed_id_warning(&message) {
             let prev_sites =
                 self.resolve_sites(extract_hexes(&message, "prev ids: [", "]"), &self.prev_pass);
-            if !prev_sites.is_empty() {
-                diagnostic
-                    .details
-                    .insert("prev_site".to_owned(), prev_sites.join(" | "));
-            }
             let new_sites = self.resolve_sites(
                 extract_hexes(&message, "new ids: [", "]"),
                 &self.current_pass,
             );
-            if !new_sites.is_empty() {
-                diagnostic
-                    .details
-                    .insert("new_site".to_owned(), new_sites.join(" | "));
-            }
+            insert_sites_detail(&mut diagnostic, "prev_site", &prev_sites);
+            insert_sites_detail(&mut diagnostic, "new_site", &new_sites);
 
             let fingerprint = widget_rect_changed_fingerprint(&message, &prev_sites, &new_sites);
             if !self.mark_conflict_reported(fingerprint) {
@@ -249,6 +238,16 @@ impl DiagnosticsState {
             }
         }
         true
+    }
+}
+
+fn is_changed_id_warning(message: &str) -> bool {
+    message.starts_with("Widget rect ") && message.contains("changed id between passes")
+}
+
+fn insert_sites_detail(diagnostic: &mut AppDiagnostic, key: &str, sites: &[String]) {
+    if !sites.is_empty() {
+        diagnostic.details.insert(key.to_owned(), sites.join(" | "));
     }
 }
 
