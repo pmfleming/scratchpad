@@ -1,7 +1,8 @@
 //! Explicit fresh start with private backup readers and atomic live-reference rebinding.
 use super::{DatabaseWorker, create_private_directory, error, private_file};
+use crate::app::services::chunk_store::{ChunkStoreHandle, Rebind};
 use crate::app::services::session_store::SessionPersistRequest;
-use std::fs;
+use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -42,41 +43,28 @@ pub(in crate::app::services::session_store) fn start_new_session(
     }
     let old = worker.map(DatabaseWorker::chunk_store);
     let previous_path = old.as_ref().and_then(|store| store.epoch().path());
-    let ownership = if let Some(worker) = worker {
-        match worker.close_for_replacement() {
-            Ok(file) => file,
-            Err(cause) => {
-                if !worker.writes_blocked() {
-                    return Err(cause);
-                }
-                let file = private_file(&root.join("session.db.lock"))?;
-                file.try_lock().map_err(error)?;
-                if let Some(old) = &old {
-                    old.close_readers();
-                }
-                file
-            }
+    let ownership = match worker {
+        Some(worker) => take_over(root, worker, old.as_ref())?,
+        None => {
+            create_private_directory(root)?;
+            lock_root(root)?
         }
-    } else {
-        create_private_directory(root)?;
-        let ownership = private_file(&root.join("session.db.lock"))?;
-        ownership.try_lock().map_err(error)?;
-        ownership
     };
+    let live_path = root.join("session.db");
     let backup = match backup_session_files(root, &std::env::temp_dir()) {
         Ok(backup) => backup,
         Err(cause) => {
             if let Some(old) = &old
                 && let Some(path) = &previous_path
             {
+                // Keep old readers working, from the retained backup if the live file moved.
                 let retained = cause
                     .get_ref()
-                    .and_then(|cause| cause.downcast_ref::<BackupRemovalError>());
-                let backup_path = retained.map(|failure| failure.backup.join("session.db"));
-                let path = if *path == root.join("session.db") {
-                    backup_path.as_ref().unwrap_or(path)
-                } else {
-                    path
+                    .and_then(|cause| cause.downcast_ref::<BackupRemovalError>())
+                    .map(|failure| failure.backup.join("session.db"));
+                let path = match &retained {
+                    Some(retained) if *path == live_path => retained,
+                    _ => path,
                 };
                 let _ = old.epoch().reopen(path);
             }
@@ -85,32 +73,65 @@ pub(in crate::app::services::session_store) fn start_new_session(
     };
     if let Some(old) = &old {
         let path = previous_path
-            .as_ref()
-            .filter(|path| **path != root.join("session.db"))
-            .cloned()
+            .filter(|path| *path != live_path)
             .unwrap_or_else(|| backup.join("session.db"));
         old.epoch().reopen(&path)?;
     }
-    let result = (|| {
-        let worker = DatabaseWorker::open_owned(root.to_owned(), ownership)?;
-        let mut copy = crate::app::services::chunk_store::Rebind::new(worker.chunk_store());
-        if let Some(old) = &old {
-            copy.copy_live(old)?;
+    open_replacement(root, ownership, old.as_ref(), request)
+        .map(|worker| (worker, backup.clone()))
+        .map_err(|cause| {
+            error(format!(
+                "Could not create the new session: {cause}. Previous session backup: {}. Temporary-file cleanup may delete this backup.",
+                backup.display()
+            ))
+        })
+}
+
+fn lock_root(root: &Path) -> io::Result<File> {
+    let ownership = private_file(&root.join("session.db.lock"))?;
+    ownership.try_lock().map_err(error)?;
+    Ok(ownership)
+}
+
+/// Takes the session lock from the running worker. A blocked worker that cannot
+/// hand it over cleanly is bypassed by locking the root directly.
+fn take_over(
+    root: &Path,
+    worker: &DatabaseWorker,
+    old: Option<&ChunkStoreHandle>,
+) -> io::Result<File> {
+    match worker.close_for_replacement() {
+        Ok(file) => Ok(file),
+        Err(cause) if !worker.writes_blocked() => Err(cause),
+        Err(_) => {
+            let file = lock_root(root)?;
+            if let Some(old) = old {
+                old.close_readers();
+            }
+            Ok(file)
         }
-        request.copy_to_store(&mut copy)?;
-        worker.call(move |db| {
-            let generation = request.generation;
-            futures_lite::future::block_on(db.persist(request, generation)).map(|_| ())
-        })?;
-        copy.publish()?;
-        Ok((worker, backup.clone()))
-    })();
-    result.map_err(|cause: io::Error| {
-        error(format!(
-            "Could not create the new session: {cause}. Previous session backup: {}. Temporary-file cleanup may delete this backup.",
-            backup.display()
-        ))
-    })
+    }
+}
+
+/// Opens the new database, rebinds live text into it and commits the request.
+fn open_replacement(
+    root: &Path,
+    ownership: File,
+    old: Option<&ChunkStoreHandle>,
+    mut request: SessionPersistRequest,
+) -> io::Result<DatabaseWorker> {
+    let worker = DatabaseWorker::open_owned(root.to_owned(), ownership)?;
+    let mut copy = Rebind::new(worker.chunk_store());
+    if let Some(old) = old {
+        copy.copy_live(old)?;
+    }
+    request.copy_to_store(&mut copy)?;
+    worker.call(move |db| {
+        let generation = request.generation;
+        futures_lite::future::block_on(db.persist(request, generation)).map(|_| ())
+    })?;
+    copy.publish()?;
+    Ok(worker)
 }
 
 fn backup_session_files(root: &Path, temporary_root: &Path) -> io::Result<PathBuf> {
