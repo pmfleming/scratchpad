@@ -1,10 +1,10 @@
 mod card;
 mod track;
-use super::{active_buffer, navigate, style};
+use super::{active_buffer, navigate};
 use crate::app::{
     app_state::{ScratchpadApp, workspace::accessors},
     domain::{BufferState, buffer::HistoryToken},
-    ui::{callout, widget_ids},
+    ui::dialogs::scrubber_chrome,
 };
 use eframe::egui;
 
@@ -49,39 +49,19 @@ pub(super) fn show(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let Some(id) = active_buffer(app) else {
         return;
     };
-    let screen = ctx.content_rect();
-    let width = (screen.width() - 24.0).clamp(160.0, 480.0);
     let mut target = None;
     let mut open_history = false;
-    let frame = style::window_frame(ctx, app.state.app_settings.editor_background_color());
-    widget_ids::area("history_scrubber_window")
-        .accessible_name("Scrubber")
-        .role(egui::Role::Dialog)
-        .order(egui::Order::Foreground)
-        .constrain(true)
-        .movable(true)
-        .default_size(egui::vec2(width, 104.0))
-        .default_pos(egui::pos2(
-            (screen.right() - width - 24.0).max(screen.left()),
-            (screen.bottom() - 150.0).max(screen.top()),
-        ))
-        .show(ctx, |ui| {
-            style::apply(ui);
-            let inner = frame.show(ui, |ui| {
-                ui.set_width((width - 24.0).max(1.0));
-                ui.set_min_width((width - 24.0).max(1.0));
-                ui.set_max_width((width - 24.0).max(1.0));
-                let Some(tab) = app.tab_manager.active_tab() else {
-                    return;
-                };
-                let buffer = tab.active_buffer();
-                open_history = card::header(ui, buffer);
-                target = transport(ui, buffer);
-                card::caption(ui, buffer);
-                ui.label(egui::RichText::new(KEY_HINTS).size(11.0).weak());
-            });
-            callout::mark_scroll_blocker_if_hovered(ctx, &inner.response);
-        });
+    let fill = app.state.app_settings.editor_background_color();
+    scrubber_chrome::show_card(ctx, fill, "history_scrubber_window", "Scrubber", |ui| {
+        let Some(tab) = app.tab_manager.active_tab() else {
+            return;
+        };
+        let buffer = tab.active_buffer();
+        open_history = card::header(ui, buffer);
+        target = transport(ui, buffer);
+        card::caption(ui, buffer);
+        ui.label(egui::RichText::new(KEY_HINTS).size(11.0).weak());
+    });
     if let Some(node) = target {
         apply_target(ctx, app, id, node);
     }
