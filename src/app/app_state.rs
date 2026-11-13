@@ -3,9 +3,7 @@ use crate::app::domain::{BufferId, SplitAxis, TabManager};
 use crate::app::fonts::EditorFontSelection;
 use crate::app::services::instance_broker::{BrokerInbox, LaunchRequest};
 use crate::app::services::session_store::SessionStore;
-use crate::app::services::settings_store::{
-    AppSettings, AppThemeMode, RecentlyClosedFile, SettingsStore,
-};
+use crate::app::services::settings_store::{AppSettings, RecentlyClosedFile, SettingsStore};
 use crate::app::shortcut_keymap::InvalidShortcutOverride;
 use crate::app::startup::StartupOptions;
 use eframe::egui;
@@ -136,7 +134,7 @@ pub(crate) struct WindowRuntimeState {
     pub(crate) current_title: Option<String>,
     pub(crate) overflow_popup_open: bool,
     pub(crate) applied_editor_font: Option<EditorFontSelection>,
-    pub(crate) applied_theme_mode: Option<AppThemeMode>,
+    pub(crate) applied_theme_preference: Option<egui::ThemePreference>,
 }
 
 // Stop adding new impl ScratchpadApp blocks except for top-level orchestration.

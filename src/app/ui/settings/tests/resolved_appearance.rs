@@ -6,6 +6,7 @@ fn custom_app(size: f32, light: bool) -> ScratchpadApp {
     editor.appearance_source = EditorAppearanceSource::App;
     editor.font_size = size;
     editor.editor_font = EditorFontPreset::Mono;
+    editor.theme_mode = AppThemeMode::Custom;
     editor.editor_text_color = if light { "#302347" } else { "#f4eacb" }.into();
     editor.editor_background_color = if light { "#f8f1dc" } else { "#211933" }.into();
     editor.editor_text_highlight_color = "#68aeee".into();

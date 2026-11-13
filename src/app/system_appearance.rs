@@ -146,7 +146,9 @@ fn system_font_family() -> Option<String> {
     FONT_FAMILY.get_or_init(detect_system_font_family).clone()
 }
 
-fn system_color_scheme() -> Option<SystemColorScheme> {
+/// The desktop's light/dark scheme: the bridge file, then what the window
+/// reports, then a one-time platform probe.
+pub(crate) fn system_color_scheme() -> Option<SystemColorScheme> {
     bridge_color_scheme()
         .or_else(observed_system_color_scheme)
         .or_else(detected_system_color_scheme)

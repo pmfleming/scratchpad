@@ -41,6 +41,8 @@ fn keyboard_focus_is_painted_for_on_and_off_switches_in_both_themes() {
                                 crate::app::services::settings_store::AppSettings::default();
                             settings.editor.appearance_source =
                                 crate::app::services::settings_store::EditorAppearanceSource::App;
+                            settings.editor.theme_mode =
+                                crate::app::services::settings_store::AppThemeMode::Custom;
                             settings.editor.editor_background_color =
                                 if dark { "#15181d" } else { "#ffffff" }.into();
                             SettingsUi::apply_appearance(ui, &settings);

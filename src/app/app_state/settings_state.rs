@@ -11,6 +11,7 @@ use crate::app::services::settings_store::{
     LIGHT_EDITOR_TEXT_COLOR, NewTabPlacement, StartupSessionBehavior, TabDisplayMode,
     TabListPosition, TabOrderDirection, TabOrderMode, WindowState, color_from_hex,
 };
+use crate::app::system_appearance::SystemColorScheme;
 use eframe::egui;
 use std::path::Path;
 use std::time::Duration;
@@ -104,22 +105,44 @@ impl AppSettings {
         self.editor.theme_mode
     }
 
+    /// The window's light/dark theme. It always agrees with the editor
+    /// background the active source and color mode resolve to.
     #[must_use]
     pub fn theme_preference(&self) -> egui::ThemePreference {
         if self.uses_system_editor_appearance() {
-            crate::app::system_appearance::theme_preference()
-        } else {
-            self.editor.theme_mode.theme_preference()
+            return crate::app::system_appearance::theme_preference();
         }
-    }
 
-    pub(crate) fn has_custom_editor_palette(&self) -> bool {
-        !uses_stock_editor_palette(self)
+        match self.editor.theme_mode {
+            AppThemeMode::Auto => match crate::app::system_appearance::system_color_scheme() {
+                Some(SystemColorScheme::Light) => egui::ThemePreference::Light,
+                Some(SystemColorScheme::Dark) => egui::ThemePreference::Dark,
+                None => egui::ThemePreference::System,
+            },
+            AppThemeMode::Light => egui::ThemePreference::Light,
+            AppThemeMode::Dark => egui::ThemePreference::Dark,
+            AppThemeMode::Custom => {
+                if self.editor_background_color().intensity() < 0.5 {
+                    egui::ThemePreference::Dark
+                } else {
+                    egui::ThemePreference::Light
+                }
+            }
+        }
     }
 
     #[must_use]
     pub fn uses_system_editor_appearance(&self) -> bool {
         self.editor_appearance_source() == EditorAppearanceSource::System
+    }
+
+    /// The stock text/background pair for a preset color mode; `None` for
+    /// `Custom`, whose colors are the stored ones.
+    fn stock_palette(&self) -> Option<(&'static str, &'static str)> {
+        stock_editor_palette(
+            self.editor.theme_mode,
+            crate::app::system_appearance::system_color_scheme(),
+        )
     }
 
     #[must_use]
@@ -128,10 +151,11 @@ impl AppSettings {
             return crate::app::system_appearance::editor_palette().text;
         }
 
-        color_from_hex(
-            &self.editor.editor_text_color,
-            color_from_hex(DEFAULT_EDITOR_TEXT_COLOR, egui::Color32::WHITE),
-        )
+        let fallback = color_from_hex(DEFAULT_EDITOR_TEXT_COLOR, egui::Color32::WHITE);
+        match self.stock_palette() {
+            Some((text, _)) => color_from_hex(text, fallback),
+            None => color_from_hex(&self.editor.editor_text_color, fallback),
+        }
     }
 
     #[must_use]
@@ -140,10 +164,11 @@ impl AppSettings {
             return crate::app::system_appearance::editor_palette().background;
         }
 
-        color_from_hex(
-            &self.editor.editor_background_color,
-            color_from_hex(DEFAULT_EDITOR_BACKGROUND_COLOR, egui::Color32::BLACK),
-        )
+        let fallback = color_from_hex(DEFAULT_EDITOR_BACKGROUND_COLOR, egui::Color32::BLACK);
+        match self.stock_palette() {
+            Some((_, background)) => color_from_hex(background, fallback),
+            None => color_from_hex(&self.editor.editor_background_color, fallback),
+        }
     }
 
     #[must_use]
@@ -152,13 +177,15 @@ impl AppSettings {
             return crate::app::system_appearance::editor_palette().highlight;
         }
 
-        color_from_hex(
-            &self.editor.editor_text_highlight_color,
-            color_from_hex(
-                DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR,
-                egui::Color32::from_rgb(255, 243, 109),
-            ),
-        )
+        let stock = color_from_hex(
+            DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR,
+            egui::Color32::from_rgb(255, 243, 109),
+        );
+        if self.editor.theme_mode != AppThemeMode::Custom {
+            return stock;
+        }
+
+        color_from_hex(&self.editor.editor_text_highlight_color, stock)
     }
 
     #[must_use]
@@ -169,7 +196,9 @@ impl AppSettings {
 
         let generated =
             crate::app::color_contrast::optimal_text_color(self.editor_text_highlight_color());
-        if uses_generated_highlight_text_color(&self.editor.editor_text_highlight_text_color) {
+        if self.editor.theme_mode != AppThemeMode::Custom
+            || uses_generated_highlight_text_color(&self.editor.editor_text_highlight_text_color)
+        {
             return generated;
         }
 
@@ -319,7 +348,7 @@ pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
     let mut settings = settings;
     let invalid_shortcuts =
         crate::app::shortcut_keymap::invalid_shortcut_overrides(&settings.shortcuts);
-    sync_stock_editor_palette_with_theme_mode(&mut settings);
+    normalize_theme_mode(&mut settings);
     settings.history.budget = settings.history.budget.sanitized();
     settings.history.failure_ram = settings.history.failure_ram.at_startup();
     settings
@@ -345,7 +374,7 @@ pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
     }
     app.state.app_settings = settings;
     app.state.window.applied_editor_font = None;
-    app.state.window.applied_theme_mode = None;
+    app.state.window.applied_theme_preference = None;
     app.apply_history_budget_to_open_buffers();
     if !invalid_shortcuts.is_empty() {
         app.state
@@ -374,69 +403,67 @@ pub(crate) fn persist_settings_now(app: &mut ScratchpadApp) -> std::io::Result<(
 
 pub fn apply_theme_to_context(app: &mut ScratchpadApp, ctx: &egui::Context) {
     crate::app::system_appearance::observe_system_theme(ctx.system_theme());
-    let theme_mode = app.state.app_settings.editor.theme_mode;
-    if app.state.window.applied_theme_mode == Some(theme_mode) {
+    // Resolved every frame: Auto follows the desktop and Custom follows the
+    // background, so neither the source nor the mode alone decides the theme.
+    let preference = app.state.app_settings.theme_preference();
+    if app.state.window.applied_theme_preference == Some(preference) {
         return;
     }
 
-    ctx.set_theme(app.state.app_settings.theme_preference());
+    ctx.set_theme(preference);
     ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
     ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
-    app.state.window.applied_theme_mode = Some(theme_mode);
+    app.state.window.applied_theme_preference = Some(preference);
 }
 
-pub(super) fn sync_stock_editor_palette_with_theme_mode(settings: &mut AppSettings) {
-    let Some((text_color, background_color)) = stock_editor_palette(settings.editor.theme_mode)
-    else {
-        return;
-    };
-
-    if !uses_stock_editor_palette(settings) {
-        return;
-    }
-
-    if settings.editor.editor_text_color == text_color
-        && settings.editor.editor_background_color == background_color
-    {
+/// Settings written before `custom` existed, or edited by hand, can pair a
+/// preset mode with colors the preset would not show. Keep those colors by
+/// treating them as a custom set.
+pub(super) fn normalize_theme_mode(settings: &mut AppSettings) {
+    let editor = &settings.editor;
+    if editor.theme_mode == AppThemeMode::Custom {
         return;
     }
 
-    text_color.clone_into(&mut settings.editor.editor_text_color);
-    background_color.clone_into(&mut settings.editor.editor_background_color);
+    let stock_pair = [
+        (DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR),
+        (LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR),
+    ]
+    .into_iter()
+    .any(|(text, background)| {
+        same_color(&editor.editor_text_color, text)
+            && same_color(&editor.editor_background_color, background)
+    });
+    let stock_highlight = same_color(
+        &editor.editor_text_highlight_color,
+        DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR,
+    );
+    if !(stock_pair && stock_highlight) {
+        settings.editor.theme_mode = AppThemeMode::Custom;
+    }
 }
 
-pub(super) fn uses_stock_editor_palette(settings: &AppSettings) -> bool {
-    matches!(
-        (
-            settings.editor.editor_text_color.as_str(),
-            settings.editor.editor_background_color.as_str()
-        ),
-        (DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR)
-            | (LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR)
-    )
+fn same_color(stored: &str, stock: &str) -> bool {
+    let stored = crate::app::color_contrast::parse_hex_color(stored.trim());
+    stored.is_some() && stored == crate::app::color_contrast::parse_hex_color(stock)
 }
 
+/// The stock text/background pair a preset mode shows. Auto picks by the
+/// desktop scheme, dark when it is unknown, matching egui's fallback theme.
 pub(super) fn stock_editor_palette(
     theme_mode: AppThemeMode,
+    scheme: Option<SystemColorScheme>,
 ) -> Option<(&'static str, &'static str)> {
+    let light = (LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR);
+    let dark = (DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR);
     match theme_mode {
-        AppThemeMode::System => None,
-        AppThemeMode::Light => Some((LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR)),
-        AppThemeMode::Dark => Some((DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR)),
-    }
-}
-
-pub(super) fn stock_editor_palette_for_selection(
-    theme_mode: AppThemeMode,
-    system_theme: Option<egui::Theme>,
-) -> (&'static str, &'static str) {
-    match theme_mode {
-        AppThemeMode::System => match system_theme.unwrap_or(egui::Theme::Dark) {
-            egui::Theme::Light => (LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR),
-            egui::Theme::Dark => (DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR),
-        },
-        AppThemeMode::Light => (LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR),
-        AppThemeMode::Dark => (DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR),
+        AppThemeMode::Auto => Some(match scheme {
+            Some(SystemColorScheme::Light) => light,
+            Some(SystemColorScheme::Dark) | None => dark,
+        }),
+        AppThemeMode::Light => Some(light),
+        AppThemeMode::Dark => Some(dark),
+        AppThemeMode::Custom => None,
     }
 }
 
@@ -461,11 +488,130 @@ fn sanitize_tab_list_auto_hide_delay_seconds(seconds: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::apply_settings;
+    use super::{apply_settings, normalize_theme_mode, stock_editor_palette};
     use crate::app::app_state::{ScratchpadApp, StatusDomain, StatusSeverity, StatusState};
     use crate::app::fonts::{EditorFontPreset, EditorFontSource};
-    use crate::app::services::settings_store::{AppSettings, EditorAppearanceSource};
+    use crate::app::services::settings_store::{
+        AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
+        EditorAppearanceSource, LIGHT_EDITOR_BACKGROUND_COLOR, LIGHT_EDITOR_TEXT_COLOR,
+        parse_toml_settings,
+    };
+    use crate::app::system_appearance::SystemColorScheme;
+    use eframe::egui;
     use std::collections::BTreeMap;
+
+    fn with_colors(
+        mode: AppThemeMode,
+        text: &str,
+        background: &str,
+        highlight: &str,
+    ) -> AppSettings {
+        let mut settings = AppSettings::default();
+        settings.editor.appearance_source = EditorAppearanceSource::App;
+        settings.editor.theme_mode = mode;
+        settings.editor.editor_text_color = text.to_owned();
+        settings.editor.editor_background_color = background.to_owned();
+        settings.editor.editor_text_highlight_color = highlight.to_owned();
+        settings
+    }
+
+    #[test]
+    fn legacy_system_color_mode_loads_as_auto() {
+        let settings = parse_toml_settings("[editor]\ntheme_mode = \"system\"\n").unwrap();
+        assert_eq!(settings.theme_mode(), AppThemeMode::Auto);
+        let settings = parse_toml_settings("[editor]\ntheme_mode = \"custom\"\n").unwrap();
+        assert_eq!(settings.theme_mode(), AppThemeMode::Custom);
+    }
+
+    #[test]
+    fn loading_keeps_non_stock_colors_as_a_custom_set() {
+        for (mode, text, background, highlight, expected) in [
+            // Hand-edited text under a preset.
+            (
+                AppThemeMode::Dark,
+                "#e4c7a2",
+                "#15181d",
+                "#fff36d",
+                AppThemeMode::Custom,
+            ),
+            // Only the highlight differs.
+            (
+                AppThemeMode::Auto,
+                "#ffffff",
+                "#15181d",
+                "#68aeee",
+                AppThemeMode::Custom,
+            ),
+            // Either stock pair is a preset, whatever the case of the hex.
+            (
+                AppThemeMode::Light,
+                "#FFFFFF",
+                "#15181D",
+                "#FFF36D",
+                AppThemeMode::Light,
+            ),
+            (
+                AppThemeMode::Auto,
+                "#000000",
+                "#ffffff",
+                "#fff36d",
+                AppThemeMode::Auto,
+            ),
+            (
+                AppThemeMode::Custom,
+                "#ffffff",
+                "#15181d",
+                "#fff36d",
+                AppThemeMode::Custom,
+            ),
+        ] {
+            let mut settings = with_colors(mode, text, background, highlight);
+            normalize_theme_mode(&mut settings);
+            assert_eq!(
+                settings.theme_mode(),
+                expected,
+                "{mode:?} {text} {highlight}"
+            );
+        }
+    }
+
+    #[test]
+    fn auto_follows_the_desktop_scheme_and_falls_back_to_dark() {
+        let light = Some((LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR));
+        let dark = Some((DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR));
+        let auto = |scheme| stock_editor_palette(AppThemeMode::Auto, scheme);
+        assert_eq!(auto(Some(SystemColorScheme::Light)), light);
+        assert_eq!(auto(Some(SystemColorScheme::Dark)), dark);
+        assert_eq!(auto(None), dark);
+        assert_eq!(stock_editor_palette(AppThemeMode::Custom, None), None);
+    }
+
+    #[test]
+    fn presets_ignore_stored_colors_and_custom_uses_them() {
+        let preset = with_colors(AppThemeMode::Dark, "#e4c7a2", "#f8f1dc", "#68aeee");
+        assert_eq!(preset.editor_text_color(), egui::Color32::WHITE);
+        assert_eq!(
+            preset.editor_text_highlight_color(),
+            egui::Color32::from_rgb(0xff, 0xf3, 0x6d)
+        );
+        let custom = with_colors(AppThemeMode::Custom, "#e4c7a2", "#f8f1dc", "#68aeee");
+        assert_eq!(
+            custom.editor_text_color(),
+            egui::Color32::from_rgb(0xe4, 0xc7, 0xa2)
+        );
+        assert_eq!(
+            custom.editor_text_highlight_color(),
+            egui::Color32::from_rgb(0x68, 0xae, 0xee)
+        );
+    }
+
+    #[test]
+    fn custom_window_theme_follows_the_background() {
+        let light = with_colors(AppThemeMode::Custom, "#302347", "#f8f1dc", "#68aeee");
+        assert_eq!(light.theme_preference(), egui::ThemePreference::Light);
+        let dark = with_colors(AppThemeMode::Custom, "#f4eacb", "#211933", "#68aeee");
+        assert_eq!(dark.theme_preference(), egui::ThemePreference::Dark);
+    }
 
     #[test]
     fn app_appearance_honors_os_font_selection() {
