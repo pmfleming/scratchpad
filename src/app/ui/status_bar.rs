@@ -42,33 +42,25 @@ pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::Panel::bottom("status").show(ui, |ui| {
         widget_ids::feature_scope(ui, "status_bar", |ui| {
             ui.horizontal(|ui| {
-                if crate::app::app_state::settings_state::showing_settings(app) {
-                    let mut actions = StatusBarActions::default();
-                    render_settings_status(
-                        ui,
-                        app,
-                        crate::app::app_state::settings_state::settings_path(app)
-                            .display()
-                            .to_string(),
-                        &mut actions,
-                    );
-                    apply_status_actions(app, actions);
-                    return;
-                }
-
                 let mut actions = StatusBarActions::default();
-
-                if let Some(details) = collect_active_status_details(app, ui.visuals().dark_mode) {
-                    render_active_status(ui, app, &details, &mut actions);
-                } else {
-                    show_status_history_button(ui, app, &mut actions);
-                    show_storage_health(ui, app, &mut actions);
-                }
-
+                render_status_contents(ui, app, &mut actions);
                 apply_status_actions(app, actions);
             });
         });
     });
+}
+
+/// Settings show their file path; editors show the active document's details.
+fn render_status_contents(ui: &mut egui::Ui, app: &ScratchpadApp, actions: &mut StatusBarActions) {
+    if crate::app::app_state::settings_state::showing_settings(app) {
+        let path = crate::app::app_state::settings_state::settings_path(app);
+        render_settings_status(ui, app, path.display().to_string(), actions);
+    } else if let Some(details) = collect_active_status_details(app, ui.visuals().dark_mode) {
+        render_active_status(ui, app, &details, actions);
+    } else {
+        show_status_history_button(ui, app, actions);
+        show_storage_health(ui, app, actions);
+    }
 }
 
 fn render_active_status(
@@ -342,7 +334,9 @@ fn show_control_char_toggle(
     actions: &mut StatusBarActions,
 ) {
     ui.separator();
-    let icon_font = if details.control_chars.icon == HIDDEN_CONTROL_CHAR_ICON {
+    let control_chars = &details.control_chars;
+    let interactive = control_chars.is_available || control_chars.icon == CONTROL_CHAR_ICON;
+    let icon_font = if control_chars.icon == HIDDEN_CONTROL_CHAR_ICON {
         egui_phosphor::font_id(STATUS_ICON_FONT_SIZE)
     } else {
         egui::FontId::proportional(STATUS_ICON_FONT_SIZE)
@@ -350,15 +344,13 @@ fn show_control_char_toggle(
     let button_response = fixed_status_icon_cell(
         ui,
         "status_control_chars",
-        details.control_chars.icon,
+        control_chars.icon,
         icon_font,
-        details.control_chars.icon_color,
+        control_chars.icon_color,
     );
     if button_response.hovered() {
-        let tooltip = if details.control_chars.is_available
-            || details.control_chars.icon == CONTROL_CHAR_ICON
-        {
-            details.control_chars.icon_tooltip
+        let tooltip = if interactive {
+            control_chars.icon_tooltip
         } else {
             "Control characters"
         };
@@ -372,9 +364,7 @@ fn show_control_char_toggle(
             tooltip
         ));
     }
-    if button_response.clicked()
-        && (details.control_chars.is_available || details.control_chars.icon == CONTROL_CHAR_ICON)
-    {
+    if interactive && button_response.clicked() {
         actions.toggle_control_chars = true;
     }
 }
