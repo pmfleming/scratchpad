@@ -39,20 +39,7 @@ pub struct TabManager {
 
 impl Default for TabManager {
     fn default() -> Self {
-        let mut manager = Self {
-            tabs: vec![WorkspaceTab::untitled()],
-            active_tab_index: 0,
-            pending_action: None,
-            session_dirty: false,
-            pending_scroll_to_active: true,
-            path_index_generation: 0,
-            inactive_cleanup_key: None,
-            buffer_tab_index: HashMap::new(),
-            path_tab_index: HashMap::new(),
-            cold_session_tabs: HashMap::new(),
-        };
-        manager.rebuild_buffer_tab_index();
-        manager
+        Self::with_tabs(vec![WorkspaceTab::untitled()], true)
     }
 }
 
@@ -64,12 +51,16 @@ impl TabManager {
 
     #[cfg(test)]
     pub(crate) fn for_test_tabs(tabs: Vec<WorkspaceTab>) -> Self {
+        Self::with_tabs(tabs, false)
+    }
+
+    fn with_tabs(tabs: Vec<WorkspaceTab>, pending_scroll_to_active: bool) -> Self {
         let mut manager = Self {
             tabs,
             active_tab_index: 0,
             pending_action: None,
             session_dirty: false,
-            pending_scroll_to_active: false,
+            pending_scroll_to_active,
             path_index_generation: 0,
             inactive_cleanup_key: None,
             buffer_tab_index: HashMap::new(),

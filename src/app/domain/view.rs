@@ -204,7 +204,6 @@ impl EditorViewState {
     /// explicit release here the piece tree's anchor registry would grow
     /// unbounded). The `display_row_offset` is preserved across the upgrade.
     pub fn upgrade_scroll_anchor_to_piece(&mut self, buffer: &mut crate::app::domain::BufferState) {
-        use crate::app::domain::AnchorBias;
         if matches!(self.scroll.anchor(), ScrollAnchor::Piece { .. }) {
             return;
         }
@@ -230,23 +229,7 @@ impl EditorViewState {
             return;
         };
         let char_offset = range.start as usize;
-        // Release the previous piece anchor (if any) before allocating a
-        // fresh one. See doc-comment above for why this is needed.
-        if let Some(previous) = self.anchors.last_piece_anchor.take() {
-            buffer
-                .document_mut()
-                .piece_tree_mut()
-                .release_anchor(previous);
-        }
-        let anchor_id = buffer
-            .document_mut()
-            .piece_tree_mut()
-            .create_anchor_with_owner(
-                char_offset,
-                AnchorBias::Left,
-                AnchorOwner::view_scroll(self.id),
-            );
-        self.anchors.last_piece_anchor = Some(anchor_id);
+        let anchor_id = self.replace_scroll_piece_anchor(buffer, char_offset);
         let frac = self.scroll.anchor().display_row_offset();
         self.scroll.replace_anchor(ScrollAnchor::Piece {
             anchor: anchor_id,
@@ -534,7 +517,6 @@ impl EditorViewState {
         buffer: &mut crate::app::domain::BufferState,
         offset: egui::Vec2,
     ) -> Option<ScrollAnchor> {
-        use crate::app::domain::AnchorBias;
         let (row_start, display_row_offset) = {
             let snapshot = self.latest_display_snapshot.as_ref()?;
             let metrics = self.scroll.metrics();
@@ -555,25 +537,31 @@ impl EditorViewState {
                 .unwrap_or_else(|| row.floor());
             (row_range.start as usize, (row - document_row).max(0.0))
         };
-        if let Some(previous) = self.anchors.last_piece_anchor.take() {
-            buffer
-                .document_mut()
-                .piece_tree_mut()
-                .release_anchor(previous);
-        }
-        let anchor_id = buffer
-            .document_mut()
-            .piece_tree_mut()
-            .create_anchor_with_owner(
-                row_start,
-                AnchorBias::Left,
-                AnchorOwner::view_scroll(self.id),
-            );
-        self.anchors.last_piece_anchor = Some(anchor_id);
+        let anchor_id = self.replace_scroll_piece_anchor(buffer, row_start);
         Some(ScrollAnchor::Piece {
             anchor: anchor_id,
             display_row_offset,
         })
+    }
+
+    /// Releases the previous scroll piece anchor before allocating a fresh one
+    /// at `char_offset`, so repeated scrolling never accumulates anchors.
+    fn replace_scroll_piece_anchor(
+        &mut self,
+        buffer: &mut crate::app::domain::BufferState,
+        char_offset: usize,
+    ) -> AnchorId {
+        let piece_tree = buffer.document_mut().piece_tree_mut();
+        if let Some(previous) = self.anchors.last_piece_anchor.take() {
+            piece_tree.release_anchor(previous);
+        }
+        let anchor_id = piece_tree.create_anchor_with_owner(
+            char_offset,
+            crate::app::domain::AnchorBias::Left,
+            AnchorOwner::view_scroll(self.id),
+        );
+        self.anchors.last_piece_anchor = Some(anchor_id);
+        anchor_id
     }
 
     fn set_horizontal_pixel_offset(&mut self, offset_x: f32) {
@@ -622,16 +610,7 @@ pub fn next_view_id() -> ViewId {
 }
 
 pub(crate) fn register_existing_view_id(id: ViewId) {
-    let next_id = id.saturating_add(1);
-    let mut current = NEXT_VIEW_ID.load(Ordering::Relaxed);
-
-    while current < next_id {
-        match NEXT_VIEW_ID.compare_exchange(current, next_id, Ordering::Relaxed, Ordering::Relaxed)
-        {
-            Ok(_) => break,
-            Err(observed) => current = observed,
-        }
-    }
+    NEXT_VIEW_ID.fetch_max(id.saturating_add(1), Ordering::Relaxed);
 }
 
 #[cfg(test)]
