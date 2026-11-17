@@ -2,7 +2,7 @@ use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::chrome::{TabButtonOptions, tab_button_with_actions, tab_label_font_id};
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::{
-    BUTTON_SIZE, TAB_HEIGHT, TAB_LIST_SCROLLBAR_GUTTER, action_bg, border, tab_active_bg,
+    BUTTON_SIZE, TAB_HEIGHT, TAB_LIST_SCROLLBAR_GUTTER, border, tab_active_bg,
     tab_list_scroll_style, text_primary,
 };
 use crate::app::ui::tab_drag;
@@ -110,8 +110,9 @@ fn overflow_button(ui: &mut egui::Ui) -> egui::Response {
                         .font(egui_phosphor::font_id(14.0))
                         .color(text_primary(ui)),
                 )
-                .fill(action_bg(ui))
-                .stroke(Stroke::new(1.0, border(ui))),
+                .frame_when_inactive(false)
+                .corner_radius(egui::CornerRadius::ZERO)
+                .stroke(Stroke::NONE),
             )
         },
     )
@@ -134,10 +135,19 @@ fn show_overflow_popup(
     filter_keys(ctx, &mut filter, &matching);
 
     let active_drag_sources = tab_drag::active_drag_sources_for_context(ctx);
-    let row_width =
-        crate::app::chrome::tab_button_width(request.app.state.app_settings.font_size())
-            .min((ctx.content_rect().width() - TAB_LIST_SCROLLBAR_GUTTER - 16.0).max(0.0));
-    let popup_width = row_width + TAB_LIST_SCROLLBAR_GUTTER;
+    let viewport = ctx.content_rect();
+    let frame = crate::app::ui::panel_style::window_frame(
+        ctx,
+        request.app.state.app_settings.editor_background_color(),
+    )
+    .inner_margin(egui::Margin::symmetric(0, 6));
+    // Keep the list's left edge by the tabs and use the space beyond the button.
+    let popup_width =
+        (crate::app::chrome::tab_button_width(request.app.state.app_settings.font_size())
+            + TAB_LIST_SCROLLBAR_GUTTER
+            + (viewport.right() - request.anchor.x).max(0.0))
+        .min((viewport.width() - frame.total_margin().sum().x).max(0.0));
+    let row_width = (popup_width - TAB_LIST_SCROLLBAR_GUTTER).max(0.0);
     let popup_max_height = overflow_popup_max_height(ctx, request.anchor, request.pivot);
     let visible_row_count = matching.len();
     let row_height =
@@ -147,15 +157,10 @@ fn show_overflow_popup(
     let area_response = widget_ids::area(request.overflow_popup_id)
         .order(egui::Order::Foreground)
         .constrain(true)
-        .fixed_pos(request.anchor)
+        .fixed_pos(egui::pos2(viewport.right(), request.anchor.y))
         .pivot(request.pivot)
         .show(ctx, |ui| {
-            crate::app::ui::panel_style::window_frame(
-                ctx,
-                request.app.state.app_settings.editor_background_color(),
-            )
-            .inner_margin(egui::Margin::symmetric(0, 6))
-            .show(ui, |ui| {
+            frame.show(ui, |ui| {
                 ui.set_width(popup_width);
                 ui.set_min_width(popup_width);
                 crate::app::ui::panel_style::apply(ui);
@@ -172,6 +177,10 @@ fn show_overflow_popup(
                 let scroll_output = ui
                     .scope(|ui| {
                         ui.spacing_mut().scroll = tab_list_scroll_style();
+                        let popup_target_height = (popup_target_height
+                            + visible_row_count.saturating_sub(1) as f32
+                                * ui.spacing().item_spacing.y)
+                            .min(popup_max_height);
                         widget_ids::scroll_area(
                             ui,
                             egui::ScrollArea::vertical(),

@@ -7,8 +7,7 @@ use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::{
-    BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, action_hover_bg, border, tab_list_scroll_style,
-    text_primary,
+    BUTTON_SIZE, TAB_BUTTON_WIDTH, action_hover_bg, tab_list_scroll_style, text_primary,
 };
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone};
 use crate::app::ui::tab_strip::{
@@ -16,7 +15,7 @@ use crate::app::ui::tab_strip::{
 };
 use crate::app::ui::transition;
 use crate::app::ui::widget_ids;
-use eframe::egui::{self, Sense, Stroke};
+use eframe::egui::{self, Sense};
 
 pub(super) fn show_vertical_tab_region(
     ui: &mut egui::Ui,
@@ -94,16 +93,18 @@ fn vertical_new_tab_button(ui: &mut egui::Ui, width: f32) -> egui::Response {
     let fill = if hovered {
         action_hover_bg(ui)
     } else {
-        action_bg(ui)
+        egui::Color32::TRANSPARENT
     };
 
-    ui.painter().rect_filled(response.rect, 4.0, fill);
-    ui.painter().rect_stroke(
-        response.rect,
-        4.0,
-        Stroke::new(1.0, border(ui)),
-        egui::StrokeKind::Inside,
-    );
+    ui.painter().rect_filled(response.rect, 0.0, fill);
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            response.rect,
+            0.0,
+            ui.visuals().selection.stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
     let color = text_primary(ui);
     let text_font = egui::TextStyle::Button.resolve(ui.style());
     let mut label = egui::text::LayoutJob::default();

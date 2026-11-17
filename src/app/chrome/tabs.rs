@@ -2,8 +2,8 @@ use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::{
-    CLOSE_HOVER_BG, TAB_BUTTON_WIDTH, TAB_HEIGHT, action_hover_bg, border, tab_active_bg,
-    tab_hover_bg, tab_selected_accent, text_primary,
+    TAB_BUTTON_WIDTH, TAB_HEIGHT, action_hover_bg, border, tab_active_bg, tab_hover_bg,
+    tab_selected_accent, text_primary,
 };
 use crate::app::ui::transition;
 use crate::app::ui::widget_ids::{self, WidgetRole};
@@ -175,8 +175,7 @@ pub fn tab_button_with_actions(
     let promote_response = promote_rect.map(|promote_rect| {
         render_tab_promote_button(ui, promote_rect, frame.surface_id, frame.drag_in_progress)
     });
-    let (_, close_response) =
-        render_tab_close_button(ui, frame.rect, frame.surface_id, frame.drag_in_progress);
+    let (_, close_response) = render_tab_close_button(ui, frame.rect, frame.surface_id);
 
     let close_response = close_response.accessible_name(format!("Close {label}"));
     (frame.response, promote_response, close_response, truncated)
@@ -394,50 +393,22 @@ fn render_tab_close_button(
     ui: &mut egui::Ui,
     tab_rect: Rect,
     surface_id: egui::Id,
-    drag_in_progress: bool,
 ) -> (Rect, egui::Response) {
     let close_rect = Rect::from_center_size(
         tab_rect.right_center() - Vec2::new(14.0, 0.0),
         Vec2::new(18.0, 18.0),
     );
 
-    let close_response = widget_ids::interact(
-        ui,
-        close_rect,
-        widget_ids::child(surface_id, WidgetRole::TabClose),
-        Sense::click(),
-        "tab_close",
-    );
-    close_response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Close tab")
-    });
-    paint_tab_close_button(ui, close_rect, close_response.hovered(), drag_in_progress);
-    let close_response = close_response.on_hover_text(shortcut_tooltips::action(
-        ui.ctx(),
-        ShortcutAction::CloseTab,
-        "Close Tab",
-    ));
+    let tooltip = shortcut_tooltips::action(ui.ctx(), ShortcutAction::CloseTab, "Close Tab");
+    let close_response = crate::app::ui::close_button::CloseButton::new("Close tab")
+        .hint(&tooltip)
+        .show_at(
+            ui,
+            close_rect,
+            widget_ids::child(surface_id, WidgetRole::TabClose),
+        );
 
     (close_rect, close_response)
-}
-
-fn paint_tab_close_button(ui: &egui::Ui, close_rect: Rect, hovered: bool, drag_in_progress: bool) {
-    let danger_hovered = hovered && !drag_in_progress;
-    if danger_hovered {
-        ui.painter().rect_filled(close_rect, 2.0, CLOSE_HOVER_BG);
-    }
-
-    ui.painter().text(
-        close_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        egui_phosphor::regular::X,
-        egui_phosphor::font_id(14.0),
-        if danger_hovered {
-            egui::Color32::WHITE
-        } else {
-            text_primary(ui)
-        },
-    );
 }
 
 fn truncate_label(

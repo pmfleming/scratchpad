@@ -555,7 +555,12 @@ fn both_reset_actions_are_destructive_without_restyling_ordinary_buttons() {
             .get_by_role_and_label(egui::Role::Button, "Reset settings…")
             .rect();
         assert!(reset.height() >= 36.0);
-        assert!(has_button_border(&harness.output().shapes, reset, border));
+        assert!(!has_button_border(&harness.output().shapes, reset, border));
+        assert_button_text_color(
+            &harness,
+            "Reset settings…",
+            SettingsUi::destructive_colors(dark)[0],
+        );
         assert!(!has_button_border(
             &harness.output().shapes,
             harness.get_by_label("Open file").rect(),
@@ -570,7 +575,16 @@ fn both_reset_actions_are_destructive_without_restyling_ordinary_buttons() {
             .get_by_role_and_label(egui::Role::Button, "Reset all settings")
             .rect();
         assert!(confirm.height() >= 36.0);
-        assert!(has_button_border(&harness.output().shapes, confirm, border));
+        assert!(!has_button_border(
+            &harness.output().shapes,
+            confirm,
+            border
+        ));
+        assert_button_text_color(
+            &harness,
+            "Reset all settings",
+            SettingsUi::destructive_colors(dark)[0],
+        );
         assert!(!has_button_border(
             &harness.output().shapes,
             harness.get_by_label("Cancel").rect(),
@@ -582,9 +596,38 @@ fn both_reset_actions_are_destructive_without_restyling_ordinary_buttons() {
         harness.run_steps(2);
         assert!(
             !has_button_border(&harness.output().shapes, confirm, border),
-            "focus must stand out from the resting red border"
+            "focus must use the accent instead of a red border"
         );
     }
+}
+
+fn assert_button_text_color(
+    harness: &Harness<'_, ScratchpadApp>,
+    label: &str,
+    color: egui::Color32,
+) {
+    fn matches(shape: &egui::Shape, label: &str, color: egui::Color32) -> bool {
+        match shape {
+            egui::Shape::Text(text) if text.galley.job.text == label => {
+                text.fallback_color == color
+                    || text
+                        .galley
+                        .job
+                        .sections
+                        .iter()
+                        .all(|section| section.format.color == color)
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| matches(shape, label, color)),
+            _ => false,
+        }
+    }
+    assert!(
+        harness
+            .output()
+            .shapes
+            .iter()
+            .any(|shape| matches(&shape.shape, label, color))
+    );
 }
 
 #[test]

@@ -6,7 +6,7 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
-use crate::app::theme::{BUTTON_SIZE, action_bg, action_hover_bg};
+use crate::app::theme::{BUTTON_SIZE, action_hover_bg};
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone, TabRectEntry};
 use crate::app::ui::tab_overflow;
 use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
@@ -204,7 +204,7 @@ fn render_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, spacing: f3
         "horizontal_new_tab",
         egui_phosphor::regular::PLUS,
         BUTTON_SIZE,
-        action_bg(ui),
+        egui::Color32::TRANSPARENT,
         action_hover_bg(ui),
         &shortcut_tooltips::action(ui.ctx(), ShortcutAction::NewTab, "New Tab"),
     )

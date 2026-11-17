@@ -1,6 +1,6 @@
 use crate::app::theme::{
-    CAPTION_BUTTON_SIZE, CAPTION_BUTTON_SPACING, CAPTION_TRAILING_PADDING, CLOSE_HOVER_BG,
-    TAB_HEIGHT, action_bg, action_hover_bg, text_primary,
+    CAPTION_BUTTON_SIZE, CAPTION_BUTTON_SPACING, CAPTION_TRAILING_PADDING, TAB_HEIGHT,
+    action_hover_bg, text_primary,
 };
 use crate::app::ui::transition;
 use crate::app::ui::widget_ids::{self, WidgetRole};
@@ -79,6 +79,14 @@ pub fn phosphor_button_with_colors(
     let highlighted = response.hovered() && !transition::suppress_interactive_chrome(ui.ctx());
     let (fill, icon_color) = colors.resolve(highlighted);
     paint_phosphor_button(ui, response.rect, icon, fill, icon_color);
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            response.rect,
+            egui::CornerRadius::ZERO,
+            ui.visuals().selection.stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
 
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -119,7 +127,7 @@ fn render_minimize_button(ui: &mut egui::Ui, ctx: &egui::Context) {
         "caption_minimize",
         egui_phosphor::regular::MINUS,
         CAPTION_BUTTON_SIZE,
-        action_bg(ui),
+        Color32::TRANSPARENT,
         action_hover_bg(ui),
         "Minimize",
     )
@@ -142,7 +150,7 @@ fn render_maximize_restore_button(ui: &mut egui::Ui, ctx: &egui::Context) {
         "caption_maximize",
         icon,
         CAPTION_BUTTON_SIZE,
-        action_bg(ui),
+        Color32::TRANSPARENT,
         action_hover_bg(ui),
         tooltip,
     )
@@ -154,20 +162,10 @@ fn render_maximize_restore_button(ui: &mut egui::Ui, ctx: &egui::Context) {
 
 fn render_close_button(ui: &mut egui::Ui) -> bool {
     widget_ids::scope(ui, "caption_close", |ui| {
-        phosphor_button_with_colors(
-            ui,
-            "caption_close",
-            egui_phosphor::regular::X,
-            CAPTION_BUTTON_SIZE,
-            PhosphorButtonColors::with_hover_icon(
-                action_bg(ui),
-                CLOSE_HOVER_BG,
-                text_primary(ui),
-                Color32::WHITE,
-            ),
-            "Close",
-        )
-        .clicked()
+        crate::app::ui::close_button::CloseButton::new("Close")
+            .size(CAPTION_BUTTON_SIZE)
+            .show(ui, "caption_close")
+            .clicked()
     })
     .inner
 }
@@ -179,7 +177,8 @@ fn paint_phosphor_button(
     fill: Color32,
     icon_color: Color32,
 ) {
-    ui.painter().rect_filled(rect, 4.0, fill);
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::ZERO, fill);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,

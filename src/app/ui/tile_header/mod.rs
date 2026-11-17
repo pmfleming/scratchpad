@@ -9,7 +9,7 @@ use crate::app::ui::transition;
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
-pub use control::{TileControl, TileControlStyle};
+pub use control::TileControl;
 pub use split::{SplitPreviewOverlay, TILE_GAP, TileAction, TileSplitHandler, paint_split_preview};
 
 pub(crate) struct TileHeaderRequest {
@@ -78,7 +78,7 @@ pub(crate) fn render_tile_header(
         *state.preview_overlay =
             Some(split_handler.make_preview(preview_state, title, preview_lines, rects.split_hit));
     }
-    if layout.can_close && header_button_clicked(ui, &control, rects.close_hit, &CLOSE_BUTTON) {
+    if layout.can_close && close_button_clicked(ui, &control, rects.close_hit) {
         state.actions.push(TileAction::Close(request.view_id));
     }
 }
@@ -130,21 +130,12 @@ struct HeaderButton {
     icon: &'static str,
     action: ShortcutAction,
     label: &'static str,
-    style: TileControlStyle,
 }
 
 const PROMOTE_BUTTON: HeaderButton = HeaderButton {
     icon: egui_phosphor::regular::ARROW_LINE_UP,
     action: ShortcutAction::PromoteTileToTab,
     label: "Promote Tile",
-    style: TileControlStyle::Default,
-};
-
-const CLOSE_BUTTON: HeaderButton = HeaderButton {
-    icon: egui_phosphor::regular::X,
-    action: ShortcutAction::CloseTile,
-    label: "Close Tile",
-    style: TileControlStyle::Danger,
 };
 
 const TILE_CONTROL_PADDING: f32 = 6.0;
@@ -216,11 +207,25 @@ fn header_button_clicked(
 ) -> bool {
     let tooltip = shortcut_tooltips::action(ui.ctx(), button.action, button.label);
     TileControl::new(button.icon)
-        .style(button.style)
         .visibility(control.visibility)
         .font_size(control.font_size)
         .tooltip(&tooltip)
         .show(ui, hit_rect, egui::Sense::click())
+        .clicked()
+}
+
+fn close_button_clicked(ui: &mut egui::Ui, control: &TileControlContext, rect: egui::Rect) -> bool {
+    if control.visibility <= 0.0 {
+        return false;
+    }
+    let tooltip = shortcut_tooltips::action(ui.ctx(), ShortcutAction::CloseTile, "Close Tile");
+    crate::app::ui::close_button::CloseButton::new("Close Tile")
+        .hint(&tooltip)
+        .show_at(
+            ui,
+            rect,
+            widget_ids::rect_surface_id(rect, "tile_header_control"),
+        )
         .clicked()
 }
 

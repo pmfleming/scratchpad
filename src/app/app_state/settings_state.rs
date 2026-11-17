@@ -411,8 +411,14 @@ pub fn apply_theme_to_context(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
 
     ctx.set_theme(preference);
-    ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
-    ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
+    for (theme, mut visuals) in [
+        (egui::Theme::Dark, egui::Visuals::dark()),
+        (egui::Theme::Light, egui::Visuals::light()),
+    ] {
+        crate::app::theme::flatten_buttons(&mut visuals);
+        visuals.widgets.active.bg_stroke = visuals.selection.stroke;
+        ctx.set_visuals_of(theme, visuals);
+    }
     app.state.window.applied_theme_preference = Some(preference);
 }
 

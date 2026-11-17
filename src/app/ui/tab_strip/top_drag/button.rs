@@ -1,7 +1,7 @@
 use super::geometry::top_drag_button_position;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::services::settings_store::TabListPosition;
-use crate::app::theme::{BUTTON_SIZE, HEADER_HEIGHT, action_bg, action_hover_bg, text_primary};
+use crate::app::theme::{BUTTON_SIZE, HEADER_HEIGHT, action_hover_bg, text_primary};
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
@@ -49,9 +49,10 @@ fn render_top_drag_button(ctx: &egui::Context, ui: &mut egui::Ui) {
     let fill = if response.hovered() {
         action_hover_bg(ui)
     } else {
-        action_bg(ui)
+        egui::Color32::TRANSPARENT
     };
-    ui.painter().rect_filled(rect, 4.0, fill);
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::ZERO, fill);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,

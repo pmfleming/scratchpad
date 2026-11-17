@@ -61,15 +61,9 @@ fn named_dialog_disappears_from_accessibility_tree_when_closed() {
                     .order(egui::Order::Foreground)
                     .default_pos(egui::pos2(10.0, 10.0))
                     .show(ui.ctx(), |ui| {
-                        let response = crate::app::chrome::phosphor_button(
-                            ui,
-                            "test-close",
-                            egui_phosphor::regular::X,
-                            egui::vec2(28.0, 28.0),
-                            egui::Color32::BLACK,
-                            egui::Color32::GRAY,
-                            "Close dialog",
-                        );
+                        let response = super::close_button::CloseButton::new("Close dialog")
+                            .size(egui::vec2(28.0, 28.0))
+                            .show(ui, "test-close");
                         if response.clicked() {
                             *open = false;
                         }

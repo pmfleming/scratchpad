@@ -3,7 +3,7 @@ use crate::app::chrome::phosphor_button;
 use crate::app::commands::{AppCommand, FileCommand, SearchCommand};
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
-use crate::app::theme::{BUTTON_SIZE, TAB_HEIGHT, action_bg, action_hover_bg};
+use crate::app::theme::{BUTTON_SIZE, TAB_HEIGHT, action_hover_bg};
 use eframe::egui;
 
 const PRIMARY_ACTION_SPACING: f32 = 4.0;
@@ -77,7 +77,7 @@ fn primary_action_button(
         id_source,
         icon,
         BUTTON_SIZE,
-        action_bg(ui),
+        egui::Color32::TRANSPARENT,
         action_hover_bg(ui),
         tooltip,
     )

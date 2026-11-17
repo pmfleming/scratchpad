@@ -114,7 +114,7 @@ pub(crate) fn title(ui: &mut egui::Ui, text: &str) -> egui::Response {
 
 /// The close button panels show where outside clicks do not dismiss them.
 pub(crate) fn close_button(ui: &mut egui::Ui, key: &'static str, label: &str) -> egui::Response {
-    super::icon_button(ui, key, egui_phosphor::regular::X, label, true)
+    crate::app::ui::close_button::CloseButton::new(label).show(ui, key)
 }
 
 /// The right-hand side of a header row; measures each switch button it is given.

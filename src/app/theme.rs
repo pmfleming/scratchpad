@@ -95,6 +95,20 @@ pub const TAB_HEIGHT: f32 = HEADER_CONTROL_HEIGHT;
 pub const TAB_BUTTON_WIDTH: f32 = 140.0;
 pub const TAB_LIST_SCROLLBAR_GUTTER: f32 = 8.0;
 
+/// Flat button surfaces, retaining hover fills and a keyboard-focus outline.
+pub(crate) fn flatten_buttons(visuals: &mut egui::Visuals) {
+    visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    for widget in [
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::ZERO;
+        widget.bg_stroke = egui::Stroke::NONE;
+    }
+    visuals.widgets.active.corner_radius = egui::CornerRadius::ZERO;
+}
+
 #[must_use]
 pub fn tab_list_scroll_style() -> egui::style::ScrollStyle {
     let mut style = egui::style::ScrollStyle::floating();

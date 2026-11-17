@@ -3,6 +3,7 @@ mod accessibility_tests;
 
 pub mod autoscroll;
 pub(crate) mod callout;
+pub(crate) mod close_button;
 pub mod dialogs;
 pub mod editor_area;
 pub mod editor_content;

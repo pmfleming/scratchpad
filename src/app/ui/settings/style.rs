@@ -100,6 +100,7 @@ impl SettingsUi {
         style.visuals.widgets.inactive.weak_bg_fill = field;
         style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, accent);
         style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, accent);
+        theme::flatten_buttons(&mut style.visuals);
     }
     /// Scoped to sliders so their rail and handle don't inherit dark field fills.
     pub(super) fn apply_slider_style(ui: &mut egui::Ui) {

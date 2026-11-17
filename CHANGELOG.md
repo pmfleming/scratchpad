@@ -20,6 +20,12 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Buttons use flat, square styling across toolbars, window and tile controls, settings, and dialogs, with hover and keyboard-focus feedback.
+
+- Window, tab, tile and floating-panel close controls share one flat button, with a red background and white X on hover, sized for each location.
+
+- The tab overflow panel and its rows expand to the window's right edge, giving tab names more space.
+
 - Internal quality refactor with no intended change to behaviour, appearance, settings or file formats. Complex storage, recovery, buffer and panel code is split into smaller steps, duplicated panel chrome is shared, unused code is removed, and tests are consolidated while covering more of the editor. Restoring stored text reads each chunk once, piece-table navigation no longer panics on an out-of-range position, and resource probe reports drop counters that were always zero.
 
 - Replacement prepares every target before committing any file, and reports success only after completion. Regex captures keep their surrounding context, selection scope stays locked through navigation and edits, and replacements verify document identity as well as revision. Searches beyond the result limit keep a bounded preview list and offer a complete replacement review.

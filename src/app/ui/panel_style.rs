@@ -71,10 +71,12 @@ pub(crate) fn apply(ui: &mut egui::Ui) {
     let selected = theme::tab_selected_bg(ui);
     let danger = theme::diff_del(ui);
     let style = ui.style_mut();
+    theme::flatten_buttons(&mut style.visuals);
     style.spacing.item_spacing = egui::vec2(6.0, 6.0);
     style.spacing.button_padding = egui::vec2(8.0, 5.0);
     style.visuals.selection.bg_fill = selected;
     style.visuals.selection.stroke = egui::Stroke::new(1.0, accent);
+    style.visuals.widgets.active.bg_stroke = style.visuals.selection.stroke;
     style.visuals.error_fg_color = danger;
     style.visuals.window_corner_radius = egui::CornerRadius::ZERO;
     style.visuals.menu_corner_radius = egui::CornerRadius::ZERO;

@@ -137,7 +137,7 @@ fn action_button<T>(ui: &mut egui::Ui, choice: &Choice<T>) -> egui::Response {
     } else if choice.quiet {
         egui::Button::new(text).frame(false)
     } else {
-        egui::Button::new(text).fill(theme::action_bg(ui))
+        egui::Button::new(text)
     };
     ui.add(button).on_hover_text(choice.hint)
 }

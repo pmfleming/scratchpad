@@ -122,9 +122,9 @@ impl SegmentLayout {
 fn paint_segment_frame(ui: &egui::Ui, label: &str, rect: egui::Rect) {
     ui.painter().rect(
         rect,
-        8.0,
-        SettingsUi::field_bg(ui),
-        egui::Stroke::new(1.0, SettingsUi::card_border(ui)),
+        0.0,
+        egui::Color32::TRANSPARENT,
+        egui::Stroke::NONE,
         egui::StrokeKind::Inside,
     );
     record_settings_control_box(format!("segments.{label}"), rect);
@@ -157,7 +157,7 @@ fn choice_button(
                     egui::RichText::new(text).color(choice_text_color(ui, selected)),
                 )
                 .wrap()
-                .corner_radius(5),
+                .corner_radius(egui::CornerRadius::ZERO),
             )
         },
     );

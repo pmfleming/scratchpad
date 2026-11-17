@@ -3,9 +3,7 @@ use crate::app::chrome::{PhosphorButtonColors, phosphor_button_with_colors};
 use crate::app::commands::{AppCommand, FileCommand, SearchCommand};
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
-use crate::app::theme::{
-    CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg, text_primary,
-};
+use crate::app::theme::{CAPTION_BUTTON_SIZE, action_hover_bg, text_primary};
 use eframe::egui;
 use std::borrow::Cow;
 
@@ -269,24 +267,25 @@ fn render_button_group(
     button_size: egui::Vec2,
 ) {
     for button in buttons {
-        let colors = if matches!(button.action, VerticalAction::CloseWindow) {
-            PhosphorButtonColors::with_hover_icon(
-                action_bg(ui),
-                CLOSE_HOVER_BG,
-                text_primary(ui),
-                egui::Color32::WHITE,
-            )
+        let response = if matches!(button.action, VerticalAction::CloseWindow) {
+            crate::app::ui::close_button::CloseButton::new(&button.tooltip)
+                .size(button_size)
+                .show(ui, button.action.id_key())
         } else {
-            PhosphorButtonColors::new(action_bg(ui), action_hover_bg(ui), text_primary(ui))
+            let colors = PhosphorButtonColors::new(
+                egui::Color32::TRANSPARENT,
+                action_hover_bg(ui),
+                text_primary(ui),
+            );
+            phosphor_button_with_colors(
+                ui,
+                button.action.id_key(),
+                button.icon,
+                button_size,
+                colors,
+                &button.tooltip,
+            )
         };
-        let response = phosphor_button_with_colors(
-            ui,
-            button.action.id_key(),
-            button.icon,
-            button_size,
-            colors,
-            &button.tooltip,
-        );
         if response.clicked() {
             handle_vertical_action(ui.ctx(), app, button.action);
         }
