@@ -61,6 +61,12 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+      - name: Check Windows file identity formatting
+        run: cargo fmt --manifest-path crates/windows_file_identity/Cargo.toml --check
+
+      - name: Lint Windows file identity
+        run: cargo clippy --manifest-path crates/windows_file_identity/Cargo.toml -- -D warnings
+
       - name: Check feature combinations
         run: cargo hack check --feature-powerset --locked
 

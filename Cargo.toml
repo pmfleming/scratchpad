@@ -44,7 +44,7 @@ sysinfo = { version = "0.39.5", default-features = false, features = ["system"] 
 sha2 = "0.10.9"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows_file_identity = { path = "crates/windows_file_identity" }
 windows_file_watch = { path = "crates/windows_file_watch" }
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -95,10 +95,11 @@ fn symlink_changes_and_parent_components_are_rechecked() {
 #[test]
 fn canonicalization_errors_are_not_reported_as_missing() {
     let root = tempfile::tempdir().unwrap();
-    let file = root.path().join("file");
-    std::fs::write(&file, "text").unwrap();
-    let key = CanonicalPathKey::from_path(&file.join("child"));
-    assert!(
-        matches!(key.resolution(), PathResolution::Unresolved(kind) if kind != io::ErrorKind::NotFound)
-    );
+    // A child of a regular file can report NotFound on Windows. An embedded
+    // NUL is invalid on both supported platforms and tests error preservation.
+    let invalid = root.path().join("invalid\0name");
+    let expected = std::fs::canonicalize(&invalid).unwrap_err().kind();
+    assert_ne!(expected, io::ErrorKind::NotFound);
+    let key = CanonicalPathKey::from_path(&invalid);
+    assert_eq!(key.resolution(), PathResolution::Unresolved(expected));
 }

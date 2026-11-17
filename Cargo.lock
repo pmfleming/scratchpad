@@ -4231,7 +4231,7 @@ dependencies = [
  "tempfile",
  "toml",
  "turso",
- "windows-sys 0.61.2",
+ "windows_file_identity",
  "windows_file_watch",
 ]
 
@@ -6071,6 +6071,13 @@ name = "windows_aarch64_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9d782e804c2f632e395708e99a94275910eb9100b2114651e04744e9b125006"
+
+[[package]]
+name = "windows_file_identity"
+version = "0.1.0"
+dependencies = [
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "windows_file_watch"

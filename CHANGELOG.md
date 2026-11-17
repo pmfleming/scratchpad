@@ -99,6 +99,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Restore Windows builds by isolating native file-identity calls behind a safe helper crate while preserving the application's unsafe-code prohibition.
+
 - Keep Settings dropdown menus sized to their controls instead of stretching across the window.
 
 - Keep the editor visible when History or the scrubber navigates to an off-screen edit without returning keyboard focus to the editor.
