@@ -323,7 +323,10 @@ fn edited_frame_publishes_current_snapshot_and_consumes_reveal() {
     let font = egui::FontId::monospace(18.0);
     render_editor_key(&ctx, &mut buffer, &mut view, &font, egui::Key::Enter);
 
-    assert_eq!(buffer.text(), "a\nbc");
+    assert_eq!(
+        buffer.text(),
+        format!("a{}bc", buffer.document().preferred_line_ending_str())
+    );
     assert!(view.latest_display_snapshot.is_some());
     assert_eq!(
         view.latest_display_snapshot_revision,

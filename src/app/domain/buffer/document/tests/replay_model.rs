@@ -15,7 +15,7 @@ fn seeded_history_replay_matches_independent_text_states_and_survives_restart() 
                 let mut model: Vec<char> = states[&document.history_now()].chars().collect();
                 let start = rng.random_range(0..=model.len());
                 let end = rng.random_range(start..=model.len());
-                let inserted = format!("{step}λ\n");
+                let inserted = format!("{step}λ{}", document.preferred_line_ending_str());
                 document.seal_history_group();
                 document
                     .replace_char_ranges_with_undo(

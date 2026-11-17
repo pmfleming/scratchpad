@@ -36,6 +36,27 @@ cargo test --locked --manifest-path xtask/Cargo.toml
 cargo audit --file xtask/Cargo.lock
 ```
 
+On Windows, run the complete native application suite and the standalone support
+crates (dependency-crate tests are not included in the application's test run):
+
+```powershell
+cargo test --all-features --locked --no-fail-fast
+cargo test --manifest-path crates/windows_file_identity/Cargo.toml --all-features
+cargo test --manifest-path crates/windows_file_watch/Cargo.toml --all-features
+cargo test --manifest-path crates/egui_phosphor/Cargo.toml --all-features
+cargo test --locked --manifest-path xtask/Cargo.toml
+cargo run --locked --manifest-path tools/turso-contract/Cargo.toml -- --wal-mode standard
+```
+
+If the development app is running from `target/debug`, set
+`$env:CARGO_TARGET_DIR = "target/windows-validation"` before these commands so the
+test build does not try to replace its locked executable. Windows CI runs the
+application, maintenance and engine checks plus independent format, all-target
+Clippy and test jobs for the native helpers and icon font crate. Test logs are
+retained as artifacts even after a failure. Intentionally ignored performance
+profiles and the installed-font probe remain manual; the ignored crash-writer
+helper is invoked by its parent recovery test.
+
 On Linux, also run the configured cross-target checks when the required toolchains are installed:
 
 ```bash

@@ -3,6 +3,9 @@
 
 use std::{fs::File, io, path::Path};
 
+#[cfg(test)]
+mod tests;
+
 /// Compares physical identity while both file handles remain open.
 ///
 /// Returns an error if either path cannot be opened or its filesystem does not

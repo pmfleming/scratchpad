@@ -45,6 +45,9 @@ jobs:
   windows:
     name: Windows native format, lint and tests
     runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      RUST_BACKTRACE: "1"
 
     steps:
       - name: Checkout
@@ -61,28 +64,78 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
-      - name: Check Windows file identity formatting
-        run: cargo fmt --manifest-path crates/windows_file_identity/Cargo.toml --check
-
-      - name: Lint Windows file identity
-        run: cargo clippy --manifest-path crates/windows_file_identity/Cargo.toml -- -D warnings
-
       - name: Check feature combinations
         run: cargo hack check --feature-powerset --locked
 
       - name: Lint
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
-      - name: Test
-        run: cargo test --all-features --locked
+      - name: Test application, integration and documentation examples
+        run: |
+          cargo test --all-features --locked --no-fail-fast 2>&1 | Tee-Object -FilePath target/windows-application-tests.log
+          exit $LASTEXITCODE
+
+      - name: Test native maintenance tasks
+        run: |
+          cargo test --locked --manifest-path xtask/Cargo.toml --no-fail-fast 2>&1 | Tee-Object -FilePath target/windows-maintenance-tests.log
+          exit $LASTEXITCODE
 
       - name: Run native Windows engine contract
-        run: cargo run --locked --manifest-path tools/turso-contract/Cargo.toml -- --wal-mode standard
+        timeout-minutes: 15
+        run: |
+          cargo run --locked --manifest-path tools/turso-contract/Cargo.toml -- --wal-mode standard 2>&1 | Tee-Object -FilePath target/windows-engine-contract.log
+          exit $LASTEXITCODE
 
       - name: Documentation
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps --all-features --locked
+
+      - name: Preserve Windows test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-results
+          path: target/windows-*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-support:
+    name: Windows support (${{ matrix.crate }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [windows_file_identity, windows_file_watch, egui_phosphor]
+    env:
+      RUST_BACKTRACE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path crates/${{ matrix.crate }}/Cargo.toml --check
+
+      - name: Lint native support and tests
+        run: cargo clippy --manifest-path crates/${{ matrix.crate }}/Cargo.toml --all-targets --all-features -- -D warnings
+
+      - name: Test native support
+        run: |
+          New-Item -ItemType Directory -Force target | Out-Null
+          cargo test --manifest-path crates/${{ matrix.crate }}/Cargo.toml --all-features --no-fail-fast 2>&1 | Tee-Object -FilePath target/windows-${{ matrix.crate }}.log
+          exit $LASTEXITCODE
+
+      - name: Preserve native support test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.crate }}-results
+          path: target/windows-${{ matrix.crate }}.log
+          if-no-files-found: warn
+          retention-days: 14
 
   linux:
     name: Linux Lint and Test

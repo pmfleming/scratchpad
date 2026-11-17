@@ -105,7 +105,10 @@ fn embed_windows_app_icon() {
     let icon_path = Path::new(&manifest_dir).join("src/assets/Scratchpad.ico");
     let rc_path = Path::new(&out_dir).join("scratchpad_icon.rc");
     let res_path = Path::new(&out_dir).join("scratchpad_icon.res");
-    let rc_contents = format!("1 ICON \"{}\"\n", icon_path.display());
+    // RC treats backslashes inside string literals as escapes (e.g. \target
+    // starts with a tab). Forward slashes also work for Windows resource paths.
+    let rc_icon_path = icon_path.to_string_lossy().replace('\\', "/");
+    let rc_contents = format!("1 ICON \"{rc_icon_path}\"\n");
 
     if let Err(error) = fs::write(&rc_path, rc_contents) {
         println!("cargo:warning=Could not write Windows icon resource script: {error}");

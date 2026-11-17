@@ -147,7 +147,12 @@ fn whitespace_previews_are_exact_bounded_and_optional() {
             let expected = match i {
                 0 => Some(HistoryPreview {
                     inserted: true,
-                    text: "\n".into(), // The edit API normalizes inserted line endings.
+                    // The edit API normalizes to the document's preferred ending.
+                    text: tab
+                        .active_buffer()
+                        .document()
+                        .preferred_line_ending_str()
+                        .into(),
                 }),
                 1 => Some(HistoryPreview {
                     inserted: false,

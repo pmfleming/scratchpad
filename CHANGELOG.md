@@ -101,6 +101,8 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 - Restore Windows builds by isolating native file-identity calls behind a safe helper crate while preserving the application's unsafe-code prohibition.
 
+- Preserve the Windows application icon when the checkout path contains resource-script escape sequences. Windows profiling checks now recognize equivalent file paths and account for native line endings.
+
 - Keep Settings dropdown menus sized to their controls instead of stretching across the window.
 
 - Keep the editor visible when History or the scrubber navigates to an off-screen edit without returning keyboard focus to the editor.

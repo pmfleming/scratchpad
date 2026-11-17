@@ -65,10 +65,12 @@ pub(super) fn render_opened_file(
             .tab_manager
             .cold_session_tabs()
             .contains_key(&app.tab_manager.active_tab_index)
-            && app
-                .tab_manager
-                .active_tab()
-                .is_some_and(|tab| tab.active_buffer().path.as_deref() == Some(expected.as_path()))
+            && app.tab_manager.active_tab().is_some_and(|tab| {
+                tab.active_buffer()
+                    .path
+                    .as_deref()
+                    .is_some_and(|opened| crate::app::paths_match(opened, &expected))
+            })
         {
             return render_app(app, ctx);
         }
@@ -196,7 +198,21 @@ fn run_bulk_profile(bytes: usize, io_stress: bool, pause_ms: u64) -> Value {
         render_app(app, &ctx);
         let text = crate::profile::fixtures::text(bytes, 0x3388_121a);
         let expected_bytes = text.len();
-        let expected_chars = text.chars().count();
+        let line_ending_chars = app
+            .tab_manager
+            .active_tab()
+            .unwrap()
+            .active_buffer()
+            .document()
+            .preferred_line_ending_str()
+            .chars()
+            .count();
+        // Fixtures contain LF; production paste normalizes each newline to the
+        // document's preferred ending (CRLF by default on Windows).
+        let expected_chars: usize = text
+            .chars()
+            .map(|ch| if ch == '\n' { line_ending_chars } else { 1 })
+            .sum();
         let store = app.state.persistence.session_store.clone();
         let handle = store.chunk_store_handle().expect("probe store");
         if io_stress {

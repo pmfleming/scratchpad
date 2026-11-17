@@ -373,7 +373,11 @@ mod live_text_tests {
             .document_mut()
             .bind_store(store.clone())
             .unwrap();
-        let text = "λ🦀\n".repeat(100_000);
+        let text = format!(
+            "λ🦀{}",
+            tab.active_buffer().document().preferred_line_ending_str()
+        )
+        .repeat(100_000);
         tab.active_buffer_mut()
             .document_mut()
             .replace_char_ranges_with_undo(

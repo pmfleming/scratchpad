@@ -63,7 +63,7 @@ fn large_utf8_import_uses_durable_lazy_chunks_and_survives_source_replacement() 
     FileService::write_snapshot_with_format(
         &saved,
         &document.snapshot(),
-        &TextFormatMetadata::utf8_for_new_file(""),
+        &TextFormatMetadata::utf8_for_new_file(&text),
     )
     .unwrap();
     assert_eq!(

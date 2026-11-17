@@ -467,6 +467,11 @@ mod tests {
         let mut buffer = BufferState::new("paste".into(), "base".into(), None);
         buffer.document.bind_store(handle.clone()).unwrap();
         let text = crate::profile::fixtures::text(40 * 1024 * 1024, 123);
+        let expected_bytes = normalize_inserted_text_line_endings(
+            &text,
+            buffer.format.preferred_line_ending_style(),
+        )
+        .len();
         assert!(buffer.queue_text_preparation(
             vec![(0..4, text)],
             CursorRange::default(),
@@ -492,11 +497,11 @@ mod tests {
         .metadata;
         assert_eq!(prepared.metadata, expected);
         assert!(buffer.install_prepared_text(prepared).is_ok());
-        assert_eq!(buffer.document.piece_tree().len_bytes(), 40 * 1024 * 1024);
+        assert_eq!(buffer.document.piece_tree().len_bytes(), expected_bytes);
         buffer.document.undo_last_operation().unwrap();
         assert_eq!(buffer.text(), "base");
         buffer.document.redo_last_operation().unwrap();
-        assert_eq!(buffer.document.piece_tree().len_bytes(), 40 * 1024 * 1024);
+        assert_eq!(buffer.document.piece_tree().len_bytes(), expected_bytes);
     }
 
     #[test]
@@ -579,7 +584,7 @@ mod history_preparation_tests {
         let mut buffer = BufferState::new("history".into(), "base".into(), None);
         buffer.document_mut().bind_store(store.clone()).unwrap();
         let initial = buffer.document().history_now();
-        let text = "λ\n".repeat(200_000);
+        let text = format!("λ{}", buffer.document().preferred_line_ending_str()).repeat(200_000);
         buffer.queue_text_preparation(
             vec![(0..0, text.clone())],
             CursorRange::default(),
@@ -603,7 +608,10 @@ mod history_preparation_tests {
             None,
             super::super::TextHistoryEvent::Replay,
         );
-        assert_eq!(buffer.document().piece_tree().len_chars(), 400_004);
+        assert_eq!(
+            buffer.document().piece_tree().len_chars(),
+            text.chars().count() + 4
+        );
         let prepared = buffer
             .take_text_preparation()
             .unwrap()

@@ -2,6 +2,9 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
+#[cfg(all(test, windows))]
+mod tests;
+
 #[derive(Clone, Debug)]
 pub enum FileWatchEvent {
     DirectoryChanged(PathBuf),
